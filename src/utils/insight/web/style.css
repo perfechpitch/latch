@@ -1,0 +1,399 @@
+/* insight — minimal: no toolbar, collapsible hierarchy, cycle grid. */
+
+@import url("https://rsms.me/inter/inter.css");
+
+:root {
+  --bg: #ffffff;
+  --surface: #fafbfc;
+  --surface-2: #f3f4f6;
+  --line: #e5e7eb;
+  --line-strong: #c8ced6;
+  --fg: #0d1117;
+  --fg-mid: #3d444d;
+  --fg-dim: #57606a;
+  --fg-faint: #9aa3b0;
+  --accent: #0a66c2;
+  --accent-soft: rgba(10, 102, 194, 0.16);
+  --selection: rgba(10, 102, 194, 0.13);
+  --grid-line: #eef0f3;
+  --grid-line-strong: #dde1e6;
+  --row-alt: #fcfcfd;
+  --row-hover: #f3f4f6;       /* unselected row, hover */
+  --row-sel: #b8d4ee;          /* selected (hover does not change it) */
+  --row-sel-bar: #0a66c2;
+  --module-fg: #6b7280;
+  --module-bg: #e6e9ef;
+  --module-bg-hover: #dce0e8;
+
+  --cat-0: #a8b1bd; --cat-1: #1a7f37; --cat-2: #bf8700; --cat-3: #cf222e;
+  --cat-4: #8250df; --cat-5: #0a66c2; --cat-6: #d4a72c; --cat-7: #df3079;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.45 "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01", "ss03", "ss05", "tnum";
+  display: grid;
+  /* The sidebar resize rail is 9px wide for an easy mouse target, but the
+     visible line inside is only 3px — see ::after below. The chart stage
+     now fills the whole height; selection details live in the floating
+     #propbox, not a docked bottom panel. */
+  grid-template-rows: 1fr;
+  grid-template-columns: var(--sidebar-w, 260px) 9px 1fr;
+  grid-template-areas:
+    "sidebar sb-resize stage";
+  overflow: hidden;
+}
+
+#sb-resize {
+  grid-area: sb-resize;
+  background: transparent;
+  cursor: ew-resize;
+  user-select: none;
+  position: relative;
+}
+#sb-resize::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 3px; width: 3px;
+  background: var(--line);
+  transition: background 0.08s ease;
+  pointer-events: none;
+}
+#sb-resize:hover::after, #sb-resize.dragging::after {
+  background: var(--accent);
+}
+
+/* ── sidebar ─────────────────────────────────────────────────────── */
+#sidebar {
+  grid-area: sidebar;
+  background: var(--bg);
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(13, 17, 23, 0.45) transparent;
+}
+#sidebar::-webkit-scrollbar { width: 10px; }
+#sidebar::-webkit-scrollbar-track { background: transparent; }
+#sidebar::-webkit-scrollbar-thumb {
+  background: rgba(13, 17, 23, 0.45);
+  border-radius: 5px;
+  border: 2px solid var(--bg);
+}
+#sidebar::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 17, 23, 0.70);
+}
+/* Sticky header strip atop the sidebar, aligned with TIMELINE_H. Holds the
+   global show/hide-all toggle and doubles as the spacer that keeps the
+   first tree row level with the canvas timeline. */
+#sidebar-head {
+  position: sticky; top: 0; z-index: 3;
+  height: 28px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+#refresh-all, #collapse-all {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 20px; padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  cursor: pointer; user-select: none;
+  transition: background 0.05s ease, color 0.05s ease, border-color 0.05s ease;
+}
+#refresh-all svg, #collapse-all svg { display: block; }
+#refresh-all:hover, #collapse-all:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+/* spin the icon while a reload round-trip is in flight */
+#refresh-all.spin svg { animation: insight-spin 0.6s linear infinite; }
+@keyframes insight-spin { to { transform: rotate(360deg); } }
+#toggle-all {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--fg-dim);
+  font: 600 11px/1 "Inter", system-ui, sans-serif;
+  cursor: pointer; user-select: none;
+  transition: background 0.05s ease, color 0.05s ease, border-color 0.05s ease;
+}
+#toggle-all svg { display: block; }
+#toggle-all:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+#toggle-all.off { color: var(--accent); border-color: var(--accent); }
+#toggle-all .eye-slash     { display: none; }
+#toggle-all.off .eye-slash { display: inline; }
+#tree { padding: 0; }
+.row {
+  display: flex;
+  align-items: center;
+  height: 27px;
+  padding: 0 12px 0 8px;
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  font: 13px/1 "Inter", system-ui, sans-serif;
+  border-bottom: 1px solid var(--grid-line);
+  transition: background 0.05s ease;
+}
+.row.module {
+  background: var(--module-bg);
+  color: var(--fg);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 12px;
+  /* No-signal grouping rows are denser than signal lanes — they carry
+     no waveform, so the shorter height keeps the hierarchy compact.
+     Must match MODULE_H in app.js or the canvas lanes drift. */
+  height: 18px;
+}
+/* Collapse-state caret in front of grouping rows. */
+.row.module .caret {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 16px;
+  margin-right: 2px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--fg-mid);
+  text-align: center;
+}
+.row.module:hover { background: var(--module-bg-hover); }
+.row.module .leaf { color: var(--fg); }
+.row.module.collapsed .leaf { color: var(--fg); }
+/* Armed module row — first click highlights, second click toggles
+   collapse. Mirrors the signal-row selected look. */
+.row.module.selected {
+  background: var(--row-sel);
+  border-left-color: var(--row-sel-bar);
+}
+.row.module.selected .leaf,
+.row.module.selected.collapsed .leaf { color: var(--accent); }
+
+/* Pointer-based drag-reorder visuals. Rows show the normal arrow cursor
+   (no grab/pointer hand); the inset box-shadow marks the drop position
+   without changing the row's box geometry. */
+.row.signal, .row.module { cursor: default; }
+/* While a row drag is in flight, block text selection everywhere so the
+   pointer sweeping over the page doesn't highlight labels/panel text. */
+body.row-dragging, body.row-dragging * { user-select: none !important; }
+.row.drag-source { opacity: 0.5; }
+.row.drag-over-before { box-shadow: inset 0  2px 0 0 var(--accent); }
+.row.drag-over-after  { box-shadow: inset 0 -2px 0 0 var(--accent); }
+/* Signal row state machine. Hover only fires for unselected rows so
+   that selecting a row "locks in" its color — moving the mouse on or
+   off a selected row produces no visual change. */
+.row.signal                       { background: var(--bg); }
+.row.signal:not(.selected):hover  { background: var(--row-hover); }
+.row.signal.selected              { background: var(--row-sel);
+                                    border-left-color: var(--row-sel-bar); }
+
+.row.signal .prefix          { color: var(--fg-faint); }
+.row.signal .leaf            { color: var(--fg); font-weight: 500; }
+.row.signal.selected .leaf   { color: var(--accent); }
+
+/* Per-signal visibility toggle (the eye). Always present but faint; it
+   brightens on row/eye hover, and stays fully lit with a slash drawn
+   across it once the signal is hidden (greyed out in the chart). */
+.row.signal .eye {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px; height: 16px;
+  margin-right: 4px;
+  color: var(--fg-faint);
+  opacity: 0.4;
+  cursor: pointer;
+  transition: opacity 0.05s ease, color 0.05s ease;
+}
+.row.signal:hover .eye   { opacity: 0.8; }
+.row.signal .eye:hover   { opacity: 1; color: var(--accent); }
+.row.signal .eye.off     { opacity: 1; color: var(--fg-dim); }
+.eye .eye-slash          { display: none; }
+.eye.off .eye-slash      { display: inline; }
+
+.row .indent { display: inline-block; flex-shrink: 0; }
+
+/* ── stage (canvas) ─────────────────────────────────── */
+#stage {
+  grid-area: stage;
+  position: relative;
+  background: var(--bg);
+  overflow: hidden;
+  outline: none;
+}
+#stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#stage canvas#cv-sel,
+#stage canvas#cv-ov { pointer-events: none; }
+#stage.loading::before {
+  content: "loading…";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fg-faint);
+  pointer-events: none;
+}
+
+/* ── property box (floating, bottom-right) ──────────────────
+   A small overlay card pinned to the bottom-right corner. Shows the
+   details of the current selection (clicked block / time range / picked
+   signals); the JS sets [hidden] when nothing is selected. Interactive
+   (not click-through) so its text can be mouse-selected/copied directly —
+   it only covers its own small corner, so it doesn't meaningfully block
+   panning/clicking the chart underneath. */
+#propbox {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 6;
+  max-width: 540px;
+  /* extra right padding reserves a gutter for the absolute copy button so
+     long titles / right-aligned values never run under it. */
+  padding: 13.5px 42px 13.5px 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: 0 9px 36px rgba(13, 17, 23, 0.18);
+  color: var(--fg);
+  user-select: text;
+}
+#propbox[hidden] { display: none; }
+#propbox .pb-copy {
+  position: absolute;
+  /* sized and aligned to the first title line, not a chunky box */
+  top: 12px;
+  right: 12px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--fg-dim);
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+#propbox .pb-copy:hover { background: var(--row-hover); color: var(--fg); }
+#propbox .pb-copy.copied { color: var(--cat-1); border-color: var(--cat-1); }
+#propbox .pb-copy.failed { color: var(--cat-3); border-color: var(--cat-3); }
+#propbox .pb-sec + .pb-sec {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+#propbox .pb-title {
+  /* Match the left signal tree exactly: same text (the path leaf, set in
+     renderEventPanel) in its natural case — no uppercasing. */
+  color: var(--fg-dim);
+  font: 600 17.25px/1.4 "Inter", system-ui, sans-serif;
+  margin-bottom: 6px;
+  word-break: break-all;
+  /* Title left, the section's time extent (.tv) right on the same line;
+     a long title wraps and pushes the extent to the next line. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 2px 24px;
+}
+/* The extent on the title line — same cycle-domain typography as .v-cyc. */
+#propbox .pb-title .tv {
+  color: var(--cat-4);
+  font: 500 18.75px/1.4 "JetBrains Mono", monospace;
+  font-feature-settings: "tnum";
+  font-style: italic;
+  letter-spacing: 0.01em;
+  margin-left: auto;
+}
+#propbox .kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4.5px 24px;
+}
+#propbox .kv .k {
+  color: var(--fg-dim);
+  font: 500 17.25px/1.4 "Inter", system-ui, sans-serif;
+}
+#propbox .kv .v {
+  color: var(--fg);
+  text-align: right;
+  font: 500 18.75px/1.4 "JetBrains Mono", monospace;
+  font-feature-settings: "tnum";
+}
+/* Cycle-domain values (t / range / duration / cycle counts — same axis as
+   the ruler): marked by style, not by a repeated "(cyc)" text suffix. */
+#propbox .kv .v.v-cyc {
+  color: var(--cat-4);
+  font-style: italic;
+  letter-spacing: 0.01em;
+}
+/* Label-less row (k === "", e.g. a lone t under a section title that
+   already says what it is): no .k span at all, so the value spans both
+   grid columns instead of leaving an empty label gutter. */
+#propbox .kv .v.v-solo {
+  grid-column: 1 / -1;
+}
+
+/* ── context menu ─────────────────────────────────────── */
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(13, 17, 23, 0.12);
+  padding: 4px 0;
+  font: 13px/1.4 "Inter", system-ui, sans-serif;
+  user-select: none;
+}
+.ctx-menu-header {
+  padding: 4px 12px 6px;
+  color: var(--fg-faint);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+.ctx-menu-item {
+  padding: 5px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg);
+}
+.ctx-menu-item:hover { background: var(--row-hover); }
+.ctx-menu-item .check { width: 10px; color: var(--accent); }
+.ctx-menu-item.active { color: var(--accent); font-weight: 500; }

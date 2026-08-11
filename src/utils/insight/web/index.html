@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>insight</title>
+  <!-- ?v= busts browser caches whenever the frontend build changes;
+       keep in sync with APP_BUILD in app.js -->
+  <link rel="stylesheet" href="/static/style.css?v=53">
+</head>
+<body>
+  <aside id="sidebar">
+    <div id="sidebar-head">
+      <button id="refresh-all" type="button" title="reload trace file"></button>
+      <button id="collapse-all" type="button" title="collapse all groups"></button>
+      <button id="toggle-all" type="button" title="hide all signals"></button>
+    </div>
+    <div id="tree"></div>
+  </aside>
+  <div id="sb-resize" title="drag to resize"></div>
+
+  <section id="stage" tabindex="0">
+    <canvas id="cv-bg"></canvas>
+    <canvas id="cv-sel"></canvas>
+    <canvas id="cv-ov"></canvas>
+  </section>
+
+  <!-- Floating property box, fixed to the bottom-right corner. Holds the
+       details of whatever is selected (clicked block / time range / picked
+       signals); stays hidden while nothing is selected. -->
+  <div id="propbox" hidden></div>
+</body>
+<script src="/static/app.js?v=56"></script>
+</html>
