@@ -1,0 +1,838 @@
+
+kernel.elf:     file format elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+
+_start:
+  /* gp 用于 small data 的相对寻址，取 gp 时必须关掉 relaxation */
+  .option push
+  .option norelax
+  la    gp, __global_pointer$
+80000000:	00041197          	auipc	x3,0x41
+80000004:	83018193          	addi	x3,x3,-2000 # 80040830 <__global_pointer$>
+  .option pop
+
+  la    sp, stack_top
+80000008:	00044117          	auipc	x2,0x44
+8000000c:	06810113          	addi	x2,x2,104 # 80044070 <stack_top>
+
+  /* .data: ILM 上的加载副本 -> DLM 上的运行地址 */
+  la    t0, data_lma
+80000010:	00001297          	auipc	x5,0x1
+80000014:	86428293          	addi	x5,x5,-1948 # 80000874 <data_lma>
+  la    t1, data_start
+80000018:	00040317          	auipc	x6,0x40
+8000001c:	fe830313          	addi	x6,x6,-24 # 80040000 <g_data>
+  la    t2, data_end
+80000020:	00040397          	auipc	x7,0x40
+80000024:	01038393          	addi	x7,x7,16 # 80040030 <fails>
+
+80000028 <copy_data>:
+copy_data:
+  bgeu  t1, t2, clear_bss
+80000028:	00737c63          	bgeu	x6,x7,80000040 <clear_bss>
+  lw    t3, 0(t0)
+8000002c:	0002ae03          	lw	x28,0(x5)
+  sw    t3, 0(t1)
+80000030:	01c32023          	sw	x28,0(x6)
+  addi  t0, t0, 4
+80000034:	00428293          	addi	x5,x5,4
+  addi  t1, t1, 4
+80000038:	00430313          	addi	x6,x6,4
+  j     copy_data
+8000003c:	fedff06f          	jal	x0,80000028 <copy_data>
+
+80000040 <clear_bss>:
+
+  /* .bss 清零 */
+clear_bss:
+  la    t0, bss_start
+80000040:	00040297          	auipc	x5,0x40
+80000044:	ff028293          	addi	x5,x5,-16 # 80040030 <fails>
+  la    t1, bss_end
+80000048:	83818313          	addi	x6,x3,-1992 # 80040068 <bss_end>
+
+8000004c <clear_bss_loop>:
+clear_bss_loop:
+  bgeu  t0, t1, run_init_array
+8000004c:	0062f863          	bgeu	x5,x6,8000005c <run_init_array>
+  sw    zero, 0(t0)
+80000050:	0002a023          	sw	x0,0(x5)
+  addi  t0, t0, 4
+80000054:	00428293          	addi	x5,x5,4
+  j     clear_bss_loop
+80000058:	ff5ff06f          	jal	x0,8000004c <clear_bss_loop>
+
+8000005c <run_init_array>:
+
+  /* 依次调用 .init_array 里的全局构造函数 */
+run_init_array:
+  la    s0, init_array_start
+8000005c:	00001417          	auipc	x8,0x1
+80000060:	81440413          	addi	x8,x8,-2028 # 80000870 <init_array_start>
+  la    s1, init_array_end
+80000064:	00001497          	auipc	x9,0x1
+80000068:	81048493          	addi	x9,x9,-2032 # 80000874 <data_lma>
+
+8000006c <init_array_loop>:
+init_array_loop:
+  bgeu  s0, s1, call_main
+8000006c:	00947a63          	bgeu	x8,x9,80000080 <call_main>
+  lw    t0, 0(s0)
+80000070:	00042283          	lw	x5,0(x8)
+  jalr  ra, t0, 0
+80000074:	000280e7          	jalr	x1,0(x5)
+  addi  s0, s0, 4
+80000078:	00440413          	addi	x8,x8,4
+  j     init_array_loop
+8000007c:	ff1ff06f          	jal	x0,8000006c <init_array_loop>
+
+80000080 <call_main>:
+
+call_main:
+  li    a0, 0
+80000080:	00000513          	addi	x10,x0,0
+  li    a1, 0
+80000084:	00000593          	addi	x11,x0,0
+  call  main
+80000088:	4c0000ef          	jal	x1,80000548 <main>
+
+  /* main 的返回值就是仿真退出码 */
+  li    t0, SIM_EXIT
+8000008c:	100012b7          	lui	x5,0x10001
+  sw    a0, 0(t0)
+80000090:	00a2a023          	sw	x10,0(x5) # 10001000 <SIM_EXIT>
+
+80000094 <halt>:
+
+halt:
+  j     halt
+80000094:	0000006f          	jal	x0,80000094 <halt>
+
+80000098 <_ZNK4Uart6PutDecEi.isra.0>:
+80000098:	ff010113          	addi	x2,x2,-16
+8000009c:	04054e63          	blt	x10,x0,800000f8 <_ZNK4Uart6PutDecEi.isra.0+0x60>
+  void PutLine(const char* s) const {
+    Put(s);
+    PutChar('\n');
+  }
+
+  void PutDec(int32_t v) const {
+800000a0:	00000713          	addi	x14,x0,0
+800000a4:	00410593          	addi	x11,x2,4
+      v = -v;
+    }
+    char buf[12];
+    int n = 0;
+    do {
+      buf[n++] = static_cast<char>('0' + (v % 10));
+800000a8:	00a00613          	addi	x12,x0,10
+800000ac:	02c567b3          	rem	x15,x10,x12
+800000b0:	00170713          	addi	x14,x14,1
+800000b4:	00e586b3          	add	x13,x11,x14
+      v /= 10;
+800000b8:	02c54533          	div	x10,x10,x12
+      buf[n++] = static_cast<char>('0' + (v % 10));
+800000bc:	03078793          	addi	x15,x15,48
+800000c0:	fef68fa3          	sb	x15,-1(x13)
+    } while (v != 0);
+800000c4:	fe0514e3          	bne	x10,x0,800000ac <_ZNK4Uart6PutDecEi.isra.0+0x14>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800000c8:	10000737          	lui	x14,0x10000
+800000cc:	10000537          	lui	x10,0x10000
+800000d0:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+    while (n > 0) PutChar(buf[--n]);
+800000d4:	fff6c603          	lbu	x12,-1(x13)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800000d8:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+800000dc:	0017f793          	andi	x15,x15,1
+800000e0:	fe078ce3          	beq	x15,x0,800000d8 <_ZNK4Uart6PutDecEi.isra.0+0x40>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+800000e4:	00c50023          	sb	x12,0(x10) # 10000000 <STACK_SIZE+0xfffc000>
+    while (n > 0) PutChar(buf[--n]);
+800000e8:	fff68693          	addi	x13,x13,-1
+800000ec:	fed594e3          	bne	x11,x13,800000d4 <_ZNK4Uart6PutDecEi.isra.0+0x3c>
+  }
+800000f0:	01010113          	addi	x2,x2,16
+800000f4:	00008067          	jalr	x0,0(x1)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800000f8:	10000737          	lui	x14,0x10000
+800000fc:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000100:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000104:	0017f793          	andi	x15,x15,1
+80000108:	fe078ce3          	beq	x15,x0,80000100 <_ZNK4Uart6PutDecEi.isra.0+0x68>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+8000010c:	100007b7          	lui	x15,0x10000
+80000110:	02d00713          	addi	x14,x0,45
+80000114:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+      v = -v;
+80000118:	40a00533          	sub	x10,x0,x10
+8000011c:	f85ff06f          	jal	x0,800000a0 <_ZNK4Uart6PutDecEi.isra.0+0x8>
+
+80000120 <_ZNK4Uart3PutEPKc.isra.0>:
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000120:	00054603          	lbu	x12,0(x10)
+80000124:	02060863          	beq	x12,x0,80000154 <_ZNK4Uart3PutEPKc.isra.0+0x34>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000128:	10000737          	lui	x14,0x10000
+8000012c:	00150693          	addi	x13,x10,1
+80000130:	100005b7          	lui	x11,0x10000
+80000134:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000138:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000013c:	0017f793          	andi	x15,x15,1
+80000140:	fe078ce3          	beq	x15,x0,80000138 <_ZNK4Uart3PutEPKc.isra.0+0x18>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000144:	00c58023          	sb	x12,0(x11) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000148:	0006c603          	lbu	x12,0(x13)
+8000014c:	00168693          	addi	x13,x13,1
+80000150:	fe0614e3          	bne	x12,x0,80000138 <_ZNK4Uart3PutEPKc.isra.0+0x18>
+  }
+80000154:	00008067          	jalr	x0,0(x1)
+
+80000158 <memcpy>:
+  for (size_t i = 0; i < n; ++i) d[i] = s[i];
+80000158:	02060063          	beq	x12,x0,80000178 <memcpy+0x20>
+8000015c:	00050793          	addi	x15,x10,0
+80000160:	00c58633          	add	x12,x11,x12
+80000164:	0005c703          	lbu	x14,0(x11)
+80000168:	00158593          	addi	x11,x11,1
+8000016c:	00178793          	addi	x15,x15,1
+80000170:	fee78fa3          	sb	x14,-1(x15)
+80000174:	fec598e3          	bne	x11,x12,80000164 <memcpy+0xc>
+}
+80000178:	00008067          	jalr	x0,0(x1)
+
+8000017c <memset>:
+  for (size_t i = 0; i < n; ++i) d[i] = static_cast<uint8_t>(c);
+8000017c:	0ff5f593          	andi	x11,x11,255
+80000180:	00050793          	addi	x15,x10,0
+80000184:	00a60733          	add	x14,x12,x10
+80000188:	00060863          	beq	x12,x0,80000198 <memset+0x1c>
+8000018c:	00b78023          	sb	x11,0(x15)
+80000190:	00178793          	addi	x15,x15,1
+80000194:	fee79ce3          	bne	x15,x14,8000018c <memset+0x10>
+}
+80000198:	00008067          	jalr	x0,0(x1)
+
+8000019c <_Z10BubbleSortPii>:
+int32_t g_bss[12];
+
+// ---------------------------------------------------------------- 排序与求和
+
+void BubbleSort(int32_t* arr, int n) {
+  for (int i = 0; i < n - 1; ++i) {
+8000019c:	fff58793          	addi	x15,x11,-1
+800001a0:	02f05a63          	bge	x0,x15,800001d4 <_Z10BubbleSortPii+0x38>
+800001a4:	00279793          	slli	x15,x15,0x2
+800001a8:	00f50633          	add	x12,x10,x15
+void BubbleSort(int32_t* arr, int n) {
+800001ac:	00050793          	addi	x15,x10,0
+    for (int j = 0; j < n - 1 - i; ++j) {
+      if (arr[j] > arr[j + 1]) {
+800001b0:	0007a703          	lw	x14,0(x15)
+800001b4:	0047a683          	lw	x13,4(x15)
+800001b8:	00e6d663          	bge	x13,x14,800001c4 <_Z10BubbleSortPii+0x28>
+        int32_t tmp = arr[j];
+        arr[j] = arr[j + 1];
+800001bc:	00d7a023          	sw	x13,0(x15)
+        arr[j + 1] = tmp;
+800001c0:	00e7a223          	sw	x14,4(x15)
+    for (int j = 0; j < n - 1 - i; ++j) {
+800001c4:	00478793          	addi	x15,x15,4
+800001c8:	fec794e3          	bne	x15,x12,800001b0 <_Z10BubbleSortPii+0x14>
+  for (int i = 0; i < n - 1; ++i) {
+800001cc:	ffc60613          	addi	x12,x12,-4
+800001d0:	fcc51ee3          	bne	x10,x12,800001ac <_Z10BubbleSortPii+0x10>
+      }
+    }
+  }
+}
+800001d4:	00008067          	jalr	x0,0(x1)
+
+800001d8 <_Z3SumPKii>:
+
+int32_t Sum(const int32_t* arr, int n) {
+  int32_t acc = 0;
+  for (int i = 0; i < n; ++i) acc += arr[i];
+800001d8:	02b05463          	bge	x0,x11,80000200 <_Z3SumPKii+0x28>
+800001dc:	00259593          	slli	x11,x11,0x2
+800001e0:	00050793          	addi	x15,x10,0
+800001e4:	00b506b3          	add	x13,x10,x11
+  int32_t acc = 0;
+800001e8:	00000513          	addi	x10,x0,0
+  for (int i = 0; i < n; ++i) acc += arr[i];
+800001ec:	0007a703          	lw	x14,0(x15)
+800001f0:	00478793          	addi	x15,x15,4
+800001f4:	00e50533          	add	x10,x10,x14
+800001f8:	fed79ae3          	bne	x15,x13,800001ec <_Z3SumPKii+0x14>
+800001fc:	00008067          	jalr	x0,0(x1)
+  int32_t acc = 0;
+80000200:	00000513          	addi	x10,x0,0
+  return acc;
+}
+80000204:	00008067          	jalr	x0,0(x1)
+
+80000208 <_Z5CheckPKcii>:
+
+// ---------------------------------------------------------------------- main
+
+int fails = 0;
+
+void Check(const char* what, int32_t got, int32_t want) {
+80000208:	ff010113          	addi	x2,x2,-16
+  if (got == want) {
+8000020c:	1ec58e63          	beq	x11,x12,80000408 <_Z5CheckPKcii+0x200>
+    uart.Put(" = ");
+    uart.PutDec(got);
+    uart.PutChar('\n');
+    return;
+  }
+  ++fails;
+80000210:	800406b7          	lui	x13,0x80040
+80000214:	0306a783          	lw	x15,48(x13) # 80040030 <fails>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000218:	10000737          	lui	x14,0x10000
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+8000021c:	02000813          	addi	x16,x0,32
+  ++fails;
+80000220:	00178793          	addi	x15,x15,1
+80000224:	02f6a823          	sw	x15,48(x13)
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000228:	800006b7          	lui	x13,0x80000
+8000022c:	7c568693          	addi	x13,x13,1989 # 800007c5 <_GLOBAL__sub_I_memcpy+0x21>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000230:	100008b7          	lui	x17,0x10000
+80000234:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000238:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000023c:	0017f793          	andi	x15,x15,1
+80000240:	fe078ce3          	beq	x15,x0,80000238 <_Z5CheckPKcii+0x30>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000244:	01088023          	sb	x16,0(x17) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000248:	0006c803          	lbu	x16,0(x13)
+8000024c:	00168693          	addi	x13,x13,1
+80000250:	fe0814e3          	bne	x16,x0,80000238 <_Z5CheckPKcii+0x30>
+80000254:	00054803          	lbu	x16,0(x10)
+80000258:	02080863          	beq	x16,x0,80000288 <_Z5CheckPKcii+0x80>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+8000025c:	10000737          	lui	x14,0x10000
+80000260:	00150693          	addi	x13,x10,1
+80000264:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000268:	10000537          	lui	x10,0x10000
+8000026c:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000270:	0017f793          	andi	x15,x15,1
+80000274:	fe078ce3          	beq	x15,x0,8000026c <_Z5CheckPKcii+0x64>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000278:	01050023          	sb	x16,0(x10) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+8000027c:	0006c803          	lbu	x16,0(x13)
+80000280:	00168693          	addi	x13,x13,1
+80000284:	fe0814e3          	bne	x16,x0,8000026c <_Z5CheckPKcii+0x64>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000288:	10000737          	lui	x14,0x10000
+8000028c:	800006b7          	lui	x13,0x80000
+80000290:	7cd68693          	addi	x13,x13,1997 # 800007cd <_GLOBAL__sub_I_memcpy+0x29>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000294:	02000513          	addi	x10,x0,32
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000298:	10000837          	lui	x16,0x10000
+8000029c:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+800002a0:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+800002a4:	0017f793          	andi	x15,x15,1
+800002a8:	fe078ce3          	beq	x15,x0,800002a0 <_Z5CheckPKcii+0x98>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+800002ac:	00a80023          	sb	x10,0(x16) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+800002b0:	0006c503          	lbu	x10,0(x13)
+800002b4:	00168693          	addi	x13,x13,1
+800002b8:	fe0514e3          	bne	x10,x0,800002a0 <_Z5CheckPKcii+0x98>
+    if (v < 0) {
+800002bc:	1205c263          	blt	x11,x0,800003e0 <_Z5CheckPKcii+0x1d8>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+800002c0:	00000713          	addi	x14,x0,0
+800002c4:	00410513          	addi	x10,x2,4
+      buf[n++] = static_cast<char>('0' + (v % 10));
+800002c8:	00a00813          	addi	x16,x0,10
+800002cc:	0305e7b3          	rem	x15,x11,x16
+800002d0:	00170713          	addi	x14,x14,1
+800002d4:	00e506b3          	add	x13,x10,x14
+      v /= 10;
+800002d8:	0305c5b3          	div	x11,x11,x16
+      buf[n++] = static_cast<char>('0' + (v % 10));
+800002dc:	03078793          	addi	x15,x15,48
+800002e0:	fef68fa3          	sb	x15,-1(x13)
+    } while (v != 0);
+800002e4:	fe0594e3          	bne	x11,x0,800002cc <_Z5CheckPKcii+0xc4>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800002e8:	10000737          	lui	x14,0x10000
+800002ec:	100008b7          	lui	x17,0x10000
+800002f0:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+    while (n > 0) PutChar(buf[--n]);
+800002f4:	fff6c803          	lbu	x16,-1(x13)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800002f8:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+800002fc:	0017f793          	andi	x15,x15,1
+80000300:	fe078ce3          	beq	x15,x0,800002f8 <_Z5CheckPKcii+0xf0>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000304:	01088023          	sb	x16,0(x17) # 10000000 <STACK_SIZE+0xfffc000>
+    while (n > 0) PutChar(buf[--n]);
+80000308:	fff68693          	addi	x13,x13,-1
+8000030c:	fed514e3          	bne	x10,x13,800002f4 <_Z5CheckPKcii+0xec>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000310:	10000737          	lui	x14,0x10000
+80000314:	800006b7          	lui	x13,0x80000
+80000318:	7d568693          	addi	x13,x13,2005 # 800007d5 <_GLOBAL__sub_I_memcpy+0x31>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+8000031c:	02000813          	addi	x16,x0,32
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000320:	100008b7          	lui	x17,0x10000
+80000324:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000328:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000032c:	0017f793          	andi	x15,x15,1
+80000330:	fe078ce3          	beq	x15,x0,80000328 <_Z5CheckPKcii+0x120>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000334:	01088023          	sb	x16,0(x17) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000338:	0006c803          	lbu	x16,0(x13)
+8000033c:	00168693          	addi	x13,x13,1
+80000340:	fe0814e3          	bne	x16,x0,80000328 <_Z5CheckPKcii+0x120>
+    if (v < 0) {
+80000344:	06064a63          	blt	x12,x0,800003b8 <_Z5CheckPKcii+0x1b0>
+      buf[n++] = static_cast<char>('0' + (v % 10));
+80000348:	00a00713          	addi	x14,x0,10
+8000034c:	02e667b3          	rem	x15,x12,x14
+80000350:	00158593          	addi	x11,x11,1
+80000354:	00b506b3          	add	x13,x10,x11
+      v /= 10;
+80000358:	02e64633          	div	x12,x12,x14
+      buf[n++] = static_cast<char>('0' + (v % 10));
+8000035c:	03078793          	addi	x15,x15,48
+80000360:	fef68fa3          	sb	x15,-1(x13)
+    } while (v != 0);
+80000364:	fe0614e3          	bne	x12,x0,8000034c <_Z5CheckPKcii+0x144>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000368:	10000737          	lui	x14,0x10000
+8000036c:	100005b7          	lui	x11,0x10000
+80000370:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+    while (n > 0) PutChar(buf[--n]);
+80000374:	fff6c603          	lbu	x12,-1(x13)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000378:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000037c:	0017f793          	andi	x15,x15,1
+80000380:	fe078ce3          	beq	x15,x0,80000378 <_Z5CheckPKcii+0x170>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000384:	00c58023          	sb	x12,0(x11) # 10000000 <STACK_SIZE+0xfffc000>
+    while (n > 0) PutChar(buf[--n]);
+80000388:	fff68693          	addi	x13,x13,-1
+8000038c:	fed514e3          	bne	x10,x13,80000374 <_Z5CheckPKcii+0x16c>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000390:	10000737          	lui	x14,0x10000
+80000394:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000398:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000039c:	0017f793          	andi	x15,x15,1
+800003a0:	fe078ce3          	beq	x15,x0,80000398 <_Z5CheckPKcii+0x190>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+800003a4:	100007b7          	lui	x15,0x10000
+800003a8:	00a00713          	addi	x14,x0,10
+800003ac:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+  uart.Put(" got ");
+  uart.PutDec(got);
+  uart.Put(" want ");
+  uart.PutDec(want);
+  uart.PutChar('\n');
+}
+800003b0:	01010113          	addi	x2,x2,16
+800003b4:	00008067          	jalr	x0,0(x1)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800003b8:	10000737          	lui	x14,0x10000
+800003bc:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+800003c0:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+800003c4:	0017f793          	andi	x15,x15,1
+800003c8:	fe078ce3          	beq	x15,x0,800003c0 <_Z5CheckPKcii+0x1b8>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+800003cc:	100007b7          	lui	x15,0x10000
+800003d0:	02d00713          	addi	x14,x0,45
+800003d4:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+      v = -v;
+800003d8:	40c00633          	sub	x12,x0,x12
+800003dc:	f6dff06f          	jal	x0,80000348 <_Z5CheckPKcii+0x140>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800003e0:	10000737          	lui	x14,0x10000
+800003e4:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+800003e8:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+800003ec:	0017f793          	andi	x15,x15,1
+800003f0:	fe078ce3          	beq	x15,x0,800003e8 <_Z5CheckPKcii+0x1e0>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+800003f4:	100007b7          	lui	x15,0x10000
+800003f8:	02d00713          	addi	x14,x0,45
+800003fc:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+      v = -v;
+80000400:	40b005b3          	sub	x11,x0,x11
+80000404:	ebdff06f          	jal	x0,800002c0 <_Z5CheckPKcii+0xb8>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000408:	10000737          	lui	x14,0x10000
+8000040c:	800006b7          	lui	x13,0x80000
+80000410:	7b968693          	addi	x13,x13,1977 # 800007b9 <_GLOBAL__sub_I_memcpy+0x15>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000414:	02000613          	addi	x12,x0,32
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000418:	10000837          	lui	x16,0x10000
+8000041c:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000420:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000424:	0017f793          	andi	x15,x15,1
+80000428:	fe078ce3          	beq	x15,x0,80000420 <_Z5CheckPKcii+0x218>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+8000042c:	00c80023          	sb	x12,0(x16) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000430:	0006c603          	lbu	x12,0(x13)
+80000434:	00168693          	addi	x13,x13,1
+80000438:	fe0614e3          	bne	x12,x0,80000420 <_Z5CheckPKcii+0x218>
+8000043c:	00054603          	lbu	x12,0(x10)
+80000440:	02060863          	beq	x12,x0,80000470 <_Z5CheckPKcii+0x268>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000444:	100006b7          	lui	x13,0x10000
+80000448:	00150713          	addi	x14,x10,1
+8000044c:	00568693          	addi	x13,x13,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000450:	10000537          	lui	x10,0x10000
+80000454:	0006c783          	lbu	x15,0(x13)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000458:	0017f793          	andi	x15,x15,1
+8000045c:	fe078ce3          	beq	x15,x0,80000454 <_Z5CheckPKcii+0x24c>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000460:	00c50023          	sb	x12,0(x10) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000464:	00074603          	lbu	x12,0(x14)
+80000468:	00170713          	addi	x14,x14,1
+8000046c:	fe0614e3          	bne	x12,x0,80000454 <_Z5CheckPKcii+0x24c>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000470:	10000737          	lui	x14,0x10000
+80000474:	800006b7          	lui	x13,0x80000
+80000478:	7c168693          	addi	x13,x13,1985 # 800007c1 <_GLOBAL__sub_I_memcpy+0x1d>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+8000047c:	02000613          	addi	x12,x0,32
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000480:	10000537          	lui	x10,0x10000
+80000484:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000488:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000048c:	0017f793          	andi	x15,x15,1
+80000490:	fe078ce3          	beq	x15,x0,80000488 <_Z5CheckPKcii+0x280>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000494:	00c50023          	sb	x12,0(x10) # 10000000 <STACK_SIZE+0xfffc000>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+80000498:	0006c603          	lbu	x12,0(x13)
+8000049c:	00168693          	addi	x13,x13,1
+800004a0:	fe0614e3          	bne	x12,x0,80000488 <_Z5CheckPKcii+0x280>
+    if (v < 0) {
+800004a4:	0605ce63          	blt	x11,x0,80000520 <_Z5CheckPKcii+0x318>
+    for (size_t i = 0; s[i] != '\0'; ++i) PutChar(s[i]);
+800004a8:	00000713          	addi	x14,x0,0
+800004ac:	00410513          	addi	x10,x2,4
+      buf[n++] = static_cast<char>('0' + (v % 10));
+800004b0:	00a00613          	addi	x12,x0,10
+800004b4:	02c5e7b3          	rem	x15,x11,x12
+800004b8:	00170713          	addi	x14,x14,1
+800004bc:	00e506b3          	add	x13,x10,x14
+      v /= 10;
+800004c0:	02c5c5b3          	div	x11,x11,x12
+      buf[n++] = static_cast<char>('0' + (v % 10));
+800004c4:	03078793          	addi	x15,x15,48
+800004c8:	fef68fa3          	sb	x15,-1(x13)
+    } while (v != 0);
+800004cc:	fe0594e3          	bne	x11,x0,800004b4 <_Z5CheckPKcii+0x2ac>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800004d0:	10000737          	lui	x14,0x10000
+800004d4:	100005b7          	lui	x11,0x10000
+800004d8:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+    while (n > 0) PutChar(buf[--n]);
+800004dc:	fff6c603          	lbu	x12,-1(x13)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800004e0:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+800004e4:	0017f793          	andi	x15,x15,1
+800004e8:	fe078ce3          	beq	x15,x0,800004e0 <_Z5CheckPKcii+0x2d8>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+800004ec:	00c58023          	sb	x12,0(x11) # 10000000 <STACK_SIZE+0xfffc000>
+    while (n > 0) PutChar(buf[--n]);
+800004f0:	fff68693          	addi	x13,x13,-1
+800004f4:	fed514e3          	bne	x10,x13,800004dc <_Z5CheckPKcii+0x2d4>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+800004f8:	10000737          	lui	x14,0x10000
+800004fc:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000500:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000504:	0017f793          	andi	x15,x15,1
+80000508:	fe078ce3          	beq	x15,x0,80000500 <_Z5CheckPKcii+0x2f8>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+8000050c:	100007b7          	lui	x15,0x10000
+80000510:	00a00713          	addi	x14,x0,10
+80000514:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+}
+80000518:	01010113          	addi	x2,x2,16
+8000051c:	00008067          	jalr	x0,0(x1)
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000520:	10000737          	lui	x14,0x10000
+80000524:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000528:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000052c:	0017f793          	andi	x15,x15,1
+80000530:	fe078ce3          	beq	x15,x0,80000528 <_Z5CheckPKcii+0x320>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000534:	100007b7          	lui	x15,0x10000
+80000538:	02d00713          	addi	x14,x0,45
+8000053c:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+      v = -v;
+80000540:	40b005b3          	sub	x11,x0,x11
+80000544:	f65ff06f          	jal	x0,800004a8 <_Z5CheckPKcii+0x2a0>
+
+80000548 <main>:
+    Put(s);
+80000548:	80000537          	lui	x10,0x80000
+
+extern "C" int main() {
+8000054c:	fe010113          	addi	x2,x2,-32
+    Put(s);
+80000550:	7dc50513          	addi	x10,x10,2012 # 800007dc <_GLOBAL__sub_I_memcpy+0x38>
+extern "C" int main() {
+80000554:	00112e23          	sw	x1,28(x2)
+80000558:	00812c23          	sw	x8,24(x2)
+8000055c:	00912a23          	sw	x9,20(x2)
+80000560:	01212823          	sw	x18,16(x2)
+80000564:	01312623          	sw	x19,12(x2)
+    Put(s);
+80000568:	bb9ff0ef          	jal	x1,80000120 <_ZNK4Uart3PutEPKc.isra.0>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+8000056c:	10000737          	lui	x14,0x10000
+80000570:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000574:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000578:	0017f793          	andi	x15,x15,1
+8000057c:	fe078ce3          	beq	x15,x0,80000574 <main+0x2c>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000580:	00a00713          	addi	x14,x0,10
+80000584:	100007b7          	lui	x15,0x10000
+80000588:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+  uint32_t Magic() const { return magic; }
+8000058c:	800407b7          	lui	x15,0x80040
+  uart.PutLine("rv32 pipeline demo");
+
+  // 全局对象在 main 之前就构造好了
+  Check("boot.magic_ok", g_boot.Magic() == 0x5A5A1234u ? 1 : 0, 1);
+80000590:	0347a583          	lw	x11,52(x15) # 80040034 <g_boot>
+80000594:	a5a5f7b7          	lui	x15,0xa5a5f
+80000598:	dcc78793          	addi	x15,x15,-564 # a5a5edcc <dlm_end+0x259dedcc>
+8000059c:	00f585b3          	add	x11,x11,x15
+800005a0:	80000537          	lui	x10,0x80000
+
+  // .data 段确实从 ILM 搬到了 DLM，.bss 确实清了零
+  Check("data[0]", g_data[0], 42);
+800005a4:	800404b7          	lui	x9,0x80040
+  Check("boot.magic_ok", g_boot.Magic() == 0x5A5A1234u ? 1 : 0, 1);
+800005a8:	00100613          	addi	x12,x0,1
+800005ac:	0015b593          	sltiu	x11,x11,1
+800005b0:	7f050513          	addi	x10,x10,2032 # 800007f0 <_GLOBAL__sub_I_memcpy+0x4c>
+800005b4:	c55ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+  Check("data[0]", g_data[0], 42);
+800005b8:	00048413          	addi	x8,x9,0 # 80040000 <g_data>
+800005bc:	00042583          	lw	x11,0(x8)
+800005c0:	80001537          	lui	x10,0x80001
+800005c4:	02a00613          	addi	x12,x0,42
+800005c8:	80050513          	addi	x10,x10,-2048 # 80000800 <_GLOBAL__sub_I_memcpy+0x5c>
+800005cc:	c3dff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+  Check("bss[0]", g_bss[0], 0);
+800005d0:	80818913          	addi	x18,x3,-2040 # 80040038 <g_bss>
+800005d4:	00092583          	lw	x11,0(x18)
+800005d8:	80001537          	lui	x10,0x80001
+800005dc:	00000613          	addi	x12,x0,0
+800005e0:	80850513          	addi	x10,x10,-2040 # 80000808 <_GLOBAL__sub_I_memcpy+0x64>
+800005e4:	c25ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+
+  // 排序：密集的比较分支加上相邻元素的读写
+  BubbleSort(g_data, 12);
+800005e8:	00048513          	addi	x10,x9,0
+800005ec:	00c00593          	addi	x11,x0,12
+800005f0:	badff0ef          	jal	x1,8000019c <_Z10BubbleSortPii>
+  Check("sorted[0]", g_data[0], 1);
+800005f4:	00042583          	lw	x11,0(x8)
+800005f8:	80001537          	lui	x10,0x80001
+800005fc:	00100613          	addi	x12,x0,1
+80000600:	81050513          	addi	x10,x10,-2032 # 80000810 <_GLOBAL__sub_I_memcpy+0x6c>
+80000604:	c05ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+  Check("sorted[11]", g_data[11], 99);
+80000608:	02c42583          	lw	x11,44(x8)
+8000060c:	80001537          	lui	x10,0x80001
+80000610:	06300613          	addi	x12,x0,99
+80000614:	81c50513          	addi	x10,x10,-2020 # 8000081c <_GLOBAL__sub_I_memcpy+0x78>
+80000618:	bf1ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+  for (int i = 0; i < n; ++i) acc += arr[i];
+8000061c:	00048793          	addi	x15,x9,0
+  int32_t acc = 0;
+80000620:	00000593          	addi	x11,x0,0
+80000624:	03040493          	addi	x9,x8,48
+  for (int i = 0; i < n; ++i) acc += arr[i];
+80000628:	0007a703          	lw	x14,0(x15)
+8000062c:	00478793          	addi	x15,x15,4
+80000630:	00e585b3          	add	x11,x11,x14
+80000634:	fe979ae3          	bne	x15,x9,80000628 <main+0xe0>
+  Check("sum", Sum(g_data, 12), 421);
+80000638:	80001537          	lui	x10,0x80001
+8000063c:	1a500613          	addi	x12,x0,421
+80000640:	82850513          	addi	x10,x10,-2008 # 80000828 <_GLOBAL__sub_I_memcpy+0x84>
+80000644:	bc5ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+
+  int sorted = 1;
+  for (int i = 0; i + 1 < 12; ++i) {
+80000648:	00042683          	lw	x13,0(x8)
+8000064c:	00440713          	addi	x14,x8,4
+  int sorted = 1;
+80000650:	00100593          	addi	x11,x0,1
+    if (g_data[i] > g_data[i + 1]) sorted = 0;
+80000654:	00068793          	addi	x15,x13,0
+80000658:	00072683          	lw	x13,0(x14)
+  for (int i = 0; i + 1 < 12; ++i) {
+8000065c:	00470713          	addi	x14,x14,4
+    if (g_data[i] > g_data[i + 1]) sorted = 0;
+80000660:	00f6a7b3          	slt	x15,x13,x15
+80000664:	fff78793          	addi	x15,x15,-1
+80000668:	00f5f5b3          	and	x11,x11,x15
+  for (int i = 0; i + 1 < 12; ++i) {
+8000066c:	fe9714e3          	bne	x14,x9,80000654 <main+0x10c>
+  }
+  Check("is_sorted", sorted, 1);
+80000670:	80001537          	lui	x10,0x80001
+80000674:	00100613          	addi	x12,x0,1
+80000678:	82c50513          	addi	x10,x10,-2004 # 8000082c <_GLOBAL__sub_I_memcpy+0x88>
+8000067c:	b8dff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+
+  // 倒着抄一份进 .bss，再排一次
+  for (int i = 0; i < 12; ++i) g_bss[i] = g_data[11 - i];
+80000680:	02c40713          	addi	x14,x8,44
+80000684:	03090493          	addi	x9,x18,48
+80000688:	00090413          	addi	x8,x18,0
+  Check("is_sorted", sorted, 1);
+8000068c:	00090793          	addi	x15,x18,0
+  for (int i = 0; i < 12; ++i) g_bss[i] = g_data[11 - i];
+80000690:	00072683          	lw	x13,0(x14)
+80000694:	00478793          	addi	x15,x15,4
+80000698:	ffc70713          	addi	x14,x14,-4
+8000069c:	fed7ae23          	sw	x13,-4(x15)
+800006a0:	fe9798e3          	bne	x15,x9,80000690 <main+0x148>
+  BubbleSort(g_bss, 12);
+800006a4:	00c00593          	addi	x11,x0,12
+800006a8:	80818513          	addi	x10,x3,-2040 # 80040038 <g_bss>
+800006ac:	af1ff0ef          	jal	x1,8000019c <_Z10BubbleSortPii>
+  Check("copy_sorted[0]", g_bss[0], 1);
+800006b0:	00092583          	lw	x11,0(x18)
+800006b4:	80001537          	lui	x10,0x80001
+800006b8:	00100613          	addi	x12,x0,1
+800006bc:	83850513          	addi	x10,x10,-1992 # 80000838 <_GLOBAL__sub_I_memcpy+0x94>
+800006c0:	b49ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+  int32_t acc = 0;
+800006c4:	00000593          	addi	x11,x0,0
+  for (int i = 0; i < n; ++i) acc += arr[i];
+800006c8:	00042783          	lw	x15,0(x8)
+800006cc:	00440413          	addi	x8,x8,4
+800006d0:	00f585b3          	add	x11,x11,x15
+800006d4:	fe941ae3          	bne	x8,x9,800006c8 <main+0x180>
+  Check("copy_sum", Sum(g_bss, 12), 421);
+800006d8:	80001537          	lui	x10,0x80001
+800006dc:	1a500613          	addi	x12,x0,421
+800006e0:	84850513          	addi	x10,x10,-1976 # 80000848 <_GLOBAL__sub_I_memcpy+0xa4>
+800006e4:	b25ff0ef          	jal	x1,80000208 <_Z5CheckPKcii>
+
+  uart.Put("  cycles ");
+800006e8:	80001537          	lui	x10,0x80001
+800006ec:	85450513          	addi	x10,x10,-1964 # 80000854 <_GLOBAL__sub_I_memcpy+0xb0>
+800006f0:	a31ff0ef          	jal	x1,80000120 <_ZNK4Uart3PutEPKc.isra.0>
+  return *reinterpret_cast<volatile uint32_t*>(addr);
+800006f4:	100017b7          	lui	x15,0x10001
+800006f8:	0087a503          	lw	x10,8(x15) # 10001008 <SIM_EXIT+0x8>
+  uart.PutDec(static_cast<int32_t>(mmio::Load32(mmio::kCycleLow)));
+800006fc:	99dff0ef          	jal	x1,80000098 <_ZNK4Uart6PutDecEi.isra.0>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000700:	10000737          	lui	x14,0x10000
+80000704:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000708:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+8000070c:	0017f793          	andi	x15,x15,1
+80000710:	fe078ce3          	beq	x15,x0,80000708 <main+0x1c0>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+80000714:	100007b7          	lui	x15,0x10000
+80000718:	00a00713          	addi	x14,x0,10
+8000071c:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+  uart.PutChar('\n');
+
+  if (fails == 0) {
+80000720:	80040437          	lui	x8,0x80040
+80000724:	03042783          	lw	x15,48(x8) # 80040030 <fails>
+80000728:	04079863          	bne	x15,x0,80000778 <main+0x230>
+    Put(s);
+8000072c:	80001537          	lui	x10,0x80001
+80000730:	86050513          	addi	x10,x10,-1952 # 80000860 <_GLOBAL__sub_I_memcpy+0xbc>
+80000734:	9edff0ef          	jal	x1,80000120 <_ZNK4Uart3PutEPKc.isra.0>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+80000738:	10000737          	lui	x14,0x10000
+8000073c:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000740:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000744:	0017f793          	andi	x15,x15,1
+80000748:	fe078ce3          	beq	x15,x0,80000740 <main+0x1f8>
+  *reinterpret_cast<volatile uint8_t*>(addr) = value;
+8000074c:	100007b7          	lui	x15,0x10000
+80000750:	00a00713          	addi	x14,x0,10
+80000754:	00e78023          	sb	x14,0(x15) # 10000000 <STACK_SIZE+0xfffc000>
+    uart.Put("FAIL ");
+    uart.PutDec(fails);
+    uart.PutChar('\n');
+  }
+  return fails;
+}
+80000758:	03042503          	lw	x10,48(x8)
+8000075c:	01c12083          	lw	x1,28(x2)
+80000760:	01812403          	lw	x8,24(x2)
+80000764:	01412483          	lw	x9,20(x2)
+80000768:	01012903          	lw	x18,16(x2)
+8000076c:	00c12983          	lw	x19,12(x2)
+80000770:	02010113          	addi	x2,x2,32
+80000774:	00008067          	jalr	x0,0(x1)
+    uart.Put("FAIL ");
+80000778:	80001537          	lui	x10,0x80001
+8000077c:	86850513          	addi	x10,x10,-1944 # 80000868 <_GLOBAL__sub_I_memcpy+0xc4>
+80000780:	9a1ff0ef          	jal	x1,80000120 <_ZNK4Uart3PutEPKc.isra.0>
+    uart.PutDec(fails);
+80000784:	03042503          	lw	x10,48(x8)
+80000788:	911ff0ef          	jal	x1,80000098 <_ZNK4Uart6PutDecEi.isra.0>
+  return *reinterpret_cast<volatile uint8_t*>(addr);
+8000078c:	10000737          	lui	x14,0x10000
+80000790:	00570713          	addi	x14,x14,5 # 10000005 <STACK_SIZE+0xfffc005>
+80000794:	00074783          	lbu	x15,0(x14)
+    while ((mmio::Load8(mmio::kUartLsr) & 0x01) == 0) {
+80000798:	0017f793          	andi	x15,x15,1
+8000079c:	fe078ce3          	beq	x15,x0,80000794 <main+0x24c>
+800007a0:	fadff06f          	jal	x0,8000074c <main+0x204>
+
+800007a4 <_GLOBAL__sub_I_memcpy>:
+  BootStamp() : magic(0x5A5A1234) {}
+800007a4:	5a5a17b7          	lui	x15,0x5a5a1
+800007a8:	23478793          	addi	x15,x15,564 # 5a5a1234 <SIM_EXIT+0x4a5a0234>
+800007ac:	80040737          	lui	x14,0x80040
+800007b0:	02f72a23          	sw	x15,52(x14) # 80040034 <g_boot>
+}
+800007b4:	00008067          	jalr	x0,0(x1)
