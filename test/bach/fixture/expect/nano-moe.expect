@@ -1,0 +1,14 @@
+BACHEXPECT 1
+
+META map_path /home/colin/develop/bach/test_regre/nano-moe.map
+META map_sha256 5202b69e9d8d7450a03e2957025594893ddd36e0fcef2a7ac0c60f01020f7a61
+META end_time 8469
+META phase off
+META generated_at 2026-08-17T18:00:09
+META generator src/bach/tools/run_bach.py
+
+USERS 2
+COMPLETED 0 1
+LOST
+DONE 0 7886
+DONE 1 8269

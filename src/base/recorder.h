@@ -45,6 +45,10 @@ class Recorder {
   std::size_t FlushThreshold() const { return flush_threshold; }
   void SetFlushThreshold(std::size_t v) { flush_threshold = v; }
   const std::string& PathPrefix() const { return prefix; }
+  // 落盘路径。全局那个 Recorder 是默认构造的，前缀恒为 Recorder，写到进程的当前
+  // 目录；一个进程里跑多轮就会一轮盖一轮。要分开存就在开写之前改掉前缀。
+  // 第一段落盘之后文件已经打开，这时再改前缀，改到的与写进去的对不上，所以拒绝。
+  void SetPathPrefix(const std::string& v);
 
  private:
   void EnsureOpen();

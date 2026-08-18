@@ -1,0 +1,889 @@
+{
+  "meta": {
+    "chip_rows": 2,
+    "chip_cols": 2,
+    "core_rows_per_chip": 2,
+    "core_cols_per_chip": 4,
+    "node_chip_rows": 2,
+    "node_chip_cols": 2,
+    "timeline": [
+      "FIFO_IN",
+      "INIT",
+      "COMPUTE",
+      "CONCAT",
+      "INIT",
+      "COMPUTE",
+      "REDUCE",
+      "REDUCTION"
+    ],
+    "timeline_volumes": [
+      6144,
+      6144,
+      0,
+      1024,
+      6144,
+      0,
+      12288,
+      6144
+    ],
+    "default_compute_times": {
+      "M": 2048,
+      "V": 130
+    }
+  },
+  "hosts": [
+    {
+      "id": "ep0",
+      "coord": [
+        0,
+        -1
+      ],
+      "target": 8,
+      "volume": 6144,
+      "pcie_bandwidth": 32,
+      "pcie_delay": 400,
+      "ep_groups": [
+        0
+      ]
+    },
+    {
+      "id": "ep1",
+      "coord": [
+        0,
+        -2
+      ],
+      "target": 24,
+      "volume": 6144,
+      "pcie_bandwidth": 32,
+      "pcie_delay": 400,
+      "ep_groups": [
+        1
+      ]
+    }
+  ],
+  "outs": [
+    {
+      "id": "out",
+      "coord": [
+        2,
+        8
+      ],
+      "target": 23,
+      "volume": 6144,
+      "pcie_bandwidth": 32,
+      "pcie_delay": 200
+    }
+  ],
+  "cores": {
+    "0": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            1
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 1
+        }
+      },
+      "group_id": 0
+    },
+    "1": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            2
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 2
+        }
+      },
+      "group_id": 0
+    },
+    "2": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            3
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 3
+        }
+      },
+      "group_id": 0
+    },
+    "3": {
+      "timeline_data": {
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "4": {
+          "targets": [
+            12
+          ]
+        }
+      },
+      "group_id": 0
+    },
+    "4": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            5
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 5
+        }
+      },
+      "group_id": 0
+    },
+    "5": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            6
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 6
+        }
+      },
+      "group_id": 0
+    },
+    "6": {
+      "timeline_data": {
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 7
+        },
+        "7": {
+          "target": null
+        },
+        "4": {
+          "targets": [
+            7
+          ]
+        }
+      },
+      "group_id": 0
+    },
+    "7": {
+      "timeline_data": {
+        "7": {
+          "target": 15
+        },
+        "6": {
+          "target": null
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "4": {
+          "targets": []
+        }
+      },
+      "group_id": 0
+    },
+    "8": {
+      "timeline_data": {
+        "0": {
+          "targets": [
+            0,
+            9
+          ]
+        }
+      },
+      "group_id": 0
+    },
+    "9": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            10
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 10
+        }
+      },
+      "group_id": 0
+    },
+    "10": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            11
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 11
+        }
+      },
+      "group_id": 0
+    },
+    "11": {
+      "timeline_data": {
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 3
+        }
+      },
+      "group_id": 0
+    },
+    "12": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            4,
+            13
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 13
+        }
+      },
+      "group_id": 0
+    },
+    "13": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            14
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 14
+        }
+      },
+      "group_id": 0
+    },
+    "14": {
+      "timeline_data": {
+        "4": {
+          "targets": []
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 6
+        }
+      },
+      "group_id": 0
+    },
+    "15": {
+      "timeline_data": {
+        "5": {
+          "compute_seqs": []
+        },
+        "6": {
+          "target": null
+        },
+        "7": {
+          "target": 23
+        }
+      },
+      "group_id": 0
+    },
+    "16": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            17
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 17
+        }
+      },
+      "group_id": 1
+    },
+    "17": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            18
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 18
+        }
+      },
+      "group_id": 1
+    },
+    "18": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            19
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 19
+        }
+      },
+      "group_id": 1
+    },
+    "19": {
+      "timeline_data": {
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "4": {
+          "targets": [
+            28
+          ]
+        }
+      },
+      "group_id": 1
+    },
+    "20": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            21
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 21
+        }
+      },
+      "group_id": 1
+    },
+    "21": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            22
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 22
+        }
+      },
+      "group_id": 1
+    },
+    "22": {
+      "timeline_data": {
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 30
+        }
+      },
+      "group_id": 1
+    },
+    "23": {
+      "timeline_data": {
+        "6": {
+          "target": null
+        },
+        "7": {}
+      },
+      "group_id": 1
+    },
+    "24": {
+      "timeline_data": {
+        "0": {
+          "targets": [
+            16,
+            25
+          ]
+        }
+      },
+      "group_id": 1
+    },
+    "25": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            26
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 26
+        }
+      },
+      "group_id": 1
+    },
+    "26": {
+      "timeline_data": {
+        "1": {
+          "targets": [
+            27
+          ]
+        },
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 27
+        }
+      },
+      "group_id": 1
+    },
+    "27": {
+      "timeline_data": {
+        "2": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 128
+            },
+            {
+              "op": "V",
+              "time": 32
+            }
+          ]
+        },
+        "3": {
+          "target": 19
+        }
+      },
+      "group_id": 1
+    },
+    "28": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            20,
+            29
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 29
+        }
+      },
+      "group_id": 1
+    },
+    "29": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            30
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 30
+        }
+      },
+      "group_id": 1
+    },
+    "30": {
+      "timeline_data": {
+        "4": {
+          "targets": [
+            31
+          ]
+        },
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": 31
+        }
+      },
+      "group_id": 1
+    },
+    "31": {
+      "timeline_data": {
+        "5": {
+          "compute_seqs": [
+            {
+              "op": "M",
+              "time": 32
+            }
+          ]
+        },
+        "6": {
+          "target": null
+        },
+        "7": {
+          "target": 23
+        }
+      },
+      "group_id": 1
+    }
+  },
+  "chip_rules": {
+    "0": {
+      "RIGHT": "3",
+      "LEFT": "4",
+      "TOP": "0",
+      "BOTTOM": "7",
+      "RIGHT_bandwidth": 32,
+      "RIGHT_delay": 300,
+      "LEFT_bandwidth": 32,
+      "LEFT_delay": 300,
+      "BOTTOM_bandwidth": 32,
+      "BOTTOM_delay": 300,
+      "TOP_bandwidth": 32,
+      "TOP_delay": 300
+    },
+    "1": {
+      "RIGHT": "3",
+      "LEFT": "4",
+      "TOP": "0",
+      "BOTTOM": "7",
+      "RIGHT_bandwidth": 32,
+      "RIGHT_delay": 300,
+      "LEFT_bandwidth": 32,
+      "LEFT_delay": 300,
+      "BOTTOM_bandwidth": 32,
+      "BOTTOM_delay": 300,
+      "TOP_bandwidth": 32,
+      "TOP_delay": 300
+    },
+    "2": {
+      "RIGHT": "3",
+      "LEFT": "4",
+      "TOP": "0",
+      "BOTTOM": "7",
+      "RIGHT_bandwidth": 32,
+      "RIGHT_delay": 300,
+      "LEFT_bandwidth": 32,
+      "LEFT_delay": 300,
+      "BOTTOM_bandwidth": 32,
+      "BOTTOM_delay": 300,
+      "TOP_bandwidth": 32,
+      "TOP_delay": 300
+    },
+    "3": {
+      "RIGHT": "3",
+      "LEFT": "4",
+      "TOP": "0",
+      "BOTTOM": "7",
+      "RIGHT_bandwidth": 32,
+      "RIGHT_delay": 300,
+      "LEFT_bandwidth": 32,
+      "LEFT_delay": 300,
+      "BOTTOM_bandwidth": 32,
+      "BOTTOM_delay": 300,
+      "TOP_bandwidth": 32,
+      "TOP_delay": 300
+    }
+  },
+  "moe_profile": {
+    "model_name": "NanoMoE",
+    "strategy": {
+      "shared_experts": 1,
+      "routed_experts": 8,
+      "active_shared_experts": 1,
+      "active_routed_experts": 3,
+      "routing_policy": "SKEWED",
+      "skew_factor": 0.8
+    }
+  },
+  "moe_ep_groups": [
+    {
+      "id": "G0",
+      "group_id": 0,
+      "shared_ep_id": 0,
+      "routed_ep_num": 4
+    },
+    {
+      "id": "G1",
+      "group_id": 1,
+      "shared_ep_id": 0,
+      "routed_ep_num": 4
+    }
+  ],
+  "phase1_lanes": [
+    {
+      "id": "L0",
+      "coord": [
+        -1,
+        0
+      ],
+      "target": 0,
+      "volume": 6144,
+      "layer_id": 0,
+      "chip_group_id": 0,
+      "bypass_target": "S_RES",
+      "moe_target": "S_MOE",
+      "hit_map": [
+        0,
+        1,
+        2
+      ],
+      "fc0_delay": 100,
+      "res_delay": 50,
+      "norm_delay": 50,
+      "router_delay": 50,
+      "push_delay": 500,
+      "user_range": [
+        0,
+        2
+      ],
+      "pcie_bandwidth": 32,
+      "pcie_delay": 200
+    }
+  ],
+  "phase1_sinks": [
+    {
+      "id": "S_RES",
+      "coord": [
+        -1,
+        1
+      ],
+      "target": 1,
+      "role": "BYPASS",
+      "volume": 6144,
+      "pcie_bandwidth": 32,
+      "pcie_delay": 200
+    },
+    {
+      "id": "S_MOE",
+      "coord": [
+        -1,
+        2
+      ],
+      "target": 2,
+      "role": "MOE",
+      "volume": 6144,
+      "pcie_bandwidth": 32,
+      "pcie_delay": 200
+    }
+  ]
+}

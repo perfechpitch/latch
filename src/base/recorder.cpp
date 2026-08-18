@@ -28,6 +28,12 @@ Recorder::~Recorder() {
   Finalize();
 }
 
+void Recorder::SetPathPrefix(const std::string& v) {
+  std::lock_guard<std::mutex> lk(mu);
+  LOGCHECK(fp == nullptr, "Recorder: the .trace file is already open");
+  prefix = v;
+}
+
 void Recorder::EnsureOpen() {
   if (fp != nullptr) return;
   const std::string path = prefix + ".trace";

@@ -1,0 +1,14 @@
+BACHEXPECT 1
+
+META map_path /home/colin/develop/bach/moe_bc_core.map
+META map_sha256 0b7a5b33776f1ac90de35f2f9d5b431551c1866b33c92b8860e13357d470c1ae
+META end_time 26924
+META phase off
+META generated_at 2026-08-17T18:00:08
+META generator src/bach/tools/run_bach.py
+
+USERS 2
+COMPLETED 0 1
+LOST
+DONE 0 24775
+DONE 1 26724

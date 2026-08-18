@@ -1,0 +1,6 @@
+add_executable(bach_run ${LATCH_ROOT_DIR}/src/bach/tools/run_bachir.cpp)
+target_include_directories(bach_run PUBLIC ${LATCH_ROOT_DIR}/src)
+target_link_libraries(bach_run latch_base_static)
+target_link_libraries(bach_run spdlog)
+target_link_libraries(bach_run pthread dl)
+target_link_libraries(bach_run sqlite3)

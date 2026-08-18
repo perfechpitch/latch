@@ -12,3 +12,4 @@ target_link_libraries(latch_base_static PUBLIC hp-socket)
 target_link_libraries(latch_base_static PUBLIC mio)
 
 add_subdirectory(libco)
+add_subdirectory(bach)
