@@ -85,6 +85,26 @@ def moe(x, cores, sel):
     return reduce_sum(parts)
 
 
+// reduce core
+// broadcast core
+
+// router : credit + vc
+// Riscv+dte
+// Riscv+mu
+// Riscv+vu
+
+// TS 任务调度
+
+
+# credit
+# 1. 申请 -> 函数(){ delay(4); //   }  -> 10 signal
+# 2. 释放 -> 函数(){  }  -> 10 signal
+
+
+
+
+
+
 # ============================== 不在核上 ==============================
 # 下面这些不产 kernel。
 
