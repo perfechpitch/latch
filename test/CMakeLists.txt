@@ -6,3 +6,4 @@ add_definitions(-DPROJECT_TEST_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 
 add_subdirectory(module)
 add_subdirectory(bach)
+add_subdirectory(rv32)

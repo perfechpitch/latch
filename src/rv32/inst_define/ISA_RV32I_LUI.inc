@@ -1,0 +1,25 @@
+#ifdef INST_RUN_DEFINE
+WriteSr(_RD, uint32_t(_IMM20.U32() << 12));
+#endif
+
+#ifdef TEST_DEFINE
+TEST_CASE("basic positive immediate") {
+  RUN_INST(ISA_RV32I_LUI, 7, 0x0002);
+  CHECK_REGISTER_EQ(uint32_t, SR[7], 0x00002000);
+}
+
+TEST_CASE("imm = 0x12345 -> 0x12345000") {
+  RUN_INST(ISA_RV32I_LUI, 7, 0x12345);
+  CHECK_REGISTER_EQ(uint32_t, SR[7], 0x12345000);
+}
+
+TEST_CASE("imm high bit set (0x80000) -> 0x80000000") {
+  RUN_INST(ISA_RV32I_LUI, 7, 0x80000);
+  CHECK_REGISTER_EQ(uint32_t, SR[7], 0x80000000);
+}
+
+TEST_CASE("imm = 0xFFFFF -> 0xFFFFF000") {
+  RUN_INST(ISA_RV32I_LUI, 7, 0xFFFFF);
+  CHECK_REGISTER_EQ(uint32_t, SR[7], 0xFFFFF000);
+}
+#endif
