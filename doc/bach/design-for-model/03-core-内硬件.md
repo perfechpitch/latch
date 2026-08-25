@@ -274,7 +274,7 @@ Bach core 对外有三个方向的数据通道：左右两边可以是 chip 间 
 | MU DSA ← Matrix Mem | 8 KB/T |
 | MU DSA ↔ Core Mem | 512 B/T 或 1 KB/T |
 | VU DSA ↔ Core Mem | 512 B/T 或 1 KB/T |
-| router ↔ DTE DSA、DTE Xbar ↔ Core/Matrix Mem | 原文空缺，按 DTE 文档为 256B+8B ×2（Cmem）、256B ×2（router） |
+| router ↔ DTE DSA、DTE Xbar ↔ Core/Matrix Mem | 原文空缺，按 Cmem MAS 与 DTE 文档为 256B ×2（Cmem）、256B ×2（router） |
 
 > **VU 不能直接读 Matrix Mem**；需要支持 Matrix Mem → Core Mem 的搬移。
 
@@ -371,7 +371,7 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**基
 | 31:0 | `TASK_PC` | 任务执行的起始 PC |
 | 33:32 | `TASK_SEND_UNIT` | 执行单元：00=DTE，01=MU，10=VU |
 | 35:34 | `TASK_RECV_UNIT` | 完成类型：00=只调 RV core 不调 DSA；01=调 DSA；10=调 DTE DSA + Router 上的 Rmem 模块 |
-| 36 | `SELF_START` | 自启动（仅 B core 才会有） |
+| 36 | `SELF_START` | 自启动（B core、R core 的链首 task） |
 | 39 | `WAIT_WAKE` | 需要外部数据唤醒 |
 | 40 | `TASK_Broadcast_REISSUE` | 标识该 task 是 Broadcast Reissue 任务 |
 | 41 | `TASK_P2P_REISSUE` | 标识该 task 是 P2P Reissue 任务 |
@@ -380,10 +380,33 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**基
 | 44 | `TASK_EXE_MASK` | 按 user 区分执行 / 不区分 |
 | 50:45 | `TASK_PATH_ID` | 任务匹配的 path_id，用于 TS 判断该任务的 credit 条件 |
 | 51 | `TASK_END` | 任务结束标识 |
-| 63 | `TASK_VALID` | 软件配置后有效 |
+| 63 | `TASK_VALID` | 软件写该寄存器后硬件自动置有效 |
 
 另有一个独立的 `DATAIN_TASK` 寄存器，只有 1 项且只能绑定 DTE，四个字段：`TASK_PC`、
 `TASK_UNIT`（固定 DTE）、`WEIGHTS_MODE`（是否处于 weights 加载阶段，此时不启动 task_chain）、`TASK_VALID`。
+
+##### 软件文档里的列名对照
+
+《软件计算流程详细评估》的任务链配置示例表用软件侧列名，与硬件位域名一一对应：
+
+| 硬件位域 | 软件示例表列名 |
+| - | - |
+| `TASK_VALID` | `task valid` |
+| `TASK_SEND_UNIT` | `task_unit` |
+| `SELF_START` | `self_start` |
+| `TASK_RECV_UNIT` | `task_recv_unit` |
+| `WAIT_WAKE` | `wait_wake` |
+| `TASK_Broadcast_REISSUE` | `B_reissue` |
+| `TASK_P2P_REISSUE` | `P2P_reissue` |
+| `TASK_REDUCE` | `task_reduce_iss` |
+| `TASK_CREDIT_EN` | `credit_en` |
+| `TASK_EXE_MASK` | `exe_mask` |
+| `TASK_PATH_ID` | `path_id` |
+| `TASK_END` | `task_end` |
+| `TASK_PC` | `task_pc` |
+| `DATAIN_TASK.WEIGHTS_MODE` | `weights_launch` |
+
+软件示例表里的 `dsa_en`（B core、R core 示例）、`exe_dest`、`task_group_id`（DP+P2P 示例）在硬件位域表中没有对应位域。
 
 其余配置寄存器：`STREAM_NUM`（1～16）、`TS_INIT_FINISH`、`TS_STATE`、`CORE_TYPE`（B core / R core / 普通 core）。
 
@@ -401,6 +424,8 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**基
 | `done_bitmap`（64 bit） | 记录该用户所有 task 的完成标识，**异步 datain 提前完成就体现在这里** |
 | `reissue` | 该用户某个任务需监测下游 credit 满足后再搬移到 router |
 | `end` | 当前 task 是否为链尾 |
+
+**建表**：`User_Match` 判断 router 请求是新用户还是已有用户，为新用户发起建表请求；Stream Map 在 `tail_ptr` 指向的空槽一次性写入用户信息、Task 0 状态及其任务属性，随后推进 `tail_ptr`。
 
 **指针维护**：注册用 `tail_ptr`，释放用 `head_ptr`，每次粒度为 1，上限受 `stream_num` 限制。**年龄优先**的仲裁都是从 `head_ptr` 开始环形扫描，不按 stream_id 数值排序。
 
@@ -423,7 +448,7 @@ TASK_FINISH──是最后一笔────────────→ TASK_IDL
 
 ### 任务生成与跳过
 
-Task Generator 里 **每个 Stream 独立推进，不需要全局 Task Pointer**。
+`Task_ctrl` 接收 DSA 返回的当前 task 完成，维护 16 个用户的 `next_task_id` 与 `next_task_fsm`。**每个 Stream 独立推进，不需要全局 Task Pointer**。
 只有当前任务进入 `TASK_FINISH` 后才生成后继任务，用一次 64-bit 优先编码**一拍**跳过所有可跳过的 task：
 
 ```
@@ -450,13 +475,8 @@ SKIP_MASK = ~END_MASK
 | `DTE_Arb` | DataIn 任务 vs 普通 Generated 任务 | 没有 Reissue 时，两者按相对 head_ptr 的 Stream 年龄比较，较老者优先；**同一 Stream 时优先选 Generated** |
 
 性能特性：**并行支持 3 个 task 的下发**（DTE / MU / VU 各一），task 唤醒延迟在时序满足前提下最短 2～3 cycle。
-为保证单用户 TPOT、防止其他用户争抢某个 DSA，支持**对单个 DSA 的 lock**。
 
-两类任务收到 ACCEPT 后改的状态不同，这条边界要划清：
-
-* **Generated 任务**：收到 raw ACCEPT 后向 Stream Map 提交 `TASK_READY → TASK_INFLY`。
-* **DataIn 任务**：收到 ACCEPT 后**只通知 User DataIn State 释放 Depth-1 Hold，不改 Stream Map
-  里的当前任务状态**。
+Generated 任务收到 raw ACCEPT 后向 Stream Map 提交 `TASK_READY → TASK_INFLY`。
 
 ### 异步 DataIn 机制
 
@@ -493,7 +513,7 @@ SKIP_MASK = ~END_MASK
    * 前一个 stream check 通过后需清除 ready 用户的 flag，下一个 stream 才能继续 check
    * 一个 stream 的任务链完成后，会在对应 stream 项**自发创建新的任务链**
 
-B core 复位后可直接自启动 16 个 stream_table 表项，此时没有用户信息，等 task 的 RV core 返回 user_id 再更新 stream_table。B core 的搬出 task 还需 check 下游 core 的 TS credit。
+软件配置 task_chain，且 task0 为自启动任务。TS 复位后直接自启动 16 个 stream_table 表项，同时激活 16 个用户的自启动任务参与仲裁发射，执行过程同普通计算 core。启动时没有用户信息，等自启动任务（RV core）返回 user_id 后更新 stream_table，再调度后续任务。表项从队头 retire 后再激活一个新表项，继续等待自启动任务。datain 任务不负责创建 stream_table。B core 的搬出 task 还需 check 下游 core 的 TS credit。
 
 ### Credit 与重发
 
@@ -516,15 +536,15 @@ B core 复位后可直接自启动 16 个 stream_table 表项，此时没有用�
 TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User id | Down direction | Data addr`），
 以及对应下游 core 的 credit 计数器。
 
-### 完成事件的合流（Completion Decoder）
+### 完成事件的合流（Task_done）
 
 七路独立的完成事件通道：
 
 * **七路独立处理**：DTE、MU、VU 各有独立 Completion Lane（RV core ACK + DSA ACK 共 6 路），DTE Lane 额外接收 Router Reduce Done
-* **完成来源判定**：用 `task_completion_src` 区分 RV / DSA / Router 三种来源，避免错误 ACK 提前结束任务
+* **完成来源判定**：用 `task_recv_type` 区分 RV / DSA / Router 三种来源，避免错误 ACK 提前结束任务
 * **Reduce 完成分离**：DTE ACK **只代表搬运完成**，执行 `consume_only` 不修改 Stream 状态；**只有 Router Reduce Done 才有权把 Reduce 任务置为 TASK_FINISH**
 * **无序汇合**：DTE ACK 与 Router Done 可任意顺序到达，Router Done 可被 Hold，但必须等匹配的 DTE ACK 被消费后才提交任务完成
-* **Router UID 匹配**：Router 不携带 SID，Completion Decoder 内部按 `user_id` 找对应 Stream
+* **Router UID 匹配**：Router 不携带 SID，`Task_done` 内部按 `user_id` 找对应 Stream
 * **Future DataIn**：固定接受 DSA ACK，只更新对应 `done_bitmap`，不使用当前任务的完成来源属性
 
 #### task 完成的三种场景
@@ -541,11 +561,11 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 * RV core、DSA 返回非法 `task_id` / `stream_id`
 * 超时检测：异步任务长时间（软件配置，如 1 μs）没收到外部 trigger；用户长时间未 retire；router 请求携带的 `path_id` 在 task_chain 无法匹配
 * 配置合规检查：软件配完 `ts_init_finish` 后，硬件检查 task_chain 与 datain_task 的合法性，
-  查五项：是否配置、多笔 end 标识、任务不连续设置 valid、多笔 task self_start、非 B core 出现 self_start
+  查五项：是否配置、多笔 end 标识、任务不连续设置 valid、多笔 task self_start、普通计算 core 出现 self_start
 
-配图：[Task Scheduler 19 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/06_Task Scheduler（编写ing）>)：stream_id_map 结构与时序、Task Generator 流程与 SKIP_MASK、DTE/MU/VU Arbiter、Credit Monitor、Completion Decoder、User DataIn State 的模块图与 LLD 时序图
+配图：[Task Scheduler 19 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/06_Task Scheduler（编写ing）>)：stream_id_map 结构与时序、Task_ctrl 流程与 SKIP_MASK、DTE/MU/VU Arbiter、Credit Monitor、Task_done 的模块图与 LLD 时序图
 
-来源：`04_四、MAS/06_Task Scheduler（编写ing）.md`（前 1200 行有效，Programming Model 后半及 Performance/Power/Area 为 eFUSE 模板残留）、`06_第四阶段/04_core内调度机制.md`
+来源：`04_四、MAS/06_Task Scheduler（编写ing）.md`（Features 的 MISC/Application scenarios、IO_REG 的图示说明、Programming Model 的 Interrupt Handling Sequence 与 Programming Sequence 步骤、Performance/Power/Area 为 eFUSE 模板残留）、`06_第四阶段/04_core内调度机制.md`
 
 ***
 
@@ -559,10 +579,10 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 | - | - | - |
 | I | 是 | 基本指令集 |
 | M | 是 | 整型乘除法 |
-| A | 否 | 原子指令，暂不支持 |
-| F | 待定 | 单精度浮点 |
+| A | 考虑支持 | 原子指令 |
+| F | 否 | 单精度浮点 |
 | D | 否 | 双精度浮点 |
-| C | 考虑支持 | 压缩指令集 |
+| C | 是 | 压缩指令集 |
 
 位宽：**RV32 就足够**（文档结论）。特权：**只支持 M 态**，实现 M 态 CSR，不支持 S/U/H。`fence` 指令实现为 nop。
 
@@ -577,15 +597,16 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 | `dsaw.s` | 001 | custom-0 | 写 1 个 DSA 寄存器 |
 | `dsaw.d` | 001 | custom-0 | 写 2 个 DSA 寄存器（rd2/rs2 + rd1/rs1） |
 | `dsawi.s` / `dsawi.d` | 001 | custom-0 | 同上，寄存器地址用立即数编码 |
-| `task_done` | 010 | custom-0 | 带 `TS` 和 `FC` 两个标志位 |
+| `task_done` | 010 | custom-0 | 带 `TS` 标志位 |
 | `flag_check` | 010 | custom-0 | 映射表快速查找，rs1/rs2 给起止地址，rd1 返回偏移 |
-| `loop` | 110 | custom-0 | 自定义循环分支，rs1=当前次数，rs2=最大次数，imm 为分支偏移 |
+| `loop` | 110 | custom-0 | 自定义循环分支，rs1=最大循环次数，rs2=当前循环次数，rs2 ≥ rs1 时退出循环，imm 为分支偏移 |
+
+`dsaw.d` / `dsawi.d` 一次写 2 个 DSA 寄存器，与 RV Core MAS 规定的每条指令最多配置 1 个 DSA 寄存器不一致，ISA 描述表尚未同步。
 
 #### DSA 任务配置指令的语义
 
-* 每条最多配置 2 个 DSA 寄存器
-* 可带 **trigger 标志**：标识任务包配置完成可以启动
-* 可带 **last 标志**：标识该任务包为 task 的最后一个，DSA 执行完后通知 TS task 完成
+* 每条最多配置 1 个 DSA 寄存器
+* 任务的启动靠写 DSA 的 **trigger 寄存器**；**last 标志**（该任务包为 task 的最后一个，DSA 执行完后通知 TS task 完成）包含在 trigger 寄存器里
 * 寄存器分**静态配置**（基本不随用户变化，初始化阶段配好，业务流阶段快速调用）与**动态配置**（随用户变化，跟随任务下发，含静态配置选择）
 * DSA 寄存器读指令**不支持同步读返回**，软件要查询状态需轮询
 
@@ -593,12 +614,11 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 
 * 通知 `pc_gen`：当前 task 完成，若 task_queue 有待执行 task 则跳转到队头 task 起始 PC，否则阻塞取指等待
 * `TS` 标志有效 → 通知 TS 当前 task 完成
-* `FC` 标志有效 → 附带 fence 功能，等前序所有访存指令完成才通知 TS；否则执行到 decode 阶段即可通知
 * firmware 程序结束时需执行一条**不通知 TS** 的 task_done，等待业务流 task
 
 #### flag_check（映射表快速查找）
 
-给起始地址与结束地址，share mem 从起始地址开始查找第一个 1，把位置偏移量写回 rd；
+该指令只见于 ISA 描述表，RV Core MAS 不再列出。给起始地址与结束地址，share mem 从起始地址开始查找第一个 1，把位置偏移量写回 rd；
 查到结束地址仍没找到则返回全 1。“自发创建任务链”一节里 R core / B core 轮询软件映射表，靠的就是这条指令。
 
 ### 流水线微架构
@@ -609,9 +629,9 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 | - | - |
 | `pc_gen` | 复位后按 io_reg 的 `boot_pc` 启动；接收 TS 下发的 task 按起始 PC 执行；每拍按分支预测 / 异常 / 顺序自增产生取指 PC。优先级：异常入口 > 分支预测错误纠正 > 分支预测跳转 > PC+8B |
 | `loop_bp` | 循环分支预测器，与自定义 loop 指令配合实现**循环退出 100% 正确预测** |
-| `ITCM` | 取指 PC 访问 SRAM 读 8B 指令，ECC 校验（1bit 纠正，2bit 报异常），判断越界与不对齐 |
-| `decode` | 解码 2 条指令，判断保留指令，汇总后段流水异常并产生清空与异常跳转 |
-| `dispatch` | 8 项指令队列（2 或 4 进 2 出），维护通用寄存器状态表，按序派遣到执行单元 |
+| `ITCM` | 取指 PC 访问 SRAM 读 8B 指令，ECC 校验（1bit 纠正，2bit 报异常） |
+| `decode` | 解码 ITCM 读出的指令，判断保留指令，汇总后段流水异常并产生清空与异常跳转。解析压缩指令：8B 取指数据最多译出 4 条压缩指令、最少 2 条非压缩指令；压缩与非压缩混合时可能剩半条非压缩指令，暂存后与下一拍取到的指令拼接译码 |
+| `dispatch` | 8 项指令队列：每拍最多接收 decode 的 4 条指令，队列剩余 ≥4 项才接收，否则阻塞前端；每拍按序读队头 2 条派遣到执行单元。维护通用寄存器状态表 |
 | `gpr` | 32×32bit，**4 读端口**（双发射每条最多 2 源）、**5 写端口**（ALU×2、MAC/DIV/DSA 共用、LSU×2） |
 | `SEU` | 标量执行：ALU0（算逻+分支）、ALU1（算逻+CSR）各 1 拍；MDU 乘法 3 拍流水、除法多周期阻塞 |
 | `LSU` | 双通道 3 级流水，都能执行 load/store，按地址范围分配访问通道 |
@@ -671,25 +691,30 @@ TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 T
 | `local_user_id` | 有 | 有 | 12 bit，HBU 流控范围内的编号，用于 R-core 用户映射表和 Matrix Mem 地址计算；**可读写**，R-core 执行 flag_check 后由软件写入 |
 | `task_id` | — | 有 | 6 bit，只读；**异步 datain 任务由软件识别包头后写入**，用于告诉 TS 是任务链中哪一步完成 |
 
-### dsa_iss 的 credit 机制
+### dsa_iss 的下发规则
 
-* DSA 任务配置指令下发前检测 DSA 是否可接收新任务，**通过 credit 机制确保配置指令必定可被 DSA 接收并写入**，保证下发通路不被阻塞（否则中断、debug 无法正常工作和记录信息）
-* credit 记录 DSA 任务队列项数，容量暂定 16；每下发一条带 trigger 的指令 credit +1，<mde-comment id="uk6dnm">credit 为 0 时阻塞 dispatch 的 DSA 配置指令发射</mde-comment>
-* DSA 任务队列释放一项时通知 RV Core 释放 credit
-* DSA 读寄存器指令**不受 credit 影响**；`dsa_rq`（8 项）按顺序记录已下发的读指令信息，返回数据后按记录的目的寄存器编号写回 gpr
+* DSA 任务配置下发指令<mde-comment id="uk6dnm">根据下发通道是否反压阻塞判断是否下发成功</mde-comment>
+* DSA 读寄存器指令**不会被阻塞**；`dsa_rq`（8 项）按顺序记录已下发的读指令信息，返回数据后按记录的目的寄存器编号写回 gpr
 
 ### 异常
 
 | 异常 | 优先级 | 触发点 | 清空范围 |
 | - | - | - | - |
-| DTCM Ecc Error | 1（最高） | 访问 DTCM 读出后，**异步非精确** | 只清空 decode 及其前序流水 |
-| Load / Store Access Fault | 2 | LSU 第一级流水 | 清空 dispatch 及之前所有流水，若同拍两条指令的第一条则还要清后一条 |
-| Illegal Instruction | 3 | 流水到 decode 阶段触发 | 清空 decode 前序取指流水，decode 后续流水不受影响 |
-| ITCM Ecc Error | 4 | 同上 | 同上 |
+| Load / Store ECC Error（DTCM） | 1（最高） | 访问 DTCM 读出后，**异步非精确** | 只清空 decode 及其前序流水 |
+| Load / Store Address Misaligned | 2 | LSU 第一级流水 | 清空 dispatch 及之前所有流水，若同拍两条指令的第一条则还要清后一条 |
+| Load / Store Access Fault | 3 | 同上 | 同上 |
+| Fetch Address Misaligned | 4 | 流水到 decode 阶段触发 | 清空 decode 前序取指流水，decode 后续流水不受影响 |
 | Fetch Access Fault | 5 | 同上 | 同上 |
-| Breakpoint | — | ebreak 指令 / 指令断点 / 访存断点 | 按断点类型对应上面三类 |
+| Fetch ECC Error（ITCM） | 6 | 同上，可**异步非精确** | 同上 |
+| Illegal Instruction | 7 | 同上 | 同上 |
+| Environment Call（ecall） | 8 | — | — |
+| Breakpoint | 9 | ebreak 指令 / 指令断点 / 访存断点 | 按断点类型对应上面几类 |
 
-Fetch Access Fault 的判定：取指地址超出 ITCM 区间范围，或取指地址低 2 bit 不为全 0（支持 C 扩展时为最低 bit 不为 0）。
+LSU 的两条指令同拍都检测出异常时，只把前序那条的异常上报 decode。
+
+Fetch Access Fault 的判定：取指地址超出 ITCM 区间，或取指地址最低 1 bit 不为 0。
+
+异常编码（`mcause`）：标准异常沿用 RISC-V 的 0～15；自定义区 24 = Fetch ECC Error、25 = Load ECC Error、26 = Store/AMO ECC Error，`mtval` 记录出错地址。
 
 ### 性能要求
 
@@ -698,7 +723,7 @@ Fetch Access Fault 的判定：取指地址超出 ITCM 区间范围，或取指�
 
 配图：[RV Core 15 张内嵌绘图](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/07_RV Core>)：`d01` core 内整体框图、`d02` 外部连接、`d03` **内部流水图**、`d04~d08` pc_gen / ITCM / loop_bp / decode / dispatch 各级、`d09~d11` SEU / LSU / dsa_iss、`d12~d15` 四类异常的流水清空范围
 
-来源：`04_四、MAS/07_RV Core.md`、`01_ISA描述.xlsx`（RV Core sheet）
+来源：`04_四、MAS/07_RV Core.md`、`_sheets/_XT24ss/1qdnTs.csv`（异常类型表）、`01_ISA描述.xlsx`（RV Core sheet）
 
 ***
 
