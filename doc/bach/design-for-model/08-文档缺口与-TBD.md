@@ -2,7 +2,13 @@
 
 **模式**：design（陈述当前设计，动机与取舍收在各节的“取舍”段落里）
 
-登记原始设计文档之间的口径冲突、标注为空缺的内容、引用了但本地没有的文档，以及设计上仍未确定的问题。
+登记四类内容：
+
+* 原始设计文档之间的口径冲突
+* 原文档标注为空缺的内容
+* 引用了但本地没有的文档
+* 设计上仍未确定的问题
+
 动手建模前先扫一遍，凡是本章列出的取值都不要当作已定。
 
 《Bach 硬件设计建模参考》第 8 章，全套目录见 [README](README.md)。
@@ -28,10 +34,19 @@
 | 取指 / 访存不对齐异常的归属 | RV Core MAS decode 优先级表：addr misalign 单列一类 | 同文档 ITCM 与 Exception 两节：不对齐归入 access fault | 按 decode 优先级表 |
 | RV core 的 C / A / F / D 扩展 | RV Core MAS Features：C 支持、A 考虑支持、F 与 D 不支持；MAS_TOP：RV32IMC | 同文档“标准指令集”小节仍以“是否支持 C？是否支持 AFD？”的问句形式 | 按 Features |
 | DTE 的软件接口 | DTE MAS：Task Descriptor（`TASK_CFG_ADDR` / `TD` / `PACK` / `TRG`）+ Doorbell 序列 | 软件计算流程详细评估：`transfer_mode` / 基地址与 `stream_stride` / `data_len` / 包头与 scale 地址 / `sharemem_*` 一套按字段命名的寄存器，与 Task Descriptor 字段无对应关系 | 软件接口按软件计算流程详细评估建，Lane 与完成机制按 DTE MAS |
+| 入站包头的字段清单 | DTE MAS Header Logical Fields：`version` / `header_len`、`packet_type` / `route`、`dst_addr`、`byte_count`、`task_id` / `stream_id`、`attributes` / `reserved` | 软件计算流程详细评估的 MSG 包结构：包头标记 2 B、Router 信息 4 B（`path_id` + `path_core_mask` + rsv）、包长度 2 B | 两份给的是同一个 Header 的两种写法，字段对不上。DTE MAS 自己声明“具体 Header 位域仍以 Router 接口规范为准”，等那一份 |
 | DTE 的启动方式 | DTE MAS：有“TS 快速启动流程”（TS 绕过 RV core 直接启动 DTE） | 软件计算流程详细评估：只保留 DTE core 配置任务给 DSA 这一种，TS 直接启动的方案待定 | 按软件计算流程详细评估 |
 | 包头与 topK 的存放位置 | DTE MAS：包头可写 DTE 内 Header mem 或 Cmem 独立空间；topK 可写 MU 的 `topK_ep_table` 或 Cmem 独立空间 | 软件计算流程详细评估：计算 core 的包头存 DTE 内独立 mem，B core / R core 存 Core Mem；topK 由 DTE 复制到单独的 mem 供 MU 读 | 按软件计算流程详细评估 |
 | B core 查询 ready 的 task 由谁执行 | 软件计算流程详细评估 GLM5 章：VU 做 check flag | 同文档 TS 章的 B core 示例：task0 为 MU | 按 GLM5 章（VU），待确认 |
 | `SELF_START` 的适用范围 | TS MAS：仅 B core 才会有 | 软件计算流程详细评估 R core 示例：task0 `self_start=1` | 按软件计算流程详细评估，B core 与 R core 都有 |
+| Router 的 R2R 方向端口 | Router MAS：五方向互连，上、下、左、右及 Core | DATA_NOC HAS：left / right / mid 三个方向端口，加 local 与 reduce_0/1/2，5 入 7 出 Crossbar | 按 HAS 的三方向。2×5 拓扑里邻居就是同行左右加另一行对称位，且与第 3 章顶层节的 data_L / data_UD / data_R 三通道一致 |
+| Reduce 的累加做在哪 | Router MAS：ReduceModule 在 Router 内，16 用户 × 16 KiB 上下文，RMW 原位累加，自己维护下游 Reduce Credit | DATA_NOC HAS：Router 内不设 Reduce Buffer，累加由独立的 Rmem 子系统完成，reduce credit 是单独的流控网络 | 按 MAS：ReduceModule 在 Router 内 |
+| Stream 资源表谁是唯一有效状态 | Router MAS：Router 维护的 User Resource Allocation Table 是唯一有效状态，DTE 持 cache | DATA_NOC HAS：Router 输出单元与 core 内各持一份 credit table，靠 credit release 接口同步 | 按 MAS：Router 唯一有效 |
+| 出核前查资源的监听队列在谁那里 | Router MAS 一处：功能已转移到 DTE 中 | 同一份 MAS 另一处：详写 Router 上 16 项全相连监听事件队列与完整申请流程 | 按后者：在 Router |
+| Router 的仲裁粒度 | Router MAS 有一节“Interleave 和整包的对比”，只列两案优劣、未给结论 | MAS 正文与 DATA_NOC HAS 都是 flit 级（“Packet 在 VC 间按照 Flit 的粒度传输”“矩阵仲裁以 flit 为基本节拍”） | flit 级，整包只作为贪婪仲裁的优先级偏好。原第 3 章写成“整包粒度（选定）”是误读，已更正 |
+| R2R 带宽 | Router MAS：相邻 Router 双向各 256 GB/s @1GHz | DATA_NOC HAS：R2R 210 GB/s、C2C 90 GB/s | 两个都记：256 GB/s 是 256 B/T @1GHz 的接口理论值，210 GB/s 是 HAS 记的有效带宽。是否同一口径待确认 |
+| 重发（reissue）任务在不在主任务链上 | TS MAS 与 core 内调度机制：重发 task 不在主线任务链上，可并行执行、优先级最高（TS MAS 里“重发的 task 任务优先级最高”这句自己划了删除线） | Top 模拟器详设的三条【讨论结果】：插在任务链中实现，同一 stream 下即使无依赖也按任务顺序执行，需等它完成才能执行后面的任务；软件计算流程详细评估的 normal core 示例把 broadcast reissue 排成 task 1' | 按 TS MAS 与 core 内调度机制：不在链上、并行、优先级最高 |
+| TS 的时延数字 | TS MAS：task 唤醒延迟 2～3 cycle | Top 模拟器详设：调度间隔 16 T、需与 Router 通信 21 T、retire 5 T；TS LLD 时序图：CREATE 3 / WAKE 2 / DONE 3 / INSTALL 4 / RETIRE 6 | 三者口径不同不是矛盾：MAS 是硬件目标，模拟器是含 RV core 往返的端到端值，LLD 是逐级拍数。《TS 任务调度器》按这三层分别记 |
 | Router 的 Credit Bypass Route | Router MAS：软件通过 CSR 为每个业务 Credit 输入端口配置静态输出方向 Mask | 软件计算流程详细评估 Router 章：删除了该配置小节，软件只配 RouterTable；但同章检查清单与释放表仍引用 Credit Bypass Route | 按 Router MAS |
 | Matrix Mem bank 数 | MU MAS：32 个 Mmem Bank 与 32 个物理 Lane 一对一 | Mmem MAS：按 64 个 lane 分成 64 bank | **未解**，直接影响 8KB/T 的组织方式 |
 | MU 计算流水深度 | 参数表：执行拍数 / 流水延时 9T | Matrix exe 章节：单 Lane 内深度 10 级 | 差 1 拍，可能是含 / 不含某一级 |
@@ -62,6 +77,7 @@
 
 * 《Harvest 下业务级 Credit 的路由机制》（Router“业务 Credit 的路由”一节的全部内容）
 * 《TS_通信机制》（TS 的 Programming Sequence 指向它的 5.3 节场景映射）
+* 《Rmem HAS 及 core 通信机制》（DATA_NOC HAS 指向它说明 Rmem 的内部架构：容量、算力、操作类型）
 * 《MU/DTE 寄存器配置参数》（DTE Programming Model、软件计算流程详细评估 Matrix 章）
 * 《MU/DTE 需求整理和遗留问题分析》（软件计算流程详细评估 DTE 章与 Matrix 章）
 * 《DTE DSA 副本》《DTE DSA》（3 Lane 评估的对比材料）
@@ -79,12 +95,12 @@
 
 * concat 的 task 软件配 1 个还是多个（若配 1 个，需在任务链中指明 `exe_num`）
 * DTE task 的三种优先级用固定优先级，还是“reissue 最高 + 其余按最老用户”
-* 哪些 task 该硬化进 TS。原文的设想是“所有与用户和 core mem 分配无关的 task，都可以采用硬化 task
-  在 TS 的方式（包括 broadcast 重发），只有与用户强相关的任务链才会在 stream 表里创建和工作”，
-  尚未定下界线
+* 哪些 task 该硬化进 TS，界线尚未定下
+  * 原文的设想：“所有与用户和 core mem 分配无关的 task，都可以采用硬化 task 在 TS 的方式（包括 broadcast 重发），只有与用户强相关的任务链才会在 stream 表里创建和工作”
 * reduce 任务（32 KB）拆成多笔 8 KB 由 TS 并行发射，方案可能改到 DTE 内做多笔，届时 TS 不再需要 `TASK_REDUCE_ISS`
 * dataout 任务后续可能由 DTE 直接与 Router 交互检查 credit，不经 TS
 * TS 直接配置启动 DTE DSA 的方案待定
+* Core Mem 里给 P2P 阻塞缓冲留多大、开哪几个方向（最多 3 个），与给 broadcast 留的空间怎么分
 
 **RV Core**
 
@@ -113,6 +129,10 @@
 * reissue 任务目前硬件只按 `path_id` 判断，是否合适
 * scale 与 data 在 Core Mem 里的存储形式
 * Matrix Mem → Core Mem 搬运的源与目的是否用同一个 `stream_id`
+* 软件包头在 Hmem 里的 task 级偏移
+  * 寄存器序列只给到 `header_base_addr + stream_id × 包头长度` 这一级
+  * `+ task_id × 16 B` 这一层是按 Hmem 的 16 KB 容量与包头存储图（16 stream × 64 task × 16 B）推出来的
+* R core 的 shareMem 怎么索引，原文留了问句未答
 
 **Core Mem**
 
@@ -130,13 +150,26 @@
 
 **建模所需而设计未给值的参数**
 
-* Router VC Buffer 深度、Stream Resource Table 项数、VC credit 初值、RouterTable 表项数与副本数、Xbar 与 ReduceModule 的仲裁算法、ReduceModule 的 Entry credit 与 bank 数、CoreStation 的 HeaderFIFO 与 OutputBuffer 深度、DTE 的 TaskQueue / Buffer / Completion RS / Done Pending 深度、VU 的 ISQ 深度、RV core 的 task_queue 深度、MU 与 DTE 的寄存器地址映射、`operation` 的 Reduce0 / Reduce1 / Reduce2 含义。第 7 章“边界与风险”给了默认值。
+下面这些设计文档没给值，《latch 建模计划》的“边界与风险”一节给了默认值：
+
+* **Router**
+  * VC Buffer 深度、VC credit 初值
+  * Stream Resource Table 项数
+  * RouterTable 表项数与副本数
+  * Xbar 与 ReduceModule 的仲裁算法
+  * ReduceModule 的 Entry credit 与 bank 数
+  * CoreStation 的 HeaderFIFO 与 OutputBuffer 深度
+  * `operation` 的 Reduce0 / Reduce1 / Reduce2 含义
+* **DTE**：TaskQueue、Buffer、Completion RS、Done Pending 四处深度
+* **VU**：ISQ 深度
+* **RV core**：task_queue 深度
+* **寄存器地址映射**：MU 与 DTE 两处
 
 **专用 core（B core / R core）**
 
-* R core 的 Matrix Mem 要不要额外的 credit 机制。原文的疑问是“Reduction Core 的 Matrix Mem
-  与 Broadcast Core 的 Matrix Mem 对应的话，不需要额外 Credit 机制保证？”，并附了一条追问：
-  总槽位数是否要按输入 / 输出能支持的**较小**那个来算，否则进得多、出得少仍会缺 credit
+* R core 的 Matrix Mem 要不要额外的 credit 机制
+  * 原文的疑问：“Reduction Core 的 Matrix Mem 与 Broadcast Core 的 Matrix Mem 对应的话，不需要额外 Credit 机制保证？”
+  * 附带的追问：总槽位数是否要按输入 / 输出能支持的**较小**那个来算，否则进得多、出得少仍会缺 credit
 
 ***
 

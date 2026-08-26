@@ -3,7 +3,9 @@
 **模式**：design（陈述当前设计，动机与取舍收在各节的“取舍”段落里）
 
 定义 Router、Bach Core 顶层、TS 任务调度器、RV Core 四个模块的结构与行为。
-这四者构成 core 内的控制通路，决定多用户如何在三条执行链上流水，是性能建模要精确复现的部分。
+
+* 这四者构成 core 内的控制通路，决定多用户如何在三条执行链上流水
+* 性能建模要精确复现的就是这一部分
 
 《Bach 硬件设计建模参考》第 3 章，全套目录见 [README](README.md)。
 
@@ -11,196 +13,18 @@
 
 ## Router：片上交换与归约中心
 
-Router 是 chip 内 2×4 core 阵列的数据交换与**片上归约**中心，物理上位于 chip 中部，同时承担三件事：
+Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，物理上位于 chip 中部，每个 core 一个。
 
-* 包的路由转发
-* Stream 与 VC 两级流控
-* Reduce 计算
+* Crossbar 五路输入：三个 R2R 方向端口 `left` / `right` / `mid`，接本 core 的 `local` 端口，ReduceModule
+* 同时承担三件事：包的路由转发、Stream 与 VC 两级流控、Reduce 计算
 
-### 内部组成
+下游收不下有三种不同的原因，Router 用三层互不复用的 credit 分别管：
 
-| 模块 | 职责 |
-| - | - |
-| **RouterStation**（×4，对应上下左右） | 收发与相邻 Router 通信的 Packet，按包头查本级路由信息参与仲裁；持有多个 VC 缓存；输出通路可把多个 Packet 按总线宽度移位拼接 |
-| **CoreStation**（×1） | 收发与本 core 通信的 Packet，**不设 VC 缓存**；进 core 通路把拼接的 Packet 恢复，出 core 通路按包头查路由参与仲裁 |
-| **ReduceModule** | 接收 Reduce 输入、做归约计算、发送结果，也按包头查路由参与仲裁 |
-| **CoreMemCreditMonitor** | 维护各方向 CoreMemCredit，支持对 credit 需求的监听，条件满足后通知 TS；credit 信息在 Router 内广播参与仲裁 |
-| **InterconnectMatrix**（Xbar） | 五方向仲裁与转发，内部维护下游所有方向的 credit |
-| **CSR & perf & debug** | CSR 寄存器、性能数据、debug 信息的统一寄存器界面，可经 AXI 读写 |
+* **VC Credit**：下游 VC Buffer 的空槽
+* **Stream 资源**：目标 core 的 Core Mem 空间
+* **Reduce Credit**：下游 ReduceModule 的上下文
 
-### 性能与容量指标
-
-| 指标 | 值 |
-| - | - |
-| 每方向数据宽度 | 256 B |
-| 相邻 Router 双向各 | 256 GB/s @1GHz |
-| Reduce 输入 | 三路各 160 GB/s |
-| Reduce 输出 | 160 GB/s |
-| Reduce 算力 | 80 GFLOPS（FP32/BF16） |
-| ReduceModule 上下文 | 16 用户 × 16 KiB |
-| VC | 每输入方向 4 类；输出方向不设 VC Buffer |
-
-* 进 core 与出 core 数据通路**完全并行**，各支持 256 GB/s @1GHz
-* VC Buffer 深度需覆盖对应路径的往返延迟，并满足该 VC 的峰值带宽需求
-* 五个输入的目标输出方向互不冲突时，**Xbar 必须支持五路输入同周期并行传输**，不得做不必要的串行化
-
-### RouterTable
-
-Packet 的路径解析与资源判定全靠这张表。Router Station 以 Header 中的 `PathID` 为索引查本地副本。**RouterTable 只描述静态路由与资源需求，不保存 Packet 的动态执行状态。**
-
-| 字段 | 含义 | 使用位置 |
-| - | - | - |
-| `PathID` | 表项索引，标识一条软件预先规划的业务路径 | Header Parser、重发查询 |
-| `curVC` | Packet 进入当前 Router 时使用的 VC 类型 | 输入 VC 分配 |
-| `directionMask` | 上下左右 + Core 五个目标方向的有效位；单位有效=单播，多位有效=多播 | 输出仲裁、Xbar |
-| `nxtVC` | 各目标方向下一跳使用的 VC 类型 | 输出 Header、下游 VC credit 查询 |
-| `streamNeedMask` | 各目标方向是否需要 Stream 授权；**Core 方向的需求必须在本级检查** | Stream Resource Table |
-| `operation` | 普通转发 or Reduce 操作类型，选择 Bypass / Core / ReduceModule 路径 | 路径选择、ReduceModule |
-| `stallWay` | 资源不足时：留在当前 VC 等待，还是转入 CoreMem 暂存由 DTE 重发 | 阻塞处理 |
-| `reducePrecision` | Reduce 输入 / 输出精度配置；**中间累加精度固定 FP32** | ReduceModule |
-
-> **三份副本的一致性是建模必须体现的约束**
->
-> * Router 内部：所有需要并行查询的位置各持一份副本，由 Router 的配置入口统一接收写事务。更新状态机把同一笔写依次写入全部副本并记录完成状态，**全部副本写完才向软件返回完成**（原子提交，禁止暴露部分新部分旧的状态）。
-> * DTE 与 ReduceModule 各自维护自己的 RouterTable，**由软件负责写入相同配置并保证三方一致，Router 硬件不同步外部副本**。软件只能在 Router 提交完成后再写 DTE 和 ReduceModule。
-
-### 两级流控：Stream 与 VC Credit
-
-这是 Router 最核心的机制，两级职责完全分开：
-
-| <br /> | Stream 资源 | VC Credit | Reduce Credit |
-| - | - | - | - |
-| 粒度 | 按 UserID + 目标方向的一个表项 | 按下游方向 + VC，flit 粒度 | flit 粒度，按 UserID |
-| 保证什么 | 目标 Core 的 CM 有空间容纳该用户的数据 | 下游 VC Buffer 有空间 | 下游 ReduceModule 上下文有空间 |
-| 谁维护 | **Router 是唯一有效状态**（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table） | 每个下游方向的每个 VC 一个独立 Credit Counter | **DTE 维护本级；ReduceModule 维护相邻下游各方向；Router 不维护** |
-| 怎么释放 | 下游或 Core 通过携带 UserID 的 release 通道通知 Router 回收表项 | flit 离开下游 VC 后经独立 release 通道返还 | 输出 flit 被下游接受后产生携带 UserID 的 release |
-
-#### Stream 授权的关键规则
-
-* 只有 **Router 负责真正申请表项**；DTE 要发数据必须先从 Router 获得指定 user 的授权，禁止超额分配或重复授权。
-* Router 的进 core 表和 TS 内部的 Stream 资源表**按完全一致的逻辑申请空项**，因此分配不会多于实际资源数量，这保证“Router 通知 TS 的 Packet 一定能被 TS 接收”。
-* DTE 内也要维护一份下游 Stream 资源表，Router 为了快速 Bypass 也维护一份下游映射表，**这两个表的行为必须保持一致**。
-
-#### 业务 Credit 的静态 Bypass
-
-Stream Credit 和 Reduce Credit 的 release 走一条特殊路径：
-
-* 软件通过 CSR 为每个业务 Credit 输入端口配置**静态输出方向 Mask**
-* 转发时**不查询 Packet RouterTable**，也不做动态路径选择
-* Mask 含多个方向时，同一笔 release 复制到所有指定方向，UserID 与 Credit 类型保持不变
-
-### Packet 传输的四条路径
-
-#### (a) Router → Router（Bypass）
-
-1. Packet 经数据总线传到下一级 Router，Router 自动检测包头，按 `PathID` 查到路由信息和资源需求
-2. 数据总线每个 flit 携带 VC 通道号，flit 到达后自动找到对应 VC 存放位置
-3. 输入方向的 RouterStation 维护所有下游方向的 Stream 资源映射表，**只有所有需求方向都满足才允许发送**
-4. VC 间用 Credit 机制，按 flit 粒度传输，申请到下游 credit 才能发 flit
-
-> **交织规则**：Router-to-Router 通路**允许在 flit 边界切换 Packet**，需保存 VC、输出方向、剩余长度和包边界上下文；但 Packet 一旦开始进入 Core 或 ReduceModule 就**锁定到尾 flit**。这条区分直接决定建模时 buffer 的组织方式。
-
-#### (b) 进 Core
-
-1. 进 Core 对 Router 而言也是一个输出方向，需维护本级 Core 的 Stream 资源
-2. 因为已通过 Stream 检查，**不再检查对 Core 的 VC credit**，一定有 CM 空间
-3. 按 PathID 查到需进 Core 后，检查本级 Stream 资源表，按三种结果分别处理：
-   * **已分配**：包头进 HeaderFIFO、数据进 OutputBuffer
-   * **未分配但有空项**：记录 UserID 占用
-   * **无空项**：该 VC 不能发数据到 Core，但 VC 有空项时仍可接收数据
-4. CoreStation 按接收包头的顺序通知 TS 调度 DTE 搬运：
-   * DTE Core 用 **AXI-Full 类接口**读包头生成 DTE 任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头
-   * CoreStation 与 DTE 之间用 **AXI-Stream-Like** 协议传数据（Header+Payload）
-   * **Core 内输入不支持多 Packet 交织**，Router 必须保证发完一个整包再发下一个
-
-#### (c) 出 Core
-
-1. 由 DataOut DTE 发起。DTE 内有（Router 一个方向的 VC 数个）Buffer，某 VC 阻塞只阻塞 DTE 中对应 Buffer，不影响其他
-2. DTE 发数据到 Router 时与 CoreStation 有 Credit 协议，保证 VC 有容量才发
-3. 若 Packet 对下游 Stream / Rmem 资源有需求，DTE 必须先申请到才能发，否则任务在 `PendingTaskQ` 等待
-4. DTE 中需有一份 RouterTable，按 PathID 查到 VC 和资源需求
-
-#### (d) Packet 重发（CoreMem 暂存）
-
-* 下游资源不满足时，Router 可把 Packet 重定向到 CoreMem 缓存，等资源就绪后重发。此时 **Router 上的 Bypass 操作被映射成“进 core + 出 core”**
-* CoreMem 中**只保存 Packet**，包头含 UserID、PathID、size；重发时用 PathID 重新查 RouterTable，不重复保存 VC 和路由信息
-* **同 VC 保序**：同一 VC 存在未完成的 CoreMem 重发 Packet 时，后续 Packet 不得越过
-* 无论直接发送还是经 CoreMem 重发，完成后都向 Core 内 TS 返回至少含 UserID + PathID 的完成信息
-
-### ReduceModule
-
-| 组件 | 职责 |
-| - | - |
-| User Context Table | 记录 UserID、当前 Packet 状态、输入完成情况、输出状态与 Retire 状态 |
-| Reduce Context SRAM | 16 用户 × 16 KiB，保存当前 Packet 的 FP32 中间累加结果 |
-| RMW Pipeline | 首份输入建立上下文，后续方向输入执行 Read-Modify-Write **原位**累加 |
-| Precision Convert | BF16 输入扩展为 FP32；输出按 RouterTable 配置转 FP32 或 BF16 |
-| Downstream Reduce Credit Map | 按 UserID + 目标方向维护相邻下游 Reduce Credit，逐 flit 扣减、按 release 恢复 |
-| Input/Output Arbiter | 仲裁最多三路输入的 SRAM / Bank / 计算资源 |
-
-关键约束：
-
-* **上下文保护**：当前 Packet 的全部输入完成并输出前，同一 User 的下一 Packet 不得覆盖该上下文
-* **必须执行 Reduce**：SRAM / Bank / 计算单元暂不可用时对输入反压，**不允许绕过 Reduce 降级为直接存储或转发**
-* 精度：输入 FP32 / BF16，BF16 转 FP32 后参与计算，中间累加统一 FP32，输出可配 FP32 或 BF16
-
-### 用户退休（Retire）
-
-资源回收的时序契约，建模时是一个明确的状态机：
-
-1. ReduceModule 完成计算并发出全部 Packet 后向 Core 返回 UserID
-2. Core 判定任务链结束后**向 Router 和 ReduceModule 广播 User Retire**
-3. **Core 的保证**：仅可在该 UserID 的全部进 core、出 core 数据搬运完成、且不会再发起新搬运后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户 Packet
-4. **Router 的动作**：收到 Retire 后停止该 UserID 的新发送，删除其全部 Stream 资源授权表项
-5. **ReduceModule 的动作**：**延迟回收**，先记录 Retire，待相邻下游各方向 Reduce Credit 全部恢复到初始值后才删除对应用户映射
-
-### 数据包监听机制
-
-Core 对外发数据要同时满足 VC 资源与 Stream 资源。监听这两项资源的职责在 **Router**，
-一次监听走三步：TS 发送注册事件 → Router 查资源 → 满足后通知 TS 调度搬运任务。该功能在 DTE 中实现。
-
-> **取舍**：若改由 TS 监听，大量通信信息要塞进 TS 任务链，计算与通信不再解耦。
-
-* 监听事件队列：**16 项全相连**，可同时监听多笔多方向的资源申请
-* 多个事件同时满足时按 StreamID 仲裁，选最老的任务通知 TS
-* 进 core 重发的任务也注册到该队列，数据进 Core、资源就绪后通知 TS 重发
-* 同一 VC 的数据包要保序，当前 VC 有未重发完的数据时后续包不能提前发送
-
-### 传输粒度
-
-Router **按 Packet 粒度仲裁，不允许 interleave**。总缓存 72KB × 3 = 216KB。
-
-> **取舍**：整包粒度的功能与时序都更简单，只需对包头仲裁，验证复杂度低；token 天然很大，8KB 能传 32 拍，不靠多流 interleave 也能把 R2R 利用率喂满。代价是长包阻塞可能引入死锁场景，须在架构层保证不出现。
-
-两个方案的对比：
-
-| <br /> | Packet Interleave | 整包粒度（选定） |
-| - | - | - |
-| 容量 | 32KB×3 + intf 16×4 = 160KB | 8+32+16+16KB = 72KB ×3 = 216KB |
-| 设计 | 更贴近标准 NoC，设计人员认为更好收敛 | 功能和时序简单，验证复杂度低，只需对包头仲裁 |
-| 适配性 | R2R 利用率不够时扩展粒度更一致 | 适合大数据流，token 天然很大，8KB 能传 32T，不需要多流拼 interleave 提升利用率 |
-| 风险 | — | **长包阻塞可能有死锁场景，需要在架构层保证不出现** |
-
-配图：[Router 12 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)
-
-| 编号 | 内容 |
-| - | - |
-| `01` | Block Diagram（5×7 CrossBar / Router Station / Interconnect Matrix / Stream Resource Map） |
-| `02` | Packet 在 Router 上传输 |
-| `03` | 进 core 机制 |
-| `04` | 出 core 机制 |
-| `05` | Core 出 Reduce |
-| `06` | ReduceModule 之间 |
-| `07~12` | RouterTable / CSR / 各 Station 与 Xbar 细节 |
-
-另有 [Router OLD 1 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/05_Router OLD>)。
-
-内嵌表格：
-
-* [通信机制 6 子表](../../../../perfechpitch/_sheets/_II1Rs6)（每个 path_id 在各 core 上的进出方向（✅ 落核 / ➡️ ⬇️ 转发）：broadcast、reduce、p2p、EP 多播各一张；`N8MvQ8` 是 path_id + path_core_mask 的编码对照）
-* [通信机制分析过程 52 子表](../../../../perfechpitch/_sheets/_BTlDsC)（36 张同构的 path_id 路径表覆盖各切分场景，另有 message 动态字段、logic op 说明、合并前后对照）
-
-来源：`04_四、MAS/04_Router.md`（前 400 行为有效内容，Programming Model 之后为 eFUSE 模板残留）
+展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、四条传输路径、ReduceModule 与用户退休、坏核与 C2C Bridge、credit release 的回程。
 
 ***
 
@@ -208,32 +32,183 @@ Router **按 Packet 粒度仲裁，不允许 interleave**。总缓存 72KB × 3 
 
 ### 组成
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Bach Core                                                           │
-│  ┌──────────┐              ┌──────────────────┐                     │
-│  │  Router  │──────────────│ TS 任务调度器    │                     │
-│  │ 256B/T×5 │              │ chain 64/stream16│                     │
-│  └────┬─────┘              └────────┬─────────┘                     │
-│       │                             │                               │
-│       │      ┌──────────┬───────────┼───────────┐    ┌────────────┐ │
-│       │      │DTE RVCore│ MU RVCore │ VU RVCore │────│ Share Mem  │ │
-│       │      │ITCM 4KB  │ ITCM 4KB  │ ITCM 4KB  │    │   32KB     │ │
-│       │      │DTCM 8KB  │ DTCM 8KB  │ DTCM 8KB  │    └────────────┘ │
-│       │      └────┬─────┴─────┬─────┴─────┬─────┘    ┌────────────┐ │
-│       │           │           │           │          │Core Monitor│ │
-│       └──────│ DTE DSA  │  MU DSA   │  VU DSA   │    │IPI/状态/clk│ │
-│              │2ch/4lane │ 8K MAC    │1024bit/T  │    └────────────┘ │
-│              └────┬─────┴────┬──────┴────┬──────┘    ┌────────────┐ │
-│                   │          │           │           │Debug Module│ │
-│              ┌────▼──────────▼───────────▼────┐      └────────────┘ │
-│              │   DTE Xbar (DMA_XBAR)          │                     │
-│              └────┬────────────────────┬──────┘                     │
-│         ┌─────────▼────────┐  ┌────────▼──────────┐                 │
-│         │ Core Mem 1MB+32KB│  │Matrix Mem 32+4MB  │                 │
-│         │(1KB+32B)/T·8bank │  │ (8+1KB)/T·64bank  │                 │
-│         └──────────────────┘  └───────────────────┘                 │
-└─────────────────────────────────────────────────────────────────────┘
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 1075" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Bach Core 顶层结构">
+<title>Bach Core 顶层</title>
+<defs>
+<marker id="ad" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
+<marker id="ads" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#2563eb"/></marker>
+<marker id="ac" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#d97706"/></marker>
+<marker id="acs" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#d97706"/></marker>
+<marker id="ag" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6b7280"/></marker>
+<marker id="ags" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#6b7280"/></marker>
+</defs>
+<rect width="1340" height="1075" fill="#ffffff"/>
+<text x="24" y="30" font-size="15" fill="#111827" font-weight="600">Bach Core 顶层</text>
+<text x="24" y="50" font-size="10.5" fill="#475569">Core Mem 容量按 Cmem MAS 记 1 MB + 32 KB</text>
+<rect x="120" y="110" width="1090" height="900" rx="8" fill="none" stroke="#374151" stroke-width="1.8"/>
+<text x="134" y="130" font-size="11" fill="#475569">Bach Core</text>
+<rect x="505" y="46" width="210" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
+<text x="610.0" y="67" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">data_UD_ch</text>
+<text x="610.0" y="83" font-size="9.5" fill="#475569" text-anchor="middle">另一行对称位（mid）· 256 B/T</text>
+<rect x="14" y="182" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
+<text x="62.0" y="203" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">data_L_ch</text>
+<text x="62.0" y="219" font-size="9.5" fill="#475569" text-anchor="middle">256 B/T</text>
+<rect x="1220" y="182" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
+<text x="1268.0" y="203" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">data_R_ch</text>
+<text x="1268.0" y="219" font-size="9.5" fill="#475569" text-anchor="middle">256 B/T</text>
+<rect x="1220" y="330" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
+<text x="1268.0" y="351" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">scp_ctrl_ch</text>
+<text x="1268.0" y="367" font-size="9.5" fill="#475569" text-anchor="middle">32 bit/T</text>
+<rect x="1220" y="640" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
+<text x="1268.0" y="661" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">async_int_ch</text>
+<text x="1268.0" y="677" font-size="9.5" fill="#475569" text-anchor="middle">→ SCP</text>
+<rect x="1220" y="782" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
+<text x="1268.0" y="803" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">dmi_ch</text>
+<text x="1268.0" y="819" font-size="9.5" fill="#475569" text-anchor="middle">32 bit/T</text>
+<rect x="180" y="150" width="970" height="120" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="192" y="172" font-size="13" fill="#111827" font-weight="600">Router　片上交换与归约中心</text>
+<text x="192" y="192" font-size="10" fill="#475569">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 × 5 出 · ReduceModule · CoreMemCreditMonitor</text>
+<text x="192" y="207" font-size="10" fill="#475569">每方向 256 B/T，进 core 与出 core 通路完全并行。Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 16 KiB</text>
+<text x="192" y="222" font-size="10" fill="#475569">两级流控：Stream 资源按 UserID + 方向，VC Credit 按 flit</text>
+<text x="192" y="237" font-size="10" fill="#475569">总缓存 72 KB × 3 = 216 KB，按 Packet 粒度仲裁</text>
+<rect x="180" y="310" width="460" height="120" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="192" y="332" font-size="13" fill="#111827" font-weight="600">TS 任务调度器</text>
+<text x="192" y="352" font-size="10" fill="#475569">固定硬件逻辑，上电配定四种工作模式</text>
+<text x="192" y="367" font-size="10" fill="#475569">task_chain 64 项 · stream_table 16 项顺序 FIFO</text>
+<text x="192" y="382" font-size="10" fill="#475569">三条发射通路 DTE_Arb / MU_Arb / VU_Arb，年龄优先</text>
+<text x="192" y="397" font-size="10" fill="#475569">调度延时 2～3 T，并行下发 3 个 task</text>
+<text x="192" y="412" font-size="10" fill="#475569">七路完成事件合流（RV ack ×3 · DSA ack ×3 · Reduce Done）</text>
+<rect x="690" y="310" width="460" height="120" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="702" y="332" font-size="13" fill="#111827" font-weight="600">core_noc</text>
+<text x="702" y="352" font-size="10" fill="#475569">SCP 控制通路，访问 core 内全局资源</text>
+<text x="702" y="367" font-size="10" fill="#475569">32 bit/T</text>
+<text x="702" y="382" font-size="10" fill="#475569">core 内全部配置寄存器挂在这条总线上：</text>
+<text x="702" y="397" font-size="10" fill="#475569">Router 路由表 · TS task chain · DSA 配置 · Core status</text>
+<rect x="180" y="470" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="192" y="492" font-size="13" fill="#111827" font-weight="600">DTE RV Core</text>
+<text x="192" y="512" font-size="10" fill="#475569">RV32IMC · 仅 M 态 · 无 MMU</text>
+<text x="192" y="527" font-size="10" fill="#475569">ITCM 4 KB · DTCM 8 KB</text>
+<text x="192" y="542" font-size="10" fill="#475569">自定义指令读写 DSA 寄存器</text>
+<rect x="450" y="470" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="462" y="492" font-size="13" fill="#111827" font-weight="600">MU RV Core</text>
+<text x="462" y="512" font-size="10" fill="#475569">RV32IMC · 仅 M 态 · 无 MMU</text>
+<text x="462" y="527" font-size="10" fill="#475569">ITCM 4 KB · DTCM 8 KB</text>
+<text x="462" y="542" font-size="10" fill="#475569">自定义指令读写 DSA 寄存器</text>
+<rect x="720" y="470" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="732" y="492" font-size="13" fill="#111827" font-weight="600">VU RV Core</text>
+<text x="732" y="512" font-size="10" fill="#475569">RV32IMC · 仅 M 态 · 无 MMU</text>
+<text x="732" y="527" font-size="10" fill="#475569">ITCM 4 KB · DTCM 8 KB</text>
+<text x="732" y="542" font-size="10" fill="#475569">自定义指令读写 DSA 寄存器</text>
+<rect x="990" y="470" width="160" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="1002" y="492" font-size="13" fill="#111827" font-weight="600">Share Mem</text>
+<text x="1002" y="512" font-size="10" fill="#475569">32 KB</text>
+<text x="1002" y="527" font-size="10" fill="#475569">3 个 RV core 共享</text>
+<text x="1002" y="542" font-size="10" fill="#475569">延时 5～10 T</text>
+<text x="1002" y="557" font-size="10" fill="#475569">只存 task 间数据</text>
+<rect x="180" y="610" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="192" y="632" font-size="13" fill="#111827" font-weight="600">DTE DSA</text>
+<text x="192" y="652" font-size="10" fill="#475569">2 ch / 4 lane</text>
+<text x="192" y="667" font-size="10" fill="#475569">Header Parser · TaskQueue ×4</text>
+<text x="192" y="682" font-size="10" fill="#475569">AGCU · Hmem 与 LUT</text>
+<rect x="450" y="610" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="462" y="632" font-size="13" fill="#111827" font-weight="600">MU DSA</text>
+<text x="462" y="652" font-size="10" fill="#475569">8 K MAC · 64 lane</text>
+<text x="462" y="667" font-size="10" fill="#475569">token × weights 的 GEMV</text>
+<text x="462" y="682" font-size="10" fill="#475569">MXFP8 / MXFP4</text>
+<rect x="720" y="610" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="732" y="632" font-size="13" fill="#111827" font-weight="600">VU DSA</text>
+<text x="732" y="652" font-size="10" fill="#475569">1024 bit/T</text>
+<text x="732" y="667" font-size="10" fill="#475569">VALU0/1/2 · VSFU · LU / SU</text>
+<text x="732" y="682" font-size="10" fill="#475569">VRF / MRF / SRF</text>
+<rect x="990" y="610" width="160" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="1002" y="632" font-size="13" fill="#111827" font-weight="600">Core Monitor</text>
+<text x="1002" y="652" font-size="10" fill="#475569">IPI（异常中断）</text>
+<text x="1002" y="667" font-size="10" fill="#475569">各模块状态影子寄存器</text>
+<text x="1002" y="682" font-size="10" fill="#475569">clk / rst 控制</text>
+<rect x="180" y="750" width="240" height="50" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="192" y="772" font-size="12" fill="#111827" font-weight="600">DTE Xbar（DMA_XBAR）</text>
+<rect x="990" y="750" width="160" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
+<text x="1002" y="772" font-size="13" fill="#111827" font-weight="600">Debug Module</text>
+<text x="1002" y="792" font-size="10" fill="#475569">解析 DMI 操作</text>
+<text x="1002" y="807" font-size="10" fill="#475569">core_ctrl · abstract_cmd · SBA</text>
+<text x="1002" y="822" font-size="10" fill="#475569">halt / resume / reset</text>
+<text x="1002" y="837" font-size="10" fill="#475569">halt_on_reset</text>
+<rect x="180" y="870" width="340" height="110" rx="5" fill="#eef2f6" stroke="#374151" stroke-width="1.3"/>
+<text x="192" y="892" font-size="13" fill="#111827" font-weight="600">Matrix Mem</text>
+<text x="192" y="912" font-size="10" fill="#475569">32 MB + 4 MB scale · 64 bank</text>
+<text x="192" y="927" font-size="10" fill="#475569">(8 + 1 KB)/T，访问延迟 50 T 以内</text>
+<text x="192" y="942" font-size="10" fill="#475569">weight · B core 存 token · R core 存 reduction 数据</text>
+<rect x="560" y="870" width="400" height="110" rx="5" fill="#eef2f6" stroke="#374151" stroke-width="1.3"/>
+<text x="572" y="892" font-size="13" fill="#111827" font-weight="600">Core Mem</text>
+<text x="572" y="912" font-size="10" fill="#475569">1 MB + 32 KB · 8 bank · 地址粒度 128 B + 4 B</text>
+<text x="572" y="927" font-size="10" fill="#475569">(1 KB + 32 B)/T，访问延迟 15 T 以内</text>
+<text x="572" y="942" font-size="10" fill="#475569">token（message + data）· MU 结果 · VU 结果</text>
+<text x="572" y="957" font-size="10" fill="#475569">按 stream_num 均分给并发用户，硬件做地址映射</text>
+<path d="M610 94 L610 148" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<path d="M112 205 L178 205" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<path d="M1218 205 L1152 205" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<path d="M180 250 L150 250 L150 665 L178 665" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<rect x="192" y="441.5" width="161.14" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="196" y="452" font-size="9.5" fill="#2563eb" text-anchor="start">256 B/T ×2　进 core / 出 core</text>
+<path d="M300 720 L300 748" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<path d="M250 800 L250 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<rect x="254" y="827.5" width="49.23" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="258" y="838" font-size="9.5" fill="#2563eb" text-anchor="start">256 B/T</text>
+<path d="M390 800 L390 830 L600 830 L600 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<rect x="520.385" y="815.5" width="49.23" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="545" y="826" font-size="9.5" fill="#2563eb" text-anchor="middle">256 B/T</text>
+<path d="M660 720 L660 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<rect x="664" y="784.5" width="102.24" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="668" y="795" font-size="9.5" fill="#2563eb" text-anchor="start">512 B/T 或 1 KB/T</text>
+<path d="M870 720 L870 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
+<rect x="874" y="784.5" width="102.24" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="878" y="795" font-size="9.5" fill="#2563eb" text-anchor="start">512 B/T 或 1 KB/T</text>
+<path d="M490 866 L490 722" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M490 823 A 7 7 0 0 1 490 837" fill="none" stroke="#2563eb" stroke-width="1.6"/>
+<rect x="496" y="747.5" width="61.01" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="500" y="758" font-size="9.5" fill="#2563eb" text-anchor="start">8 KB/T　只读</text>
+<path d="M360 272 L360 308" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<rect x="366" y="285.5" width="302.5" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="370" y="296" font-size="9.5" fill="#d97706" text-anchor="start">trigger · credit · complete · reduce_done · retire</text>
+<path d="M280 432 L280 468" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M570 432 L570 468" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M600 432 L600 450 L840 450 L840 468" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<rect x="678.88" y="435.5" width="102.24" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="730" y="446" font-size="9.5" fill="#d97706" text-anchor="middle">task 下发 / RV ack</text>
+<path d="M240 580 L240 608" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M660 580 L660 608" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M810 580 L810 608" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<rect x="814" y="588.5" width="78.67999999999999" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="818" y="599" font-size="9.5" fill="#d97706" text-anchor="start">配置 · dsa_iss</text>
+<path d="M390 608 L390 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
+<path d="M620 608 L620 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
+<path d="M760 608 L760 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
+<path d="M760 596 L667 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
+<path d="M653 596 L390 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
+<path d="M653 596 A 7 7 0 0 1 667 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
+<path d="M435 596 L435 432" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
+<rect x="439" y="439.5" width="78.67999999999999" height="16.5" fill="#ffffff" opacity="0.94"/>
+<text x="443" y="450" font-size="9.5" fill="#d97706" text-anchor="start">DSA ack → TS</text>
+<path d="M960 525 L988 525" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
+<path d="M920 308 L920 272" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<path d="M700 350 L642 350" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<path d="M1070 432 L1070 468" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<path d="M1150 350 L1218 350" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)" marker-start="url(#ags)"/>
+<path d="M1070 580 L1070 608" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<path d="M1150 663 L1218 663" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<path d="M1218 805 L1152 805" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<text x="24" y="1042" font-size="10.5" fill="#475569">连线：</text>
+<path d="M70 1038 L104 1038" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<text x="112" y="1042" font-size="10.5" fill="#475569">数据通路</text>
+<path d="M220 1038 L254 1038" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
+<text x="262" y="1042" font-size="10.5" fill="#475569">调度与完成</text>
+<path d="M370 1038 L404 1038" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
+<text x="412" y="1042" font-size="10.5" fill="#475569">配置 / 调试</text>
+<path d="M540 1031 A 7 7 0 0 1 540 1045" fill="none" stroke="#2563eb" stroke-width="1.6"/>
+<text x="556" y="1042" font-size="10.5" fill="#475569">跨线不相连</text>
+<text x="660" y="1042" font-size="10.5" fill="#475569">VU DSA 不直接读 Matrix Mem，两笔数据由 DTE 先搬到 Core Mem</text>
+</svg>
 ```
 
 | 模块 | 功能 |
@@ -282,9 +257,11 @@ Bach core 对外有三个方向的数据通道：左右两边可以是 chip 间 
 
 这是 Bach 支持多用户并发的基础机制：**无页表、硬件地址映射 + 软硬件分层管理**。
 
-映射必须由硬件做，理由是多用户复用同一套 kernel 代码：软件只能用统一固定的虚拟偏移地址，
-没法为每个用户单独改地址、单独编译。纯软件管理会让相同虚拟地址落到同一块物理内存，多用户互相覆盖。
-因此“**相同虚拟地址 ⇒ 不同物理地址**”这层动态映射只能交给硬件。
+映射必须由硬件做，理由是多用户复用同一套 kernel 代码：
+
+* 软件只能用统一固定的虚拟偏移地址，没法为每个用户单独改地址、单独编译
+* 纯软件管理会让相同虚拟地址落到同一块物理内存，多用户互相覆盖
+* “**相同虚拟地址 ⇒ 不同物理地址**”这层动态映射只能交给硬件
 
 1. **软件配置并发规格**：按 Core Mem 总容量与单用户所需空间，配置 TS 的最大并发用户数 `stream_num`（1～16）
 2. **硬件全局分片**：按 `stream_num` 均等切分 Core Mem，单用户独占空间 = 总容量 / stream_num
@@ -309,12 +286,11 @@ Matrix Mem 不需要这套机制，每个用户看到的是相同的权重。
 
 #### <mde-comment id="agp9rj">Share Mem 的必要性</mde-comment>
 
-Core Mem 容量大、物理距离远，访问延时 15～25 拍，顺序执行的 RV core 掩盖不了。
-因此单独做一块容量小、物理距离近、延时 5～10 拍的 SRAM，作为三个 RV core 的共享标量存储，
-用来加速 DTE / MU / VU 的 task 之间传数据。**它不需要初始化，只存 task 间的共享数据。**
+* Core Mem 容量大、物理距离远，访问延时 15～25 拍，顺序执行的 RV core 掩盖不了
+* 因此单独做一块容量小、物理距离近、延时 5～10 拍的 SRAM，作为三个 RV core 的共享标量存储
+* 用途是加速 DTE / MU / VU 的 task 之间传数据。**不需要初始化，只存 task 间的共享数据**
 
-Core mem → Share mem 的 message 交互采用“**初始跟随数据搬移到 core mem，再由第一个 RV core
-拿到 share mem**”的方案，另一个候选是初始化时直接进 share mem。
+Core mem → Share mem 的 message 交互选定的方案是“**初始跟随数据搬移到 core mem，再由第一个 RV core 拿到 share mem**”，另一个候选是初始化时直接进 share mem。
 
 ### 异常与中断
 
@@ -332,7 +308,7 @@ Bach 用**任务隔离**代替显式一致性维护，建模时这一块可以�
 
 1. 不同 token 用户之间有独立地址空间，不存在数据共享
 2. MU、VU、DTE 的 RV core **在任意时刻不会执行同一个用户的 task**，不会访问同一地址空间，不需要维护一致性
-3. 同一用户在任务链不同 task 之间共享数据，默认通过 TS 隔离不同步骤任务来解决：
+3. 同一用户在任务链不同 task 之间共享数据，默认靠 TS 把不同步骤的任务隔开来解决：
    * 同一用户的 task 按任务链顺序执行，前一个完成后才下发后一个
    * task 间通过 share mem 传数据 / context，前一个 task 的 RV core 写完 share mem 后，用 `fence + task 完成通知 TS` 的方式隔离两个 task 的数据相关
 
@@ -356,216 +332,23 @@ Bach 用**任务隔离**代替显式一致性维护，建模时这一块可以�
 
 ## TS 任务调度器
 
-TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**基于任务链的硬化调度器**，调度延时 2～3 cycle。
+TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按任务链走的硬化调度器**，调度延时 2～3 cycle。
 
-> **取舍**：不同场景下 core 内任务流固定、任务类型不多，硬化调度器足够覆盖，因此不做软件调度。
+**TS 是一块固定的硬件逻辑，不是可编程的调度器**：
 
-### 两个核心数据结构
+* 上电时由 SCP 经 `ctrl_noc` 把 64 项的 `task_chain` 与几个全局寄存器配好
+* 写 `TS_INIT_FINISH` 之后就按固定逻辑跑，运行时不接受软件干预
+* `CORE_TYPE` 与 `WEIGHTS_MODE` 两个配置项选定四种工作模式：weights 加载、普通计算 core、B core、R core
+* **数据进来由 Router 经 `router2ts_trigger_ch` 直接通知它**，这是它被激活的入口
 
-#### task_chain（任务链）
+运行时用 16 项的 `stream_table` 记录每个在途用户走到哪一步，做四件事：
 
-最多 **64 个 task**，软件初始化时通过 `core_noc` 配置。每个表项 64 bit：
+1. 新用户到了建表
+2. 判当前 task 的前置条件齐了没有
+3. 同一个执行单元有多个候选时选最老的
+4. 收到完成事件推进度，并在链尾退休
 
-| 位域 | 名称 | 含义 |
-| - | - | - |
-| 31:0 | `TASK_PC` | 任务执行的起始 PC |
-| 33:32 | `TASK_SEND_UNIT` | 执行单元：00=DTE，01=MU，10=VU |
-| 35:34 | `TASK_RECV_UNIT` | 完成类型：00=只调 RV core 不调 DSA；01=调 DSA；10=调 DTE DSA + Router 上的 Rmem 模块 |
-| 36 | `SELF_START` | 自启动（B core、R core 的链首 task） |
-| 39 | `WAIT_WAKE` | 需要外部数据唤醒 |
-| 40 | `TASK_Broadcast_REISSUE` | 标识该 task 是 Broadcast Reissue 任务 |
-| 41 | `TASK_P2P_REISSUE` | 标识该 task 是 P2P Reissue 任务 |
-| 42 | `TASK_REDUCE` | 逐级 reduce 任务 |
-| 43 | `TASK_CREDIT_EN` | 是否需要 credit 才可发射（core 内 DTE 从 MM 搬到 CM 就不需要） |
-| 44 | `TASK_EXE_MASK` | 按 user 区分执行 / 不区分 |
-| 50:45 | `TASK_PATH_ID` | 任务匹配的 path_id，用于 TS 判断该任务的 credit 条件 |
-| 51 | `TASK_END` | 任务结束标识 |
-| 63 | `TASK_VALID` | 软件写该寄存器后硬件自动置有效 |
-
-另有一个独立的 `DATAIN_TASK` 寄存器，只有 1 项且只能绑定 DTE，四个字段：`TASK_PC`、
-`TASK_UNIT`（固定 DTE）、`WEIGHTS_MODE`（是否处于 weights 加载阶段，此时不启动 task_chain）、`TASK_VALID`。
-
-##### 软件文档里的列名对照
-
-《软件计算流程详细评估》的任务链配置示例表用软件侧列名，与硬件位域名一一对应：
-
-| 硬件位域 | 软件示例表列名 |
-| - | - |
-| `TASK_VALID` | `task valid` |
-| `TASK_SEND_UNIT` | `task_unit` |
-| `SELF_START` | `self_start` |
-| `TASK_RECV_UNIT` | `task_recv_unit` |
-| `WAIT_WAKE` | `wait_wake` |
-| `TASK_Broadcast_REISSUE` | `B_reissue` |
-| `TASK_P2P_REISSUE` | `P2P_reissue` |
-| `TASK_REDUCE` | `task_reduce_iss` |
-| `TASK_CREDIT_EN` | `credit_en` |
-| `TASK_EXE_MASK` | `exe_mask` |
-| `TASK_PATH_ID` | `path_id` |
-| `TASK_END` | `task_end` |
-| `TASK_PC` | `task_pc` |
-| `DATAIN_TASK.WEIGHTS_MODE` | `weights_launch` |
-
-软件示例表里的 `dsa_en`（B core、R core 示例）、`exe_dest`、`task_group_id`（DP+P2P 示例）在硬件位域表中没有对应位域。
-
-其余配置寄存器：`STREAM_NUM`（1～16）、`TS_INIT_FINISH`、`TS_STATE`、`CORE_TYPE`（B core / R core / 普通 core）。
-
-#### stream_table（多用户调度队列）
-
-**16 项顺序 FIFO**，每项对应一条完整用户业务流：
-
-| 字段 | 说明 |
-| - | - |
-| `valid` | 槽位有效，建表时置位、用户退出时清除 |
-| `user_id` | 用户全局 ID，跟随 router 请求写入 |
-| `task_id` | 当前执行的 task 编号（task_chain 的某一步） |
-| `task_unit` / `task_dsa_en` / `task_pc` | 更新 task_id 时索引 task_chain 得到 |
-| `task_fsm` | IDLE / WAIT / RDY / INFLY / FINISH |
-| `done_bitmap`（64 bit） | 记录该用户所有 task 的完成标识，**异步 datain 提前完成就体现在这里** |
-| `reissue` | 该用户某个任务需监测下游 credit 满足后再搬移到 router |
-| `end` | 当前 task 是否为链尾 |
-
-**建表**：`User_Match` 判断 router 请求是新用户还是已有用户，为新用户发起建表请求；Stream Map 在 `tail_ptr` 指向的空槽一次性写入用户信息、Task 0 状态及其任务属性，随后推进 `tail_ptr`。
-
-**指针维护**：注册用 `tail_ptr`，释放用 `head_ptr`，每次粒度为 1，上限受 `stream_num` 限制。**年龄优先**的仲裁都是从 `head_ptr` 开始环形扫描，不按 stream_id 数值排序。
-
-### task_fsm 状态机
-
-```
-TASK_IDLE ──第一笔是 datain/reissue──→ TASK_WAIT
-          └─第一笔是 self_start─────→ TASK_RDY
-
-TASK_WAIT ──done_bitmap 对应位拉高──→ TASK_RDY
-          └─credit 条件满足─────────→ TASK_RDY
-
-TASK_RDY  ──成功下发到 RV core─────→ TASK_INFLY
-TASK_INFLY──收到 DSA / RV core 完成─→ TASK_FINISH
-
-TASK_FINISH──是最后一笔────────────→ TASK_IDLE（退休）
-            ├─后续是已完成的 datain→ 该 task 直接 TASK_RDY
-            └─后续是未完成的 datain→ 该 task 进 TASK_WAIT
-```
-
-### 任务生成与跳过
-
-`Task_ctrl` 接收 DSA 返回的当前 task 完成，维护 16 个用户的 `next_task_id` 与 `next_task_fsm`。**每个 Stream 独立推进，不需要全局 Task Pointer**。
-只有当前任务进入 `TASK_FINISH` 后才生成后继任务，用一次 64-bit 优先编码**一拍**跳过所有可跳过的 task：
-
-```
-SKIP_MASK = ~END_MASK
-          & ( (DATA_IN_MASK & done_bitmap)
-            | (REISSUE_MASK & ~stream.reissue) )
-```
-
-连续 skip 的数量**不增加周期**。可跳过的四种场景：
-
-* 异步 datain_task 已提前完成
-* B reissue 任务不需要重发
-* P2P 任务不需要重发（Router 通过匹配 `path_id` 告知哪个 P2P task 已完成）
-* DP+P2P 场景：有些用户只有 P2P 无计算 task，有些是计算无 P2P，router 请求携带用户是否计算，对应匹配任务链中计算任务，其余 P2P 任务可越过
-
-**End Task 即使已提前完成也不能被跳过**，并且不会再生成后继任务。
-
-### 三条发射通路
-
-| Arbiter | 候选 | 优先级规则 |
-| - | - | - |
-| `MU_Arb` / `VU_Arb` | `valid=1 && task_fsm=TASK_READY && task_unit=MU/VU` | 从 head_ptr 开始环形年龄优先，选最老 Stream；非抢占保持，直到 RV Core 返回 raw ACCEPT |
-| `DTE_Arb` | Reissue 任务 | 优先级最高，从 head_ptr 选最老的 Reissue |
-| `DTE_Arb` | DataIn 任务 vs 普通 Generated 任务 | 没有 Reissue 时，两者按相对 head_ptr 的 Stream 年龄比较，较老者优先；**同一 Stream 时优先选 Generated** |
-
-性能特性：**并行支持 3 个 task 的下发**（DTE / MU / VU 各一），task 唤醒延迟在时序满足前提下最短 2～3 cycle。
-
-Generated 任务收到 raw ACCEPT 后向 Stream Map 提交 `TASK_READY → TASK_INFLY`。
-
-### 异步 DataIn 机制
-
-在 `tp_nk` 这类切分下，任务链里 task 0/3/7/8 都是“router trigger TS → 调度 DTE 从 router 搬数据进 core”。
-但**这些 task 不一定按任务链顺序执行**，谁先谁后取决于对应数据什么时候到 router，
-所以没法等链序执行到该 task 再去调度 DTE。
-
-解法：<mde-comment id="0z2frq">TS 支持**不受任务链约束的 datain task**</mde-comment>。每当 router trigger TS，就激活这个 task 下发到 DTE；DTE core 的程序解析数据包头判断这是任务链中哪一步的数据，搬运完成后通知对应 user 的 stream 项，只更新 `done_bitmap` 对应位，不推进 `task_id`。后续任务查询前序所有完成 flag 都有效才能下发。
-
-一个典型的 `tp_nk` 任务链（11 步）：
-
-| task_id | unit | end | 任务描述 |
-| - | - | - | - |
-| 0 | DTE | 0 | Router trigger TS 后创建任务链，配置 DTE 搬 token 到 Core Mem |
-| 1 | MU | 0 | 循环执行多个激活专家的 FC1 和 FC3 运算 |
-| 2 | DTE | 0 | 搬多个激活专家的 FC1、FC3 数据到 router，等待逐级 reduce |
-| 3 | DTE | 0 | router 逐级 reduce 完 trigger TS 后，搬回 Core Mem |
-| 4 | VU | 0 | 循环执行多个激活专家的 FC1 SiLU dot FC3，生成 FC2 token |
-| 5 | DTE | 0 | 搬 FC2 token 到 router 做 broadcast |
-| 6 | MU | 0 | 循环执行多个激活专家的 FC2 运算和专家间 reduce |
-| 7 | DTE | 0 | 本 chip 其他 core 数据到达 router 后 trigger TS，搬到 Core Mem 与本 core 数据 concat |
-| 8 | DTE | 0 | 上游 chip 的 FC2 result 到达后 trigger TS，搬到 Core Mem |
-| 9 | VU | 0 | 把 concat 完的数据和上游 chip 数据 reduce 后写回 Core Mem |
-| 10 | DTE | 1 | 从 Core Mem 搬 result 到 router 并 P2P 传到下游 chip |
-
-### 自发创建任务链（B core / R core）
-
-专用 core 的用户数量远超 TS 的 16 项 stream_table，且数据搬入与后续操作之间的时间窗口很大，TS 覆盖不了。解法是**双任务链 + 软件映射表**：
-
-1. 数据接收类 datain 任务由 datain task 支持，但**完成 flag 由软件设置维护，不在 TS 里更新**
-2. 后续任务配置为任务链，调度 RV core 循环 check 软件映射表的 flag，check 通过后执行后续计算 / 搬运 / 搬出：
-   * check flag 的 RV core 需要长期工作，该 task **不调度对应的 DSA**
-   * 任务链创建不受用户数据 trigger 影响，**自动在每个 stream 表项创建起点 task**（`self_start`），按 stream 顺序激活执行 check flag task
-   * 前一个 stream check 通过后需清除 ready 用户的 flag，下一个 stream 才能继续 check
-   * 一个 stream 的任务链完成后，会在对应 stream 项**自发创建新的任务链**
-
-软件配置 task_chain，且 task0 为自启动任务。TS 复位后直接自启动 16 个 stream_table 表项，同时激活 16 个用户的自启动任务参与仲裁发射，执行过程同普通计算 core。启动时没有用户信息，等自启动任务（RV core）返回 user_id 后更新 stream_table，再调度后续任务。表项从队头 retire 后再激活一个新表项，继续等待自启动任务。datain 任务不负责创建 stream_table。B core 的搬出 task 还需 check 下游 core 的 TS credit。
-
-### Credit 与重发
-
-#### 用户 token 重发（Broadcast Reissue）
-
-1. broadcast 数据到达 router trigger TS 时，若下游无法接收则把**重发标记置为有效**
-2. TS 查询下游 credit，可下发时按用户顺序选**最老的重发用户**，发起重发 task 到 DTE 去 Core Mem 搬 token 到 router
-3. 重发 task **不在用户主线任务链上**，可与用户任务链并行执行，优先级高于其他主线 task
-4. 重发标记有效但未重发成功时，<mde-comment id="xw28ej">该用户的原始 token 数据**不能被覆盖，也不能释放该用户**</mde-comment>
-
-#### Reduce 任务的 credit
-
-软件配置任务为逐级 reduce 时需同时配置该任务会操作几次 reduce（`reduce_num = N`）。TS 发现是 reduce task 后**顺序连续下发 N 笔 credit 请求**，credit 满足即可顺序下发，直到收全 N 笔 Rmem finish。
-
-#### P2P 阻塞缓冲
-
-为防止 P2P 传输阻塞导致死锁或性能下降，设一个保底的“P2P 阻塞进 core mem”机制。软件可配四项：
-开关、分配给 P2P 缓存的 core mem 容量、开启的方向（最多 **3 个**）、每方向的容量与项数。
-
-TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User id | Down direction | Data addr`），
-以及对应下游 core 的 credit 计数器。
-
-### 完成事件的合流（Task_done）
-
-七路独立的完成事件通道：
-
-* **七路独立处理**：DTE、MU、VU 各有独立 Completion Lane（RV core ACK + DSA ACK 共 6 路），DTE Lane 额外接收 Router Reduce Done
-* **完成来源判定**：用 `task_recv_type` 区分 RV / DSA / Router 三种来源，避免错误 ACK 提前结束任务
-* **Reduce 完成分离**：DTE ACK **只代表搬运完成**，执行 `consume_only` 不修改 Stream 状态；**只有 Router Reduce Done 才有权把 Reduce 任务置为 TASK_FINISH**
-* **无序汇合**：DTE ACK 与 Router Done 可任意顺序到达，Router Done 可被 Hold，但必须等匹配的 DTE ACK 被消费后才提交任务完成
-* **Router UID 匹配**：Router 不携带 SID，`Task_done` 内部按 `user_id` 找对应 Stream
-* **Future DataIn**：固定接受 DSA ACK，只更新对应 `done_bitmap`，不使用当前任务的完成来源属性
-
-#### task 完成的三种场景
-
-| 场景 | 典型情况 | 谁上报 TS |
-| - | - | - |
-| RV core 收尾 | 纯 RV core task 不调 DSA，或调了 DSA 但 RV core 会等 DSA 完成后再执行一段程序 | RV core |
-| DSA 收尾 | 异步配置调度 DSA 后 RV core 立刻结束 task 程序 | DSA |
-| 不确定谁收尾 | RV core 异步配置 DSA 后不查询完成状态，但还要再执行一段程序 | **两者都上报，TS 等二者都完成才算 task 真的完成** |
-
-### 异常检测
-
-* 异步 task 本该执行 1 次完成，但 RV core / DSA 对同一 task 返回多次完成
-* RV core、DSA 返回非法 `task_id` / `stream_id`
-* 超时检测：异步任务长时间（软件配置，如 1 μs）没收到外部 trigger；用户长时间未 retire；router 请求携带的 `path_id` 在 task_chain 无法匹配
-* 配置合规检查：软件配完 `ts_init_finish` 后，硬件检查 task_chain 与 datain_task 的合法性，
-  查五项：是否配置、多笔 end 标识、任务不连续设置 valid、多笔 task self_start、普通计算 core 出现 self_start
-
-配图：[Task Scheduler 19 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/06_Task Scheduler（编写ing）>)：stream_id_map 结构与时序、Task_ctrl 流程与 SKIP_MASK、DTE/MU/VU Arbiter、Credit Monitor、Task_done 的模块图与 LLD 时序图
-
-来源：`04_四、MAS/06_Task Scheduler（编写ing）.md`（Features 的 MISC/Application scenarios、IO_REG 的图示说明、Programming Model 的 Interrupt Handling Sequence 与 Programming Sequence 步骤、Performance/Power/Area 为 eFUSE 模板残留）、`06_第四阶段/04_core内调度机制.md`
+展开在[《TS 任务调度器》](03-ts-任务调度器.md)：两张表的字段、四个动作的规则、三处复杂性（异步 datain、下游反压、B / R core 双链），以及配置检查、异常和时延口径。
 
 ***
 
@@ -618,8 +401,12 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 
 #### flag_check（映射表快速查找）
 
-该指令只见于 ISA 描述表，RV Core MAS 不再列出。给起始地址与结束地址，share mem 从起始地址开始查找第一个 1，把位置偏移量写回 rd；
-查到结束地址仍没找到则返回全 1。“自发创建任务链”一节里 R core / B core 轮询软件映射表，靠的就是这条指令。
+该指令只见于 ISA 描述表，RV Core MAS 不再列出。
+
+* 输入：起始地址与结束地址
+* 行为：share mem 从起始地址开始查找第一个 1，把位置偏移量写回 rd
+* 查到结束地址仍没找到则返回全 1
+* 用处：“自发创建任务链”一节里 R core / B core 轮询软件映射表靠的就是这条指令
 
 ### 流水线微架构
 
@@ -669,8 +456,11 @@ TS 要为每个方向各维护一张 P2P 阻塞缓冲映射表（`p2p vld | User
 
 访存带宽 32-bit。写回优先级：DTCM 读出数据与 share_mem / core_mem 数据同时需写回时，**优先写回 share_mem / core_mem**，阻塞 DTCM。
 
-DTE core 访问 Core Mem 的接口与其余通路不同：一次读请求**固定读回 1056 bit**，不支持 burst，
-按 32 bit / 拍返回；地址 18 bit、4B 粒度；写请求带 4 bit 字节使能。
+DTE core 访问 Core Mem 的接口与其余通路不同：
+
+* 一次读请求**固定读回 1056 bit**，不支持 burst，按 32 bit / 拍返回
+* 地址 18 bit，4B 粒度
+* 写请求带 4 bit 字节使能
 
 ### task 下发与完成
 
