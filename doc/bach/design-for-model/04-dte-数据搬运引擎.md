@@ -48,159 +48,165 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 
 数据布局：**仅支持连续一维搬运**，当前不支持 stride。
 
-模块组成与对外通道如下。
+模块组成与对外通道如下，布局与通道名照 MAS 的 Block Diagram 与 External Connections。
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 640" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="DTE 的模块组成与对外通道">
-<title>DTE 的模块与对外通道</title><defs>
-<marker id="d" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
-<marker id="ds" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#2563eb"/></marker>
-<marker id="c" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#d97706"/></marker>
-<marker id="cs" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#d97706"/></marker>
-<marker id="g" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6b7280"/></marker>
-<marker id="gs" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#6b7280"/></marker>
-</defs>
-<rect width="1320" height="640" fill="#ffffff"/>
-<text x="24" y="28" font-size="14.5" fill="#111827" font-weight="600">DTE 的模块与对外通道</text>
-<text x="24" y="47" font-size="10" fill="#475569">任务从两个入口进来，经 Commit 拆到两条 Channel，完成后合成一次 task_done。信号名与逐级拍数见 DTE 建模单元</text>
-<rect x="196" y="62" width="906" height="530" rx="8" fill="none" stroke="#374151" stroke-width="1.7"/>
-<text x="208" y="80" font-size="11" fill="#6b7280">DTE DSA</text>
-<rect x="212" y="92" width="274" height="254" rx="6" fill="#eef6fb" stroke="#b7d4e6" stroke-width="1.1"/>
-<text x="222" y="109" font-size="10.5" fill="#6b7280" font-weight="600">任务入口</text>
-<rect x="506" y="92" width="348" height="254" rx="6" fill="#fdf6ec" stroke="#e4c99b" stroke-width="1.1"/>
-<text x="516" y="109" font-size="10.5" fill="#6b7280" font-weight="600">两条 Channel</text>
-<rect x="874" y="92" width="214" height="254" rx="6" fill="#eef8f4" stroke="#a8d8c6" stroke-width="1.1"/>
-<text x="884" y="109" font-size="10.5" fill="#6b7280" font-weight="600">完成</text>
-<rect x="212" y="364" width="876" height="214" rx="6" fill="#f5f1fa" stroke="#c9bade" stroke-width="1.1"/>
-<text x="222" y="381" font-size="10.5" fill="#6b7280" font-weight="600">表与旁路存储</text>
-<rect x="226" y="118" width="246" height="66" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="236" y="136" font-size="11.5" fill="#111827" font-weight="600">Config reg</text>
-<text x="236" y="151" font-size="8.5" fill="#475569">收 RV core 用 dsawi 写的四个寄存器</text>
-<text x="236" y="163" font-size="8.5" fill="#475569">ADDR 与 TD 先配，最后写 Doorbell</text>
-<text x="236" y="175" font-size="8.5" fill="#475569">PACK 随 Doorbell 自动写入</text>
-<rect x="226" y="192" width="246" height="66" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="236" y="210" font-size="11.5" fill="#111827" font-weight="600">Header Parser</text>
-<text x="236" y="225" font-size="8.5" fill="#475569">一帧一任务，首拍固定是 Header</text>
-<text x="236" y="237" font-size="8.5" fill="#475569">校验 opcode、长度、身份与帧格式</text>
-<text x="236" y="249" font-size="8.5" fill="#475569">非法 Header 走 Drop Frame</text>
-<rect x="226" y="266" width="246" height="66" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="236" y="284" font-size="11.5" fill="#111827" font-weight="600">Commit</text>
-<text x="236" y="299" font-size="8" fill="#475569">两侧 TaskQueue 与 RS 项同时拿到才成立</text>
-<text x="236" y="311" font-size="8" fill="#475569">不产生半任务，否则入口反压</text>
-<text x="236" y="323" font-size="8" fill="#475569">同一步完成地址展开 · 双 Bank，Router 优先</text>
-<rect x="520" y="118" width="320" height="56" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="530" y="136" font-size="11.5" fill="#111827" font-weight="600">TaskQueue ×4</text>
-<text x="530" y="151" font-size="8.5" fill="#475569">RD_CH0 / WR_CH0 / RD_CH1 / WR_CH1 各 16 项</text>
-<text x="530" y="163" font-size="8.5" fill="#475569">各自独立按序激活，不等配对的那一条</text>
-<rect x="520" y="182" width="320" height="56" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="530" y="200" font-size="11.5" fill="#111827" font-weight="600">AGCU 与 Read / Write Ctrl</text>
-<text x="530" y="215" font-size="8.5" fill="#475569">解析任务、算地址、发访问命令</text>
-<text x="530" y="227" font-size="8.5" fill="#475569">RD 可领先 WR，领先量由 buffer credit 约束</text>
-<rect x="520" y="246" width="155" height="86" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="530" y="264" font-size="11.5" fill="#111827" font-weight="600">inbound buffer</text>
-<text x="530" y="279" font-size="8.5" fill="#475569">Router → MM / CM</text>
-<text x="530" y="291" font-size="8.5" fill="#475569">满则 TREADY</text>
-<text x="530" y="303" font-size="8.5" fill="#475569">向 Router 反压</text>
-<rect x="685" y="246" width="155" height="86" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="695" y="264" font-size="11.5" fill="#111827" font-weight="600">outbound buffer</text>
-<text x="695" y="279" font-size="8.5" fill="#475569">MM / CM → Router</text>
-<text x="695" y="291" font-size="8.5" fill="#475569">或 MM → CM，</text>
-<text x="695" y="303" font-size="8.5" fill="#475569">出口由 Route 固化</text>
-<rect x="888" y="118" width="186" height="116" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="898" y="136" font-size="11.5" fill="#111827" font-weight="600">Completion RS</text>
-<text x="898" y="151" font-size="8.5" fill="#475569">四条 Lane 的事件按</text>
-<text x="898" y="163" font-size="8.5" fill="#475569">task_id Join</text>
-<text x="898" y="175" font-size="8.5" fill="#475569">两侧都满足才算完成</text>
-<text x="898" y="187" font-size="8.5" fill="#475569">同拍多个命中全部保留</text>
-<rect x="888" y="246" width="186" height="86" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="898" y="264" font-size="11.5" fill="#111827" font-weight="600">Done Pending</text>
-<text x="898" y="279" font-size="8.5" fill="#475569">串行化后与 TS 握手</text>
-<text x="898" y="291" font-size="8.5" fill="#475569">Exactly-once</text>
-<rect x="226" y="392" width="270" height="172" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="236" y="410" font-size="11.5" fill="#111827" font-weight="600">LUT</text>
-<text x="236" y="425" font-size="8.5" fill="#475569">path_id_table 与 task_len_table</text>
-<text x="236" y="437" font-size="8.5" fill="#475569">共 192 B</text>
-<text x="236" y="449" font-size="8.5" fill="#475569">TS 直接启动时按 stream_id / task_id</text>
-<text x="236" y="461" font-size="8.5" fill="#475569">索引静态参数（P1，方案待定）</text>
-<rect x="512" y="392" width="270" height="172" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="522" y="410" font-size="11.5" fill="#111827" font-weight="600">Hmem</text>
-<text x="522" y="425" font-size="8.5" fill="#475569">16 KB + 32 B</text>
-<text x="522" y="437" font-size="8.5" fill="#475569">软件包头表 16×64 项，每项 16 B</text>
-<text x="522" y="449" font-size="8.5" fill="#475569">硬件包头静态部分 64 项按 task_id</text>
-<text x="522" y="461" font-size="8.5" fill="#475569">动态部分 16 项按 stream_id</text>
-<text x="522" y="473" font-size="8.5" fill="#475569">进核要分配新 stream_id 才存，否则丢弃</text>
-<rect x="798" y="392" width="276" height="172" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.2"/>
-<text x="808" y="410" font-size="11.5" fill="#111827" font-weight="600">topK 与 shareMem 写</text>
-<text x="808" y="425" font-size="8.5" fill="#475569">topK 复制到单独的 mem 供 MU 读</text>
-<text x="808" y="437" font-size="8.5" fill="#475569">可写 MU 的 topK_ep_table，</text>
-<text x="808" y="449" font-size="8.5" fill="#475569">也可写 Core Mem 的独立空间</text>
-<text x="808" y="461" font-size="8.5" fill="#475569">任务传完按配置地址写 shareMem</text>
-<text x="808" y="473" font-size="8.5" fill="#475569">只在 B core 与 R core 用</text>
-<rect x="30" y="118" width="152" height="76" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="40" y="136" font-size="11.5" fill="#111827" font-weight="600">DTE RV core</text>
-<text x="40" y="151" font-size="8.5" fill="#475569">按 task_pc 跑 kernel</text>
-<text x="40" y="163" font-size="8.5" fill="#475569">用自定义指令配任务</text>
-<rect x="30" y="212" width="152" height="62" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="40" y="230" font-size="11.5" fill="#111827" font-weight="600">ctrl_noc</text>
-<text x="40" y="245" font-size="8.5" fill="#475569">配 LUT 与静态</text>
-<text x="40" y="257" font-size="8.5" fill="#475569">寄存器</text>
-<rect x="30" y="292" width="152" height="76" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="40" y="310" font-size="11.5" fill="#111827" font-weight="600">Router RX</text>
-<text x="40" y="325" font-size="8.5" fill="#475569">AXI-Stream</text>
-<text x="40" y="337" font-size="8.5" fill="#475569">Header 与 Payload</text>
-<rect x="1136" y="118" width="158" height="86" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="1146" y="136" font-size="11.5" fill="#111827" font-weight="600">Core Mem</text>
-<text x="1146" y="151" font-size="8.5" fill="#475569">与 Matrix Mem</text>
-<text x="1146" y="163" font-size="8.5" fill="#475569">经 DMA_XBAR</text>
-<text x="1146" y="175" font-size="8.5" fill="#475569">256 B/T</text>
-<rect x="1136" y="216" width="158" height="62" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="1146" y="234" font-size="11.5" fill="#111827" font-weight="600">Router TX</text>
-<text x="1146" y="249" font-size="8.5" fill="#475569">出核数据</text>
-<rect x="1136" y="292" width="158" height="62" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="1146" y="310" font-size="11.5" fill="#111827" font-weight="600">TS</text>
-<text x="1146" y="325" font-size="8.5" fill="#475569">task_done</text>
-<rect x="1136" y="400" width="158" height="76" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="1146" y="418" font-size="11.5" fill="#111827" font-weight="600">MU</text>
-<text x="1146" y="433" font-size="8.5" fill="#475569">topK_ep_table</text>
-<rect x="1136" y="492" width="158" height="62" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.2"/>
-<text x="1146" y="510" font-size="11.5" fill="#111827" font-weight="600">Share Mem</text>
-<text x="1146" y="525" font-size="8.5" fill="#475569">B / R core 的标志</text>
-<path d="M184 152 L222 152" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<path d="M184 328 L206 328 L206 222 L222 222" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<path d="M184 246 L200 246 L200 470 L222 470" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#g)"/>
-<path d="M350 186 L350 262" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<path d="M400 260 L400 262" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<path d="M472 296 L494 296 L494 146 L516 146" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<path d="M680 176 L680 180" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<path d="M598 240 L598 244" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<path d="M762 240 L762 244" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<path d="M762 334 L762 355 L1110 355 L1110 247 L1132 247" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<rect x="900.65" y="341.5" width="58.7" height="13.5" fill="#ffffff" opacity="0.95"/>
-<text x="930" y="351" font-size="8.5" fill="#2563eb" text-anchor="middle">出核 256 B/T</text>
-<path d="M840 160 L860 160 L860 56 L1215 56 L1215 114" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<rect x="941.665" y="42.5" width="116.67" height="13.5" fill="#ffffff" opacity="0.95"/>
-<text x="1000" y="52" font-size="8.5" fill="#2563eb" text-anchor="middle">读写 MM / CM，经 DMA_XBAR</text>
-<path d="M854 210 L884 210" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<rect x="866.0" y="334.5" width="6.0" height="13.5" fill="#ffffff" opacity="0.95"/>
-<text x="869" y="344" font-size="8.5" fill="#d97706" text-anchor="middle"></text>
-<path d="M1074 289 L1132 289" fill="none" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<path d="M1074 470 L1110 470 L1110 438 L1132 438" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<rect x="1101.0" y="450.5" width="6.0" height="13.5" fill="#ffffff" opacity="0.95"/>
-<text x="1104" y="460" font-size="8.5" fill="#2563eb" text-anchor="middle"></text>
-<path d="M1074 520 L1110 520 L1110 523 L1132 523" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<path d="M496 478 L508 478" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#g)"/>
-<path d="M390 388 L390 336" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#g)"/>
-<rect x="418.555" y="350.5" width="42.89" height="13.5" fill="#ffffff" opacity="0.95"/>
-<text x="440" y="360" font-size="8.5" fill="#6b7280" text-anchor="middle">查表与包头存取</text>
-<path d="M648 388 L648 336" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#g)"/>
-<text x="24" y="620" font-size="10" fill="#475569">连线：</text>
-<path d="M68 616 L98 616" stroke="#2563eb" stroke-width="1.5" marker-end="url(#d)"/>
-<text x="106" y="620" font-size="10" fill="#475569">数据通路</text>
-<path d="M243 616 L273 616" stroke="#d97706" stroke-width="1.5" marker-end="url(#c)"/>
-<text x="281" y="620" font-size="10" fill="#475569">任务与完成</text>
-<path d="M418 616 L448 616" stroke="#6b7280" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#g)"/>
-<text x="456" y="620" font-size="10" fill="#475569">配置与表访问</text>
-<text x="620" y="620" font-size="10" fill="#475569">CM → MM 本版本不支持：XBar 不提供 CH1 write ctrl 到 Matrix Memory 的连接</text>
+<svg viewBox="0 0 1240 830" width="1240" height="830" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DTE 的模块组成与对外通道">
+<title>DTE 的模块组成与对外通道</title>
+<rect width="1240" height="830" fill="#ffffff"/>
+<defs><marker id="kka" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="kkas" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="kkai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="kkais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="kkab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="kkabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="kkar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="kkars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="kkac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="kkacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="kkap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="kkaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
+<text x="30" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="start">DTE 的模块组成与对外通道</text>
+<text x="30" y="44" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">布局与通道名照 MAS 的 Block Diagram：左列是任务入口（config reg / LUT / MUX / taskQ），中间上下两条 Channel（inbound_ch/ch0、outbound_ch/ch1），右侧 DMA XBar 接 MatrixMem / CoreMem；</text>
+<text x="30" y="58" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每条 Channel 都是 taskq → agcu → ctrl 的读写两行，中间一个 buffer；Hmem 收进核包头、出核时被读；对外通道名照 External Connections 图</text>
+<rect x="40" y="140" width="120" height="46" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
+<text x="48" y="155" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#16181d" font-weight="700" text-anchor="start">DTE RVCore</text>
+<text x="48" y="169" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">用 dsawi 写四个寄存器</text>
+<text x="48" y="181" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">core_cmd / status</text>
+<rect x="40" y="246" width="120" height="46" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+<text x="48" y="261" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" font-weight="700" text-anchor="start">TS</text>
+<text x="48" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">trigger：TID · SID · UID</text>
+<text x="48" y="287" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">收 done</text>
+<rect x="40" y="352" width="120" height="46" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
+<text x="48" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" font-weight="700" text-anchor="start">ctrl_NOC</text>
+<text x="48" y="381" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">SCP 经 ctrl_ch 配</text>
+<text x="48" y="393" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">LUT 与静态寄存器</text>
+<rect x="40" y="458" width="120" height="46" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
+<text x="48" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" font-weight="700" text-anchor="start">Debug</text>
+<text x="48" y="487" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">debug_ch</text>
+<rect x="190" y="96" width="830" height="650" rx="12" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
+<text x="204" y="116" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#2563eb" font-weight="700" text-anchor="start">DTE</text>
+<rect x="215" y="140" width="90" height="46" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
+<text x="223" y="155" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">config reg</text>
+<text x="223" y="169" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">ADDR · TD · PACK</text>
+<text x="223" y="181" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Doorbell 启动</text>
+<rect x="215" y="246" width="90" height="46" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
+<text x="223" y="261" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">LUT</text>
+<text x="223" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">path_id_table</text>
+<text x="223" y="287" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">task_len_table 192 B</text>
+<path d="M330 150 L352 162 L352 282 L330 294 Z" fill="#ffffff" stroke="#3f4451" stroke-width="1.2"/>
+<text transform="translate(342 222) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" text-anchor="middle">MUX</text>
+<rect x="380" y="192" width="80" height="62" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="388" y="207" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">taskQ</text>
+<text x="388" y="221" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">TaskQueue 16 项</text>
+<text x="388" y="233" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">Commit：读写两侧</text>
+<text x="388" y="245" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">同时拿到项才成立</text>
+<rect x="215" y="458" width="90" height="46" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
+<text x="223" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Debug ctrl</text>
+<text x="223" y="487" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">调试通路</text>
+<path d="M160 163 L215 163" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M160 269 L215 269" stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M160 375 L200 375 L200 300 L215 300" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M200 375 L200 190 L215 190" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M160 481 L215 481" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M305 163 L330 163" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M305 269 L330 269" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M352 222 L380 222" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M305 481 L420 481 L420 254" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="470" y="140" width="440" height="200" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+<text x="690" y="156" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="700" text-anchor="middle">inbound_ch / ch0　Router → MM / CM</text>
+<rect x="485" y="170" width="80" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="525.0" y="190.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_taskq</text>
+<rect x="600" y="170" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="645.0" y="190.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">rd_ch0_agcu</text>
+<rect x="720" y="170" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="765.0" y="190.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_rd_ctrl</text>
+<rect x="720" y="226" width="90" height="28" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
+<text x="765.0" y="244.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">inbound buffer</text>
+<rect x="485" y="280" width="80" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
+<text x="525.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_wr_taskq</text>
+<rect x="600" y="280" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
+<text x="645.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">wr_ch0_agcu</text>
+<rect x="720" y="280" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
+<text x="765.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_wr_ctrl</text>
+<path d="M565 186 L600 186" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M690 186 L720 186" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M525 202 L525 280" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M565 296 L600 296" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M690 296 L720 296" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M765 202 L765 226" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M765 254 L765 280" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="470" y="380" width="440" height="200" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.2"/>
+<text x="690" y="396" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#0d9488" font-weight="700" text-anchor="middle">outbound_ch / ch1　MM / CM → Router，MM → CM</text>
+<rect x="485" y="410" width="80" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="525.0" y="430.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_taskq</text>
+<rect x="600" y="410" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="645.0" y="430.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">rd_ch1_agcu</text>
+<rect x="720" y="410" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
+<text x="765.0" y="430.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_rd_ctrl</text>
+<rect x="720" y="466" width="90" height="28" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
+<text x="765.0" y="484.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">outbound buffer</text>
+<rect x="485" y="520" width="80" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
+<text x="525.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_wr_taskq</text>
+<rect x="600" y="520" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
+<text x="645.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">wr_ch1_agcu</text>
+<rect x="720" y="520" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
+<text x="765.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_wr_ctrl</text>
+<path d="M565 426 L600 426" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M690 426 L720 426" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M525 442 L525 520" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M565 536 L600 536" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M690 536 L720 536" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M765 442 L765 466" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M765 494 L765 520" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="690" y="348" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">RD 可领先 WR，领先量由 buffer credit 约束；buffer 满经 TREADY 向 Router 反压</text>
+<text x="690" y="588" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">出口由 Route 固化：Router TX 或 CoreMem（CH1 write 只允许 CoreMem，所以不支持 CM → MM）</text>
+<path d="M460 222 L470 222 L470 186 L485 186" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M470 222 L470 426 L485 426" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="800" y="108" width="180" height="24" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
+<text x="890.0" y="124.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="middle">Hmem 16 KB + 32 B</text>
+<text x="890" y="142" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="middle">sw_harder_table 16×64 项 · core_mask_table</text>
+<path d="M780 170 L780 150 L820 150 L820 132" stroke="#d97706" stroke-width="1.4" fill="none" marker-end="url(#kkar)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="826" y="154" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="start">2 B / 16 B 包头写入</text>
+<path d="M990 132 L1000 132 L1000 576 L765 576 L765 552" stroke="#dc2626" stroke-width="1.2" fill="none" marker-end="url(#kkar)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<text transform="translate(1009 360) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#dc2626" text-anchor="middle">出核时读包头（sw / hw 包头）</text>
+<rect x="1030" y="200" width="44" height="380" rx="6" fill="#eceef1" stroke="#3f4451" stroke-width="1.3"/>
+<text transform="translate(1052 390) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#16181d" text-anchor="middle">DMA XBar</text>
+<path d="M810 296 L1030 296" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="920" y="290" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2xbar_ch0_wr　256 B</text>
+<path d="M1030 426 L810 426" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="920" y="420" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">xbar2dsa_ch　256 B</text>
+<path d="M840 526 L862 536 L862 556 L840 566 Z" fill="#ffffff" stroke="#3f4451" stroke-width="1.2"/>
+<path d="M810 536 L840 536" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M862 546 L900 546 L900 536 L1030 536" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="965" y="530" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2xbar_ch1_wr　CoreMem Only</text>
+<path d="M900 546 L900 700 L1120 700 L1120 606" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="1010" y="694" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2router_ch　256 B</text>
+<rect x="1110" y="108" width="110" height="40" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
+<text x="1118" y="123" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#0d9488" font-weight="700" text-anchor="start">MU</text>
+<text x="1118" y="137" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">local_ep_table</text>
+<text x="1118" y="149" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">128 B / 256 B</text>
+<path d="M810 178 L1090 178 L1090 138 L1110 138" stroke="#0d9488" stroke-width="1.4" fill="none" marker-end="url(#kkac)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="950" y="174" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#0d9488" font-weight="400" text-anchor="middle">topK 复制给 MU　128 B / 256 B</text>
+<rect x="1110" y="170" width="110" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="1118" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router RX</text>
+<text x="1118" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">router2dsa_ch</text>
+<text x="1118" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">read_ch0 · 256 B</text>
+<path d="M1110 196 L810 196" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="960" y="210" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#2563eb" font-weight="400" text-anchor="middle">AXI-Stream：首拍 Header，Header Parser 在 ch0_rd_ctrl 解析</text>
+<rect x="1110" y="276" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
+<text x="1118" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#d97706" font-weight="700" text-anchor="start">MatrixMem</text>
+<text x="1118" y="305" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">to_mm_ch CH0</text>
+<text x="1118" y="317" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">mm_out_ch</text>
+<path d="M1074 296 L1110 296" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kkar)" marker-start="url(#kkars)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="1110" y="406" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
+<text x="1118" y="421" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#d97706" font-weight="700" text-anchor="start">CoreMem</text>
+<text x="1118" y="435" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">to_cm_ch CH0 / CH1</text>
+<text x="1118" y="447" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">cm_out_ch</text>
+<path d="M1074 426 L1110 426" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kkar)" marker-start="url(#kkars)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="1110" y="566" width="110" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="1118" y="581" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router TX</text>
+<text x="1118" y="595" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">write_ch1 · 256 B</text>
+<text x="1118" y="607" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">AXI-Stream Valid/Ready</text>
+<rect x="485" y="620" width="325" height="40" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+<text x="493" y="635" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#2563eb" font-weight="700" text-anchor="start">Completion</text>
+<text x="493" y="649" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">RD 与 WR 两侧按 task_id Join，buffer 排空后才生成一次 task_done；同一任务只报一次</text>
+<path d="M765 552 L765 620" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kkar)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M830 312 L830 366 L680 366 L680 620" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kkar)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M485 640 L175 640 L175 292" stroke="#d97706" stroke-width="1.6" fill="none" marker-end="url(#kkar)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="330" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">done → TS（dte2ts_done_ch）</text>
+<rect x="30" y="770" width="1180" height="40" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
+<text x="46" y="787" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">外部通道名照 External Connections：ctrl_ch（SCP）、debug_ch、core_cmd / status（DTE Core）、trigger_dsa 与 router2dsa_ch / dsa2router_ch（Router）、dsa2xbar_ch0_wr / ch1_wr 与 xbar2dsa_ch（DMA_XBAR）、done（TS）。</text>
+<text x="46" y="803" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">MAS 图里 inbound_ch 的写控制标成 ch1_wr_ctrl，按上下文应为 ch0_wr_ctrl，本图按后者；参数：TaskQueue 深度 16（待定）、中间 buffer 约 8 KB、Cmem 口 256 B + 8 B scale、Router 口 256 B。</text>
 </svg>
 ```
 

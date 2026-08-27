@@ -56,7 +56,7 @@
 
 ### 本轮不建的部分
 
-* Host CPU、Node CPU、Board CPU 的业务流控与退出、动态专家调度（第 2 章“业务流控与退出”）。LPU Dispatch 的派遣规则（所有 R core 有余量才派遣）放在 GPU / DPU 桩里。
+* Host CPU、Node CPU、tray CPU（源文档叫 Board CPU）的业务流控与退出、动态专家调度（第 2 章“业务流控与退出”）。LPU Dispatch 的派遣规则（所有 R core 有余量才派遣）放在 GPU / DPU 桩里。
 * Debug Module、DTM、GDB。
 * 异常、ECC、看门狗、功耗类机制（RV core 九类异常、MU Drain & Trap、VU error_code、TS Except_Check、DTE 首错保留、DIDT 分级、零输入门控、MU 与 VU 错峰）。各单元给这些机制留出状态位与接口名，本轮不实现其行为。
 * RV core 的流水线细节：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突。它们折算成每条指令 1 拍。
@@ -424,7 +424,7 @@ Core 的第 0 层图：Core 内全部单元与它们之间的端口组。每个�
 
 | 类 | 内容 | 来源 |
 | - | - | - |
-| 拓扑与部署 | rack 数、chip 形状 2×5、Harvest mask、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、chip 数 48、GPU 数与每 GPU 的 batch | 编译侧 |
+| 拓扑与部署 | tray 数（编译器叫 rack）、chip 形状 2×5、Harvest mask、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、chip 数 48、GPU 数与每 GPU 的 batch | 编译侧 |
 | 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项，含软件属性 `exe_dest` / `task_group_id` / `reduce_num`）、datain_task、`stream_num`、`CORE_TYPE`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 27 MiB 权重分片（含共享专家）与落 Matrix Mem 的地址；注入表（每 token 的 6368 B 级联包与注入拍）；参考实现的期望输出 | 编译侧 + `reference/` |

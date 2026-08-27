@@ -24,7 +24,7 @@ Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，�
 * **Stream 资源**：目标 core 的 Core Mem 空间
 * **Reduce Credit**：下游 ReduceModule 的上下文
 
-展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、四条传输路径、ReduceModule 与用户退休、坏核与 C2C Bridge、credit release 的回程。
+展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、按任务类型分的走法、三类 credit 的管理方式、ReduceModule 与用户退休、坏核与 C2C Bridge。
 
 ***
 
@@ -33,181 +33,147 @@ Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，�
 ### 组成
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 1075" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Bach Core 顶层结构">
-<title>Bach Core 顶层</title>
-<defs>
-<marker id="ad" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
-<marker id="ads" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#2563eb"/></marker>
-<marker id="ac" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#d97706"/></marker>
-<marker id="acs" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#d97706"/></marker>
-<marker id="ag" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6b7280"/></marker>
-<marker id="ags" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#6b7280"/></marker>
-</defs>
-<rect width="1340" height="1075" fill="#ffffff"/>
-<text x="24" y="30" font-size="15" fill="#111827" font-weight="600">Bach Core 顶层</text>
-<text x="24" y="50" font-size="10.5" fill="#475569">Core Mem 容量按 Cmem MAS 记 1 MB + 32 KB</text>
-<rect x="120" y="110" width="1090" height="900" rx="8" fill="none" stroke="#374151" stroke-width="1.8"/>
-<text x="134" y="130" font-size="11" fill="#475569">Bach Core</text>
-<rect x="505" y="46" width="210" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
-<text x="610.0" y="67" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">data_UD_ch</text>
-<text x="610.0" y="83" font-size="9.5" fill="#475569" text-anchor="middle">另一行对称位（mid）· 256 B/T</text>
-<rect x="14" y="182" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
-<text x="62.0" y="203" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">data_L_ch</text>
-<text x="62.0" y="219" font-size="9.5" fill="#475569" text-anchor="middle">256 B/T</text>
-<rect x="1220" y="182" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
-<text x="1268.0" y="203" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">data_R_ch</text>
-<text x="1268.0" y="219" font-size="9.5" fill="#475569" text-anchor="middle">256 B/T</text>
-<rect x="1220" y="330" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
-<text x="1268.0" y="351" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">scp_ctrl_ch</text>
-<text x="1268.0" y="367" font-size="9.5" fill="#475569" text-anchor="middle">32 bit/T</text>
-<rect x="1220" y="640" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
-<text x="1268.0" y="661" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">async_int_ch</text>
-<text x="1268.0" y="677" font-size="9.5" fill="#475569" text-anchor="middle">→ SCP</text>
-<rect x="1220" y="782" width="96" height="46" rx="4" fill="#eef2f7" stroke="#64748b" stroke-width="1.1"/>
-<text x="1268.0" y="803" font-size="11" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">dmi_ch</text>
-<text x="1268.0" y="819" font-size="9.5" fill="#475569" text-anchor="middle">32 bit/T</text>
-<rect x="180" y="150" width="970" height="120" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="192" y="172" font-size="13" fill="#111827" font-weight="600">Router　片上交换与归约中心</text>
-<text x="192" y="192" font-size="10" fill="#475569">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 × 5 出 · ReduceModule · CoreMemCreditMonitor</text>
-<text x="192" y="207" font-size="10" fill="#475569">每方向 256 B/T，进 core 与出 core 通路完全并行。Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 16 KiB</text>
-<text x="192" y="222" font-size="10" fill="#475569">两级流控：Stream 资源按 UserID + 方向，VC Credit 按 flit</text>
-<text x="192" y="237" font-size="10" fill="#475569">总缓存 72 KB × 3 = 216 KB，按 Packet 粒度仲裁</text>
-<rect x="180" y="310" width="460" height="120" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="192" y="332" font-size="13" fill="#111827" font-weight="600">TS 任务调度器</text>
-<text x="192" y="352" font-size="10" fill="#475569">固定硬件逻辑，上电配定四种工作模式</text>
-<text x="192" y="367" font-size="10" fill="#475569">task_chain 64 项 · stream_table 16 项顺序 FIFO</text>
-<text x="192" y="382" font-size="10" fill="#475569">三条发射通路 DTE_Arb / MU_Arb / VU_Arb，年龄优先</text>
-<text x="192" y="397" font-size="10" fill="#475569">调度延时 2～3 T，并行下发 3 个 task</text>
-<text x="192" y="412" font-size="10" fill="#475569">七路完成事件合流（RV ack ×3 · DSA ack ×3 · Reduce Done）</text>
-<rect x="690" y="310" width="460" height="120" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="702" y="332" font-size="13" fill="#111827" font-weight="600">core_noc</text>
-<text x="702" y="352" font-size="10" fill="#475569">SCP 控制通路，访问 core 内全局资源</text>
-<text x="702" y="367" font-size="10" fill="#475569">32 bit/T</text>
-<text x="702" y="382" font-size="10" fill="#475569">core 内全部配置寄存器挂在这条总线上：</text>
-<text x="702" y="397" font-size="10" fill="#475569">Router 路由表 · TS task chain · DSA 配置 · Core status</text>
-<rect x="180" y="470" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="192" y="492" font-size="13" fill="#111827" font-weight="600">DTE RV Core</text>
-<text x="192" y="512" font-size="10" fill="#475569">RV32IMC · 仅 M 态 · 无 MMU</text>
-<text x="192" y="527" font-size="10" fill="#475569">ITCM 4 KB · DTCM 8 KB</text>
-<text x="192" y="542" font-size="10" fill="#475569">自定义指令读写 DSA 寄存器</text>
-<rect x="450" y="470" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="462" y="492" font-size="13" fill="#111827" font-weight="600">MU RV Core</text>
-<text x="462" y="512" font-size="10" fill="#475569">RV32IMC · 仅 M 态 · 无 MMU</text>
-<text x="462" y="527" font-size="10" fill="#475569">ITCM 4 KB · DTCM 8 KB</text>
-<text x="462" y="542" font-size="10" fill="#475569">自定义指令读写 DSA 寄存器</text>
-<rect x="720" y="470" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="732" y="492" font-size="13" fill="#111827" font-weight="600">VU RV Core</text>
-<text x="732" y="512" font-size="10" fill="#475569">RV32IMC · 仅 M 态 · 无 MMU</text>
-<text x="732" y="527" font-size="10" fill="#475569">ITCM 4 KB · DTCM 8 KB</text>
-<text x="732" y="542" font-size="10" fill="#475569">自定义指令读写 DSA 寄存器</text>
-<rect x="990" y="470" width="160" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="1002" y="492" font-size="13" fill="#111827" font-weight="600">Share Mem</text>
-<text x="1002" y="512" font-size="10" fill="#475569">32 KB</text>
-<text x="1002" y="527" font-size="10" fill="#475569">3 个 RV core 共享</text>
-<text x="1002" y="542" font-size="10" fill="#475569">延时 5～10 T</text>
-<text x="1002" y="557" font-size="10" fill="#475569">只存 task 间数据</text>
-<rect x="180" y="610" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="192" y="632" font-size="13" fill="#111827" font-weight="600">DTE DSA</text>
-<text x="192" y="652" font-size="10" fill="#475569">2 ch / 4 lane</text>
-<text x="192" y="667" font-size="10" fill="#475569">Header Parser · TaskQueue ×4</text>
-<text x="192" y="682" font-size="10" fill="#475569">AGCU · Hmem 与 LUT</text>
-<rect x="450" y="610" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="462" y="632" font-size="13" fill="#111827" font-weight="600">MU DSA</text>
-<text x="462" y="652" font-size="10" fill="#475569">8 K MAC · 64 lane</text>
-<text x="462" y="667" font-size="10" fill="#475569">token × weights 的 GEMV</text>
-<text x="462" y="682" font-size="10" fill="#475569">MXFP8 / MXFP4</text>
-<rect x="720" y="610" width="240" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="732" y="632" font-size="13" fill="#111827" font-weight="600">VU DSA</text>
-<text x="732" y="652" font-size="10" fill="#475569">1024 bit/T</text>
-<text x="732" y="667" font-size="10" fill="#475569">VALU0/1/2 · VSFU · LU / SU</text>
-<text x="732" y="682" font-size="10" fill="#475569">VRF / MRF / SRF</text>
-<rect x="990" y="610" width="160" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="1002" y="632" font-size="13" fill="#111827" font-weight="600">Core Monitor</text>
-<text x="1002" y="652" font-size="10" fill="#475569">IPI（异常中断）</text>
-<text x="1002" y="667" font-size="10" fill="#475569">各模块状态影子寄存器</text>
-<text x="1002" y="682" font-size="10" fill="#475569">clk / rst 控制</text>
-<rect x="180" y="750" width="240" height="50" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="192" y="772" font-size="12" fill="#111827" font-weight="600">DTE Xbar（DMA_XBAR）</text>
-<rect x="990" y="750" width="160" height="110" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1.3"/>
-<text x="1002" y="772" font-size="13" fill="#111827" font-weight="600">Debug Module</text>
-<text x="1002" y="792" font-size="10" fill="#475569">解析 DMI 操作</text>
-<text x="1002" y="807" font-size="10" fill="#475569">core_ctrl · abstract_cmd · SBA</text>
-<text x="1002" y="822" font-size="10" fill="#475569">halt / resume / reset</text>
-<text x="1002" y="837" font-size="10" fill="#475569">halt_on_reset</text>
-<rect x="180" y="870" width="340" height="110" rx="5" fill="#eef2f6" stroke="#374151" stroke-width="1.3"/>
-<text x="192" y="892" font-size="13" fill="#111827" font-weight="600">Matrix Mem</text>
-<text x="192" y="912" font-size="10" fill="#475569">32 MB + 4 MB scale · 64 bank</text>
-<text x="192" y="927" font-size="10" fill="#475569">(8 + 1 KB)/T，访问延迟 50 T 以内</text>
-<text x="192" y="942" font-size="10" fill="#475569">weight · B core 存 token · R core 存 reduction 数据</text>
-<rect x="560" y="870" width="400" height="110" rx="5" fill="#eef2f6" stroke="#374151" stroke-width="1.3"/>
-<text x="572" y="892" font-size="13" fill="#111827" font-weight="600">Core Mem</text>
-<text x="572" y="912" font-size="10" fill="#475569">1 MB + 32 KB · 8 bank · 地址粒度 128 B + 4 B</text>
-<text x="572" y="927" font-size="10" fill="#475569">(1 KB + 32 B)/T，访问延迟 15 T 以内</text>
-<text x="572" y="942" font-size="10" fill="#475569">token（message + data）· MU 结果 · VU 结果</text>
-<text x="572" y="957" font-size="10" fill="#475569">按 stream_num 均分给并发用户，硬件做地址映射</text>
-<path d="M610 94 L610 148" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<path d="M112 205 L178 205" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<path d="M1218 205 L1152 205" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<path d="M180 250 L150 250 L150 665 L178 665" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<rect x="192" y="441.5" width="161.14" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="196" y="452" font-size="9.5" fill="#2563eb" text-anchor="start">256 B/T ×2　进 core / 出 core</text>
-<path d="M300 720 L300 748" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<path d="M250 800 L250 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<rect x="254" y="827.5" width="49.23" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="258" y="838" font-size="9.5" fill="#2563eb" text-anchor="start">256 B/T</text>
-<path d="M390 800 L390 830 L600 830 L600 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<rect x="520.385" y="815.5" width="49.23" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="545" y="826" font-size="9.5" fill="#2563eb" text-anchor="middle">256 B/T</text>
-<path d="M660 720 L660 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<rect x="664" y="784.5" width="102.24" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="668" y="795" font-size="9.5" fill="#2563eb" text-anchor="start">512 B/T 或 1 KB/T</text>
-<path d="M870 720 L870 868" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)" marker-start="url(#ads)"/>
-<rect x="874" y="784.5" width="102.24" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="878" y="795" font-size="9.5" fill="#2563eb" text-anchor="start">512 B/T 或 1 KB/T</text>
-<path d="M490 866 L490 722" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M490 823 A 7 7 0 0 1 490 837" fill="none" stroke="#2563eb" stroke-width="1.6"/>
-<rect x="496" y="747.5" width="61.01" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="500" y="758" font-size="9.5" fill="#2563eb" text-anchor="start">8 KB/T　只读</text>
-<path d="M360 272 L360 308" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<rect x="366" y="285.5" width="302.5" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="370" y="296" font-size="9.5" fill="#d97706" text-anchor="start">trigger · credit · complete · reduce_done · retire</text>
-<path d="M280 432 L280 468" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<path d="M570 432 L570 468" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<path d="M600 432 L600 450 L840 450 L840 468" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<rect x="678.88" y="435.5" width="102.24" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="730" y="446" font-size="9.5" fill="#d97706" text-anchor="middle">task 下发 / RV ack</text>
-<path d="M240 580 L240 608" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<path d="M660 580 L660 608" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<path d="M810 580 L810 608" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<rect x="814" y="588.5" width="78.67999999999999" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="818" y="599" font-size="9.5" fill="#d97706" text-anchor="start">配置 · dsa_iss</text>
-<path d="M390 608 L390 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
-<path d="M620 608 L620 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
-<path d="M760 608 L760 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
-<path d="M760 596 L667 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
-<path d="M653 596 L390 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
-<path d="M653 596 A 7 7 0 0 1 667 596" fill="none" stroke="#d97706" stroke-width="1.6"/>
-<path d="M435 596 L435 432" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<rect x="439" y="439.5" width="78.67999999999999" height="16.5" fill="#ffffff" opacity="0.94"/>
-<text x="443" y="450" font-size="9.5" fill="#d97706" text-anchor="start">DSA ack → TS</text>
-<path d="M960 525 L988 525" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)" marker-start="url(#acs)"/>
-<path d="M920 308 L920 272" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<path d="M700 350 L642 350" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<path d="M1070 432 L1070 468" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<path d="M1150 350 L1218 350" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)" marker-start="url(#ags)"/>
-<path d="M1070 580 L1070 608" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<path d="M1150 663 L1218 663" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<path d="M1218 805 L1152 805" fill="none" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<text x="24" y="1042" font-size="10.5" fill="#475569">连线：</text>
-<path d="M70 1038 L104 1038" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<text x="112" y="1042" font-size="10.5" fill="#475569">数据通路</text>
-<path d="M220 1038 L254 1038" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<text x="262" y="1042" font-size="10.5" fill="#475569">调度与完成</text>
-<path d="M370 1038 L404 1038" stroke="#6b7280" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#ag)"/>
-<text x="412" y="1042" font-size="10.5" fill="#475569">配置 / 调试</text>
-<path d="M540 1031 A 7 7 0 0 1 540 1045" fill="none" stroke="#2563eb" stroke-width="1.6"/>
-<text x="556" y="1042" font-size="10.5" fill="#475569">跨线不相连</text>
-<text x="660" y="1042" font-size="10.5" fill="#475569">VU DSA 不直接读 Matrix Mem，两笔数据由 DTE 先搬到 Core Mem</text>
+<svg viewBox="0 0 1200 900" width="1200" height="900" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bach Core 顶层结构">
+<title>Bach Core 顶层结构</title>
+<rect width="1200" height="900" fill="#ffffff"/>
+<defs><marker id="kea" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="keas" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="keai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="keais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="keab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="keabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="kear" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="kears" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="keac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="keacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="keap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="keaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
+<text x="30" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="start">Bach Core 顶层</text>
+<text x="30" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">布局照 MAS TOP 与系统软件需求分析里的画法：TS 在最上，Router 在最下，core_noc + debug_noc 绕一圈；Core Mem 容量按 Cmem MAS 记 1 MB + 32 KB</text>
+<rect x="560" y="56" width="140" height="36" rx="6" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
+<text x="630" y="79" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#6b7280" font-weight="700" text-anchor="middle">SCP</text>
+<rect x="980" y="56" width="100" height="36" rx="6" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
+<text x="1030" y="79" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#6b7280" font-weight="700" text-anchor="middle">DTM</text>
+<rect x="120" y="120" width="960" height="680" rx="14" fill="#ffffff" stroke="#3f4451" stroke-width="1.6"/>
+<text x="138" y="140" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#5c6370" font-weight="600" text-anchor="start">Bach Core</text>
+<rect x="225" y="150" width="750" height="610" rx="8" fill="none" stroke="#ede9fe" stroke-width="9"/>
+<rect x="225" y="150" width="750" height="610" rx="8" fill="none" stroke="#7c3aed" stroke-width="1.0" stroke-dasharray="3 3"/>
+<text x="600" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="400" text-anchor="middle">core_noc + debug_noc　32 bit/T　SCP 的控制通路，core 内全部配置寄存器（Router 路由表 · TS task chain · DSA 配置 · Core status）都挂在这条总线上</text>
+<text x="600" y="752" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="400" text-anchor="middle">core_noc + debug_noc</text>
+<rect x="140" y="150" width="66" height="490" rx="6" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
+<text x="173" y="172" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#6b7280" font-weight="700" text-anchor="middle">Core</text>
+<text x="173" y="186" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#6b7280" font-weight="700" text-anchor="middle">Monitor</text>
+<text transform="translate(177 420) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">IPI（异常中断）· 各模块状态影子寄存器 · clk / rst 控制</text>
+<rect x="1000" y="150" width="60" height="490" rx="6" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
+<text x="1030" y="172" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#6b7280" font-weight="700" text-anchor="middle">Debug</text>
+<text x="1030" y="186" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#6b7280" font-weight="700" text-anchor="middle">Module</text>
+<text transform="translate(1034 420) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">解析 DMI · core_ctrl（halt / resume / reset / halt_on_reset）· abstract_cmd · SBA</text>
+<rect x="260" y="180" width="520" height="58" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
+<text x="270" y="197" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#2563eb" font-weight="700" text-anchor="start">TS　任务调度器</text>
+<text x="270" y="212" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">task_chain 64 项 · stream_table 16 项顺序 FIFO · 三条发射通路 DTE_Arb / MU_Arb / VU_Arb，年龄优先</text>
+<text x="270" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">固定硬件逻辑，上电配定四种工作模式 · 调度延时 2～3 T · 七路完成事件合流（RV ack ×3 · DSA ack ×3 · Reduce Done）</text>
+<rect x="810" y="180" width="140" height="58" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
+<text x="820" y="197" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Share Mem</text>
+<text x="820" y="212" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">32 KB · 3 个 RV core 共享</text>
+<text x="820" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">延时 5～10 T · 传 task 间数据</text>
+<rect x="260" y="268" width="210" height="70" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
+<text x="270" y="285" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#16181d" font-weight="700" text-anchor="start">MU RV Core</text>
+<text x="270" y="300" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RV32IMC · 仅 M 态 · 无 MMU</text>
+<text x="270" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">ITCM 4 KB · DTCM 8 KB</text>
+<text x="270" y="326" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">自定义指令读写 DSA 寄存器</text>
+<rect x="260" y="368" width="210" height="70" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
+<text x="270" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">MU DSA</text>
+<text x="270" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">8 K MAC · 64 lane</text>
+<text x="270" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">token × weights 的 GEMV</text>
+<text x="270" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">MXFP8 / MXFP4</text>
+<rect x="500" y="268" width="210" height="70" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
+<text x="510" y="285" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#16181d" font-weight="700" text-anchor="start">VU RV Core</text>
+<text x="510" y="300" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RV32IMC · 仅 M 态 · 无 MMU</text>
+<text x="510" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">ITCM 4 KB · DTCM 8 KB</text>
+<text x="510" y="326" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">自定义指令读写 DSA 寄存器</text>
+<rect x="500" y="368" width="210" height="70" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
+<text x="510" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">VU DSA</text>
+<text x="510" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">1024 bit/T</text>
+<text x="510" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">VALU0/1/2 · VSFU · LU / SU</text>
+<text x="510" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">VRF / MRF / SRF</text>
+<rect x="740" y="268" width="210" height="70" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
+<text x="750" y="285" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#16181d" font-weight="700" text-anchor="start">DTE RV Core</text>
+<text x="750" y="300" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RV32IMC · 仅 M 态 · 无 MMU</text>
+<text x="750" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">ITCM 4 KB · DTCM 8 KB</text>
+<text x="750" y="326" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">自定义指令读写 DSA 寄存器</text>
+<rect x="740" y="368" width="210" height="70" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
+<text x="750" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">DTE DSA</text>
+<text x="750" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">2 ch / 4 lane</text>
+<text x="750" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">Header Parser · TaskQueue ×4</text>
+<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">AGCU · Hmem 与 LUT</text>
+<rect x="260" y="478" width="340" height="80" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
+<text x="270" y="495" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Matrix Mem</text>
+<text x="270" y="510" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">32 MB + 4 MB scale · 64 bank</text>
+<text x="270" y="523" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">(8 + 1 KB)/T，访问延迟 50 T 以内</text>
+<text x="270" y="536" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">weight · B core 存 token · R core 存 reduction 数据</text>
+<rect x="630" y="478" width="250" height="80" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
+<text x="640" y="495" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Core Mem</text>
+<text x="640" y="510" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">1 MB + 32 KB · 8 bank · 地址粒度 128 B + 4 B</text>
+<text x="640" y="523" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">(1 KB + 32 B)/T，访问延迟 15 T 以内</text>
+<text x="640" y="536" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">token（message + data）· MU 结果 · VU 结果</text>
+<text x="640" y="549" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">按 stream_num 均分给并发用户，硬件做地址映射</text>
+<rect x="260" y="592" width="660" height="26" rx="4" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
+<text x="590" y="609" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" font-weight="700" text-anchor="middle">DTE Xbar（DMA_XBAR）　到 Core Mem / Matrix Mem 各 256 B/T</text>
+<rect x="260" y="660" width="690" height="70" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
+<text x="270" y="677" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router　片上交换与归约中心</text>
+<text x="270" y="692" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 × 5 出 · ReduceModule · CoreMemCreditMonitor</text>
+<text x="270" y="705" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每方向 256 B/T，进 core 与出 core 通路完全并行 · Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 16 KiB</text>
+<text x="270" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">两级流控：Stream 资源按 UserID + 方向，VC Credit 按 flit · 总缓存 72 KB × 3 = 216 KB，按 Packet 粒度仲裁</text>
+<path d="M935 438 L935 660" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="944" y="470" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">256 B/T ×2</text>
+<text x="944" y="482" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">进 / 出 core</text>
+<path d="M900 438 L900 592" stroke="#2563eb" stroke-width="2.0" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="908" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">256 B/T</text>
+<path d="M430 558 L430 592" stroke="#2563eb" stroke-width="2.0" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M755 558 L755 592" stroke="#2563eb" stroke-width="2.0" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M365 478 L365 438" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#keab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="372" y="462" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">8 KB/T 只读</text>
+<path d="M440 438 L440 458 L645 458 L645 478" stroke="#2563eb" stroke-width="2.0" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="470" y="470" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">512 B/T 或 1 KB/T</text>
+<path d="M690 438 L690 478" stroke="#2563eb" stroke-width="2.0" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="698" y="462" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">512 B/T 或 1 KB/T</text>
+<rect x="20" y="672" width="80" height="46" rx="6" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.2"/>
+<text x="60" y="691" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="600" text-anchor="middle">data_L_ch</text>
+<text x="60" y="706" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="middle">256 B/T</text>
+<path d="M100 695 L260 695" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="1100" y="672" width="80" height="46" rx="6" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.2"/>
+<text x="1140" y="691" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="600" text-anchor="middle">data_R_ch</text>
+<text x="1140" y="706" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="middle">256 B/T</text>
+<path d="M950 695 L1100 695" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="540" y="830" width="180" height="46" rx="6" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.2"/>
+<text x="630" y="849" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="600" text-anchor="middle">data_UD_ch</text>
+<text x="630" y="864" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="middle">另一行对称位（mid）· 256 B/T</text>
+<path d="M630 730 L630 830" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="640" y="774" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="start">左右两边可以是 chip 间 PCIe，也可以是相邻 core 的 Router；</text>
+<text x="640" y="787" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="start">上下方向是同一个通道，来自另一行 core 的 Router</text>
+<path d="M260 205 L246 205 L246 700 L260 700" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<text transform="translate(240 450) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#d97706" font-weight="600" text-anchor="middle">Router ↔ TS：trigger · credit · complete · reduce_done · retire</text>
+<path d="M365.0 238 L365.0 268" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M365.0 338 L365.0 368" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M480 368 L480 238" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kear)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M605.0 238 L605.0 268" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M605.0 338 L605.0 368" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M720 368 L720 238" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kear)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M845.0 238 L845.0 268" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M845.0 338 L845.0 368" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" marker-start="url(#kears)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M962 368 L962 238" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kear)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="372" y="258" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#d97706" font-weight="400" text-anchor="start">task 下发 / RV ack</text>
+<text x="372" y="358" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#d97706" font-weight="400" text-anchor="start">配置 · dsa_iss</text>
+<text transform="translate(475 303) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" text-anchor="middle">DSA ack → TS</text>
+<path d="M630 92 L630 150" stroke="#6b7280" stroke-width="1.4" fill="none" marker-end="url(#kea)" stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="640" y="118" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#6b7280" font-weight="400" text-anchor="start">scp_ctrl_ch　32 bit/T</text>
+<path d="M630 154 L630 180" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kea)" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M880 154 L880 180" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kea)" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M600 756 L600 730" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kea)" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1030 92 L1030 150" stroke="#6b7280" stroke-width="1.4" fill="none" marker-end="url(#kea)" stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="1040" y="118" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#6b7280" font-weight="400" text-anchor="start">dmi_ch</text>
+<text x="1040" y="131" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#6b7280" font-weight="400" text-anchor="start">32 bit/T</text>
+<path d="M975 300 L1000 300" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kea)" marker-start="url(#keas)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M206 300 L225 300" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kea)" marker-start="url(#keas)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M173 150 L173 74 L560 74" stroke="#6b7280" stroke-width="1.4" fill="none" marker-end="url(#kea)" stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="330" y="68" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#6b7280" font-weight="400" text-anchor="middle">async_int_ch　core 的中断异常信息返回 SCP</text>
+<text x="30" y="888" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">连线：</text>
+<path d="M70 884 L110 884" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#keab)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="118" y="888" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">数据通路</text>
+<path d="M190 884 L230 884" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kear)" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="238" y="888" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">调度与完成</text>
+<path d="M320 884 L360 884" stroke="#6b7280" stroke-width="1.4" fill="none" marker-end="url(#kea)" stroke-dasharray="5 3" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="368" y="888" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">配置 / 调试 / 状态</text>
+<text x="520" y="888" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">VU DSA 不直接读 Matrix Mem，两笔数据由 DTE 先搬到 Core Mem；DTE Xbar 是 DTE 搬数据用的 xbar，不接 MU / VU</text>
 </svg>
 ```
 
