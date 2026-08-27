@@ -1,7 +1,8 @@
-# 3　Chip、SCP 与 ctrl_noc
+# Chip
 
 **模式**：design（陈述当前设计，取舍收在“取舍”段落里）
-**层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../07-latch-建模计划.md)）的建模方式之上
+**层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../07-latch-建模计划.md)）的建模方式之上
+**在硬件里的位置**：LPU → **chip**
 
 给实现 Chip 装配、SCP 桩与 ctrl_noc 的人，三个对象各自的接线、端口、存储器、逐拍行为、参数与机制：
 
@@ -21,16 +22,16 @@
 
 ## 1　定位与边界
 
-Chip 的组成：2×5 的 Core 阵列，加边界的 C2C 端口、一个 SCP 桩、一条 ctrl_noc。
+Chip 的组成：2×5 的 Core 阵列，加边界的四个 C2C 端口、一个 SCP 桩、一条 ctrl_noc。48 颗 chip 怎么摆、每颗的四个 C2C 端口接到哪，是 LPU 的事，chip 只把这四个端口露出来。
 
 Chip 只做构造与接线，四件事：
 
-1. 按 Harvest mask 构造 10 个 Core，坏核只构造 Router 的模块
+1. 按本 chip 的 harvest mask 构造 10 个 Core，坏核只构造 Router 的模块
 2. 把相邻 Core 的 Router 端口用 Link 对接成 mesh
-3. 四个边界 core 各接一条 C2C 链路
+3. 四个边界 core 各露一个 C2C 端口
 4. SCP 桩经 ctrl_noc 端点写到每个 core 内模块的 `cfg` 端口
 
-SCP 桩按 boot 序列与初始化六步发配置事务，自身不计算。
+SCP 桩按 boot 序列与初始化六步发配置事务，自身不计算。每 chip 一个。
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 520" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -98,7 +99,7 @@ SCP 桩按 boot 序列与初始化六步发配置事务，自身不计算。
   <text x="600" y="296" font-size="9" fill="#6b7280">cfg 写事务 → 各 core 各模块</text>
 
   <text x="20" y="470" font-size="10.5" fill="#374151">Chip 不是模块，是装配容器：构造 10 个 Core 与它们的模块、接 mesh 与 C2C、接 ctrl_noc。坏核只构造 Router 的模块。</text>
-  <text x="20" y="490" font-size="10.5" fill="#374151">逻辑 ↔ 物理映射由编译侧给出：(tray, chip, logical_core)，逻辑 8 = B core / R core。</text>
+  <text x="20" y="490" font-size="10.5" fill="#374151">四个 C2C 端口只引到 chip 边界，接相邻 chip 还是 PCIe Switch 由 LPU 决定。</text>
 </svg>
 ```
 
@@ -107,7 +108,7 @@ SCP 桩按 boot 序列与初始化六步发配置事务，自身不计算。
 ## 2　接口
 
 ```
-port c2c[d] (双向, credit/release, clk)           // d ∈ {N, E, W, S}：边界 core（core0 / core4 / core5 / core9）Router 的一个方向经 Link 接 PCIe Switch 或相邻 chip
+port c2c[d] (双向, credit/release, clk)           // d ∈ {N, E, W, S}：边界 core（core0 / core4 / core5 / core9）Router 的一个方向，由 LPU 接到相邻 chip 或 PCIe Switch
 port scp_ctrl (master, ctrl_noc 写事务, clk)      // SCP 桩 → ctrl_noc 端点，32 bit/T
   out cfg_valid · cfg_core[3:0] · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0] · cfg_bcast
   in  cfg_rdata[31:0]                               // 下一拍
@@ -122,7 +123,7 @@ port core.cfg[m] (master, ctrl_noc 写事务, clk)   // ctrl_noc 端点 → core
 
 ```
 mem harvest_mask     FF        10 b                                   1R      输入                                 复位由输入给   // 坏核位图
-mem logical_map      FF 阵列   10 × {tray, chip, logical_core}         1R      编译侧读入                           复位由输入给
+mem logical_map      FF 阵列   10 × {logical_core, role}               1R      编译侧读入                           复位由输入给   // 本 chip 的逻辑 core 编号与角色
 mem addr_map         FF 阵列   N × {base[23:0], size, target_module, target_core}  1R  静态                        复位由输入给   // ctrl_noc 地址分发表
 mem core_id_reg[10]  FF        只读 core id                            1R      SCP 经 ctrl_noc 读，不可改            复位固定
 mem scp_fsm          FF        {state[3:0], core_idx[3:0], step[2:0], cursor[31:0]}  1RW  boot 序列                复位 自启动
@@ -148,7 +149,7 @@ mem noc_rdata        1-deep 寄存器 {rdata[31:0]}                       1W1R  
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `harvest_mask`、`logical_map`、参数表 | 1. `Build`：对 10 个 core，`harvest_mask[i]` 为坏则只构造 Router 的模块（CoreStation 永远不准入、ReduceModule 不累加、CreditMonitor 空转），否则构造全部模块<br>2. 断言：坏核不能承担 compute / B core / R core（编译侧校验，此处再查一次）<br>3. `Wire`：2×5 row-major，相邻 core 的 Router `link[d]` 用一对 Link 对接（R2R 参数）；core0 = N、core4 = E、core5 = W、core9 = S 各接一条 C2C Link（C2C 参数）到 `c2c[d]`<br>4. 每 core 一个 ctrl_noc 端点，按各单元文档的 `cfg` 口接线 | 模块实例与端口连接 | — |
+| `harvest_mask`、`logical_map`、参数表 | 1. `Build`：对 10 个 core，`harvest_mask[i]` 为坏则只构造 Router 的模块（CoreStation 永远不准入、ReduceModule 不累加、CreditMonitor 空转），否则构造全部模块<br>2. 断言：坏核不能承担 compute / B core / R core（编译侧校验，此处再查一次）<br>3. `Wire`：2×5 row-major，相邻 core 的 Router `link[d]` 用一对 Link 对接（R2R 参数）；core0 = N、core4 = E、core5 = W、core9 = S 的对外方向各引出到 `c2c[d]`，接谁由 LPU 定<br>4. 每 core 一个 ctrl_noc 端点，按各单元文档的 `cfg` 口接线 | 模块实例与端口连接 | — |
 
 ### B1 · SCP 桩 boot 序列
 
@@ -185,14 +186,12 @@ ITCM 装载拍数        镜像字节数 / 4 B
 | 2×5 阵列与边界 core 连接规则 | A1 第 3 条 | `chip_mesh_2x5` |
 | Harvest disable mask 只关 EngineNode，RouterNode 仍可用 | A1 第 1 条 | `harvest_router_only` |
 | 坏核不能承担 compute / B core / R core；可承担转发、多播、router reduce | A1 第 2 条 + Router 文档坏核一节 | `harvest_roles` |
-| 逻辑 core 8 = special core，special 优先四步 | 编译侧 | `logical_map` |
 | core id 由 SCP 经 ctrl_noc 读 MMIO，不可修改 | N1 第 3 条 | `core_id_readonly` |
 | SCP boot 序列：自启动 → PCIe 训练 → 顺序配 core0～core7 | B1 第 1 条 | `boot_sequence` |
 | Core 内 boot：ITCM 装载（kernel 镜像）→ 三个 RV core 进 wait → ready 全高 → 开放业务接收 | B1 第 3、4 条 + RV core 文档 G1 | `core_boot` |
 | 初始化六步 | B1 第 2 条 | `init_six_steps` |
 | Router 多副本提交完成后软件再写 DTE 与 ReduceModule 副本 | B1 第 2 条 | `router_table_three_copies` |
 | weights 加载模式：四步加载 | B1 第 5 条 + 真实 datain 任务 | `weights_load` |
-| 先发最远路径的数据 | GPU 桩注入表顺序 | `weights_far_first` |
 | 切到业务模式 | B1 第 5 条 | `switch_to_business` |
 | 地址空间视野 | N1 第 2 条的 `addr_map` | `address_map` |
 

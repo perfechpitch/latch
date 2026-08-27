@@ -1,7 +1,8 @@
-# 10　存储子系统
+# 存储子系统
 
 **模式**：design（陈述当前设计，取舍收在“取舍”段落里）
-**层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../07-latch-建模计划.md)）的建模方式之上
+**层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
+**在硬件里的位置**：LPU → chip → core → **Core Mem / Matrix Mem / Share Mem**
 
 给实现 Core 内三块存储的人：Core Mem、Matrix Mem、Share Mem 三个独立打拍的模块各自的端口、存储器、流水线与逐级行为、参数与机制。
 

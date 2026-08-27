@@ -23,7 +23,7 @@
 | [DTE 数据搬运引擎](04-dte-数据搬运引擎.md) | design | DTE 专题：一个搬运任务怎么被拆成读写两半又合回一次完成，三条数据流，一个包拆成哪四类内容、地址怎么算出来、五个搬运方向各自怎么配。第 4 章的展开。 |
 | [建模参数与性能模型](05-建模参数与性能模型.md) | design | 全部延迟、带宽、容量、队列深度的数值，以及解析延迟与吞吐模型。建模取值以本章为准。 |
 | [软件栈](06-软件栈.md) | design | 编译器职责与硬件抽象、软件执行模型、Router 软件视角、各类 core 的软件流程，以及两种切分方式从模型加载到 token 出核的完整流程。 |
-| [latch 建模计划](07-latch-建模计划.md) | design | 逐拍 cycle 模型的建模方式、从 GPU 桩到 core 内每个子块的对象清单、每个子块的状态 / 接口 / 机制覆盖 / 参数、代码结构、输入输出、建模顺序与验收判据。各单元一份文档在 `07-units/` 下。 |
+| [latch 建模计划](07-latch-建模计划.md) | design | 逐拍 cycle 模型的建模方式、以一个 LPU（48 chip）为顶层的对象清单、每个对象的状态 / 接口 / 机制覆盖 / 参数、代码结构、输入输出、建模顺序与验收判据。各单元一份文档在 `07-units/` 下，目录层级与硬件层级一致。 |
 | [文档缺口与 TBD](08-文档缺口与-TBD.md) | design | 口径冲突、原始文档的空缺、引用了但本地没有的文档、设计上仍未确定的问题。动手前先扫一遍。 |
 
 ## 小节索引
@@ -71,6 +71,10 @@
 **[latch 建模计划](07-latch-建模计划.md)**
 
 [建模范围与对象清单](<07-latch-建模计划.md#建模范围与对象清单>)　[建模方式](<07-latch-建模计划.md#建模方式>)　[模型结构](<07-latch-建模计划.md#模型结构>)　[各单元的建模规格](<07-latch-建模计划.md#各单元的建模规格>)　[输入](<07-latch-建模计划.md#输入>)　[时间轴与链路](<07-latch-建模计划.md#时间轴与链路>)　[输出与观测](<07-latch-建模计划.md#输出与观测>)　[建模顺序](<07-latch-建模计划.md#建模顺序>)　[验收](<07-latch-建模计划.md#验收>)　[边界与风险](<07-latch-建模计划.md#边界与风险>)
+
+单元文档按硬件层级放在 `07-units/` 下：
+
+[LPU](07-units/lpu.md)　[链路](07-units/link.md)　[PCIe Switch](07-units/pcie-switch.md)　[片外桩](07-units/external-stub.md)　[Chip](07-units/chip/chip.md)　[Core](07-units/chip/core/core.md)　[Router](07-units/chip/core/router.md)　[TS](07-units/chip/core/ts.md)　[RV core](07-units/chip/core/rv-core.md)　[DTE DSA](07-units/chip/core/dte.md)　[MU DSA](07-units/chip/core/mu.md)　[VU DSA](07-units/chip/core/vu.md)　[存储子系统](07-units/chip/core/memory.md)
 
 **[文档缺口与 TBD](08-文档缺口与-TBD.md)**
 

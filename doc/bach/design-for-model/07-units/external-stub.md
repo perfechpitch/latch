@@ -1,15 +1,18 @@
-# 1　GPU / DPU 桩
+# 片外桩
 
 **模式**：design（陈述当前设计，取舍收在“取舍”段落里）
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../07-latch-建模计划.md)）的建模方式之上
+**在硬件里的位置**：LPU 之外：**片外桩**
 
-给实现 GPU / DPU 桩与出口桩的人：两个独立打拍的模块各自的端口、存储器、逐拍行为、参数，以及它们承载的机制。
+给实现片外桩的人：入口桩与出口桩两个独立打拍的模块各自的端口、存储器、逐拍行为、参数，以及它们承载的机制。
 
-桩只模仿接口行为，不算 Attention：
+LPU 之外的全部硬件（GPU、SmartNIC 里的 DPU、ETH 交换机、tray 上的 CPU 与 DDR）都收在这两个桩里，只模仿接口行为：
 
 * 按注入表发 token
 * 做两层 credit
 * 收结果比对
+
+不算 Attention，不算 FC0 输入的乱序重排，不做 CPU 侧的缓存管理。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -22,20 +25,29 @@
 
 ## 1　定位与边界
 
-**GPU / DPU 桩**站在 Node 的入口：
+**入口桩**站在 LPU 的入口，一个 GPU 一个实例：
 
-* 每个 GPU 按注入表在给定拍，把一个 token 的 6368 B 级联包封成 MSG 发向 PCIe Switch
+* 按注入表在给定拍，把一个 token 的 6368 B 级联包封成 MSG 发向 PCIe Switch
 * 发前过两道闸门：GPU 本地 credit、Bach 全局 credit 池
 * 收端回来的 retired 信息更新 credit
 * EP6+TP8 下还做 LPU Dispatch 派遣
 
-**出口桩**站在出口：
+**出口桩**站在 LPU 的出口：
 
 * 从 PCIe Switch 收结果包
 * 按 `(gpu_id, token_id)` 与参考实现逐 bit 比对
 * 记完成集合
 
 两者各带一个路由器（自己那一侧的 RouterStation 与链路模型），包在这里进出链路。
+
+片外那几样硬件在桩里的落点：
+
+| 硬件 | 在桩里是什么 |
+| - | - |
+| GPU | 注入表的一个 `gpu_id`，加它那份本地 credit |
+| SmartNIC 里的 DPU | 入口桩封包时写的自定义包头 `gpu_id(8) + token_id(16)` |
+| ETH 交换机与 ETH 口 | 桩到 PCIe Switch 之间那条链路实例的带宽与延迟（50 GB/s、3 μs） |
+| tray 上的 CPU 与 DDR | 注入表的发包顺序，即当前选定的 LPU 广播下“只把 token 送进入口 chip”这一条 |
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 420" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -44,10 +56,10 @@
     <marker id="a0s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#475569"/></marker>
   </defs>
   <rect x="0" y="0" width="1100" height="420" fill="#ffffff"/>
-  <text x="20" y="28" font-size="12" fill="#111827">GPU / DPU 桩与出口桩 · 第 0 层</text>
+  <text x="20" y="28" font-size="12" fill="#111827">片外桩 · 第 0 层</text>
 
   <rect x="60" y="80" width="300" height="150" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="72" y="104" font-size="12" fill="#7c2d12">GPU / DPU 桩（每 GPU 一个实例）</text>
+  <text x="72" y="104" font-size="12" fill="#7c2d12">入口桩（每 GPU 一个实例）</text>
   <text x="72" y="124" font-size="10" fill="#92400e">inject_tbl · 注入拍 + 6368 B 级联包</text>
   <text x="72" y="140" font-size="10" fill="#92400e">两层 credit：buffer_used / pool_avail</text>
   <text x="72" y="156" font-size="10" fill="#92400e">DPU 包头 gpu_id(8) + token_id(16)</text>
@@ -59,7 +71,7 @@
   <text x="72" y="294" font-size="12" fill="#7c2d12">出口桩</text>
   <text x="72" y="314" font-size="10" fill="#92400e">收结果包 → 按 (gpu_id, token_id) 重组</text>
   <text x="72" y="330" font-size="10" fill="#92400e">与参考实现逐 bit 比对 · 完成集合</text>
-  <text x="72" y="346" font-size="10" fill="#92400e">retired_token 回报 GPU 桩</text>
+  <text x="72" y="346" font-size="10" fill="#92400e">retired_token 回报入口桩</text>
 
   <rect x="440" y="120" width="180" height="160" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="452" y="144" font-size="12" fill="#111827">桩侧路由器</text>
@@ -85,7 +97,7 @@
   <line x1="200" y1="270" x2="200" y2="232" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a0)"/>
   <text x="206" y="256" font-size="9" fill="#6b7280">done 集合 / retired 汇总</text>
 
-  <text x="20" y="400" font-size="10.5" fill="#374151">桩是模块（tick=true），坐标登记在外部节点表里，挂在 PCIe Switch 上；链路与 Switch 见“链路与 PCIe Switch”文档。</text>
+  <text x="20" y="400" font-size="10.5" fill="#374151">桩是模块（tick=true），坐标登记在片外节点表里，挂在 PCIe Switch 上；链路与 Switch 各有一份文档。</text>
 </svg>
 ```
 
@@ -130,7 +142,7 @@ mem done_set        FF 阵列   N_token × {done, mismatch}               1RW   
 
 ## 4　流水线总览
 
-* **GPU 桩每拍**：G1 注入判定（两道闸门）→ G2 封包进 `tx_q` → 桩侧路由器按链路带宽与延迟送出
+* **入口桩每拍**：G1 注入判定（两道闸门）→ G2 封包进 `tx_q` → 桩侧路由器按链路带宽与延迟送出
   * `retired` 到来时更新 credit
 * **出口桩每拍**：X1 收 flit 重组 → X2 尾 flit 时比对、记完成、回报 retired
 
@@ -140,19 +152,19 @@ mem done_set        FF 阵列   N_token × {done, mismatch}               1RW   
 
 ## 5　逐级行为
 
-### G1 · 注入判定（GPU / DPU 桩）
+### G1 · 注入判定（入口桩）
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
 | `inject_tbl` 游标、`credit_local[g]`、`pool`、`dispatch_slots`、`tx_q` 余量 | 1. `tbl[cur].inject_cycle ≤ now`<br>2. 第一层：`buffer_used[g] < buffer_depth_tokens[g]`<br>3. 第二层：`pool_avail = pool_total − Σ inflight_bach > 0`，grant 按 GPU 轮询公平发；两道闸门都开才流，1 credit = 1 token<br>4. EP6+TP8：`∀ r: dispatch_slots[r] > 0` 才派遣，派时各 −1（顺序调度）<br>5. 通过 → `buffer_used[g] += 1`，`inflight_bach[g] += 1`，`seq_w += 1`，进 G2；否则等 | `credit_local`、`pool`、`dispatch_slots`、`seq_w` | D1 |
 
-### G2 · 封包（GPU / DPU 桩）
+### G2 · 封包（入口桩）
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
 | G1 通过的 token、`hdr_cnt[g]`、`tx_q` | 1. `Encapsulate`：DPU 自定义包头 `gpu_id(8) + token_id(16)`，Payload ≤ 64 KB；MSG Header 按 `common/message.h`（加载 weights 时由 DPU 写 MSG Header）；`hdr_cnt[g] += 1`<br>2. 切成 `ceil(size / 256)` 个 flit 进 `tx_q`；首 flit 携带 Header<br>3. 桩侧路由器每拍从 `tx_q` 取 1 flit 走 `tx`，按链路模型算到达拍 | `tx_q`、`tx` | D1 |
 
-### G3 · retired 记账（GPU / DPU 桩）
+### G3 · retired 记账（入口桩）
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
@@ -175,13 +187,11 @@ mem done_set        FF 阵列   N_token × {done, mismatch}               1RW   
 ## 6　参数汇总
 
 ```
-ETH_INJECT_LATENCY   3 μs → 3000 T；50 GB/s 每口
-PCIE_IN_BW           x16 54.4 GB/s
 TX_Q_DEPTH           32 flit           // 待定
 SEQ_W                16 bit            // 序号位宽，回绕模 2^W
 buffer_depth_tokens、pool_total          由输入给；GPU 数与每 GPU 的 batch 由输入给
 BCORE_MM_SLOTS       ≥ 32 × 26 = 832（B core Matrix Mem 槽位，参数校验）
-组播能力             开关，默认关（第 6 章“先假设 PCIe 没有组播能力”）
+桩到 PCIe Switch 的那条链路   按 ETH 实例配（带宽与延迟见链路的参数）
 ```
 
 ***
@@ -211,3 +221,6 @@ BCORE_MM_SLOTS       ≥ 32 × 26 = 832（B core Matrix Mem 槽位，参数校�
   * 出口桩的落地重组因此与 CoreStation 的进 core 通路同构
 * **两层 credit 为什么全记在桩里，不分到 Switch**
   * 《软件栈》把两道闸门都定义在 GPU 侧
+* **CPU、SmartNIC、ETH 交换机为什么不各建一个模块**
+  * 它们在 LPU 之外，对 LPU 的作用只有三样：token 什么时候进来、包头写什么、这一段链路多宽多长
+  * 三样都能表达成注入表的字段与一条链路实例的参数

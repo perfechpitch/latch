@@ -1,7 +1,8 @@
-# 7　DTE DSA
+# DTE DSA
 
 **模式**：design（陈述当前设计，取舍收在“取舍”段落里）
-**层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../07-latch-建模计划.md)）的建模方式之上
+**层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
+**在硬件里的位置**：LPU → chip → core → **DTE DSA**
 
 给实现 DTE 的人：八个独立打拍的模块各自的端口、存储器、流水线与逐级行为、参数与机制。
 
@@ -514,7 +515,7 @@ LUT 的 task_mode_table  与 TS 快速启动一起不建
 | 出核改头 | L4 第 2 条 | `dte_header_rewrite` |
 | 纯包头任务 | H1 第 3 条 | `dte_hp_zero_len` |
 | 分开存储：软件 / 硬件包头独立，硬件包头分静态与动态 | `sw_hdr` / `hw_static` / `hw_dyn` | — |
-| 发包时 MSG Header 由 DTE 写入；加载 weights 时由 DPU 写入 | L4 第 2 条 / GPU 桩 | `msg_header_writer` |
+| 发包时 MSG Header 由 DTE 写入；加载 weights 时由 DPU 写入 | L4 第 2 条 / 入口桩 | `msg_header_writer` |
 | topK 复制到独立 mem 供 MU 读；进核必带 topK，result 出核不带 | L1 第 3 条 + L2 第 5 条 | `dte_topk_copy` |
 | 完成后写 shareMem 再通知 TS | L2 第 5 条 → R1 → P1 | `dte_sharemem_write` |
 

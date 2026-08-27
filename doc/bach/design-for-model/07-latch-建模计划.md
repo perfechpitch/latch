@@ -13,7 +13,7 @@
 
 三条边界：
 
-* 模型的对象从 GPU 桩到 core 内的每个模块，粒度与《Core 内硬件》《执行单元与存储》的子块一致
+* 模型的顶层是一个 LPU，即 48 颗 chip 装模型的一层 MoE。LPU 之外的硬件一律一个桩；chip 之内的对象粒度与《Core 内硬件》《执行单元与存储》的子块一致
 * 机制全部实现，数值按 bit 级与参考实现比对
 * 《建模参数与性能模型》的参数直接成为各单元的输入
 
@@ -36,27 +36,127 @@
 
 “形态”一列：模块 = 独立打拍的 `ClkModule`；装配 = 只做构造与接线的容器；静态 = 仿真前算好的表；桩 = 只模仿接口行为的模块。
 
-| 层 | 对象 | 对应设计 | 形态 |
-| - | - | - | - |
-| 系统 | GPU / DPU 桩 | 第 6 章“GPU → Bach 的两层 credit 反压”、第 2 章 Node 组成 | 桩 |
-| 系统 | ETH 链路、PCIe 链路、C2C 链路 | 第 2 章互连参数、第 5 章延迟表 | 模块（带宽、延迟、到达时刻） |
-| 系统 | PCIe Switch | 第 2 章 Node 组成、第 6 章两层 credit | 模块 |
-| 系统 | 出口桩 | 第 6 章输出包格式 | 桩 |
-| chip | Chip（2×5 阵列、Harvest mask、C2C 端口） | 第 2 章“Chip 与 Harvest” | 装配 |
-| chip | SCP 与 ctrl_noc | 第 2 章 Boot、第 3 章 Bach Core 顶层 | 桩 + 配置总线 |
-| core | Core | 第 3 章 Bach Core 顶层 | 装配 |
-| core | Router：RouterTable 与 CSR、RouterStation ×3、Xbar、CoreStation、CoreMem 重发、ReduceModule、Retire、CoreMemCreditMonitor | 第 3 章 Router | 模块 ×8 |
-| core | TS：CFG_REG、User_Match、DataIn_task_table、Stream_table、Task_ctrl、MU_Arb / VU_Arb、DTE_Arb、Credit_monitor、Task_done | 第 3 章 TS 任务调度器 | 模块 ×9 |
-| core | RV core ×3：task_queue、指令执行器（`src/rv32`）、dsa_iss、访存（sm_lsq / cm_lsq）、CSR | 第 3 章 RV Core | 模块 ×3 |
-| core | DTE：Header Parser、Commit、TaskQueue ×4、Lane ×4（含 AGCU）、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | 第 4 章 DTE DSA | 模块 ×8 |
-| core | MU：regfile、issue_q、gen_ep_info、agu ×3、ldq ×2、matrix exe、stq | 第 4 章 MU DSA | 模块 ×7 |
-| core | VU：config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU0 / VALU1 / VALU2 / VSFU、MEXE、SEXE、VRF / MRF / SRF、Profile | 第 4 章 VU DSA | 模块 ×11 |
-| core | Core Mem、Matrix Mem、Share Mem 及各自的仲裁器 | 第 4 章存储子系统 | 模块 ×3 |
-| 静态 | 拓扑与地址空间、切分与权重分配、路由表与任务链生成、参考实现 | 第 2 章切分、第 6 章编译器产物 | 静态（编译侧） |
+| 层 | 对象 | 对应设计 | 形态 | 文档 |
+| - | - | - | - | - |
+| LPU 之外 | 片外桩：入口桩、出口桩 | 第 6 章“GPU → Bach 的两层 credit 反压”“输出包格式”、第 2 章 Node 组成 | 桩 ×2 | [`external-stub.md`](07-units/external-stub.md) |
+| LPU | LPU：48 chip 的构造与接线、全局坐标换算、Harvest 与逻辑 core 映射的读入 | 第 2 章“集群与 Node”“机柜内多 tray 互联与 token 派遣”、第 6 章编译器的硬件抽象 | 装配 | [`lpu.md`](07-units/lpu.md) |
+| LPU | 链路：R2R、C2C、跨 tray 纵向、PCIe ↔ Router、ETH | 第 2 章互连参数、第 5 章延迟表 | 模块（带宽、延迟、到达时刻） | [`link.md`](07-units/link.md) |
+| LPU | PCIe Switch | 第 2 章“tray 组成”、第 6 章两层 credit | 模块 ×12 | [`pcie-switch.md`](07-units/pcie-switch.md) |
+| chip | Chip（2×5 阵列、Harvest mask、四个 C2C 端口）、SCP 桩、ctrl_noc 端点 | 第 2 章“Chip 与 Harvest”“Boot 流程” | 装配 + 模块 ×2 | [`chip/chip.md`](07-units/chip/chip.md) |
+| core | Core | 第 3 章 Bach Core 顶层 | 装配 | [`chip/core/core.md`](07-units/chip/core/core.md) |
+| core | Router：RouterTable 与 CSR、RouterStation ×3、Xbar、CoreStation、CoreMem 重发、ReduceModule、Retire、CoreMemCreditMonitor | 第 3 章 Router | 模块 ×8 | [`chip/core/router.md`](07-units/chip/core/router.md) |
+| core | TS：CFG_REG、User_Match、DataIn_task_table、Stream_table、Task_ctrl、MU_Arb / VU_Arb、DTE_Arb、Credit_monitor、Task_done | 第 3 章 TS 任务调度器 | 模块 ×9 | [`chip/core/ts.md`](07-units/chip/core/ts.md) |
+| core | RV core ×3：task_queue、指令执行器（`src/rv32`）、dsa_iss、访存（sm_lsq / cm_lsq）、CSR | 第 3 章 RV Core | 模块 ×3 | [`chip/core/rv-core.md`](07-units/chip/core/rv-core.md) |
+| core | DTE：Header Parser、Commit、TaskQueue ×4、Lane ×4（含 AGCU）、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | 第 4 章 DTE DSA | 模块 ×8 | [`chip/core/dte.md`](07-units/chip/core/dte.md) |
+| core | MU：regfile、issue_q、gen_ep_info、agu ×3、ldq ×2、matrix exe、stq | 第 4 章 MU DSA | 模块 ×7 | [`chip/core/mu.md`](07-units/chip/core/mu.md) |
+| core | VU：config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU0 / VALU1 / VALU2 / VSFU、MEXE、SEXE、VRF / MRF / SRF、Profile | 第 4 章 VU DSA | 模块 ×11 | [`chip/core/vu.md`](07-units/chip/core/vu.md) |
+| core | Core Mem、Matrix Mem、Share Mem 及各自的仲裁器 | 第 4 章存储子系统 | 模块 ×3 | [`chip/core/memory.md`](07-units/chip/core/memory.md) |
+| 静态 | 拓扑与地址空间、切分与权重分配、路由表与任务链生成、参考实现 | 第 2 章切分、第 6 章编译器产物 | 静态（编译侧） | — |
+
+### 对象的层级与文档归属
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 640" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <rect x="0" y="0" width="1160" height="640" fill="#ffffff"/>
+  <text x="20" y="30" font-size="12" fill="#111827">建模对象的层级与文档归属</text>
+  <rect x="30" y="60" width="186" height="62" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
+  <text x="42" y="80" font-size="11.5" fill="#7c2d12">片外桩</text>
+  <text x="42" y="96" font-size="9" fill="#92400e">入口桩 · 出口桩</text>
+  <text x="204" y="80" font-size="9" fill="#9ca3af" text-anchor="end">桩 ×2</text>
+  <text x="204" y="113" font-size="8.5" fill="#9ca3af" text-anchor="end">external-stub.md</text>
+  <rect x="30" y="150" width="186" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="42" y="170" font-size="11.5" fill="#111827">LPU</text>
+  <text x="42" y="186" font-size="9" fill="#475569">48 chip · 12 × 4 网格</text>
+  <text x="42" y="200" font-size="9" fill="#475569">坐标换算 · Harvest</text>
+  <text x="204" y="170" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
+  <text x="204" y="211" font-size="8.5" fill="#9ca3af" text-anchor="end">lpu.md</text>
+  <line x1="123" y1="122" x2="123" y2="148" stroke="#b45309" stroke-dasharray="4 3"/>
+  <text x="131" y="140" font-size="9" fill="#92400e">经 PCIe Switch 接入</text>
+  <rect x="230" y="150" width="206" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="242" y="170" font-size="11.5" fill="#111827">链路</text>
+  <text x="424" y="170" font-size="9" fill="#9ca3af" text-anchor="end">模块</text>
+  <text x="424" y="185" font-size="8.5" fill="#9ca3af" text-anchor="end">link.md</text>
+  <rect x="230" y="206" width="206" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="242" y="226" font-size="11.5" fill="#111827">PCIe Switch</text>
+  <text x="424" y="226" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×12</text>
+  <text x="424" y="241" font-size="8.5" fill="#9ca3af" text-anchor="end">pcie-switch.md</text>
+  <rect x="230" y="284" width="206" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="242" y="304" font-size="11.5" fill="#111827">chip ×48</text>
+  <text x="242" y="320" font-size="9" fill="#475569">2×5 core · SCP · ctrl_noc</text>
+  <text x="424" y="304" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
+  <text x="424" y="331" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/chip.md</text>
+  <polyline points="216,185 232,185 232,172 230,172" fill="none" stroke="#94a3b8"/>
+  <polyline points="216,185 232,185 232,228 230,228" fill="none" stroke="#94a3b8"/>
+  <polyline points="216,185 232,185 232,306 230,306" fill="none" stroke="#94a3b8"/>
+  <rect x="452" y="284" width="208" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="464" y="304" font-size="11.5" fill="#111827">SCP 桩 · ctrl_noc 端点</text>
+  <text x="648" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×2</text>
+  <text x="648" y="319" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/chip.md</text>
+  <rect x="452" y="356" width="208" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="464" y="376" font-size="11.5" fill="#111827">core ×10</text>
+  <text x="648" y="376" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
+  <text x="648" y="391" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/core.md</text>
+  <polyline points="436,312 452,312 452,306 452,306" fill="none" stroke="#94a3b8"/>
+  <polyline points="436,312 452,312 452,378 452,378" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="60" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="80" font-size="11.5" fill="#111827">Router</text>
+  <text x="688" y="96" font-size="9" fill="#475569">RouterStation ×3 · Xbar · CoreStation · ReduceModule</text>
+  <text x="688" y="110" font-size="9" fill="#475569">RouterTable / CSR · CoreMemCreditMonitor · Retire</text>
+  <text x="688" y="124" font-size="9" fill="#475569">CoreMem 重发</text>
+  <text x="1124" y="80" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
+  <text x="1124" y="123" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/router.md</text>
+  <polyline points="660,378 676,378 676,96 676,96" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="144" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="164" font-size="11.5" fill="#111827">TS 任务调度器</text>
+  <text x="688" y="180" font-size="9" fill="#475569">CFG_REG · User_Match · DataIn_task_table · Stream_table</text>
+  <text x="688" y="194" font-size="9" fill="#475569">Task_ctrl · DTE_Arb · MU_Arb / VU_Arb · Credit_monitor</text>
+  <text x="688" y="208" font-size="9" fill="#475569">Task_done</text>
+  <text x="1124" y="164" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×9</text>
+  <text x="1124" y="207" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/ts.md</text>
+  <polyline points="660,378 676,378 676,180 676,180" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="228" width="460" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="248" font-size="11.5" fill="#111827">RV core ×3</text>
+  <text x="688" y="264" font-size="9" fill="#475569">task_queue · 指令执行器（src/rv32）· dsa_iss · lsq · CSR</text>
+  <text x="1124" y="248" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×3</text>
+  <text x="1124" y="263" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/rv-core.md</text>
+  <polyline points="660,378 676,378 676,250 676,250" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="284" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="304" font-size="11.5" fill="#111827">DTE DSA</text>
+  <text x="688" y="320" font-size="9" fill="#475569">Header Parser · Commit · TaskQueue ×4</text>
+  <text x="688" y="334" font-size="9" fill="#475569">Lane ×4（AGCU）· 中间 Buffer · Completion RS · Hmem 与 LUT</text>
+  <text x="688" y="348" font-size="9" fill="#475569">topK 与 shareMem 写</text>
+  <text x="1124" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
+  <text x="1124" y="347" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/dte.md</text>
+  <polyline points="660,378 676,378 676,320 676,320" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="368" width="460" height="58" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="388" font-size="11.5" fill="#111827">MU DSA</text>
+  <text x="688" y="404" font-size="9" fill="#475569">regfile · issue_q · gen_ep_info · agu ×3 · ldq ×2</text>
+  <text x="688" y="418" font-size="9" fill="#475569">matrix exe · stq</text>
+  <text x="1124" y="388" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×7</text>
+  <text x="1124" y="417" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/mu.md</text>
+  <polyline points="660,378 676,378 676,397 676,397" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="438" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="458" font-size="11.5" fill="#111827">VU DSA</text>
+  <text x="688" y="474" font-size="9" fill="#475569">config_register · ISQ · pipe_ctrl · LU · SU</text>
+  <text x="688" y="488" font-size="9" fill="#475569">SMUX / DMUX · VALU ×3 · VSFU · MEXE · SEXE · 寄存器堆</text>
+  <text x="688" y="502" font-size="9" fill="#475569">Profile</text>
+  <text x="1124" y="458" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×11</text>
+  <text x="1124" y="501" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/vu.md</text>
+  <polyline points="660,378 676,378 676,474 676,474" fill="none" stroke="#94a3b8"/>
+  <rect x="676" y="522" width="460" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="688" y="542" font-size="11.5" fill="#111827">存储</text>
+  <text x="688" y="558" font-size="9" fill="#475569">Core Mem · Matrix Mem · Share Mem</text>
+  <text x="1124" y="542" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×3</text>
+  <text x="1124" y="557" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/memory.md</text>
+  <polyline points="660,378 676,378 676,544 676,544" fill="none" stroke="#94a3b8"/>
+  <text x="20" y="600" font-size="10.5" fill="#374151">装配容器只做构造与接线，自身没有 Cycle()；模块各自持有推进它的协程；桩只模仿接口行为。</text>
+  <text x="20" y="622" font-size="10.5" fill="#374151">右下角是这一层对应的单元文档，全部在 07-units/ 下，目录层级与本图一致。</text>
+</svg>
+```
 
 ### 本轮不建的部分
 
-* Host CPU、Node CPU、tray CPU（源文档叫 Board CPU）的业务流控与退出、动态专家调度（第 2 章“业务流控与退出”）。LPU Dispatch 的派遣规则（所有 R core 有余量才派遣）放在 GPU / DPU 桩里。
+* Host CPU、Node CPU、tray CPU（源文档叫 Board CPU）的业务流控与退出、动态专家调度（第 2 章“业务流控与退出”）。LPU Dispatch 的派遣规则（所有 R core 有余量才派遣）放在入口桩里。
 * Debug Module、DTM、GDB。
 * 异常、ECC、看门狗、功耗类机制（RV core 九类异常、MU Drain & Trap、VU error_code、TS Except_Check、DTE 首错保留、DIDT 分级、零输入门控、MU 与 VU 错峰）。各单元给这些机制留出状态位与接口名，本轮不实现其行为。
 * RV core 的流水线细节：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突。它们折算成每条指令 1 拍。
@@ -73,7 +173,7 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 
 ### 挂时钟粒度：图上的每个模块独立打拍
 
-硬件框图里的每个模块都是一个 `tick=true` 的 `ClkModule`，各自持有推进它的协程：Core 内的 Router 八个模块、TS 九个模块、三个 RV core、DTE / MU / VU 的各模块、三块存储；Core 外的 PCIe Switch、链路、GPU / DPU 桩、出口桩、SCP 桩。Core 与 Chip 不是模块，是装配容器：构造各模块、按各单元文档的接口把端口对接起来，自身没有 `Cycle()`。
+硬件框图里的每个模块都是一个 `tick=true` 的 `ClkModule`，各自持有推进它的协程：Core 内的 Router 八个模块、TS 九个模块、三个 RV core、DTE / MU / VU 的各模块、三块存储；Core 外的 PCIe Switch、链路、SCP 桩、ctrl_noc 端点，以及 LPU 之外的入口桩与出口桩。LPU、Chip 与 Core 不是模块，是装配容器：构造各模块、按各单元文档的接口把端口对接起来，自身没有 `Cycle()`。
 
 一个模块一拍做的事全部写在它的 `Step()` 里：读入口端口上一拍锁存的值，算本拍的组合逻辑，把结果写到出口端口，下拍对方才看得到。`Cycle()` 只做起手的 `DelayCycle(1)` 再调 `Step()`，`Step()` 里一次也不许让出。模块之间没有调用关系，同一拍里各模块的执行顺序不影响结果。这条分工写在 `ip/module_base.h` 的基类里。
 
@@ -133,33 +233,32 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 
 ## 模型结构
 
-### 目录按对象清单
+### 目录按硬件层级
 
-沿用 `src/bach/` 现有的目录组织。`ip/` 下每个头文件对应对象清单里的一个模块；Python 版模拟器遗留的单元（`credit_unit.h`、`moe_bitmap.h`、`compute/`、`eth_switch/`、`external/phase*`、`dispatcher.h`）保留不动，新单元不依赖它们。
+`ip/` 的目录层级与对象清单的层级一致：一层硬件一个目录，目录里每个头文件对应清单里的一个模块，与 `07-units/` 下那一层的文档一一对上。Python 版模拟器遗留的单元（`credit_unit.h`、`moe_bitmap.h`、`compute/`、`eth_switch/`、`external/phase*`、`dispatcher.h`）保留不动，新单元不依赖它们。
 
 ```
 src/bach/
   ip/
     module_base.h                  模块基类：Cycle() = DelayCycle(1) + Step()，Step() 内不让出
     node_context.h                 每个节点都有的编号、参数表与记录器
-    route_config.h                 外部节点与跨 chip 网关的坐标换算表
     wiring.h                       接一条双向物理链路（数据端口对 + 三种 release 端口）
-    system.h                       持有全部节点，做跨 chip 与阵列外的接线
+    lpu.h                          LPU 装配：构造 48 个 Chip、按 12 × 4 网格接 C2C、接 PCIe Switch 与片外桩
+    lpu_grid.h                     全局坐标换算：(tray, 层, 列) ↔ (gx, gy)，以及片外节点与跨 chip 网关的坐标
     link/
       link.h                       链路模型：带宽、延迟、arrive_cycle 计算
+    pcie_switch.h                  双路 x16、组播复制、按最慢收端反压
     external/
-      gpu.h                        GPU / DPU 桩：两层 credit、自定义包头、retired 汇总、LPU Dispatch 派遣
-      out.h                        出口桩：收结果、按 (gpu_id, token_id) 与参考实现比对
-      scp.h                        SCP 桩：boot 序列、ctrl_noc 配置事务
-    node/
-      pcie_switch.h                双路 x16、组播复制、按最慢收端反压
+      in_stub.h                    入口桩：注入表、两层 credit、自定义包头、LPU Dispatch 派遣
+      out_stub.h                   出口桩：收结果、按 (gpu_id, token_id) 与参考实现比对
     chip/
-      chip.h                       2×5 阵列、Harvest mask、四个边界 core 的 C2C 端口、ctrl_noc
+      chip.h                       2×5 阵列、Harvest mask、四个 C2C 端口、ctrl_noc
+      scp.h                        SCP 桩：boot 序列、ctrl_noc 配置事务
+      ctrl_noc_endpoint.h          ctrl_noc 在 core 内的落点：寄存器写入分发
       core/
         core.h                     装配容器：构造 core 内全部模块，按各单元文档的接口对接端口
         core_context.h             各模块共用的只读上下文（core id、角色、参数表）
         ports.h                    端口束：valid/ready、credit/release、AXI-Stream-like、脉冲、电平各一种字段结构
-        ctrl_noc_endpoint.h        ctrl_noc 在 core 内的落点：寄存器写入分发
         router/
           router_table.h           RouterTable 与 CSR、Credit Bypass Route、多副本提交状态机
           router_station.h         ×4：Header Parser、VC Buffer、Packet Context、Stream Resource Table、VC Credit
@@ -212,29 +311,33 @@ src/bach/
 
 模块之间只有端口。装配容器把生产者的出口端口和消费者的入口端口对接，两侧都只看到端口束的字段，不持有对方的类型，装配顺序不受构造顺序牵制。
 
-`test/bach/ip/` 按 `ip/` 的一级镜像分目录，每个模块旁边有它自己的测试。
+`test/bach/ip/` 按 `ip/` 的层级镜像分目录，每个模块旁边有它自己的测试。
 
 ### 物理归属
 
 **Router 属于 Core。**
 
 * Core 构造时创建各模块，Router 的八个模块是其中一组，每个 Core 一份
-* 片内 mesh 的连线动作在 Chip 里做，但被连的端口长在 RouterStation 上
+* chip 内 mesh 的连线动作在 Chip 里做，但被连的端口长在 RouterStation 上
 * 坏核只构造 Router 的模块，不构造 TS、RV core、DSA 与存储
 
-**PCIe Switch 属于 node。**
+**链路与 PCIe Switch 属于 LPU。**
 
-* 它是片外的交换节点，坐标是不与核阵列重叠的锚点
-* 端口由拓扑起名，核那一侧仍是 chip 边界四个 C2C 端口之一
+* 每条物理链路每方向一个链路实例，实例本身不属于任何一颗 chip，两端各是一个模块的端口
+* PCIe Switch 的坐标是不与核阵列重叠的锚点，端口由拓扑起名；核那一侧仍是 chip 边界四个 C2C 端口之一
 * 两侧各用各的端口标识，接线时对接
 
-**GPU / DPU 桩、出口桩、SCP 桩属于 system。**
+**SCP 桩与 ctrl_noc 端点属于 Chip。**
 
-* 它们的坐标不在核阵列内，登记在外部节点表里
-* GPU / DPU 桩与出口桩挂在 PCIe Switch 上，各自带一个路由器
-  * 包先进自己那个路由器的本地口，由它按链路的带宽与延迟送到网关核
-  * 回来的包也在这个路由器上落地重组，再交给设备本身
 * SCP 桩每 chip 一个，只接 ctrl_noc
+* ctrl_noc 端点每 core 一个，落点是 core 内各模块的 `cfg` 口
+
+**入口桩与出口桩在 LPU 之外。**
+
+* 它们的坐标不在核阵列内，登记在片外节点表里
+* 两个桩挂在 PCIe Switch 上，各自带一个路由器
+  * 包先进自己那个路由器的本地口，由它按链路的带宽与延迟送到网关核
+  * 回来的包也在这个路由器上落地重组，再交给桩本身
 
 ### 接口的声明方式
 
@@ -244,179 +347,13 @@ src/bach/
 
 ## 各单元的建模规格
 
-每个单元一份文档，放在 `07-units/` 下，按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）的六章写：定位与边界（第 0 层图：本单元的模块与邻居）、接口（每个端口组一个声明块）、存储器（含级间 latch）、流水线总览（第 1 层图）、逐级行为（第 2 层图，每级四要素）、参数汇总；之后加本章要求的两段：机制覆盖（“落点”是模型里承载该机制的模块与函数，“用例”是 `test/bach/ip/` 下的测试名）、参数与简化（设计未给值的参数写默认值并标“待定”，全部待定值汇总在本章末尾）。图一律手写 SVG，用该规范的 stencil；上层盒子名 = 下层图标题，上层箭头上的信号名 = 下层图的端口组名。
+每个单元一份文档，放在 `07-units/` 下，目录层级与对象清单一致。文档按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）的六章写：定位与边界（第 0 层图：本单元的模块与邻居）、接口（每个端口组一个声明块）、存储器（含级间 latch）、流水线总览（第 1 层图）、逐级行为（第 2 层图，每级四要素）、参数汇总；之后加本章要求的两段：机制覆盖（“落点”是模型里承载该机制的模块与函数，“用例”是 `test/bach/ip/` 下的测试名）、参数与简化（设计未给值的参数写默认值并标“待定”，全部待定值汇总在本章末尾）。
 
-### 总结构图
+装配容器那几份（LPU、Chip、Core）没有自己的一拍工作，它们的“逐级行为”写的是构造期的接线步骤，不画第 1 层图。
 
-Core 的第 0 层图：Core 内全部单元与它们之间的端口组。每个盒子对应一份单元文档，盒子里列的是该单元独立打拍的模块；箭头上的名字是端口组名，在两侧单元文档的“接口”章里各有一个声明块。Core 外的 GPU / DPU 桩、链路与 PCIe Switch、Chip / SCP 在各自单元文档的第 0 层图里。
+图一律手写 SVG，用该规范的 stencil；上层盒子名 = 下层图标题，上层箭头上的信号名 = 下层图的端口组名。逐层的缝合关系就是文档的目录层级：LPU 第 0 层图里的一颗 chip 盒子，展开是 Chip 的第 0 层图；Chip 图里的一个 core 盒子，展开是 Core 的第 0 层图；Core 图里的一个单元盒子，展开是该单元文档的第 0 层图。
 
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 900" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="c0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="c0s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#475569"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1240" height="900" fill="#ffffff"/>
-  <text x="20" y="30" font-size="12" fill="#111827">Bach Core · 第 0 层</text>
-
-  <!-- 对外端口 -->
-  <polygon points="560,50 660,50 650,90 550,90" fill="#f8fafc" stroke="#374151"/>
-  <text x="605" y="74" font-size="10.5" fill="#374151" text-anchor="middle">data_UD</text>
-  <polygon points="30,180 130,180 120,220 20,220" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="204" font-size="10.5" fill="#374151" text-anchor="middle">data_L</text>
-  <polygon points="1120,180 1220,180 1210,220 1110,220" fill="#f8fafc" stroke="#374151"/>
-  <text x="1165" y="204" font-size="10.5" fill="#374151" text-anchor="middle">data_R</text>
-  <polygon points="30,800 130,800 120,840 20,840" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="824" font-size="10.5" fill="#374151" text-anchor="middle">scp_ctrl</text>
-
-  <!-- Router -->
-  <rect x="200" y="120" width="380" height="150" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="216" y="144" font-size="12" fill="#111827">Router</text>
-  <text x="216" y="166" font-size="10" fill="#475569">RouterStation ×3 · Xbar · CoreStation</text>
-  <text x="216" y="182" font-size="10" fill="#475569">ReduceModule · RouterTable / CSR</text>
-  <text x="216" y="198" font-size="10" fill="#475569">CoreMemCreditMonitor · Retire · CoreMem 重发</text>
-  <text x="216" y="222" font-size="9.5" fill="#9ca3af">三个方向各 256 B/T，进 core 与出 core 并行</text>
-  <line x1="605" y1="92" x2="520" y2="118" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <line x1="132" y1="200" x2="198" y2="200" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <polyline points="1108,200 1000,200 1000,100 590,100 590,118" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="640" y="96" font-size="9" fill="#6b7280">flit + vc_release / stream_release / reduce_release</text>
-
-  <!-- TS -->
-  <rect x="760" y="120" width="380" height="150" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="776" y="144" font-size="12" fill="#111827">TS 任务调度器</text>
-  <text x="776" y="166" font-size="10" fill="#475569">CFG_REG · User_Match · DataIn_task_table</text>
-  <text x="776" y="182" font-size="10" fill="#475569">Stream_table · Task_ctrl · DTE_Arb / MU_Arb / VU_Arb</text>
-  <text x="776" y="198" font-size="10" fill="#475569">Credit_monitor · Task_done</text>
-  <text x="776" y="222" font-size="9.5" fill="#9ca3af">stream 16 项，任务链 64 项</text>
-  <line x1="582" y1="170" x2="758" y2="170" stroke="#475569" marker-end="url(#c0)"/>
-  <text x="670" y="164" font-size="9" fill="#6b7280" text-anchor="middle">trigger · credit_pulse · reduce_done</text>
-  <line x1="758" y1="240" x2="582" y2="240" stroke="#475569" marker-end="url(#c0)"/>
-  <text x="670" y="256" font-size="9" fill="#6b7280" text-anchor="middle">credit_req · stream_credit_return · retire</text>
-
-  <!-- RV core ×3 -->
-  <rect x="200" y="340" width="220" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="216" y="364" font-size="12" fill="#111827">DTE RV core</text>
-  <text x="216" y="384" font-size="10" fill="#475569">src/rv32 · ITCM 4 KB · DTCM 8 KB</text>
-  <text x="216" y="400" font-size="10" fill="#475569">task_queue · dsa_iss · sm_lsq · cm_lsq</text>
-  <rect x="480" y="340" width="220" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="496" y="364" font-size="12" fill="#111827">MU RV core</text>
-  <text x="496" y="384" font-size="10" fill="#475569">src/rv32 · ITCM 4 KB · DTCM 8 KB</text>
-  <text x="496" y="400" font-size="10" fill="#475569">task_queue · dsa_iss · sm_lsq</text>
-  <rect x="760" y="340" width="220" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="776" y="364" font-size="12" fill="#111827">VU RV core</text>
-  <text x="776" y="384" font-size="10" fill="#475569">src/rv32 · ITCM 4 KB · DTCM 8 KB</text>
-  <text x="776" y="400" font-size="10" fill="#475569">task_queue · dsa_iss · sm_lsq</text>
-
-  <!-- TS ↔ RV core -->
-  <polyline points="850,272 850,300 310,300 310,338" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <polyline points="870,272 870,310 590,310 590,338" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <line x1="890" y1="272" x2="890" y2="338" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="600" y="296" font-size="9" fill="#6b7280" text-anchor="middle">task_cmd / task_ack · task_done</text>
-
-  <!-- Share Mem -->
-  <rect x="1040" y="340" width="170" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="1044" y="344" width="162" height="82" fill="none" stroke="#374151"/>
-  <text x="1056" y="366" font-size="12" fill="#111827">Share Mem</text>
-  <text x="1056" y="386" font-size="10" fill="#475569">smem · SRAM 32 KB</text>
-  <text x="1056" y="402" font-size="10" fill="#475569">RV ×3 + DTE 写 · 仲裁</text>
-  <line x1="982" y1="385" x2="1038" y2="385" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <polyline points="700,385 730,385 730,320 1010,320 1010,395 1038,395" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <polyline points="420,385 450,385 450,325 1020,325 1020,405 1038,405" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="1010" y="380" font-size="9" fill="#6b7280" text-anchor="end">sm_lsq ×3</text>
-
-  <!-- DSA ×3 -->
-  <rect x="200" y="500" width="220" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="216" y="524" font-size="12" fill="#111827">DTE DSA</text>
-  <text x="216" y="544" font-size="10" fill="#475569">Header Parser · Commit · TaskQueue ×4</text>
-  <text x="216" y="560" font-size="10" fill="#475569">Lane ×4（AGCU）· Buffer · Completion RS</text>
-  <text x="216" y="576" font-size="10" fill="#475569">Hmem / LUT · topK / shareMem 写</text>
-  <rect x="480" y="500" width="220" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="496" y="524" font-size="12" fill="#111827">MU DSA</text>
-  <text x="496" y="544" font-size="10" fill="#475569">regfile · issue_q · gen_ep_info</text>
-  <text x="496" y="560" font-size="10" fill="#475569">agu ×3 · ldq ×2 · matrix exe · stq</text>
-  <text x="496" y="576" font-size="10" fill="#475569">32 lane × 10 级</text>
-  <rect x="760" y="500" width="220" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="776" y="524" font-size="12" fill="#111827">VU DSA</text>
-  <text x="776" y="544" font-size="10" fill="#475569">config_register · ISQ · pipe_ctrl</text>
-  <text x="776" y="560" font-size="10" fill="#475569">LU · SU · MUX · VALU ×3 · VSFU</text>
-  <text x="776" y="576" font-size="10" fill="#475569">MEXE · SEXE · VRF / MRF / SRF · Profile</text>
-
-  <!-- RV → DSA, DSA → TS -->
-  <line x1="310" y1="432" x2="310" y2="498" stroke="#475569" marker-end="url(#c0)"/>
-  <line x1="590" y1="432" x2="590" y2="498" stroke="#475569" marker-end="url(#c0)"/>
-  <line x1="870" y1="432" x2="870" y2="498" stroke="#475569" marker-end="url(#c0)"/>
-  <text x="600" y="470" font-size="9" fill="#6b7280" text-anchor="middle">dsa_cfg（dsaw / dsar）</text>
-  <polyline points="422,530 460,530 460,455 1005,455 1005,272" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#c0)"/>
-  <polyline points="702,530 740,530 740,455" fill="none" stroke="#475569" stroke-dasharray="4 3"/>
-  <polyline points="982,530 1005,530 1005,455" fill="none" stroke="#475569" stroke-dasharray="4 3"/>
-  <text x="1010" y="450" font-size="9" fill="#6b7280">dsa_done ×3（脉冲）</text>
-
-  <!-- Router ↔ DTE DSA / DTE RV -->
-  <polyline points="230,272 160,272 160,555 198,555" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="165" y="420" font-size="9" fill="#6b7280" transform="rotate(-90 165 420)" text-anchor="middle">hdr · datain · dataout（+ vc credit）</text>
-  <polyline points="250,272 180,272 180,400 198,400" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="185" y="300" font-size="9" fill="#6b7280" transform="rotate(-90 185 300)" text-anchor="middle">io_reg</text>
-
-  <!-- Core Mem / Matrix Mem -->
-  <rect x="200" y="700" width="380" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="204" y="704" width="372" height="102" fill="none" stroke="#374151"/>
-  <text x="216" y="726" font-size="12" fill="#111827">Core Mem</text>
-  <text x="216" y="746" font-size="10" fill="#475569">cmem_bank ×8 · SRAM 1024×128 B + scale 1024×4 B</text>
-  <text x="216" y="762" font-size="10" fill="#475569">6 个 master 口 · 每 bank 独占仲裁 · (1 KB + 32 B)/T</text>
-  <text x="216" y="784" font-size="9.5" fill="#9ca3af">stream_id 分片由地址计算侧完成</text>
-  <rect x="620" y="700" width="360" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="624" y="704" width="352" height="102" fill="none" stroke="#374151"/>
-  <text x="636" y="726" font-size="12" fill="#111827">Matrix Mem</text>
-  <text x="636" y="746" font-size="10" fill="#475569">mmem_bank ×32 · SRAM 1 MB + scale 128 KB / bank</text>
-  <text x="636" y="762" font-size="10" fill="#475569">DTE 读写 · MU 只读（lane 一对一）· ctrl_noc · (8 + 1 KB)/T</text>
-
-  <!-- DSA ↔ Mem -->
-  <line x1="290" y1="612" x2="290" y2="698" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="296" y="660" font-size="9" fill="#6b7280">cmem_dte_rd / wr 256 B</text>
-  <polyline points="380,612 380,650 700,650 700,698" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="560" y="646" font-size="9" fill="#6b7280" text-anchor="middle">mmem_dte_rd / wr 256 B</text>
-  <polyline points="540,612 540,630 500,630 500,698" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="504" y="690" font-size="9" fill="#6b7280">cmem_mu_rd / wr 132 B</text>
-  <line x1="640" y1="612" x2="760" y2="698" stroke="#475569" marker-start="url(#c0s)"/>
-  <text x="716" y="640" font-size="9" fill="#6b7280">mmem_mu_rd 8 KB + 1 KB</text>
-  <polyline points="820,612 820,670 560,670 560,698" fill="none" stroke="#475569" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="700" y="684" font-size="9" fill="#6b7280" text-anchor="middle">cmem_vu_ld / st 1056 bit</text>
-  <polyline points="240,432 240,470 140,470 140,720 198,720" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#c0s)" marker-end="url(#c0)"/>
-  <text x="145" y="600" font-size="9" fill="#6b7280" transform="rotate(-90 145 600)" text-anchor="middle">cm_lsq</text>
-  <polyline points="422,590 1000,590 1000,432" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#c0)"/>
-  <text x="900" y="586" font-size="9" fill="#6b7280">sm_wr</text>
-
-  <!-- ctrl_noc -->
-  <rect x="30" y="700" width="90" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="40" y="722" font-size="11" fill="#111827">ctrl_noc</text>
-  <text x="40" y="740" font-size="10" fill="#475569">端点</text>
-  <text x="40" y="756" font-size="10" fill="#475569">32 bit/T</text>
-  <line x1="75" y1="798" x2="75" y2="772" stroke="#475569" marker-end="url(#c0)"/>
-  <polyline points="75,698 75,640 100,640 100,120 200,120" fill="none" stroke="#475569" stroke-dasharray="2 3" marker-end="url(#c0)"/>
-  <text x="104" y="135" font-size="9" fill="#6b7280">cfg 写事务 → 各模块的 cfg 端口</text>
-</svg>
-```
-
-三条读图的提示：
-
-* Router 的三个 R2R 方向端口（left / right / mid）接 mesh 上相邻 core 的 Router，或 Chip 边界上的 C2C 链路
-* Core Mem 与 Matrix Mem 只有 DTE、MU、VU 与 ctrl_noc 这几个 master
-* ctrl_noc 的配置写事务按地址分发到每个模块的 `cfg` 端口，图上只画到端点
-
-### 单元文档索引
-
-| 编号 | 单元 | 文档 |
-| - | - | - |
-| 1 | GPU / DPU 桩 | [`07-units/01-gpu-dpu-stub.md`](07-units/01-gpu-dpu-stub.md) |
-| 2 | 链路与 PCIe Switch | [`07-units/02-link-pcie-switch.md`](07-units/02-link-pcie-switch.md) |
-| 3 | Chip、SCP 与 ctrl_noc | [`07-units/03-chip-scp-ctrl-noc.md`](07-units/03-chip-scp-ctrl-noc.md) |
-| 4 | Router | [`07-units/04-router.md`](07-units/04-router.md) |
-| 5 | TS 任务调度器 | [`07-units/05-ts.md`](07-units/05-ts.md) |
-| 6 | RV Core（DTE / MU / VU 各一） | [`07-units/06-rv-core.md`](07-units/06-rv-core.md) |
-| 7 | DTE DSA | [`07-units/07-dte.md`](07-units/07-dte.md) |
-| 8 | MU DSA | [`07-units/08-mu.md`](07-units/08-mu.md) |
-| 9 | VU DSA | [`07-units/09-vu.md`](07-units/09-vu.md) |
-| 10 | 存储子系统 | [`07-units/10-memory.md`](07-units/10-memory.md) |
+***
 
 ## 输入
 
@@ -424,12 +361,12 @@ Core 的第 0 层图：Core 内全部单元与它们之间的端口组。每个�
 
 | 类 | 内容 | 来源 |
 | - | - | - |
-| 拓扑与部署 | tray 数（编译器叫 rack）、chip 形状 2×5、Harvest mask、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、chip 数 48、GPU 数与每 GPU 的 batch | 编译侧 |
+| 拓扑与部署 | chip 数 48、tray 数 3（编译器叫 rack）、tray 形状 4 层 × 4 chip、chip 形状 2×5、全局进出口位置（`global_top_left` / `global_bottom_right`）、每 chip 的 Harvest mask、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、GPU 数与每 GPU 的 batch | 编译侧 |
 | 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项，含软件属性 `exe_dest` / `task_group_id` / `reduce_num`）、datain_task、`stream_num`、`CORE_TYPE`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 27 MiB 权重分片（含共享专家）与落 Matrix Mem 的地址；注入表（每 token 的 6368 B 级联包与注入拍）；参考实现的期望输出 | 编译侧 + `reference/` |
 
-编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、坏核 mask、`CreditCounter[path_id][stream_id]` 初值（广播 = 目的 core 数，P2P = 1）。
+编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、每 chip 的坏核 mask 与由它推出的 chip 类型、`CreditCounter[path_id][stream_id]` 初值（广播 = 目的 core 数，P2P = 1）。
 
 参数表 `common/params.h` 是全部拍数、带宽、深度的唯一出处，每个值标注来历：MAS 给的、性能需求规格说明书给的、第 8 章冲突项按“建议”取的、本章“待定”默认值。
 
@@ -437,7 +374,7 @@ Core 的第 0 层图：Core 内全部单元与它们之间的端口组。每个�
 
 ## 时间轴与链路
 
-Clock 周期取 1 T，即 1 GHz 下的 1 ns，一拍就是一 T。第 5 章的参数凡是按 T 给的直接变成拍数；按 ns 或 μs 给的（PCIe C2C 300 ns、GPU 注入 3 μs）按 1 T = 1 ns 折算。
+Clock 周期取 1 T，即 1 GHz 下的 1 ns，一拍就是一 T。第 5 章的参数凡是按 T 给的直接变成拍数；按 ns 或 μs 给的（PCIe C2C 300 ns、ETH 注入 3 μs）按 1 T = 1 ns 折算。
 
 拍数换算统一为 `ceil(size / bw)`，且 size 小于等于 0 时算一拍。
 
@@ -467,7 +404,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 类 | reason |
 | - | - |
 | 依赖 | 等前序 task 完成、等 datain 数据到达、等 Router `reduce_done`、等 DSA 读寄存器返回、等 Completion RS 的 Join、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的 arrive_num == 2 |
-| 资源 | 等 stream 坑、等 VC credit、等 Reduce credit、等 GPU grant、等 TaskQueue / ISQ / issue_q 项、等 Lane、等 bank 端口、等 RV core 空闲、等 dsa_iss 通道、等 DTE Buffer credit、等 Xbar 出口、等 ReduceModule 上下文 |
+| 资源 | 等 stream 坑、等 VC credit、等 Reduce credit、等入口桩的 grant、等 TaskQueue / ISQ / issue_q 项、等 Lane、等 bank 端口、等 RV core 空闲、等 dsa_iss 通道、等 DTE Buffer credit、等 Xbar 出口、等 ReduceModule 上下文 |
 
 瓶颈由此能定位到具体资源而不只是慢，而且只有资源那一半是改参数动得了的。
 
@@ -491,7 +428,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 1. 结果一致。注入 N 个 token，出口收到 N 个结果，逐 bit 等于参考实现。
 2. 不变量成立。四条不变量在每个阶段都查，任何一条被破坏都说明模型有结构性错误。
-3. 逐段时间手算。单 user 单 stream 下，GPU 注入加链路加 TS 派发加 RV core 配置加 DSA 启动加访存加逐跳链路时间加计算时间，与模型输出逐段对上，每一段的取值都能在第 5 章或参数表找到。
+3. 逐段时间手算。单 user 单 stream 下，入口桩注入加链路加 TS 派发加 RV core 配置加 DSA 启动加访存加逐跳链路时间加计算时间，与模型输出逐段对上，每一段的取值都能在第 5 章或参数表找到。
 4. 等待归因。`unit_waits` 的 reason 分布能解释吞吐与延迟的差距，资源类等待能通过改参数消掉。
 
 ### 检查项
@@ -500,7 +437,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | 类别 | 检查项举例 |
 | - | - |
-| 拓扑结构 | core 数量 = chip 数 × 10；坏核集合与 mask 一致；边界 core 的 C2C 连接与 2×5 规则一致；逻辑 ↔ 物理映射满足 special 优先四步 |
+| 拓扑结构 | chip 数 = 48，摆成全局 12 × 4；core 数量 = chip 数 × 10，每 chip 可用 8 个；同层左右与同列上下直连，跨 tray 的两处换纵向链路参数；每层两端 chip 接 PCIe Switch；坏核集合与 mask 一致；`gx ∈ {0, 3}` 的 chip 只有 A / B 型；边界 core 的 C2C 连接与 2×5 规则一致；逻辑 ↔ 物理映射满足 special 优先四步 |
 | 数据流正确性 | **Credit 守恒**（初始 + 归还 = 消费 + 余额，无泄漏）；flit 组装正确；topK 正确传递；MU / VU 计算次数与预期一致；每 core 的 user init 数量符合预期 |
 | 边界与异常 | Stream 耗尽正确排队；Credit 耗尽正确阻塞上游；ready 拉低正确背压；无效 path_id / 重复 User ID 被拒 |
 | 时序行为 | 各启动延迟等于配置值；R2R 单跳 40T，跨 chip 400T；同一 user 的 task 之间先后与任务链一致；bank 冲突时按优先级授予；VU 两条宏指令重叠、MU 三段重叠可在波形上读出 |
