@@ -42,7 +42,7 @@
 | LPU | LPU：48 chip 的构造与接线、全局坐标换算、Harvest 与逻辑 core 映射的读入 | 第 2 章“集群与 Node”“机柜内多 tray 互联与 token 派遣”、第 6 章编译器的硬件抽象 | 装配 | [`lpu.md`](07-units/lpu.md) |
 | LPU | 链路：R2R、C2C、跨 tray 纵向、PCIe ↔ Router、ETH | 第 2 章互连参数、第 5 章延迟表 | 模块（带宽、延迟、到达时刻） | [`link.md`](07-units/link.md) |
 | LPU | PCIe Switch | 第 2 章“tray 组成”、第 6 章两层 credit | 模块 ×12 | [`pcie-switch.md`](07-units/pcie-switch.md) |
-| chip | Chip（2×5 阵列、Harvest mask、四个 C2C 端口）、SCP 桩、ctrl_noc 端点 | 第 2 章“Chip 与 Harvest”“Boot 流程” | 装配 + 模块 ×2 | [`chip/chip.md`](07-units/chip/chip.md) |
+| chip | Chip（2×5 阵列、Harvest mask、四个 C2C 端口）、SCP 桩、ctrl_noc 端点 ×10、C2C Bridge ×4 | 第 2 章“Chip 与 Harvest”“Boot 流程”、第 3 章 Router 的“坏核与跨 chip” | 装配 + 模块 ×3 类 | [`chip/chip.md`](07-units/chip/chip.md) |
 | core | Core | 第 3 章 Bach Core 顶层 | 装配 | [`chip/core/core.md`](07-units/chip/core/core.md) |
 | core | Router：RouterTable 与 CSR、RouterStation ×3、Xbar、CoreStation、CoreMem 重发、ReduceModule、Retire、CoreMemCreditMonitor | 第 3 章 Router | 模块 ×8 | [`chip/core/router.md`](07-units/chip/core/router.md) |
 | core | TS：CFG_REG、User_Match、DataIn_task_table、Stream_table、Task_ctrl、MU_Arb / VU_Arb、DTE_Arb、Credit_monitor、Task_done | 第 3 章 TS 任务调度器 | 模块 ×9 | [`chip/core/ts.md`](07-units/chip/core/ts.md) |
@@ -88,10 +88,10 @@
   <polyline points="216,185 232,185 232,172 230,172" fill="none" stroke="#94a3b8"/>
   <polyline points="216,185 232,185 232,228 230,228" fill="none" stroke="#94a3b8"/>
   <polyline points="216,185 232,185 232,306 230,306" fill="none" stroke="#94a3b8"/>
-  <rect x="452" y="284" width="208" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="464" y="304" font-size="11.5" fill="#111827">SCP 桩 · ctrl_noc 端点</text>
-  <text x="648" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×2</text>
-  <text x="648" y="319" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/chip.md</text>
+  <rect x="452" y="278" width="208" height="52" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="464" y="300" font-size="11" fill="#111827">SCP 桩 · ctrl_noc 端点 ×10</text>
+  <text x="648" y="300" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×3 类</text>
+  <text x="464" y="316" font-size="9" fill="#475569">C2C Bridge ×4</text><text x="648" y="322" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/chip.md</text>
   <rect x="452" y="356" width="208" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="464" y="376" font-size="11.5" fill="#111827">core ×10</text>
   <text x="648" y="376" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
@@ -347,11 +347,23 @@ src/bach/
 
 ## 各单元的建模规格
 
-每个单元一份文档，放在 `07-units/` 下，目录层级与对象清单一致。文档按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）的六章写：定位与边界（第 0 层图：本单元的模块与邻居）、接口（每个端口组一个声明块）、存储器（含级间 latch）、流水线总览（第 1 层图）、逐级行为（第 2 层图，每级四要素）、参数汇总；之后加本章要求的两段：机制覆盖（“落点”是模型里承载该机制的模块与函数，“用例”是 `test/bach/ip/` 下的测试名）、参数与简化（设计未给值的参数写默认值并标“待定”，全部待定值汇总在本章末尾）。
+每个单元一份文档，放在 `07-units/` 下，目录层级与对象清单一致。文档按九章写，前六章取自《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`），后三章是本章的要求：
 
-装配容器那几份（LPU、Chip、Core）没有自己的一拍工作，它们的“逐级行为”写的是构造期的接线步骤，不画第 1 层图。
+| 章 | 写什么 |
+| - | - |
+| 1 定位与边界 | 一句话职责加第 0 层图：本单元的全部模块与邻居、每条对外通路的端口组名 |
+| 2 功能清单 | 本单元做的每一件事一条，按模块分组，编号 F1、F2…。这一章是实现的清单，也是第 8 章“机制覆盖”指向的落点 |
+| 3 接口 | 每个端口组一个声明块，注明 master / slave、协议、时钟域；valid/ready 组注明 ready 的成立条件；信号名与代码一致 |
+| 4 存储器 | 全模块的存储清单，含级间 latch，每行给类型、形状、读写口、写规则、复位 |
+| 5 流水线总览 | 第 1 层图。**本轮留位不画**，各模块的逐级拍数定下来后补 |
+| 6 逐级行为 | 第 2 层图与每级的四要素。**本轮留位不写**，第 1 层图完成后补，级编号回标到第 1 层图 |
+| 7 参数汇总 | latency / 深度 / 位宽常量，注明权威出处；设计未给值的写默认值并标“待定”，全部待定值汇总在本章末尾 |
+| 8 机制覆盖 | 三列：机制、落在哪条功能（第 2 章的编号）、用例（`test/bach/ip/` 下的测试名） |
+| 9 取舍 | 这一单元为什么这么设计，动机与被否掉的方案收在这里 |
 
-图一律手写 SVG，用该规范的 stencil；上层盒子名 = 下层图标题，上层箭头上的信号名 = 下层图的端口组名。逐层的缝合关系就是文档的目录层级：LPU 第 0 层图里的一颗 chip 盒子，展开是 Chip 的第 0 层图；Chip 图里的一个 core 盒子，展开是 Core 的第 0 层图；Core 图里的一个单元盒子，展开是该单元文档的第 0 层图。
+装配容器那几份（LPU、Chip、Core）没有自己的一拍工作，第 5、6 两章对它们永远是空的，构造期的接线步骤写在第 2 章的功能清单里。
+
+图一律手写 SVG，用该规范的 stencil；上层盒子名 = 下层图标题，上层箭头上的信号名 = 下层图的端口组名。逐层的缝合关系就是文档的目录层级：LPU 第 0 层图里的一颗 chip 盒子，展开是 Chip 的第 0 层图；Chip 图里的一个 core 盒子，展开是 Core 的第 0 层图；Core 图里的一个单元盒子，展开是该单元文档的第 0 层图。第 0 层图要画全：本单元的每个模块、每条对外通路、每类 credit 的走向都要出现在图上。
 
 ***
 
@@ -502,6 +514,7 @@ Router 的验收场景 A1～A17 中，下面四个直接覆盖了最易实现错
 | CoreStation HeaderFIFO、OutputBuffer 深度 | 16、32 flit |
 | DTE TaskQueue、Buffer、Completion RS、Done Pending 深度 | 16、16 × 256 B × 2、16、16 |
 | VU ISQ 深度 | 8 |
+| Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度 | 2 |
 | custom-0 自定义指令的字段布局 | funct3 按第 3 章表；rd / rs1 / rs2 / imm 按 R 型与 I 型标准布局，等 ISA 描述表到手后改 `bach_insts.h` |
 | MU、DTE 的寄存器地址映射 | `regmap.h` 临时映射 |

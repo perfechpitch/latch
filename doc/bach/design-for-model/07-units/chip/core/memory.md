@@ -4,14 +4,14 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **Core Mem / Matrix Mem / Share Mem**
 
-给实现 Core 内三块存储的人：Core Mem、Matrix Mem、Share Mem 三个独立打拍的模块各自的端口、存储器、流水线与逐级行为、参数与机制。
+给实现 core 内三块存储的人：三个独立打拍的模块各自做哪些事、端口与存储怎么定。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
 **对应设计**：
 
 * 《执行单元与存储》“存储子系统”：Core Mem、Matrix Mem、Share Mem
-* 《Core 内硬件》：“Core Mem 的硬件多用户管理”“core 内部通路带宽”
+* 《Core 内硬件》：“Core Mem 的硬件多用户管理”“内存结构与容量”
 
 ***
 
@@ -21,604 +21,457 @@
 
 | 存储 | 接哪些 master |
 | - | - |
-| Core Mem | DTE、MU、VU 三个 DSA，加 DTE RV core、ctrl_noc |
-| Matrix Mem | DTE、MU、ctrl_noc；MU 只读 |
-| Share Mem | 三个 RV core 与 DTE |
+| Core Mem | DTE、MU、VU 三个 DSA，加 DTE RV core、Router 的 CoreMem 重发、ctrl_noc |
+| Matrix Mem | DTE、ctrl_noc、MU；MU 只读 |
+| Share Mem | 三个 RV core 的 sm_lsq，加 DTE DSA 的 shareMem 写 |
 
 内部结构与两条约定：
 
 * 每个模块内部是 bank 阵列，加每 bank 一个仲裁器
 * 请求在模块内按固定拍数走完，返回数据经出口端口交还 master
-* stream_id 分片（`base(stream_id) = 分片大小 × stream_id`）在 master 侧的地址计算里做，存储模块只看物理地址
+* `stream_id` 分片（`base(stream_id) = 分片大小 × stream_id`）在 master 侧的地址计算里做，存储模块只看物理地址
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 520" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 980" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs>
-    <marker id="m0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="m0s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#475569"/></marker>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
+    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
+    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
+    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
+    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
+    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
+    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
+    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
+    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
+    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
   </defs>
-  <rect x="0" y="0" width="1100" height="520" fill="#ffffff"/>
-  <text x="20" y="30" font-size="12" fill="#111827">存储子系统 · 第 0 层</text>
-
-  <!-- masters -->
-  <rect x="40" y="70" width="150" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="94" font-size="12" fill="#111827">DTE DSA</text>
-  <text x="52" y="114" font-size="10" fill="#475569">Lane WR0 / RD1 / WR1</text>
-  <rect x="40" y="170" width="150" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="194" font-size="12" fill="#111827">MU DSA</text>
-  <text x="52" y="214" font-size="10" fill="#475569">Token ldq · stq · Weight ldq</text>
-  <rect x="40" y="270" width="150" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="294" font-size="12" fill="#111827">VU DSA</text>
-  <text x="52" y="314" font-size="10" fill="#475569">LU · SU</text>
-  <rect x="40" y="370" width="150" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="394" font-size="12" fill="#111827">RV core ×3</text>
-  <text x="52" y="414" font-size="10" fill="#475569">sm_lsq ×3 · cm_lsq（DTE core）</text>
-  <polygon points="44,468 134,468 126,506 36,506" fill="#f8fafc" stroke="#374151"/>
-  <text x="85" y="491" font-size="10.5" fill="#374151" text-anchor="middle">cfg</text>
-  <text x="150" y="491" font-size="9" fill="#6b7280">ctrl_noc 4 B/T</text>
-
-  <!-- Core Mem -->
-  <rect x="380" y="60" width="300" height="150" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="384" y="64" width="292" height="142" fill="none" stroke="#374151"/>
-  <text x="396" y="86" font-size="12" fill="#111827">Core Mem</text>
-  <text x="396" y="106" font-size="10" fill="#475569">cmem_bank ×8 · SRAM 1024×128 B · 1RW</text>
-  <text x="396" y="122" font-size="10" fill="#475569">cmem_scale ×8 · FF 1024×4 B · 1RW</text>
-  <text x="396" y="138" font-size="10" fill="#475569">bank_arb ×8 · 优先级 MU &gt; VU = DTE = RV</text>
-  <text x="396" y="154" font-size="10" fill="#475569">rsp_q ×7 · 延迟线</text>
-  <text x="396" y="190" font-size="9.5" fill="#9ca3af">(1 KB + 32 B)/T</text>
-
-  <!-- Matrix Mem -->
-  <rect x="380" y="240" width="300" height="130" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="384" y="244" width="292" height="122" fill="none" stroke="#374151"/>
-  <text x="396" y="266" font-size="12" fill="#111827">Matrix Mem</text>
-  <text x="396" y="286" font-size="10" fill="#475569">mmem_bank ×32 · SRAM 4096×256 B · 1RW</text>
-  <text x="396" y="302" font-size="10" fill="#475569">mmem_scale ×32 · SRAM 512×256 B · 1RW</text>
-  <text x="396" y="318" font-size="10" fill="#475569">bank_arb ×32 · 同 bank 只执行 MU</text>
-  <text x="396" y="354" font-size="9.5" fill="#9ca3af">(8 KB + 1 KB)/T</text>
-
-  <!-- Share Mem -->
-  <rect x="380" y="400" width="300" height="100" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="384" y="404" width="292" height="92" fill="none" stroke="#374151"/>
-  <text x="396" y="426" font-size="12" fill="#111827">Share Mem</text>
-  <text x="396" y="446" font-size="10" fill="#475569">smem · SRAM 8192×4 B · 1RW</text>
-  <text x="396" y="462" font-size="10" fill="#475569">smem_arb · 4 请求者轮询</text>
-
-  <!-- edges -->
-  <line x1="192" y1="90" x2="378" y2="90" stroke="#475569" marker-start="url(#m0s)" marker-end="url(#m0)"/>
-  <text x="285" y="84" font-size="9" fill="#6b7280" text-anchor="middle">cmem_dte_rd · cmem_dte_wr</text>
-  <polyline points="192,120 300,120 300,290 378,290" fill="none" stroke="#475569" marker-start="url(#m0s)" marker-end="url(#m0)"/>
-  <text x="304" y="200" font-size="9" fill="#6b7280">mmem_dte_rd · mmem_dte_wr</text>
-  <line x1="192" y1="190" x2="378" y2="130" stroke="#475569" marker-start="url(#m0s)" marker-end="url(#m0)"/>
-  <text x="300" y="150" font-size="9" fill="#6b7280" text-anchor="middle">cmem_mu_rd · cmem_mu_wr</text>
-  <line x1="378" y1="320" x2="192" y2="215" stroke="#475569" marker-end="url(#m0)"/>
-  <text x="285" y="280" font-size="9" fill="#6b7280" text-anchor="middle">mmem_mu_rd</text>
-  <line x1="192" y1="300" x2="378" y2="160" stroke="#475569" marker-start="url(#m0s)" marker-end="url(#m0)"/>
-  <text x="250" y="240" font-size="9" fill="#6b7280">cmem_vu_ld · cmem_vu_st</text>
-  <polyline points="192,395 250,395 250,180 378,180" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#m0s)" marker-end="url(#m0)"/>
-  <text x="256" y="176" font-size="9" fill="#6b7280">cmem_rv</text>
-  <line x1="192" y1="430" x2="378" y2="430" stroke="#475569" marker-start="url(#m0s)" marker-end="url(#m0)"/>
-  <text x="285" y="424" font-size="9" fill="#6b7280" text-anchor="middle">smem_rv ×3 · smem_find</text>
-  <polyline points="192,135 230,135 230,470 378,470" fill="none" stroke="#475569" marker-end="url(#m0)"/>
-  <text x="300" y="488" font-size="9" fill="#6b7280" text-anchor="middle">smem_dte_wr</text>
-  <polyline points="136,487 350,487 350,200 378,200" fill="none" stroke="#475569" stroke-dasharray="2 3" marker-end="url(#m0)"/>
-  <polyline points="350,340 378,340" fill="none" stroke="#475569" stroke-dasharray="2 3" marker-end="url(#m0)"/>
-
-  <text x="720" y="90" font-size="11" fill="#374151">每个箭头是一个端口组，声明在“接口”章；</text>
-  <text x="720" y="108" font-size="11" fill="#374151">Core Mem 六个 DSA 口加 RV 口与 cfg 口，Matrix Mem 三个口，Share Mem 五个口。</text>
-  <text x="720" y="126" font-size="11" fill="#374151">MU 不能读 Matrix Mem 以外的权重来源；VU 不接 Matrix Mem。</text>
+  <rect x="0" y="0" width="1500" height="980" fill="#ffffff"/>
+  <text x="20" y="26" font-size="12" fill="#111827">存储子系统 · 第 0 层</text>
+  <text x="163" y="26" font-size="9.5" fill="#6b7280">每个模块内部是 bank 阵列加每 bank 一个仲裁器；stream_id 分片在 master 侧的地址计算里做，存储模块只看物理地址</text>
+  <rect x="300" y="60" width="420" height="410" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <rect x="304" y="64" width="412" height="402" fill="none" stroke="#374151"/>
+  <text x="312" y="81" font-size="11" fill="#111827">Core Mem（Cmem）</text>
+  <text x="312" y="98" font-size="8.5" fill="#475569">容量 (128 KB + 4 KB) × 8 bank = 1 MB + 32 KB，其中 32 KB 是寄存器</text>
+  <text x="312" y="111.5" font-size="8.5" fill="#475569">每 bank：深度 1024、位宽 128 B 的 SRAM，另有 4 KB 寄存器存 scale</text>
+  <text x="312" y="125.0" font-size="8.5" fill="#475569">　（地址深度 1024 × 4 B，与 SRAM 地址一一映射，128 B : 4 B）</text>
+  <text x="312" y="138.5" font-size="8.5" fill="#475569">SRAM 单元 1024 × 139 bit = 128 data + 10 ecc + 1 mask 标志</text>
+  <text x="312" y="152.0" font-size="8.5" fill="#475569">最大访存带宽 (128 + 4) B × 8 bank = (1 KB + 32 B)/T</text>
+  <text x="312" y="165.5" font-size="8.5" fill="#475569">访问延迟：请求进 CM 到读出或返回 bvalid，15T 以内</text>
+  <text x="312" y="179.0" font-size="8.5" fill="#475569">地址粒度 128 B + 4 B，支持按 Byte mask 读写；时钟域 1 GHz</text>
+  <rect x="314" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="335" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank0</text>
+  <text x="335" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="335" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="335" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="335" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="335" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="335" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="335" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="364" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="385" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank1</text>
+  <text x="385" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="385" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="385" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="385" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="385" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="385" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="385" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="414" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="435" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank2</text>
+  <text x="435" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="435" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="435" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="435" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="435" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="435" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="435" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="464" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="485" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank3</text>
+  <text x="485" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="485" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="485" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="485" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="485" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="485" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="485" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="514" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="535" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank4</text>
+  <text x="535" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="535" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="535" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="535" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="535" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="535" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="535" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="564" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="585" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank5</text>
+  <text x="585" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="585" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="585" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="585" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="585" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="585" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="585" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="614" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="635" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank6</text>
+  <text x="635" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="635" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="635" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="635" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="635" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="635" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="635" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="664" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
+  <text x="685" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank7</text>
+  <text x="685" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
+  <text x="685" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
+  <text x="685" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
+  <text x="685" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
+  <text x="685" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
+  <text x="685" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
+  <text x="685" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
+  <rect x="1020" y="60" width="460" height="410" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <rect x="1024" y="64" width="452" height="402" fill="none" stroke="#374151"/>
+  <text x="1032" y="81" font-size="11" fill="#111827">Matrix Mem（Mmem）</text>
+  <text x="1032" y="98" font-size="8.5" fill="#475569">容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8），</text>
+  <text x="1032" y="111.5" font-size="8.5" fill="#475569">　32 MB 存正常数据；非 scale 模式下 36 MB 全存数据</text>
+  <text x="1032" y="125.0" font-size="8.5" fill="#475569">按 64 个 lane 分成 64 bank，每 bank 0.5625 MB</text>
+  <text x="1032" y="138.5" font-size="8.5" fill="#475569">每 bank 与 MU 的 lane 匹配，顶层拉齐不同 lane 的延迟</text>
+  <text x="1032" y="152.0" font-size="8.5" fill="#475569">SRAM 单元 2048 × 128 bit，ECC 按 128 bit 一组</text>
+  <text x="1032" y="165.5" font-size="8.5" fill="#475569">最大访存带宽 (8 + 1) KB/T（非 scale 模式 8 KB/T）</text>
+  <text x="1032" y="179.0" font-size="8.5" fill="#475569">访问延迟：master 请求进 MM 到读出或 bvalid，50T 以内</text>
+  <text x="1032" y="192.5" font-size="8.5" fill="#475569">地址粒度 128 B，不支持按 Byte mask 读写；时钟域 1 GHz</text>
+  <rect x="1034" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1057" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank0</text>
+  <text x="1057" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1057" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1057" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1057" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1057" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1057" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1057" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1089" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1112" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank1</text>
+  <text x="1112" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1112" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1112" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1112" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1112" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1112" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1112" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1144" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1167" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank2</text>
+  <text x="1167" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1167" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1167" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1167" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1167" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1167" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1167" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1199" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1222" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank3</text>
+  <text x="1222" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1222" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1222" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1222" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1222" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1222" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1222" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1254" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1277" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank4</text>
+  <text x="1277" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1277" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1277" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1277" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1277" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1277" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1277" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1309" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1332" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank5</text>
+  <text x="1332" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1332" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1332" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1332" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1332" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1332" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1332" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1364" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1387" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank6</text>
+  <text x="1387" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1387" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1387" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1387" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1387" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1387" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1387" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <rect x="1419" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
+  <text x="1442" y="318" font-size="8" fill="#064e3b" text-anchor="middle">… bank63</text>
+  <text x="1442" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
+  <text x="1442" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
+  <text x="1442" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
+  <text x="1442" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
+  <text x="1442" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
+  <text x="1442" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
+  <text x="1442" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
+  <polygon points="56,96 226,96 217,126 47,126" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="115" font-size="8.5" fill="#374151" text-anchor="middle">cmem_dte_rd / wr</text>
+  <text x="60" y="90" font-size="8.5" fill="#6b7280" text-anchor="start">256 B/T，13T</text>
+  <polygon points="56,148 226,148 217,178 47,178" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="167" font-size="8.5" fill="#374151" text-anchor="middle">cmem_mu_rd / wr</text>
+  <text x="60" y="142" font-size="8.5" fill="#6b7280" text-anchor="start">132 B/T，11T</text>
+  <polygon points="56,200 226,200 217,230 47,230" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="219" font-size="8.5" fill="#374151" text-anchor="middle">cmem_vu_ld / st</text>
+  <text x="60" y="194" font-size="8.5" fill="#6b7280" text-anchor="start">132 B/T，14T</text>
+  <polygon points="56,252 226,252 217,282 47,282" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="271" font-size="8.5" fill="#374151" text-anchor="middle">cmem_rv</text>
+  <text x="60" y="246" font-size="8.5" fill="#6b7280" text-anchor="start">128 B / 16 B / 2 B</text>
+  <polygon points="56,304 226,304 217,334 47,334" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="323" font-size="8.5" fill="#374151" text-anchor="middle">cmem_reissue</text>
+  <text x="60" y="298" font-size="8.5" fill="#6b7280" text-anchor="start">Router 重发，256 B</text>
+  <polygon points="56,356 226,356 217,386 47,386" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="375" font-size="8.5" fill="#374151" text-anchor="middle">cmem_cfg</text>
+  <text x="60" y="350" font-size="8.5" fill="#6b7280" text-anchor="start">ctrl_noc 4 B/T</text>
+  <polyline points="226,111 300,111" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="226,163 300,163" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="226,215 300,215" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="226,267 300,267" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="226,319 300,319" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="226,371 300,371" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polygon points="790,150 960,150 951,180 781,180" fill="#f8fafc" stroke="#374151"/>
+  <text x="871" y="169" font-size="8.5" fill="#374151" text-anchor="middle">mmem_dte_rd / wr</text>
+  <text x="794" y="144" font-size="8.5" fill="#6b7280" text-anchor="start">256 B/T，读 8T / 写 9T</text>
+  <polygon points="790,240 960,240 951,270 781,270" fill="#f8fafc" stroke="#374151"/>
+  <text x="871" y="259" font-size="8.5" fill="#374151" text-anchor="middle">mmem_mu_rd</text>
+  <text x="794" y="234" font-size="8.5" fill="#6b7280" text-anchor="start">只读 (8+1) KB/T，8T</text>
+  <polygon points="790,330 960,330 951,360 781,360" fill="#f8fafc" stroke="#374151"/>
+  <text x="871" y="349" font-size="8.5" fill="#374151" text-anchor="middle">mmem_cfg</text>
+  <text x="794" y="324" font-size="8.5" fill="#6b7280" text-anchor="start">ctrl_noc 4 B/T，128 B 对齐，burst ≤ 32</text>
+  <polyline points="960,165 1020,165" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="960,255 1020,255" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="960,345 1020,345" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <rect x="300" y="530" width="420" height="190" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <rect x="304" y="534" width="412" height="182" fill="none" stroke="#374151"/>
+  <text x="312" y="551" font-size="11" fill="#111827">Share Mem</text>
+  <text x="312" y="568" font-size="8.5" fill="#475569">容量 32 KB，访问延迟 5～10 拍，远短于 Core Mem 的 15～25 拍</text>
+  <text x="312" y="581.5" font-size="8.5" fill="#475569">不需要初始化</text>
+  <text x="312" y="595.0" font-size="8.5" fill="#475569">三种用途：task 之间的共享数据；B core / R core 的用户数据</text>
+  <text x="312" y="608.5" font-size="8.5" fill="#475569">　映射表的更新与查询；标量数据</text>
+  <text x="312" y="622.0" font-size="8.5" fill="#475569">master：三个 RV core 的 sm_lsq（32 bit）加 DTE DSA 的 shareMem 写</text>
+  <text x="312" y="635.5" font-size="8.5" fill="#475569">四个 master 的仲裁规则原文未给，建模按轮询（待定）</text>
+  <polygon points="56,552 226,552 217,582 47,582" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="571" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq［DTE］</text>
+  <polyline points="226,567 300,567" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polygon points="56,592 226,592 217,622 47,622" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="611" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq［MU］</text>
+  <polyline points="226,607 300,607" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polygon points="56,632 226,632 217,662 47,662" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="651" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq［VU］</text>
+  <polyline points="226,647 300,647" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polygon points="56,672 226,672 217,702 47,702" fill="#f8fafc" stroke="#374151"/>
+  <text x="137" y="691" font-size="8.5" fill="#374151" text-anchor="middle">smem_dte_wr</text>
+  <polyline points="226,687 300,687" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <rect x="790" y="530" width="690" height="190" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="802" y="551" font-size="11" fill="#111827">仲裁规则</text>
+  <text x="802" y="568" font-size="8.5" fill="#475569">Core Mem：每组读写端口有 bank 冲突时 arb 二选一，无冲突可同时访问</text>
+  <text x="802" y="581.5" font-size="8.5" fill="#475569">　　　　　DTE 端口部分 bank 冲突时只反压冲突的那个 bank</text>
+  <text x="802" y="595.0" font-size="8.5" fill="#475569">　　　　　同组内相同优先级：DTE 端口先做读写各自的 bank 冲突判断，再做 wr 与 rd 之间的冲突判断</text>
+  <text x="802" y="608.5" font-size="8.5" fill="#475569">　　　　　非同组的优先级：MU &gt; VU = DTE；不增加 bank 冲突计数器</text>
+  <text x="802" y="622.0" font-size="8.5" fill="#475569">Matrix Mem：DTE、ctrl_noc、MU 三者不能出现两个 master 同时访问相同 bank</text>
+  <text x="802" y="635.5" font-size="8.5" fill="#475569">　　　　　　同时访问时只执行 MU 请求，并通过计数器记录报错。这是建模仲裁逻辑时必须体现的硬约束</text>
+  <rect x="300" y="760" width="1180" height="180" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="312" y="781" font-size="11" fill="#111827">scale 与 ECC</text>
+  <text x="312" y="798" font-size="8.5" fill="#475569">Core Mem 的 scale : data 比例最大 1 : 32；MU / VU 访问 CM 按 132 B 读写，只访问 SRAM 部分时有效带宽 128 B；scale 读写使能拉高时同时读写对应地址的 scale 寄存器</text>
+  <text x="312" y="811.5" font-size="8.5" fill="#475569">byte_mask 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 byte_mask 机制</text>
+  <text x="312" y="825.0" font-size="8.5" fill="#475569">Core Mem 的 ECC 按 128 bit 一组，编解码在 SRAM 接口处处理（而非随数据到各访问源端口），能减少 8% 数据传输功耗，代价是面积增加</text>
+  <text x="312" y="838.5" font-size="8.5" fill="#475569">Core Mem 的 ECC 1 bit 错用计数器计数（每读端口 1 个、DTE / MU / VU 读写各 1 个），可经 NOC 读取；2 bit 错报错</text>
+  <text x="312" y="852.0" font-size="8.5" fill="#475569">Matrix Mem 的 SRAM 内部支持单 bit 自纠错：读出时检测到单 bit 错，纠错后在 SRAM 空闲时写回对应地址覆盖原有错误数据</text>
+  <text x="312" y="865.5" font-size="8.5" fill="#475569">Matrix Mem 按 core 角色扮演三种角色：普通计算 core 存 weight 供 MU 做 MoE 计算；reduction core 存 reduction 数据不存权重；</text>
+  <text x="312" y="879.0" font-size="8.5" fill="#475569">　broadcast core 存 token 数据，防止专家不均衡影响其他 EP group 的 token 广播</text>
 </svg>
 ```
 
 ***
 
-## 2　接口
+## 2　功能清单
 
-信号名即模型里端口束的字段名。所有 valid/ready 组的 `ready` 都是上一拍锁存的值（《latch 建模计划》“跨模块按硬件的握手协议与打拍规则”）。
+一功能一条，编号供“机制覆盖”一章引用。
 
 ### Core Mem
 
-```
-port cmem_dte_rd (slave, valid/ready, clk)        // DTE Lane RD1 读 Core Mem，一拍 256 B
-  in  req_valid
-  out req_ready                                     // = req_slot[dte_rd] 空
-  in  req_addr[19:0]                                // 字节地址，256 B 对齐
-  in  req_tag[7:0]                                  // DTE 的 outstanding 编号，随响应原样返回
-  out rsp_valid                                     // 请求进模块后第 CMEM_LAT_DTE 拍拉高一拍
-  out rsp_data[2047:0]                              // 256 B
-  out rsp_tag[7:0]
-port cmem_dte_wr (slave, valid/ready, clk)        // DTE Lane WR0 / WR1 写 Core Mem，一拍 256 B
-  in  req_valid
-  out req_ready                                     // = req_slot[dte_wr] 空
-  in  req_addr[19:0]
-  in  req_data[2047:0]
-  in  req_mask[7:0]                                 // 32 B 粒度，位为 0 该 32 B 不写
-  out rsp_valid                                     // 写完成（bvalid），第 CMEM_LAT_DTE 拍
-port cmem_mu_rd (slave, valid/ready, clk)         // MU Token ldq 读，一拍 128 B + 4 B scale
-  in  req_valid
-  out req_ready                                     // = req_slot[mu_rd] 空
-  in  req_addr[19:0]                                // 128 B 对齐
-  in  req_scale_en                                  // 1 = 同时读 cmem_scale
-  in  req_tag[3:0]
-  out rsp_valid                                     // 第 CMEM_LAT_MU 拍
-  out rsp_data[1023:0]
-  out rsp_scale[31:0]
-  out rsp_tag[3:0]
-port cmem_mu_wr (slave, valid/ready, clk)         // MU stq 写，一拍 128 B + 4 B scale
-  in  req_valid
-  out req_ready                                     // = req_slot[mu_wr] 空
-  in  req_addr[19:0]
-  in  req_data[1023:0]
-  in  req_scale[31:0]
-  in  req_scale_en
-  in  req_byte_mask[127:0]                          // 非全 1 时该行留存 mask 记录
-  out rsp_valid                                     // 第 CMEM_LAT_MU 拍
-port cmem_vu_ld (slave, valid/ready, clk)         // VU LU 读，一次 1056 bit，不 burst
-  in  req_valid
-  out req_ready                                     // = req_slot[vu_ld] 空
-  in  req_addr[19:0]                                // 128 B 对齐
-  in  req_scale_en
-  out rsp_valid                                     // 第 CMEM_LAT_VU 拍
-  out rsp_data[1023:0]
-  out rsp_scale[31:0]
-port cmem_vu_st (slave, valid/ready, clk)         // VU SU 写，一次 1056 bit
-  in  req_valid
-  out req_ready                                     // = req_slot[vu_st] 空
-  in  req_addr[19:0]
-  in  req_data[1023:0]
-  in  req_scale[31:0]
-  in  req_scale_en
-  in  req_byte_mask[127:0]
-  out rsp_valid                                     // 第 CMEM_LAT_VU 拍
-port cmem_rv (slave, valid/ready, clk)            // DTE RV core 的 cm_lsq，4 B 粒度
-  in  req_valid
-  out req_ready                                     // = req_slot[rv] 空
-  in  req_addr[19:0]
-  in  req_we                                        // 1 = 写
-  in  req_wdata[31:0]
-  in  req_be[3:0]
-  out rsp_valid                                     // 第 CMEM_LAT_RV 拍
-  out rsp_data[1023:0]                              // 读固定回整行 128 B，RV 侧按 32 bit / 拍取用
-port cmem_cfg (slave, ctrl_noc 写事务, clk)       // ctrl_noc 后门读写，4 B/T
-  in  cfg_valid
-  in  cfg_addr[19:0]
-  in  cfg_we
-  in  cfg_wdata[31:0]
-  out cfg_rdata[31:0]                               // 下一拍有效
-```
+| 编号 | 功能 |
+| - | - |
+| F1 | 容量 (128 KB + 4 KB) × 8 bank = 1 MB + 32 KB，其中 32 KB 是寄存器 |
+| F2 | 每 bank 是深度 1024、位宽 128 B 的 SRAM，另有 4 KB 寄存器存 scale（地址深度 1024 × 4 B，与 SRAM 地址一一映射，128 B : 4 B） |
+| F3 | SRAM 单元 1024 × 139 bit（63 × 211 μm），139 bit = 128 data + 10 ecc + 1 mask 标志；每 bank 由 8 个 SRAM 加 4 KB scale 寄存器组成 |
+| F4 | 最大访存带宽 (128 + 4) B × 8 bank = (1 KB + 32 B)/T |
+| F5 | 访问延迟：数据请求进 CM 到读出或返回 bvalid，15T 以内 |
+| F6 | 地址粒度 128 B + 4 B，支持按 Byte mask 读写 |
+| F7 | 各 master 的带宽与延迟：DTE 读写各 256 B/T、13T；MU 读写各 132 B/T、11T；VU 读写各 132 B/T、14T；ctrl_noc 读写 4 B/T；DTE RV core 三种带宽 128 B / 16 B / 2 B |
+| F8 | 每组读写端口有 bank 冲突时 arb 二选一，无冲突可同时访问 |
+| F9 | DTE 端口部分 bank 冲突时只反压冲突的那个 bank |
+| F10 | 同组内相同优先级：DTE 端口先做读写各自的 bank 冲突判断，再做 wr 与 rd 之间的冲突判断 |
+| F11 | 非同组的优先级：MU > VU = DTE |
+| F12 | 不增加 bank 冲突计数器 |
+| F13 | scale : data 比例最大 1 : 32。MU / VU 访问 CM 按 132 B 读写，只访问 SRAM 部分时有效带宽 128 B；scale 读写使能拉高时同时读写对应地址的 scale 寄存器 |
+| F14 | `byte_mask` 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 byte_mask 机制 |
+| F15 | ECC 按 128 bit 一组，编解码在 SRAM 接口处处理而非随数据到各访问源端口 |
+| F16 | ECC 1 bit 错用计数器计数（每读端口 1 个、DTE / MU / VU 读写各 1 个），可经 NOC 读取；2 bit 错报错。本轮只留状态位与接口名 |
+| F17 | 按 `stream_num` 均等切分，单用户独占空间等于总容量除以 `stream_num`；分片的基址由 master 侧算好，本模块只看物理地址 |
+| F18 | 存三类内容：业务流 token（message + data）、MU 计算结果、VU 计算结果；另按软件配置留出 P2P 阻塞缓冲与 broadcast 重发的暂存空间 |
 
 ### Matrix Mem
 
+| 编号 | 功能 |
+| - | - |
+| F19 | 容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8）、32 MB 存正常数据；非 scale 模式下 36 MB 全存数据 |
+| F20 | 按 64 个 lane 分成 64 bank，每 bank 0.5625 MB；每 bank 与 MU 的 lane 匹配，顶层拉齐不同 lane 的延迟 |
+| F21 | SRAM 单元 2048 × 128 bit，ECC 按 128 bit 一组 |
+| F22 | 最大访存带宽 (8 + 1) KB/T（scale 模式；非 scale 模式最大 8 KB/T） |
+| F23 | 访问延迟：master 请求进 MM 到读出或 bvalid，50T 以内 |
+| F24 | 地址粒度 128 B，不支持按 Byte mask 读写 |
+| F25 | 各 master 的带宽与 lane 内延迟：DTE 读写各 256 B/T（写 9T、读 8T）；MU 只读 (8 + 1) KB/T（8T）；ctrl_noc 读写 4 B/T，地址对齐 128 B、数据粒度 4 B、burst len 最大 32 |
+| F26 | 硬约束：DTE、ctrl_noc、MU 三者不能出现两个 master 同时访问相同 bank；同时访问时只执行 MU 请求，并通过计数器记录报错 |
+| F27 | SRAM 内部支持单 bit 自纠错：读出时检测到单 bit 错，纠错后在 SRAM 空闲时写回对应地址覆盖原有错误数据 |
+| F28 | 不做 stream 分片，每个用户看到的是相同的权重 |
+| F29 | 按 core 角色扮演三种角色：普通计算 core 在权重加载阶段接收 DTE 从 Router 搬来的 weight 供 MU 做 MoE 计算；reduction core 存 reduction 数据不存权重；broadcast core 存 token 数据，防止专家不均衡影响其他 EP group 的 token 广播 |
+
+### Share Mem
+
+| 编号 | 功能 |
+| - | - |
+| F30 | 容量 32 KB，访问延迟 5～10 拍，远短于 Core Mem 的 15～25 拍 |
+| F31 | 不需要初始化 |
+| F32 | 只被三个 RV core 的访存指令与 DTE DSA 的 shareMem 写口读写 |
+| F33 | 三种用途：task 之间的共享数据；B core / R core 的用户数据映射表的更新与查询；标量数据 |
+| F34 | B core 用它存一对 `head` / `tail` 指针把收发两条链耦合起来；R core 用它存 `arrive_num[gpu_id][token_id]` 与两张 `tmp_info[stream_id]` |
+| F35 | 四个 master 的仲裁规则原文未给，建模按轮询（待定） |
+
+***
+
+## 3　接口
+
 ```
-port mmem_dte_rd (slave, valid/ready, clk)        // DTE Lane RD1 读，一拍 256 B = 一个 bank 行
-  in  req_valid
-  out req_ready                                     // = req_slot[dte_rd] 空
-  in  req_addr[25:0]                                // 字节地址，256 B 对齐，不支持 byte mask
-  in  req_tag[7:0]
-  out rsp_valid                                     // 第 MMEM_LAT_DTE_RD 拍
-  out rsp_data[2047:0]
-  out rsp_tag[7:0]
-port mmem_dte_wr (slave, valid/ready, clk)        // DTE Lane WR0 写，一拍 256 B
-  in  req_valid
+port cmem_dte_rd / cmem_dte_wr (slave, valid/ready, clk)   // DTE DSA，256 B/T
+  in  req_valid · req_addr[17:0] · req_wdata[2047:0] · req_be[255:0] · req_scale_en
+  out req_ready · rsp_valid · rsp_rdata[2047:0] · rsp_scale[63:0]
+port cmem_mu_rd / cmem_mu_wr (slave, valid/ready, clk)     // MU DSA，132 B/T
+  in  req_valid · req_addr[17:0] · req_wdata[1023:0] · req_scale[31:0] · req_be[127:0]
+  out req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
+port cmem_vu_ld / cmem_vu_st (slave, valid/ready, clk)     // VU DSA，1056 bit，不 burst
+  in  req_valid · req_addr[31:0] · req_wdata[1023:0] · req_scale[31:0]
+  out req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
+port cmem_rv (slave, valid/ready, clk)                     // DTE RV core 的 cm_lsq，32 bit 取用
+  in  req_valid · req_we · req_addr[17:0] · req_wdata[31:0] · req_be[3:0]
+  out req_ready · rsp_valid · rsp_rdata[1055:0]              // 读固定回 1056 bit
+port cmem_reissue (slave, valid/ready, clk)                // Router 的 CoreMem 重发暂存，256 B
+  in  req_valid · req_we · req_addr[17:0] · req_wdata[2047:0]
+  out req_ready · rsp_valid · rsp_rdata[2047:0]
+port mmem_dte_rd / mmem_dte_wr (slave, valid/ready, clk)   // DTE DSA，256 B/T
+  in  req_valid · req_addr[24:0] · req_wdata[2047:0]
+  out req_ready · rsp_valid · rsp_rdata[2047:0]
+port mmem_mu_rd (slave, valid/ready, clk)                  // MU DSA 只读，一个行地址广播到各 bank
+  in  req_valid · req_addr[24:0]
+  out req_ready · rsp_valid · rsp_rdata[65535:0] · rsp_scale[8191:0]
+port smem_rv[u] (slave, valid/ready, clk)                  // u ∈ {DTE, MU, VU} 的 sm_lsq，32 bit
+  in  req_valid · req_we · req_addr[14:0] · req_wdata[31:0] · req_be[3:0]
+  out req_ready · rsp_valid · rsp_rdata[31:0]
+port smem_dte_wr (slave, valid/ready, clk)                 // DTE DSA 的 shareMem 表项写
+  in  req_valid · req_addr[14:0] · req_wdata[31:0]
   out req_ready
-  in  req_addr[25:0]
-  in  req_data[2047:0]
-  out rsp_valid                                     // 第 MMEM_LAT_DTE_WR 拍
-port mmem_mu_rd (slave, valid/ready, clk)         // MU Weight ldq 读，一个地址广播到 32 bank，每 bank 回 256 B
-  in  req_valid
-  out req_ready                                     // = req_slot[mu_rd] 空
-  in  req_row[11:0]                                 // bank 内行号，32 个 bank 同行
-  in  req_scale_en                                  // 1 = 同时读 mmem_scale 的对应行
-  out rsp_valid                                     // 第 MMEM_LAT_MU 拍
-  out rsp_data[31][2047:0]                          // 32 lane 各 256 B，共 8 KB
-  out rsp_scale[31][255:0]                          // 每 lane 32 B，共 1 KB
-port mmem_cfg (slave, ctrl_noc 写事务, clk)       // ctrl_noc 读写，4 B/T，地址 128 B 对齐，burst ≤ 32
-  in  cfg_valid
-  in  cfg_addr[25:0]
-  in  cfg_we
-  in  cfg_wdata[31:0]
+port cfg (slave, ctrl_noc 写事务, clk)                     // 三块存储各一个后门口，4 B/T
+  in  cfg_valid · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0]
   out cfg_rdata[31:0]
 ```
 
-### Share Mem
+***
+
+## 4　存储器
 
 ```
-port smem_rv[3] (slave, valid/ready, clk)         // 三个 RV core 的 sm_lsq，各一组，4 B 粒度
-  in  req_valid
-  out req_ready                                     // = req_slot[rv_i] 空
-  in  req_addr[14:0]
-  in  req_we
-  in  req_wdata[31:0]
-  in  req_be[3:0]
-  out rsp_valid                                     // 第 SM_LATENCY 拍
-  out rsp_rdata[31:0]
-port smem_dte_wr (slave, valid/ready, clk)        // DTE 搬运完成后写 valid 标志
-  in  req_valid
-  out req_ready
-  in  req_addr[14:0]
-  in  req_wdata[31:0]
-port smem_find (slave, valid/ready, clk)          // RV core 的 flag_check：从 begin 起找第一个非零字
-  in  req_valid
-  out req_ready                                     // = 上一笔 find 已回
-  in  req_begin[14:0]
-  in  req_end[14:0]
-  out rsp_valid                                     // 第 SM_LATENCY 拍
-  out rsp_offset[31:0]                              // 找不到为全 1
+mem cmem_sram[8]    SRAM      每 bank 1024 × 139 bit（128 data + 10 ecc + 1 mask 标志），合计 1 MB   1R1W  每 bank 二选一  复位未定义
+mem cmem_scale[8]   FF 阵列   每 bank 1024 × 4 B = 4 KB，与 SRAM 地址一一映射                        1R1W  scale 使能时同读同写  复位未定义
+mem cmem_ecc_cnt    FF 阵列   每读端口 1 个、DTE / MU / VU 读写各 1 个                               1RW   1 bit 错计数    复位 0
+mem cmem_arb[8]     FF        每 bank 一个仲裁器状态                                                 1RW   —              复位 空闲
+mem mmem_sram[64]   SRAM      每 bank 2048 × 128 bit × N，合计 0.5625 MB / bank                     1R1W  同 bank 不许两个 master  复位未定义
+mem mmem_scale      SRAM      4 MB（scale : data = 1 : 8）                                          1R1W  scale 模式下划出  复位未定义
+mem mmem_err_cnt    FF        同 bank 冲突计数器                                                     1RW   冲突时只执行 MU 并计数  复位 0
+mem smem_sram       SRAM      32 KB                                                                 1R1W  四个 master 轮询  复位未定义（不需要初始化）
+mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固定拍数把响应推回出口                     1RW   —              复位空
 ```
 
 ***
 
-## 3　存储器
+## 5　流水线总览
+
+第 1 层图待各 master 端口的逐级拍数定下来后补。届时要按拍对齐画的是四段：请求锁存、bank 仲裁、SRAM 读写、延迟线与响应。
+
+***
+
+## 6　逐级行为
+
+第 2 层图与每级的四要素待第 1 层图完成后补，级编号回标到第 1 层图。
+
+***
+
+## 7　参数汇总
 
 ```
-mem cmem_bank[8]   SRAM        1024×128 B                 1RW   byte_mask 写，非全 1 留存 mask 记录   复位 0x55 填充   // 数据 bank，行 128 B；bank = addr[9:7]
-mem cmem_scale[8]  FF 阵列     1024×4 B                   1RW   scale_en 时整字写                    复位未定义       // 与数据行一一映射的 scale
-mem cmem_mask[8]   FF 阵列     1024×1 b                   1RW   随数据写                             复位 0           // 该行是否存在过非全 1 的 byte_mask（读时跳过 ECC 检查）
-mem cmem_req_slot[7] 1-deep 寄存器 {port, addr[19:0], we, data[2047:0], mask[127:0], scale[31:0], scale_en, tag[7:0]}  1W1R  满 → 该口 req_ready=0  复位空  // M1 → M2，每个 master 口一个
-mem cmem_grant[8]  级间 latch   {port[2:0], slot 内容}     —     每拍覆写                             —               // M2 → M3，每 bank 一个
-mem cmem_rdout[8]  级间 latch   {port[2:0], data[1023:0], scale[31:0], tag[7:0]}  —  每拍覆写         —               // M3 → M4
-mem cmem_rsp_q[7]  FIFO        深 CMEM_LAT_MAX × {data[2047:0], scale[31:0], tag[7:0], due[31:0]}  1W1R  不会满（每口每拍最多进一项、出一项）  复位空  // M4 延迟线，每个 master 口一个
-mem cmem_cfg_rd    1-deep 寄存器 {rdata[31:0]}             1W1R  每拍覆写                             —               // cfg 读返回
-
-mem mmem_bank[32]  SRAM        4096×256 B                 1RW   整行写，无 byte mask                复位 0x55 填充   // 每 bank 1 MB 数据，与 MU lane 一对一
-mem mmem_scale[32] SRAM        512×256 B                  1RW   整行写                               复位 0x55 填充   // 每 bank 128 KB scale（scale 模式）
-mem mmem_req_slot[3] 1-deep 寄存器 {port, addr[25:0] 或 row[11:0], we, data[2047:0], scale_en, tag[7:0]}  1W1R  满 → req_ready=0  复位空  // M1 → M2
-mem mmem_grant[32] 级间 latch   {port[1:0], row[11:0], we, data[2047:0]}  —  每拍覆写                —               // M2 → M3
-mem mmem_rdout[32] 级间 latch   {port[1:0], data[2047:0], scale[255:0]}   —  每拍覆写                —               // M3 → M4
-mem mmem_rsp_q[3]  FIFO        深 MMEM_LAT_MAX × {data, scale, tag, due}  1W1R  不会满               复位空          // M4 延迟线
-mem mmem_conflict_cnt FF        32 b                       1RW   同 bank 双 master 时 +1              复位 0           // 报错计数，cfg 可读
-
-mem smem           SRAM        8192×4 B                   1RW   be[3:0] 字节写                       复位未定义       // 32 KB，不需要初始化
-mem smem_req_slot[5] 1-deep 寄存器 {port, addr[14:0], we, wdata[31:0], be[3:0], begin[14:0], end[14:0]}  1W1R  满 → req_ready=0  复位空  // M1 → M2，rv ×3、dte_wr、find
-mem smem_grant     级间 latch   {port[2:0], addr[14:0], we, wdata[31:0], be[3:0]}  —  每拍覆写         —               // M2 → M3
-mem smem_rdout     级间 latch   {port[2:0], rdata[31:0]}   —     每拍覆写                             —               // M3 → M4
-mem smem_rsp_q[4]  FIFO        深 SM_LATENCY × {rdata[31:0], due[31:0]}  1W1R  不会满                复位空          // M4 延迟线，rv ×3 与 find
-mem smem_find_ctx  1-deep 寄存器 {cur[14:0], end[14:0], base[14:0]}  1W1R  find 在飞时占用            复位空          // flag_check 的逐字扫描游标
+Core Mem 容量        (128 KB + 4 KB) × 8 bank = 1 MB + 32 KB
+Core Mem 带宽        (1 KB + 32 B)/T；地址粒度 128 B + 4 B，支持 byte mask
+Core Mem 延迟        15T 以内；DTE 13T · MU 11T · VU 14T
+Core Mem 优先级       非同组 MU > VU = DTE；同组内 DTE 先判读写各自冲突再判读写之间
+Matrix Mem 容量      32 + 4 MB，64 bank × 0.5625 MB
+Matrix Mem 带宽      (8 + 1) KB/T；地址粒度 128 B，不支持 byte mask
+Matrix Mem 延迟      50T 以内；DTE 写 9T 读 8T · MU 读 8T
+Matrix Mem 硬约束    同一 bank 不许两个 master 同时访问，冲突时只执行 MU 并计数报错
+Share Mem            32 KB，5～10 拍，不需要初始化；仲裁按轮询（待定）
+时钟域               三块都是 1 GHz
+ECC                  Core Mem 按 128 bit 一组，编解码在 SRAM 接口处；Matrix Mem 单 bit 自纠错并在空闲时写回
+硬件带宽对照          Matrix Memory 8192 GB/s · Core Memory 512 GB/s · Router 双向各 256 GB/s · DTE 数据通路需求 190～320 GB/s
+单用户 Core Mem 容量  按角色 16～36 KiB；推 Core Mem 容量按 16 用户并发 × 单用户 30～50 KB
+Matrix Mem bank 数    **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一，Mmem MAS 记 64 bank。未解，直接影响 8 KB/T 的组织方式
 ```
 
 ***
 
-## 4　流水线总览
+## 8　机制覆盖
 
-三个模块同一条四级骨架：
-
-* M1 请求锁存 → M2 bank 仲裁 → M3 SRAM 读写 → M4 延迟线与响应
-* 每个 master 口一个请求槽与一条延迟线，bank 仲裁按 bank 独立
-
-下图是 Core Mem。Matrix Mem 与 Share Mem 的差别只在口数、bank 数、优先级规则与拍数，列在图后的表里，不另画。
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 470" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="p0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1180" height="470" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">Core Mem · 第 1 层（DTE 口按比例 13 拍；MU 11、VU 14、RV 15～25 为 M4 延迟线长度不同）</text>
-
-  <!-- t 标尺：格宽 76，t0 在 x=130 -->
-  <g stroke="#e5e7eb">
-    <line x1="130" y1="40" x2="130" y2="430"/><line x1="206" y1="40" x2="206" y2="430"/><line x1="282" y1="40" x2="282" y2="430"/><line x1="358" y1="40" x2="358" y2="430"/><line x1="434" y1="40" x2="434" y2="430"/><line x1="510" y1="40" x2="510" y2="430"/><line x1="586" y1="40" x2="586" y2="430"/><line x1="662" y1="40" x2="662" y2="430"/><line x1="738" y1="40" x2="738" y2="430"/><line x1="814" y1="40" x2="814" y2="430"/><line x1="890" y1="40" x2="890" y2="430"/><line x1="966" y1="40" x2="966" y2="430"/><line x1="1042" y1="40" x2="1042" y2="430"/><line x1="1118" y1="40" x2="1118" y2="430"/>
-  </g>
-  <g font-size="8.5" fill="#6b7280">
-    <text x="130" y="50">t0</text><text x="206" y="50">t1</text><text x="282" y="50">t2</text><text x="358" y="50">t3</text><text x="434" y="50">t4</text><text x="510" y="50">t5</text><text x="586" y="50">t6</text><text x="662" y="50">t7</text><text x="738" y="50">t8</text><text x="814" y="50">t9</text><text x="890" y="50">t10</text><text x="966" y="50">t11</text><text x="1042" y="50">t12</text><text x="1118" y="50">t13</text>
-  </g>
-
-  <!-- 端口（左） -->
-  <polygon points="20,88 118,88 110,120 12,120" fill="#f8fafc" stroke="#374151"/>
-  <text x="65" y="108" font-size="10" fill="#374151" text-anchor="middle">cmem_dte_rd/wr</text>
-  <polygon points="20,140 118,140 110,172 12,172" fill="#f8fafc" stroke="#374151"/>
-  <text x="65" y="160" font-size="10" fill="#374151" text-anchor="middle">cmem_mu_rd/wr</text>
-  <polygon points="20,192 118,192 110,224 12,224" fill="#f8fafc" stroke="#374151"/>
-  <text x="65" y="212" font-size="10" fill="#374151" text-anchor="middle">cmem_vu_ld/st</text>
-  <polygon points="20,244 118,244 110,276 12,276" fill="#f8fafc" stroke="#374151"/>
-  <text x="65" y="264" font-size="10" fill="#374151" text-anchor="middle">cmem_rv</text>
-  <polygon points="20,296 118,296 110,328 12,328" fill="#f8fafc" stroke="#374151"/>
-  <text x="65" y="316" font-size="10" fill="#374151" text-anchor="middle">cmem_cfg</text>
-
-  <!-- M1 请求槽 -->
-  <rect x="134" y="70" width="68" height="260" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="134" y="70" width="68" height="16" fill="#334155"/>
-  <text x="168" y="82" font-size="10" fill="#ffffff" text-anchor="middle">req_slot[7]</text>
-  <text x="139" y="66" font-size="8.5" fill="#6b7280">M1</text>
-  <text x="200" y="66" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="140" y="104" font-size="9.5" fill="#475569">addr[19:0]</text>
-  <text x="140" y="118" font-size="9.5" fill="#475569">we · mask</text>
-  <text x="140" y="132" font-size="9.5" fill="#475569">data[2047:0]</text>
-  <text x="140" y="146" font-size="9.5" fill="#475569">scale · en</text>
-  <text x="140" y="160" font-size="9.5" fill="#475569">tag[7:0]</text>
-  <text x="140" y="300" font-size="9" fill="#9ca3af">每口一槽</text>
-  <line x1="120" y1="104" x2="132" y2="104" stroke="#475569" marker-end="url(#p0)"/>
-  <line x1="120" y1="156" x2="132" y2="156" stroke="#475569" marker-end="url(#p0)"/>
-  <line x1="120" y1="208" x2="132" y2="208" stroke="#475569" marker-end="url(#p0)"/>
-  <line x1="120" y1="260" x2="132" y2="260" stroke="#475569" marker-end="url(#p0)"/>
-  <line x1="120" y1="312" x2="132" y2="312" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- M2 bank 仲裁 -->
-  <rect x="210" y="70" width="68" height="260" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="215" y="66" font-size="8.5" fill="#6b7280">M2</text>
-  <text x="276" y="66" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="218" y="92" font-size="12" fill="#111827">bank_arb</text>
-  <text x="218" y="108" font-size="9.5" fill="#475569">×8</text>
-  <text x="218" y="300" font-size="9" fill="#9ca3af">MU &gt; VU = DTE = RV</text>
-  <line x1="202" y1="200" x2="208" y2="200" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- grant latch -->
-  <rect x="284" y="70" width="70" height="260" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="284" y="70" width="70" height="16" fill="#334155"/>
-  <text x="319" y="82" font-size="10" fill="#ffffff" text-anchor="middle">grant[8]</text>
-  <text x="290" y="104" font-size="9.5" fill="#475569">port[2:0]</text>
-  <text x="290" y="118" font-size="9.5" fill="#475569">槽内容</text>
-  <line x1="278" y1="200" x2="282" y2="200" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- M3 SRAM -->
-  <rect x="362" y="70" width="144" height="260" fill="#f8fafc" stroke="#374151"/>
-  <rect x="366" y="74" width="136" height="252" fill="none" stroke="#374151"/>
-  <text x="367" y="66" font-size="8.5" fill="#6b7280">M3</text>
-  <text x="504" y="66" font-size="8.5" fill="#6b7280" text-anchor="end">D2</text>
-  <text x="374" y="96" font-size="11" fill="#111827">cmem_bank[8]</text>
-  <text x="374" y="112" font-size="9.5" fill="#475569">SRAM 1024×128 B · 1RW</text>
-  <text x="374" y="136" font-size="11" fill="#111827">cmem_scale[8]</text>
-  <text x="374" y="152" font-size="9.5" fill="#475569">FF 1024×4 B · 1RW</text>
-  <text x="374" y="176" font-size="11" fill="#111827">cmem_mask[8]</text>
-  <text x="374" y="192" font-size="9.5" fill="#475569">FF 1024×1 b · 1RW</text>
-  <text x="374" y="300" font-size="9" fill="#9ca3af">1W · wen=byte_mask</text>
-  <line x1="354" y1="200" x2="360" y2="200" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- rdout latch -->
-  <rect x="512" y="70" width="70" height="260" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="512" y="70" width="70" height="16" fill="#334155"/>
-  <text x="547" y="82" font-size="10" fill="#ffffff" text-anchor="middle">rdout[8]</text>
-  <text x="518" y="104" font-size="9.5" fill="#475569">port[2:0]</text>
-  <text x="518" y="118" font-size="9.5" fill="#475569">data[1023:0]</text>
-  <text x="518" y="132" font-size="9.5" fill="#475569">scale[31:0]</text>
-  <text x="518" y="146" font-size="9.5" fill="#475569">tag[7:0]</text>
-  <line x1="506" y1="200" x2="510" y2="200" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- M4 延迟线 -->
-  <rect x="590" y="70" width="450" height="260" fill="#f8fafc" stroke="#374151"/>
-  <rect x="594" y="74" width="442" height="252" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="640" y1="74" x2="640" y2="326"/><line x1="686" y1="74" x2="686" y2="326"/><line x1="732" y1="74" x2="732" y2="326"/></g>
-  <text x="595" y="66" font-size="8.5" fill="#6b7280">M4</text>
-  <text x="1038" y="66" font-size="8.5" fill="#6b7280" text-anchor="end">D变长（DTE 9）</text>
-  <text x="760" y="96" font-size="11" fill="#111827">rsp_q[7]</text>
-  <text x="760" y="112" font-size="9.5" fill="#475569">FIFO 深 CMEM_LAT_MAX · 1W1R</text>
-  <text x="760" y="128" font-size="9.5" fill="#475569">{data, scale, tag, due}</text>
-  <text x="760" y="300" font-size="9" fill="#9ca3af">due = 进模块拍 + CMEM_LAT_&lt;port&gt;</text>
-  <line x1="582" y1="200" x2="588" y2="200" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- 端口（右） -->
-  <polygon points="1058,180 1156,180 1148,212 1050,212" fill="#f8fafc" stroke="#374151"/>
-  <text x="1103" y="200" font-size="10" fill="#374151" text-anchor="middle">rsp_*（各口）</text>
-  <line x1="1040" y1="196" x2="1048" y2="196" stroke="#475569" marker-end="url(#p0)"/>
-
-  <!-- 反压 -->
-  <polyline points="168,340 168,380 65,380 65,332" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#p0)"/>
-  <text x="180" y="384" font-size="9" fill="#6b7280">req_ready = 槽空（上拍锁存）</text>
-  <polyline points="244,340 244,400 168,400" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#p0)"/>
-  <text x="256" y="404" font-size="9" fill="#6b7280">未获授予的槽保持，下拍再仲裁</text>
-  <text x="590" y="420" font-size="9" fill="#6b7280">写请求的 rsp 只有 valid（bvalid），M4 同样按 due 拍出队</text>
-</svg>
-```
-
-反压只有一处：请求槽满则该口 `req_ready` 拉低；槽里未获授予的请求原地保持，下拍再参加仲裁。M4 出队按 `due` 拍，每口每拍最多一项，所以延迟线不会溢出。
-
-| 模块 | 口数 | bank 数 | M2 规则 | M3 | M4 拍数（端到端 = 1 + 1 + 2 + M4） |
-| - | - | - | - | - | - |
-| Core Mem | 7 + cfg | 8 | 每 bank 独占；MU > VU = DTE = RV；DTE 的读写各自判 bank 冲突，再判读写之间；只反压冲突的那个口 | 1RW，byte_mask，scale 同拍 | DTE 9、MU 7、VU 10、RV `CM_RV_LATENCY` − 4 |
-| Matrix Mem | 3 + cfg | 32 | 每 bank 独占；MU 请求一次占全部 32 bank；同 bank 双 master 时只执行 MU，另一方保持并 `mmem_conflict_cnt` +1 | 1RW，整行 256 B | DTE 写 5、DTE 读 4、MU 4 |
-| Share Mem | 5 | 1 | 轮询（待定）；find 占用期间每拍读一字 | 1RW，4 B，be 字节写 | `SM_LATENCY` − 4 |
-
-***
-
-## 5　逐级行为
-
-Core Mem 的四级；Matrix Mem 与 Share Mem 同一套级，差别在上表。
-
-### M1 · 请求锁存
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 970 200" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="q1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="970" height="200" fill="#ffffff"/>
-  <polygon points="30,70 150,70 140,120 20,120" fill="#f8fafc" stroke="#374151"/>
-  <text x="85" y="99" font-size="10.5" fill="#374151" text-anchor="middle">cmem_*（7 口）</text>
-  <text x="85" y="150" font-size="9.5" fill="#6b7280" text-anchor="middle">req_valid · req_addr · req_data …</text>
-  <line x1="152" y1="95" x2="248" y2="95" stroke="#475569" marker-end="url(#q1)"/>
-  <rect x="252" y="36" width="380" height="128" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="260" y="50" font-size="8.5" fill="#6b7280">M1</text>
-  <text x="624" y="50" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="268" y="70" font-size="12" fill="#111827">请求锁存</text>
-  <text x="268" y="90" font-size="10.5" fill="#475569">1. req_ready[p] = !req_slot[p].valid（上拍值）</text>
-  <text x="268" y="106" font-size="10.5" fill="#475569">2. req_valid[p] &amp;&amp; req_ready[p] → req_slot[p] = {addr, we, data, mask, scale, scale_en, tag}</text>
-  <text x="268" y="122" font-size="10.5" fill="#475569">3. req_slot[p].bank = addr[9:7]；DTE 的 256 B 请求占 bank 与 bank+1 两个</text>
-  <text x="268" y="138" font-size="10.5" fill="#475569">4. req_slot[p].t_in = now</text>
-  <line x1="634" y1="95" x2="740" y2="95" stroke="#475569" marker-end="url(#q1)"/>
-  <rect x="744" y="60" width="200" height="70" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="744" y="60" width="200" height="16" fill="#334155"/>
-  <text x="844" y="72" font-size="10.5" fill="#ffffff" text-anchor="middle">cmem_req_slot[7]</text>
-  <text x="752" y="92" font-size="10" fill="#475569">valid · bank[2:0] · addr[19:0] · we</text>
-  <text x="752" y="106" font-size="10" fill="#475569">data[2047:0] · mask[127:0] · scale[31:0]</text>
-  <text x="752" y="120" font-size="10" fill="#475569">scale_en · tag[7:0] · t_in[31:0]</text>
-</svg>
-```
-
-### M2 · bank 仲裁
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 970 220" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="q2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="970" height="220" fill="#ffffff"/>
-  <rect x="20" y="60" width="200" height="70" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="20" y="60" width="200" height="16" fill="#334155"/>
-  <text x="120" y="72" font-size="10.5" fill="#ffffff" text-anchor="middle">cmem_req_slot[7]</text>
-  <text x="28" y="92" font-size="10" fill="#475569">valid · bank[2:0] · we · port</text>
-  <text x="28" y="106" font-size="10" fill="#475569">（其余字段随授予转发）</text>
-  <line x1="222" y1="95" x2="248" y2="95" stroke="#475569" marker-end="url(#q2)"/>
-  <rect x="252" y="30" width="400" height="160" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="260" y="44" font-size="8.5" fill="#6b7280">M2</text>
-  <text x="644" y="44" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="268" y="64" font-size="12" fill="#111827">bank 仲裁（每 bank 独立）</text>
-  <text x="268" y="84" font-size="10.5" fill="#475569">1. cand[b] = { p : slot[p].valid &amp;&amp; slot[p] 覆盖 bank b }</text>
-  <text x="268" y="100" font-size="10.5" fill="#475569">2. win[b] = 按优先级 MU &gt; VU = DTE = RV 选一；同级按 slot 的 t_in 先到先得</text>
-  <text x="268" y="116" font-size="10.5" fill="#475569">   2.1 DTE 读与 DTE 写先各自与其他口判冲突，再在两者之间判（同组同优先级）</text>
-  <text x="268" y="132" font-size="10.5" fill="#475569">3. 占两个 bank 的 DTE 请求：两个 bank 都赢才授予，否则整体保持（多方向一次性扣减）</text>
-  <text x="268" y="148" font-size="10.5" fill="#475569">4. 授予的 slot 清 valid；grant[b] = {port, slot 内容}；未授予的 slot 保持</text>
-  <text x="268" y="176" font-size="9.5" fill="#9ca3af">cfg 口不经仲裁：空拍插入，同 bank 有授予时顺延一拍</text>
-  <line x1="654" y1="95" x2="740" y2="95" stroke="#475569" marker-end="url(#q2)"/>
-  <rect x="744" y="60" width="200" height="70" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="744" y="60" width="200" height="16" fill="#334155"/>
-  <text x="844" y="72" font-size="10.5" fill="#ffffff" text-anchor="middle">cmem_grant[8]</text>
-  <text x="752" y="92" font-size="10" fill="#475569">valid · port[2:0] · row[9:0] · we</text>
-  <text x="752" y="106" font-size="10" fill="#475569">data[1023:0] · mask[127:0] · scale[31:0]</text>
-  <text x="752" y="120" font-size="10" fill="#475569">scale_en · tag[7:0] · t_in[31:0]</text>
-</svg>
-```
-
-### M3 · SRAM 读写
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 970 220" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="q3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="970" height="220" fill="#ffffff"/>
-  <rect x="20" y="30" width="200" height="70" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="20" y="30" width="200" height="16" fill="#334155"/>
-  <text x="120" y="42" font-size="10.5" fill="#ffffff" text-anchor="middle">cmem_grant[8]</text>
-  <text x="28" y="62" font-size="10" fill="#475569">port · row[9:0] · we · data · mask</text>
-  <text x="28" y="76" font-size="10" fill="#475569">scale · scale_en · tag · t_in</text>
-  <rect x="20" y="120" width="200" height="70" fill="#f8fafc" stroke="#374151"/>
-  <rect x="24" y="124" width="192" height="62" fill="none" stroke="#374151"/>
-  <text x="28" y="144" font-size="10.5" fill="#111827">cmem_bank[b] · SRAM 1024×128 B · 1RW</text>
-  <text x="28" y="160" font-size="10" fill="#475569">cmem_scale[b] · FF 1024×4 B · 1RW</text>
-  <text x="28" y="176" font-size="10" fill="#475569">cmem_mask[b] · FF 1024×1 b · 1RW</text>
-  <line x1="222" y1="65" x2="248" y2="65" stroke="#475569" marker-end="url(#q3)"/>
-  <line x1="222" y1="155" x2="248" y2="155" stroke="#475569" marker-end="url(#q3)"/>
-  <rect x="252" y="30" width="400" height="160" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="260" y="44" font-size="8.5" fill="#6b7280">M3</text>
-  <text x="644" y="44" font-size="8.5" fill="#6b7280" text-anchor="end">D2</text>
-  <text x="268" y="64" font-size="12" fill="#111827">SRAM 读写（每 bank）</text>
-  <text x="268" y="84" font-size="10.5" fill="#475569">1. we=0：rdout[b].data = bank[b][row]；scale_en → rdout[b].scale = scale[b][row]</text>
-  <text x="268" y="100" font-size="10.5" fill="#475569">2. we=1：bank[b][row][i] = data[i] if mask[i]（逐字节）；scale_en → scale[b][row] = scale</text>
-  <text x="268" y="116" font-size="10.5" fill="#475569">   2.1 mask 非全 1 → cmem_mask[b][row] = 1</text>
-  <text x="268" y="132" font-size="10.5" fill="#475569">3. rdout[b] = {port, data, scale, tag, t_in}；写请求只带 {port, tag, t_in}</text>
-  <text x="268" y="160" font-size="9.5" fill="#9ca3af">ECC 与 mask 记录只留位，不建校验；读出 2 拍</text>
-  <line x1="654" y1="110" x2="740" y2="110" stroke="#475569" marker-end="url(#q3)"/>
-  <rect x="744" y="75" width="200" height="70" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="744" y="75" width="200" height="16" fill="#334155"/>
-  <text x="844" y="87" font-size="10.5" fill="#ffffff" text-anchor="middle">cmem_rdout[8]</text>
-  <text x="752" y="107" font-size="10" fill="#475569">valid · port[2:0] · data[1023:0]</text>
-  <text x="752" y="121" font-size="10" fill="#475569">scale[31:0] · tag[7:0] · t_in[31:0]</text>
-</svg>
-```
-
-### M4 · 延迟线与响应
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 970 220" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="q4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="970" height="220" fill="#ffffff"/>
-  <rect x="20" y="30" width="200" height="60" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="20" y="30" width="200" height="16" fill="#334155"/>
-  <text x="120" y="42" font-size="10.5" fill="#ffffff" text-anchor="middle">cmem_rdout[8]</text>
-  <text x="28" y="62" font-size="10" fill="#475569">port · data · scale · tag · t_in</text>
-  <rect x="20" y="120" width="200" height="70" fill="#f8fafc" stroke="#374151"/>
-  <rect x="24" y="124" width="192" height="62" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="60" y1="124" x2="60" y2="186"/><line x1="90" y1="124" x2="90" y2="186"/></g>
-  <text x="100" y="150" font-size="10.5" fill="#111827">cmem_rsp_q[p]</text>
-  <text x="100" y="166" font-size="10" fill="#475569">FIFO 深 CMEM_LAT_MAX · 1W1R</text>
-  <line x1="222" y1="60" x2="248" y2="60" stroke="#475569" marker-end="url(#q4)"/>
-  <line x1="222" y1="155" x2="248" y2="155" stroke="#475569" marker-end="url(#q4)"/>
-  <rect x="252" y="30" width="400" height="160" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="260" y="44" font-size="8.5" fill="#6b7280">M4</text>
-  <text x="644" y="44" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="268" y="64" font-size="12" fill="#111827">延迟线与响应（每口）</text>
-  <text x="268" y="84" font-size="10.5" fill="#475569">1. rdout[b].valid → rsp_q[port].push({data, scale, tag, due = t_in + CMEM_LAT_&lt;port&gt;})</text>
-  <text x="268" y="100" font-size="10.5" fill="#475569">   1.1 DTE 的两个 bank 合并成一项 256 B（bank 与 bank+1 的 rdout 同拍到）</text>
-  <text x="268" y="116" font-size="10.5" fill="#475569">2. rsp_q[p].front.due == now → 出队，rsp_valid[p] = 1，rsp_data / rsp_scale / rsp_tag = 该项</text>
-  <text x="268" y="132" font-size="10.5" fill="#475569">3. 否则 rsp_valid[p] = 0</text>
-  <text x="268" y="160" font-size="9.5" fill="#9ca3af">端到端拍数由 CMEM_LAT_&lt;port&gt; 决定，M1～M3 固定 4 拍，此级补足其余</text>
-  <line x1="654" y1="110" x2="740" y2="110" stroke="#475569" marker-end="url(#q4)"/>
-  <polygon points="750,85 940,85 930,135 740,135" fill="#f8fafc" stroke="#374151"/>
-  <text x="845" y="114" font-size="10.5" fill="#374151" text-anchor="middle">cmem_*（rsp_* 字段）</text>
-</svg>
-```
-
-**Matrix Mem 的差别**：M1 的 `mmem_mu_rd` 请求不带地址而带行号，M2 里它一次占全部 32 个 bank；M2 的同 bank 冲突不排队，只执行 MU、另一方保持并计数；M3 整行 256 B 写、无 byte mask；M4 的 due 按 `MMEM_LAT_DTE_RD / MMEM_LAT_DTE_WR / MMEM_LAT_MU`。
-
-**Share Mem 的差别**：单 bank；M2 四个请求者轮询（待定），`smem_find` 授予后占住 M2～M3 逐拍读一字，直到读到非零或 `cur == end`，`smem_find_ctx` 记游标；M4 的 due 按 `SM_LATENCY`，find 的 due 从最后一次读算。
-
-***
-
-## 6　参数汇总
-
-```
-CMEM_LAT_DTE      13    // 第 4 章 Cmem MAS：DTE 读写 13T
-CMEM_LAT_MU       11    // MU 读写 11T
-CMEM_LAT_VU       14    // VU 读写 14T
-CM_RV_LATENCY     15    // 第 3 章 15～25T，取下限（待定）
-CMEM_LAT_MAX      25    // rsp_q 深度
-CMEM_BANKS        8     // bank = addr[9:7]（bank 摆放规则按 Cmem MAS 图，待定）
-CMEM_ROW_BYTES    128
-MMEM_LAT_DTE_WR   9     // 第 4 章 Mmem MAS，lane 内延迟
-MMEM_LAT_DTE_RD   8
-MMEM_LAT_MU       8     // 第 8 章有 4T / 8T / 17T 三个值，取 Mmem MAS 的 8T
-MMEM_LAT_MAX      50    // 端到端上限，rsp_q 深度
-MMEM_BANKS        32    // 与 MU 32 物理 lane 一对一；地址到 bank 的映射按 Mmem MAS 的 bank 摆放图（待定）
-MMEM_ROW_BYTES    256
-SM_LATENCY        5     // 第 3 章 5～10，取下限（待定）
-SMEM_ARB          轮询  // 待定，原文未给
-带宽：Core Mem (1 KB + 32 B)/T；Matrix Mem (8 KB + 1 KB)/T；Share Mem 4 B/T × 每拍 1 请求
-```
-
-M1～M3 固定 4 拍、其余落在 M4 的拆法是本文定的（待定）：MAS 只给端到端拍数，不给级间拆分。
-
-***
-
-## 7　机制覆盖
-
-### Core Mem
-
-| 机制 | 落点 | 用例 |
+| 机制 | 功能 | 用例 |
 | - | - | - |
-| bank 冲突二选一，无冲突同时访问 | M2 逐 bank 仲裁 | `cmem_bank_arb` |
-| DTE 局部反压：只反压冲突的 bank | M2 第 3 条 + M1 的 `req_ready` | `cmem_dte_partial` |
-| 同组同优先级：DTE 先读写各自判断，再 wr 与 rd 判断 | M2 第 2.1 条 | `cmem_dte_two_writers` |
-| 非同组优先级 MU > VU = DTE | M2 第 2 条 | `cmem_priority` |
-| 132 B 访问：MU / VU 按 132 B 读写，scale 使能时同读写 scale 寄存器；只访问 SRAM 时有效带宽 128 B | M3 第 1、2 条 | `cmem_scale_regs` |
-| Byte mask 写；非全 1 留存记录 | M3 第 2、2.1 条 | `cmem_byte_mask` |
-| 延迟 DTE 13T、MU 11T、VU 14T；带宽 DTE 256 B/T、MU / VU 128 + 4 B/T，总 1 KB + 32 B/T | M4 的 due + 每口每拍一请求 | `cmem_latency` |
-| DTE RV core 读写 CM，读固定回整行、32 bit / 拍取用 | `cmem_rv` 口 + RV core 文档的 cm_lsq | `rv_cm_read` |
-| stream_id 分片：`base(stream_id) = 分片大小 × stream_id`，统一偏移映射 | master 侧 `CoreContext::StreamBase()`，本模块只看物理地址 | `cm_stream_slicing` |
-| ECC、计数器、ctrl_noc 后门 | `cmem_cfg` 口按 4 B/T；ECC 不建 | `cmem_ctrl_noc` |
-
-### Matrix Mem
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| 同 bank 互斥：两个 master 同 bank 只执行 MU 请求，报错并计数 | M2 + `mmem_conflict_cnt` | `mmem_conflict_mu_wins` |
-| MU 一次读 32 bank 同一行，8 KB + 1 KB scale | `mmem_mu_rd` 口 + M2 全 bank 授予 | `mmem_mu_row_read` |
-| scale 地址计算 | `mmem_scale` 与数据行一一映射 | `mmem_scale_addr` |
-| 三种角色（权重 / reduction 数据 / token 缓冲） | 软件布局 | `bcore_slots`、`rcore_out_of_order` |
-| 延迟：端到端 50T 以内；DTE 写 9T / 读 8T、MU 读 8T（lane 内）；带宽 DTE 256 B/T、MU 8 + 1 KB/T | M4 的 due | `mmem_latency` |
-| 地址粒度 128 B，不支持 Byte mask | M1 断言 | `mmem_granule` |
-| ECC 自纠回写、计数器 | 不建 | — |
-
-### Share Mem
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| 三种用途：task 间共享、用户映射表、标量 | 软件 | `bcore_two_chains`、`rcore_out_of_order` |
-| RV core 访问 5～10 拍，每拍 1 请求 | M1 每口一槽 + M4 的 due | `rv_latency` |
-| DTE 完成后写 valid 标志 | `smem_dte_wr` 口 | `dte_sharemem_write` |
-| `flag_check` 查找第一个非零字，找不到返回全 1 | `smem_find` 口 + M2～M3 的扫描 | `rv_flag_check` |
+| Core Mem 8 bank，每 bank SRAM 加 scale 寄存器 | F1、F2 | `cmem_bank_layout` |
+| 最大带宽 (1 KB + 32 B)/T | F4 | `cmem_bw` |
+| 支持 byte mask 读写 | F6 | `cmem_byte_mask` |
+| 各 master 的带宽与延迟 | F7 | `cmem_master_latency` |
+| bank 冲突时 arb 二选一，无冲突同时访问 | F8 | `cmem_bank_arb` |
+| DTE 部分 bank 冲突时只反压冲突的那个 bank | F9 | `cmem_partial_stall` |
+| 同组内 DTE 先判读写各自冲突再判读写之间 | F10 | `cmem_same_group` |
+| 非同组优先级 MU > VU = DTE | F11 | `cmem_priority` |
+| scale 使能时同时读写对应地址的 scale 寄存器 | F13 | `cmem_scale` |
+| byte_mask 非全 1 时不做 ECC 检测 | F14 | `cmem_mask_ecc` |
+| ECC 编解码在 SRAM 接口处，1 bit 计数、2 bit 报错 | F15、F16 | `cmem_ecc` |
+| 按 stream_num 均等切分，分片基址在 master 侧算 | F17 | `cmem_stream_slice` |
+| Matrix Mem 64 bank 与 lane 匹配，顶层拉齐延迟 | F20 | `mmem_bank_lane` |
+| 最大带宽 (8 + 1) KB/T，地址粒度 128 B 不支持 byte mask | F22、F24 | `mmem_bw` |
+| 同一 bank 不许两个 master，冲突时只执行 MU 并计数 | F26 | `mmem_single_master` |
+| SRAM 单 bit 自纠错并在空闲时写回 | F27 | `mmem_ecc_writeback` |
+| Matrix Mem 不做 stream 分片 | F28 | `mmem_no_slice` |
+| Matrix Mem 按 core 角色扮演三种角色 | F29 | `mmem_roles` |
+| Share Mem 32 KB、5～10 拍、不需要初始化 | F30、F31 | `smem_basic` |
+| Share Mem 只被三个 RV core 与 DTE 读写 | F32 | `smem_masters` |
+| B core 的 head / tail 与 R core 的 arrive_num 存在 Share Mem | F34 | `smem_tables` |
 
 ***
 
-## 8　取舍
+## 9　取舍
 
-* **四级骨架为什么对三块存储共用**
-  * MAS 对三者都只给端到端拍数和仲裁规则，没有级间时序
-  * 把级间拆分固定成“1 + 1 + 2 + 其余”，端到端拍数仍等于 MAS 值
-  * 仲裁点的位置（进模块后第 2 拍）对三者一致
-  * 日后拿到 MAS 的级间时序，只改参数表和 M4 的长度
-* **延迟线为什么放在每个 master 口，不放在每个 bank 上**
-  * 返回顺序按口保序，不按 bank 保序
-  * 这与 DTE 的 outstanding 记账、MU ldq 的按序回填一致
+* **为什么 ECC 编解码放在 SRAM 接口处而不是各访问源端口**
+  * 能减少 8% 数据传输功耗，代价是面积增加
+* **为什么 Matrix Mem 同一 bank 不许两个 master**
+  * bank 与 MU 的 lane 一对一垂直贴合，为 MU 的 8 KB/T 让路
+  * 冲突时只执行 MU，是因为 MU 的读是关键路径，DTE 与 ctrl_noc 都可以等
+* **为什么单独做一块 Share Mem**
+  * Core Mem 容量大、物理距离远，访问延时 15～25 拍，顺序执行的 RV core 掩盖不了
+  * Share Mem 容量小、距离近，延时 5～10 拍，用来加速三个 RV core 的 task 之间传数据
+* **为什么 stream 分片放在 master 侧算而不是存储模块里**
+  * 分片的基址与步长是软件配的任务参数，随方向与内容类型变（data、scale、topK、包头各有各的步长）
+  * 存储模块只看物理地址，就不必知道这些

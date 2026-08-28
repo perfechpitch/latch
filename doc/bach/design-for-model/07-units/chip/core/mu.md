@@ -4,409 +4,377 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **MU DSA**
 
-给实现 MU 的人：七个独立打拍的模块各自的端口、存储器、流水线与逐级行为、参数与机制。
-
-七个模块：regfile、issue_q、gen_ep_info、agu ×3 与 acu、ldq ×2、matrix exe、stq。
-
-两条建模前提：
-
-* 阵列按 32 物理 lane、原语 K128×N64 建
-* Matrix Mem 按 32 bank 与 lane 一对一
+给实现 MU 的人：七个独立打拍的模块各自做哪些事、端口与存储怎么定。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
 **对应设计**：
 
 * 《执行单元与存储》“MU DSA（矩阵单元）”全部小节
-* 《软件栈》“MU core 100 T 内三件事”
+* 《归约的完整过程》：“第一层：core 内的专家间求和”
+* 《软件栈》：“计算 Core”的中间若干 task
 
 ***
 
 ## 1　定位与边界
 
-MU 做 GEMV，一趟数据流：
+MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token = 1）的极低延时推理。一趟数据流：
 
-* **读**：token 从 Core Mem，weight 从 Matrix Mem（32 bank 一对一，无 crossbar）
-* **算**：32 lane 各 10 级流水的 MAC 阵列，算 `C = A × B` 或 `C = C + (A × B) × W_ep`
+* **读**：token 从 Core Mem，weight 从 Matrix Mem（bank 与 lane 一对一垂直贴合，无 crossbar）
+* **算**：32 个物理 lane 各 10 级流水的 MAC 阵列
 * **写**：结果经 stq 拼成 1 KB 写回 Core Mem
 
-任务由 MU RV core 写寄存器加 trigger 下发，走 `regfile → issue_q → gen_ep_info → agu → ldq → matrix exe → stq`。load、计算、写回三段在相邻 task 之间重叠。
+支持两种矩阵运算形式：
+
+| 形式 | 说明 |
+| - | - |
+| `C = A × B` | 普通 GEMV |
+| `C = C + (A × B) × W_ep` | 矩阵乘加专家间 reduce，**不支持初始 C 加载**：第一个专家的结果直接写 `C`，后续专家逐个累加 |
+
+第二种形式把 EP reduce 从 VU 挪进 MU，Core Mem 不必为每个用户缓存所有激活专家的中间结果。MoE 多专家场景默认走它。
+
+任务由 MU RV core 写寄存器加 trigger 下发，走 `regfile → issue_q → gen_ep_info → agu / acu → ldq → matrix exe → stq`；load、计算、写回三段在相邻 task 之间重叠。
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 560" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1520 900" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs>
-    <marker id="u0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="u0s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#475569"/></marker>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
+    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
+    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
+    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
+    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
+    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
+    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
+    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
+    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
+    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
   </defs>
-  <rect x="0" y="0" width="1180" height="560" fill="#ffffff"/>
-  <text x="20" y="28" font-size="12" fill="#111827">MU DSA · 第 0 层</text>
-
-  <polygon points="30,90 130,90 120,126 20,126" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="112" font-size="10.5" fill="#374151" text-anchor="middle">dsa_cfg · dsa_rsp</text>
-  <text x="75" y="144" font-size="9" fill="#6b7280" text-anchor="middle">← MU RV core</text>
-  <polygon points="30,200 130,200 120,236 20,236" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="222" font-size="10.5" fill="#374151" text-anchor="middle">topk_wr</text>
-  <text x="75" y="254" font-size="9" fill="#6b7280" text-anchor="middle">← DTE</text>
-  <polygon points="30,470 130,470 120,506 20,506" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="492" font-size="10.5" fill="#374151" text-anchor="middle">cfg</text>
-
-  <rect x="200" y="70" width="170" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="212" y="94" font-size="12" fill="#111827">regfile</text>
-  <text x="212" y="112" font-size="10" fill="#475569">配置寄存器 · 收齐即下发</text>
-  <text x="212" y="128" font-size="10" fill="#475569">静态 / 动态划分</text>
-  <line x1="132" y1="108" x2="198" y2="108" stroke="#475569" marker-start="url(#u0s)" marker-end="url(#u0)"/>
-  <rect x="200" y="170" width="170" height="60" fill="#f8fafc" stroke="#374151"/>
-  <rect x="204" y="174" width="162" height="52" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="220" y1="174" x2="220" y2="226"/></g>
-  <text x="228" y="194" font-size="11" fill="#111827">issue_q · FIFO 16</text>
-  <text x="228" y="212" font-size="10" fill="#475569">顺序执行 · 满则反压</text>
-  <line x1="285" y1="142" x2="285" y2="168" stroke="#475569" marker-end="url(#u0)"/>
-  <rect x="200" y="260" width="170" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="212" y="284" font-size="12" fill="#111827">gen_ep_info</text>
-  <text x="212" y="302" font-size="10" fill="#475569">topK global → local index</text>
-  <text x="212" y="318" font-size="10" fill="#475569">weight 地址</text>
-  <line x1="285" y1="232" x2="285" y2="258" stroke="#475569" marker-end="url(#u0)"/>
-  <rect x="200" y="360" width="170" height="80" fill="#f8fafc" stroke="#374151"/>
-  <rect x="204" y="364" width="162" height="72" fill="none" stroke="#374151"/>
-  <text x="212" y="384" font-size="11" fill="#111827">topk_ep_table · 16 × 16 项</text>
-  <text x="212" y="400" font-size="11" fill="#111827">local_ep_table · 256 项</text>
-  <text x="212" y="418" font-size="10" fill="#475569">DTE 写 / 软件初始化</text>
-  <line x1="132" y1="218" x2="198" y2="380" stroke="#475569" marker-end="url(#u0)"/>
-  <line x1="285" y1="358" x2="285" y2="332" stroke="#475569" stroke-dasharray="3 2" marker-end="url(#u0)"/>
-
-  <rect x="440" y="260" width="200" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="452" y="284" font-size="12" fill="#111827">agu ×3 · acu</text>
-  <text x="452" y="302" font-size="10" fill="#475569">token / weight / store</text>
-  <text x="452" y="318" font-size="10" fill="#475569">先 tile_K 再 tile_N</text>
-  <text x="452" y="334" font-size="10" fill="#475569">acu 对齐与越界</text>
-  <line x1="372" y1="295" x2="438" y2="295" stroke="#475569" marker-end="url(#u0)"/>
-
-  <rect x="700" y="160" width="200" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="712" y="184" font-size="12" fill="#111827">ldq ×2</text>
-  <text x="712" y="202" font-size="10" fill="#475569">Token ldq 16 + outstanding 16×256 B</text>
-  <text x="712" y="218" font-size="10" fill="#475569">Weight ldq 4 + 乒乓 2 级</text>
-  <text x="712" y="234" font-size="10" fill="#475569">vlane MUX · 非对齐移位</text>
-  <line x1="642" y1="290" x2="700" y2="240" stroke="#475569" marker-end="url(#u0)"/>
-  <polygon points="950,90 1060,90 1050,126 940,126" fill="#f8fafc" stroke="#374151"/>
-  <text x="1000" y="112" font-size="10.5" fill="#374151" text-anchor="middle">cmem_rd</text>
-  <polygon points="950,160 1060,160 1050,196 940,196" fill="#f8fafc" stroke="#374151"/>
-  <text x="1000" y="182" font-size="10.5" fill="#374151" text-anchor="middle">mmem_rd</text>
-  <line x1="902" y1="190" x2="940" y2="110" stroke="#475569" marker-start="url(#u0s)" marker-end="url(#u0)"/>
-  <line x1="902" y1="210" x2="940" y2="180" stroke="#475569" marker-start="url(#u0s)" marker-end="url(#u0)"/>
-
-  <rect x="700" y="290" width="200" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="712" y="314" font-size="12" fill="#111827">matrix exe</text>
-  <text x="712" y="332" font-size="10" fill="#475569">32 lane × 10 级 · CSA 树</text>
-  <text x="712" y="348" font-size="10" fill="#475569">MX scale 每 32 MAC 一组</text>
-  <text x="712" y="364" font-size="10" fill="#475569">vlane 旁路 · Ksplit_acc</text>
-  <line x1="800" y1="252" x2="800" y2="288" stroke="#475569" marker-end="url(#u0)"/>
-
-  <rect x="700" y="420" width="200" height="90" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="712" y="444" font-size="12" fill="#111827">stq</text>
-  <text x="712" y="462" font-size="10" fill="#475569">stq 16 · concat buffer 每 lane</text>
-  <text x="712" y="478" font-size="10" fill="#475569">凑 1 KB 突发写 · 输出类型转换</text>
-  <text x="712" y="494" font-size="10" fill="#475569">task_finish → issue_q</text>
-  <line x1="800" y1="382" x2="800" y2="418" stroke="#475569" marker-end="url(#u0)"/>
-  <line x1="640" y1="330" x2="700" y2="450" stroke="#475569" stroke-dasharray="3 2" marker-end="url(#u0)"/>
-  <polygon points="950,440 1060,440 1050,476 940,476" fill="#f8fafc" stroke="#374151"/>
-  <text x="1000" y="462" font-size="10.5" fill="#374151" text-anchor="middle">cmem_wr</text>
-  <line x1="902" y1="458" x2="940" y2="458" stroke="#475569" marker-start="url(#u0s)" marker-end="url(#u0)"/>
-  <polyline points="700,500 600,500 600,220 372,220" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#u0)"/>
-  <text x="480" y="216" font-size="9" fill="#6b7280">task_finish</text>
-  <polygon points="950,520 1060,520 1050,556 940,556" fill="#f8fafc" stroke="#374151"/>
-  <text x="1000" y="542" font-size="10.5" fill="#374151" text-anchor="middle">ts_done</text>
-  <polyline points="372,200 400,200 400,540 940,540" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#u0)"/>
-  <line x1="132" y1="488" x2="200" y2="120" stroke="#475569" stroke-dasharray="2 3"/>
+  <rect x="0" y="0" width="1520" height="900" fill="#ffffff"/>
+  <text x="20" y="26" font-size="12" fill="#111827">MU DSA · 第 0 层（七个独立打拍的模块）</text>
+  <text x="295" y="26" font-size="9.5" fill="#6b7280">执行流水 regfile → issue_q → gen_ep_info → agu / acu → ldq → matrix exe → stq；load、计算、写回三段在相邻 task 之间重叠</text>
+  <polygon points="36,116 196,116 187,146 27,146" fill="#f8fafc" stroke="#374151"/>
+  <text x="112" y="135" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
+  <rect x="250" y="84" width="260" height="156" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="262" y="105" font-size="11" fill="#111827">regfile</text>
+  <text x="262" y="122" font-size="8.5" fill="#475569">静态配置：基本不随用户变化，</text>
+  <text x="262" y="135.5" font-size="8.5" fill="#475569">　初始化阶段配好，业务流阶段快速调用</text>
+  <text x="262" y="149.0" font-size="8.5" fill="#475569">动态配置：随用户变化，跟随任务下发</text>
+  <text x="262" y="162.5" font-size="8.5" fill="#475569">启动：dsawi.d topk_stream_stride, trigger</text>
+  <text x="262" y="176.0" font-size="8.5" fill="#475569">trigger 含 last 标志</text>
+  <text x="262" y="189.5" font-size="8.5" fill="#475569">streamID / taskID / userID 由 DSA 自己读，</text>
+  <text x="262" y="203.0" font-size="8.5" fill="#475569">　不需要软件配置</text>
+  <rect x="556" y="84" width="230" height="156" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="568" y="105" font-size="11" fill="#111827">issue_q</text>
+  <text x="568" y="122" font-size="8.5" fill="#475569">队列深度 16</text>
+  <text x="568" y="135.5" font-size="8.5" fill="#475569">顺序执行与 finish</text>
+  <text x="568" y="149.0" font-size="8.5" fill="#475569">与启动延时有关</text>
+  <text x="568" y="162.5" font-size="8.5" fill="#475569">任务切换无 bubble</text>
+  <text x="568" y="176.0" font-size="8.5" fill="#475569">task 间在执行通路上不同操作</text>
+  <text x="568" y="189.5" font-size="8.5" fill="#475569">类型可重叠：task0 load →</text>
+  <text x="568" y="203.0" font-size="8.5" fill="#475569">{task0 算 ‖ task1 load} →</text>
+  <text x="568" y="216.5" font-size="8.5" fill="#475569">{task0 写回 ‖ task1 算} → …</text>
+  <rect x="832" y="84" width="330" height="156" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="844" y="105" font-size="11" fill="#111827">gen_ep_info</text>
+  <text x="844" y="122" font-size="8.5" fill="#475569">按任务信息索引 topK 激活专家信息</text>
+  <text x="844" y="135.5" font-size="8.5" fill="#475569">用 topK 里的 global index 索引 local_ep_table</text>
+  <text x="844" y="149.0" font-size="8.5" fill="#475569">　转成 local index，方便算 weight 访存地址</text>
+  <text x="844" y="162.5" font-size="8.5" fill="#475569">local_ep_table 记录当前 EP Group 内有哪些专家</text>
+  <text x="844" y="176.0" font-size="8.5" fill="#475569">　及各自在组内的序号</text>
+  <text x="844" y="189.5" font-size="8.5" fill="#475569">topK_ep_table：DTE 搬进来的 topK，每 stream ≤ 256 B</text>
+  <text x="844" y="203.0" font-size="8.5" fill="#475569">　FC1 / FC3 只需 ids，FC2 需 ids 与 weights</text>
+  <text x="844" y="216.5" font-size="8.5" fill="#475569">router_expert_count = 0 时忽略 topK 相关寄存器</text>
+  <rect x="250" y="300" width="340" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="262" y="321" font-size="11" fill="#111827">agu ×3 与 acu</text>
+  <text x="262" y="338" font-size="8.5" fill="#475569">agu ×3：分别算 token、weight、结果的访存地址</text>
+  <text x="262" y="351.5" font-size="8.5" fill="#475569">任务拆分顺序：先循环 tile_K，再循环 tile_N</text>
+  <text x="262" y="365.0" font-size="8.5" fill="#475569">acu：检查地址越界与对齐</text>
+  <text x="262" y="378.5" font-size="8.5" fill="#475569">异常时向阵列发排空指令（Drain）：</text>
+  <text x="262" y="392.0" font-size="8.5" fill="#475569">　1. 阻塞任务下发</text>
+  <text x="262" y="405.5" font-size="8.5" fill="#475569">　2. 清理已发出的访存请求（已请求的回复照常</text>
+  <text x="262" y="419.0" font-size="8.5" fill="#475569">　　 处理，不再发起新的）</text>
+  <text x="262" y="432.5" font-size="8.5" fill="#475569">　3. 排空计算流水线</text>
+  <text x="262" y="446.0" font-size="8.5" fill="#475569">　4. 恢复默认状态</text>
+  <text x="262" y="459.5" font-size="8.5" fill="#475569">允许已进入脉动通路的合法数据正常算完并写回，</text>
+  <text x="262" y="473.0" font-size="8.5" fill="#475569">　仅丢弃越界任务数据，防止状态机死锁</text>
+  <rect x="636" y="300" width="280" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="648" y="321" font-size="11" fill="#111827">Token ldq</text>
+  <text x="648" y="338" font-size="8.5" fill="#475569">队列深度 16（取决于读延时）</text>
+  <text x="648" y="351.5" font-size="8.5" fill="#475569">Core Mem 读带宽 256 B（接口 512 B / 1 KB）</text>
+  <text x="648" y="365.0" font-size="8.5" fill="#475569">　与 MAC 阵列接口 256 B</text>
+  <text x="648" y="378.5" font-size="8.5" fill="#475569">Core Mem 读延迟 16（待定）</text>
+  <text x="648" y="392.0" font-size="8.5" fill="#475569">Rd outstanding buffer 16 × 256 B = 4 KB</text>
+  <text x="648" y="405.5" font-size="8.5" fill="#475569">　用来掩盖 latency</text>
+  <text x="648" y="419.0" font-size="8.5" fill="#475569">vlane 机制影响 Load token：从 buffer 只读取</text>
+  <text x="648" y="432.5" font-size="8.5" fill="#475569">　256 B / vlane_num 字节，再 copy 扩展到 256 B</text>
+  <rect x="962" y="300" width="300" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="974" y="321" font-size="11" fill="#111827">Weight ldq</text>
+  <text x="974" y="338" font-size="8.5" fill="#475569">队列深度 4</text>
+  <text x="974" y="351.5" font-size="8.5" fill="#475569">Matrix Mem 读带宽 8 KB</text>
+  <text x="974" y="365.0" font-size="8.5" fill="#475569">　bank 与 lane 一对一垂直贴合，无 crossbar</text>
+  <text x="974" y="378.5" font-size="8.5" fill="#475569">Matrix Mem 读延迟 4T（读 sram 2T + 打拍 2T）</text>
+  <text x="974" y="392.0" font-size="8.5" fill="#475569">各 lane 访存地址相同，只需发一个地址</text>
+  <text x="974" y="405.5" font-size="8.5" fill="#475569">　然后逐级脉动到各 lane</text>
+  <text x="974" y="419.0" font-size="8.5" fill="#475569">MAC 入口用乒乓 2 级缓存掩盖 Mmem 读出延迟</text>
+  <rect x="250" y="556" width="720" height="236" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="262" y="577" font-size="11" fill="#111827">matrix exe</text>
+  <text x="262" y="594" font-size="8.5" fill="#475569">32 个物理 Lane，左右镜像各 16 lane；单 Lane 内 10 级混合高频流水</text>
+  <text x="262" y="607.5" font-size="8.5" fill="#475569">物理阵列规格二选一：1×K256×N32（输出带宽 128 B）或 1×K128×N64（输出带宽 256 B）</text>
+  <text x="262" y="621.0" font-size="8.5" fill="#475569">两种运算形式：C = A × B，以及 C = C + (A × B) × W_ep（矩阵乘加专家间 reduce，不支持初始 C 加载）</text>
+  <text x="262" y="634.5" font-size="8.5" fill="#475569">算力：BF16×BF16 4K MACs · MXFP8×MXFP8 8K MACs（scale block 32，E8M0）</text>
+  <text x="262" y="648.0" font-size="8.5" fill="#475569">　　　MXFP8×MXFP4 与 MXFP8×NVFP4 各 16K MACs（scale block 16，FP8）· BF16×MXFP4 与 BF16×NVFP4 各 8K MACs</text>
+  <text x="262" y="661.5" font-size="8.5" fill="#475569">八种计算原语：MXFP8 的 1×K128×N64 与 1×K64×N128；BF16 的 1×K64×N64 与 1×K32×N128；</text>
+  <text x="262" y="675.0" font-size="8.5" fill="#475569">　　　　　　　W4A8 的 1×K256×N64 与 1×K128×N128；W4A16 的 1×K128×N64 与 1×K64×N128</text>
+  <text x="262" y="688.5" font-size="8.5" fill="#475569">vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树的第 128 输入层级节点插旁路 MUX，配上对应 vlane 分组的</text>
+  <text x="262" y="702.0" font-size="8.5" fill="#475569">　MUX 逻辑和 Ksplit_acc 寄存器，做到单 lane 同时输出多个结果；vlane 有 1 和 2 两种模式</text>
+  <text x="262" y="715.5" font-size="8.5" fill="#475569">数据类型：token(A) / weight(B) 输入 BF16 或 MXFP8；W_ep 输入 FP32；输出 FP32 或 BF16</text>
+  <text x="262" y="729.0" font-size="8.5" fill="#475569">bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序</text>
+  <text x="262" y="742.5" font-size="8.5" fill="#475569">计算异常 MATH_NAN_INF 不阻塞流水，由硬件自动 Clamp；零输入旁路 + 特殊值穿透；DIDT 分级启动，最小分级为单 lane</text>
+  <rect x="1010" y="556" width="300" height="236" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="1022" y="577" font-size="11" fill="#111827">stq</text>
+  <text x="1022" y="594" font-size="8.5" fill="#475569">队列深度 16</text>
+  <text x="1022" y="607.5" font-size="8.5" fill="#475569">Core Mem 写带宽 256 B（接口 1 KB）</text>
+  <text x="1022" y="621.0" font-size="8.5" fill="#475569">　不足 1 KB 按实际传输并标记 mask</text>
+  <text x="1022" y="634.5" font-size="8.5" fill="#475569">Core Mem 写延迟 16（待定）</text>
+  <text x="1022" y="648.0" font-size="8.5" fill="#475569">Wr concat buffer 1～2 KB：</text>
+  <text x="1022" y="661.5" font-size="8.5" fill="#475569">　各 lane buffer 深度不同，取决于物理距离，</text>
+  <text x="1022" y="675.0" font-size="8.5" fill="#475569">　最远 16 拍、最近 1 拍，越近 buffer 越大，</text>
+  <text x="1022" y="688.5" font-size="8.5" fill="#475569">　最大深度 16</text>
+  <text x="1022" y="702.0" font-size="8.5" fill="#475569">Store concat 按 vlane 分两种拼装：</text>
+  <text x="1022" y="715.5" font-size="8.5" fill="#475569">　vlane=1 步进横切，所有 lane buffer 并行 128 B</text>
+  <text x="1022" y="729.0" font-size="8.5" fill="#475569">　　截面，连续取 8 次攒满 1024 B（8T）</text>
+  <text x="1022" y="742.5" font-size="8.5" fill="#475569">　vlane=2 纵向整块，每 lane 一次取 8 B、共 256 B</text>
+  <text x="1022" y="756.0" font-size="8.5" fill="#475569">　　截面，连续取 4 次攒满 1024 B（4T）</text>
+  <polyline points="196,131 223,131 223,128 250,128" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="510,154 556,154" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="786,154 832,154" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="924,240 924,272 461,272 461,300" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="590,378 636,378" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="916,378 962,378" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="737,496 737,528 624,528 624,556" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="1088,496 1088,528 869,528 869,556" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="970,627 1010,627" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polygon points="1360,340 1490,340 1481,370 1351,370" fill="#f8fafc" stroke="#374151"/>
+  <text x="1421" y="359" font-size="9" fill="#374151" text-anchor="middle">mmem_rd</text>
+  <polygon points="1360,620 1490,620 1481,650 1351,650" fill="#f8fafc" stroke="#374151"/>
+  <text x="1421" y="639" font-size="9" fill="#374151" text-anchor="middle">cmem_rd</text>
+  <polygon points="1360,700 1490,700 1481,730 1351,730" fill="#f8fafc" stroke="#374151"/>
+  <text x="1421" y="719" font-size="9" fill="#374151" text-anchor="middle">cmem_wr</text>
+  <polyline points="1262,355 1351,355" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="1310,702 1330,702 1330,715 1351,715" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="877,496 877,518 1329,518 1329,635 1351,635" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <text x="1320" y="512" font-size="8.5" fill="#6b7280" text-anchor="end">Token ldq ↔ Core Mem，MU 侧 132 B/T（11T）</text>
+  <polygon points="36,834 186,834 177,864 27,864" fill="#f8fafc" stroke="#374151"/>
+  <text x="107" y="853" font-size="9" fill="#374151" text-anchor="middle">dsa_done → TS</text>
+  <polyline points="293,792 293,849 186,849" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
+  <text x="300" y="828" font-size="8.5" fill="#0f766e" text-anchor="start">issue_q 的 finish 与 stq 写回完成合成 dsa_done；trigger 里的 last 标志决定这一笔要不要报 TS</text>
+  <polygon points="1360,120 1490,120 1481,150 1351,150" fill="#f8fafc" stroke="#374151"/>
+  <text x="1421" y="139" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
+  <polyline points="1420,120 1420,66 1116,66 1116,84" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
+  <text x="1180" y="66" font-size="8.5" fill="#7c3aed" text-anchor="end">local_ep_table 与静态配置由 ctrl_noc 写入</text>
+  <text x="20" y="884" font-size="10.5" fill="#374151">异常统一走 Drain &amp; Trap 四步，覆盖 Load / Store misalign、access fault、bus·ecc error 三类；本轮只留状态位与接口名。</text>
 </svg>
 ```
 
 ***
 
-## 2　接口
+## 2　功能清单
+
+一功能一条，编号供“机制覆盖”一章引用。
+
+### regfile
+
+| 编号 | 功能 |
+| - | - |
+| F1 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
+| F2 | 任务启动用 `dsawi.d topk_stream_stride, trigger`，trigger 寄存器含 last 标志 |
+| F3 | `streamID` / `taskID` / `userID` 由 DSA 自己读取，不需要软件配置 |
+| F4 | 寄存器地址映射本轮用临时映射（`regmap.h`），等《MU/DTE 寄存器配置参数》到手后改 |
+
+### issue_q
+
+| 编号 | 功能 |
+| - | - |
+| F5 | 队列深度 16，与启动延时有关 |
+| F6 | 顺序执行与 finish |
+| F7 | 任务切换无 bubble |
+| F8 | 支持 task 间在执行通路上不同操作类型的重叠：`task0 load → {task0 计算 ‖ task1 load} → {task0 写回 ‖ task1 计算} → …` |
+
+### gen_ep_info
+
+| 编号 | 功能 |
+| - | - |
+| F9 | 按任务信息索引 topK 激活专家信息 |
+| F10 | 用 topK 里的 global index 索引 `local_ep_table` 转成 local index，方便算 weight 访存地址 |
+| F11 | `local_ep_table` 记录当前 EP Group 内有哪些专家以及各自在组内的序号 |
+| F12 | token 数据与 topK 信息分开存放：FC1 / FC3 只需 topK ids，FC2 需 ids 与 weights |
+| F13 | `router_expert_count = 0` 时忽略 topK 相关寄存器 |
+
+### agu ×3 与 acu
+
+| 编号 | 功能 |
+| - | - |
+| F14 | 三个 agu 分别算 token、weight、结果的访存地址 |
+| F15 | 任务拆分顺序：先循环 tile_K，再循环 tile_N |
+| F16 | acu 检查地址越界与对齐 |
+| F17 | 异常时向阵列发排空指令（Drain），四步：阻塞任务下发 → 清理已发出的访存请求（已请求的回复照常处理，不再发起新的）→ 排空计算流水线 → 恢复默认状态 |
+| F18 | Drain 期间允许已进入脉动通路的合法数据正常算完并写回，仅丢弃越界任务数据，防止状态机死锁 |
+| F19 | 走 Drain & Trap 的异常三类：Load / Store misalign、Load / Store access fault、Load / Store bus·ecc error。本轮只留状态位与接口名 |
+
+### ldq ×2
+
+| 编号 | 功能 |
+| - | - |
+| F20 | Token ldq 队列深度 16，取决于读延时；Core Mem 读带宽 256 B（接口 512 B / 1 KB），与 MAC 阵列接口 256 B；读延迟 16（待定） |
+| F21 | Rd outstanding buffer 16 × 256 B = 4 KB，用来掩盖 latency |
+| F22 | Weight ldq 队列深度 4；Matrix Mem 读带宽 8 KB，bank 与 lane 一对一垂直贴合、无 crossbar；读延迟 4T（读 sram 2T + 打拍 2T） |
+| F23 | Weight 各 lane 访存地址相同，只需发一个地址然后逐级脉动到各 lane |
+| F24 | MAC 入口用乒乓 2 级缓存掩盖 Mmem 读出延迟 |
+| F25 | vlane 机制对 Load token 的影响：从 buffer 只读取 `256 B / vlane_num` 字节，再 copy 扩展到 256 B 输出 |
+
+### matrix exe
+
+| 编号 | 功能 |
+| - | - |
+| F26 | 32 个物理 Lane，左右镜像各 16 lane；单 Lane 内 10 级混合高频流水 |
+| F27 | 物理阵列规格二选一：`1×K256×N32`（输出带宽 128 B）或 `1×K128×N64`（输出带宽 256 B） |
+| F28 | 算力按精度组合分六档：BF16×BF16 4K MACs；MXFP8×MXFP8 8K MACs（scale block 32，E8M0）；MXFP8×MXFP4 与 MXFP8×NVFP4 各 16K MACs（scale block 16，FP8）；BF16×MXFP4 与 BF16×NVFP4 各 8K MACs |
+| F29 | 八种计算原语：MXFP8 的 `1×K128×N64` 与 `1×K64×N128`；BF16 的 `1×K64×N64` 与 `1×K32×N128`；W4A8 的 `1×K256×N64` 与 `1×K128×N128`；W4A16 的 `1×K128×N64` 与 `1×K64×N128` |
+| F30 | 数据类型：token(A) 与 weight(B) 输入 BF16 或 MXFP8，`W_ep` 输入 FP32，输出 FP32 或 BF16 |
+| F31 | vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树的第 128 输入层级节点插旁路 MUX，配上对应 vlane 分组的 MUX 逻辑和 `Ksplit_acc` 寄存器，做到单 lane 同时输出多个结果。vlane 有 1 和 2 两种模式 |
+| F32 | bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序 |
+| F33 | 计算异常 `MATH_NAN_INF` 不走 Drain & Trap，不阻塞流水，由硬件自动 Clamp |
+| F34 | 单 lane MAC 阵列 bitmask 计算，零输入旁路加特殊值（NaN / Inf）穿透 |
+| F35 | DIDT 分级启动，分级模式可配置，最小分级为单 lane 启动；Matrix 与 Vector 错峰启动，防止二者功耗陡升叠加。本轮只留状态位与接口名 |
+| F36 | 性能目标：MXFP8 下 Primitive K256×N32 和 K128×N64 阵列利用率 100%，BF16 与 MXFP4 同样 100%；Primitive `1×64×128` 且 K=64 时有 50% 性能损失；Tile K×N 过小会有性能损失，由 RV core 配置延时和 MU 内启动延时决定 |
+
+### stq
+
+| 编号 | 功能 |
+| - | - |
+| F37 | 队列深度 16；Core Mem 写带宽 256 B（接口 1 KB），不足 1 KB 按实际传输并标记 mask；写延迟 16（待定） |
+| F38 | Wr concat buffer 1～2 KB：各 lane buffer 深度不同，取决于物理距离，最远 16 拍、最近 1 拍，越近 buffer 越大，最大深度 16 |
+| F39 | Store concat 按 vlane 分两种拼装方式：`vlane=1` 步进横切，所有 lane buffer 并行 128 B 截面，连续取 8 次攒满 1024 B（8T）；`vlane=2` 纵向整块，每 lane 一次取 8 B、共 256 B 截面，连续取 4 次攒满 1024 B（4T） |
+| F40 | 结果写回 Core Mem 后与 issue_q 的 finish 合成 `dsa_done`；trigger 里的 last 标志决定这一笔要不要报 TS |
+
+***
+
+## 3　接口
 
 ```
-port dsa_cfg (slave, valid/ready, clk)            // MU RV core 的 dsaw / dsar
-  in  req_valid
-  out req_ready                                     // = !STATUS.QUEUE_FULL（issue_q 未满）
-  in  req_we · req_addr[15:0] · req_data[31:0] · req_stream_id[3:0] · req_user_id[15:0] · req_task_id[5:0] · req_rq_idx[2:0]
-port dsa_rsp (master, 脉冲, clk)
-  out valid · rq_idx[2:0] · data[31:0]
-port topk_wr (slave, valid/ready, clk)            // DTE 写 topK 表
-  in  req_valid · req_stream_id[3:0] · req_idx[3:0] · req_expert[15:0] · req_weight[31:0]
-  out req_ready                                     // = 1（表写口空闲）
-port cmem_rd (master, valid/ready, clk)           // 存储文档 cmem_mu_rd 的镜像，132 B
-port cmem_wr (master, valid/ready, clk)           // 存储文档 cmem_mu_wr 的镜像，132 B；1 KB 突发 = 8 拍
-port mmem_rd (master, valid/ready, clk)           // 存储文档 mmem_mu_rd 的镜像：一个行号广播 32 bank，回 8 KB + 1 KB
-port ts_done (master, 脉冲, clk)                  // → TS done_ack[MU_DSA]，trigger 含 last 时
-  out valid · stream_id[3:0] · task_id[5:0] · user_id[15:0]
-port cfg (slave, ctrl_noc 写事务, clk)            // 静态寄存器、local_ep_table 初始化
-  in  cfg_valid · cfg_addr[15:0] · cfg_we · cfg_wdata[31:0]
+port dsa_cfg (slave, valid/ready, clk)            // MU RV core 的 dsa_iss
+  in  req_valid · req_we · req_addr[11:0] · req_wdata[31:0]
+  out req_ready                                     // = regfile 配置通路未反压
+port dsa_rdata (master, 脉冲, clk)                // 读寄存器的异步返回
+  out valid · rdata[31:0]
+port dsa_done (master, 脉冲, clk)                 // → TS：trigger 的 last 标志置位的那一笔完成时报
+  out valid · stream_id[3:0] · task_id[5:0]
+port cmem_rd (master, valid/ready, clk)           // Token ldq → Core Mem，132 B（128 B data + 4 B scale）
+  out req_valid · req_addr[17:0] · req_scale_en
+  in  req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
+port cmem_wr (master, valid/ready, clk)           // stq → Core Mem，132 B；1 KB 突发按 8 拍发
+  out req_valid · req_addr[17:0] · req_wdata[1023:0] · req_scale[31:0] · req_be[127:0]
+  in  req_ready
+port mmem_rd (master, valid/ready, clk)           // Weight ldq → Matrix Mem，只读；一个行地址广播到各 bank
+  out req_valid · req_addr[24:0]
+  in  req_ready · rsp_valid · rsp_rdata[65535:0] · rsp_scale[8191:0]   // 8 KB data + 1 KB scale
+port cfg (slave, ctrl_noc 写事务, clk)            // local_ep_table 与静态配置
+  in  cfg_valid · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0]
   out cfg_rdata[31:0]
 ```
 
 ***
 
-## 3　存储器
+## 4　存储器
 
 ```
-mem regs            FF        {SYS_CTRL, TASK_CFG{prim[2:0], vlane, acc, out_type}, TASK_BLOCK{K[15:0], N[15:0]}, ADDR_TOKEN[19:0], ADDR_WEIGHT[25:0], ADDR_SCALE[25:0], ADDR_OUT[19:0], expert_en_config[15:0], topk_table_addr, topk_stream_stride, router_expert_count[3:0], trigger{last, no_ack}, STATUS{QUEUE_FULL, BUSY}}  1RW  dsaw 写  复位 0
-mem local_ep_table  FF 阵列   256 × local_idx[7:0]                1R1W   cfg 初始化                    复位 0
-mem topk_ep_table   FF 阵列   16 × 16 × {expert[15:0], weight[31:0]}  1R1W  DTE 写，按 stream_id        复位 0
-mem issue_q         FIFO      深 16 × cfg_info{regs 快照, ids}    1W1R   满 → STATUS.QUEUE_FULL       复位空
-mem ep_latch        级间 latch {valid, task, expert_local[15:0], w_addr[25:0], w_ep[31:0]}  —  每拍覆写  —   // gen_ep_info → agu
-mem tile_ctx        FF        {task, k_idx, n_idx, k_tiles, n_tiles}  1RW  agu 拆分游标                复位空
-mem tok_ldq         FIFO      深 16 × {addr[19:0], bytes[8:0], k_idx}  1W1R  满 → agu 等              复位空
-mem tok_outstanding FIFO      深 16 × 256 B                        1W1R   先发后回填                    复位空     // Rd outstanding buffer
-mem wt_ldq          FIFO      深 4 × {row[11:0], k_idx}            1W1R   满 → agu 等                   复位空
-mem wt_pingpong     FF 阵列   2 × 32 × 256 B                       1W1R   MAC 入口乒乓                  复位空
-mem tok_latch       级间 latch {valid, a[2047:0], vlane, acc, out_type, k_idx}  —  每拍覆写  —          // ldq → matrix exe
-mem mac_pipe        级间 latch 32 lane × 10 级 × {partial, exp}    —      每拍推进                      —          // 单 lane 10 级
-mem ksplit_acc      FF 阵列   32 × 2 × FP32                        1RW    vlane 分组累加                复位 0
-mem exe_out_latch   级间 latch {valid, lane_out[32][31:0], n_idx, last}  —  每拍覆写  —                // matrix exe → stq
-mem stq             FIFO      深 16 × {addr[19:0], n_idx, out_type}  1W1R  双条件启动                   复位空
-mem concat_buf      FF 阵列   32 lane × 深 1～16 × 32 b            1W1R   按 lane 距离线性分布          复位空     // Wr concat buffer
-mem assemble_latch  级间 latch {valid, data[8191:0], mask[31:0]}    —      每拍覆写                      —          // 1 KB 拼接器
+mem regfile         FF 阵列   静态配置组 + 动态参数寄存器                          1R1W  dsa_cfg 写            复位 0
+mem issue_q         FIFO      16 × 任务描述                                        1W1R  顺序执行              复位空
+mem local_ep_table  FF 阵列   当前 EP Group 内的专家与组内序号                      1R    ctrl_noc 配置         复位由输入给
+mem topK_ep_table   FF 阵列   16 stream × 256 B，每项 {expert_id 2 B, weight 4 B}   1R1W  DTE 写入              复位空
+mem token_ldq       FIFO      16 × {addr[17:0], tag}                                1W1R  取决于读延时           复位空
+mem rd_outstanding  FF 阵列   16 × 256 B = 4 KB                                     1RW   掩盖 latency          复位空
+mem weight_ldq      FIFO      4 × {addr[24:0]}                                      1W1R  各 lane 地址相同       复位空
+mem mac_ping_pong   FF 阵列   每 lane 2 级缓存                                      1RW   掩盖 Mmem 读出延迟     复位空
+mem ksplit_acc      FF 阵列   每 lane 一组，vlane 分组的部分和                       1RW   vlane=2 时使用         复位 0
+mem stq             FIFO      16 × {addr[17:0], data}                               1W1R  —                     复位空
+mem wr_concat       FF 阵列   各 lane 1～2 KB，深度 1～16 不等（越近越大）           1RW   按 vlane 两种拼装      复位空
+mem 级间 latch       级间 latch 单 lane 内 10 级                                     —     每拍覆写              —
 ```
 
 ***
 
-## 4　流水线总览
+## 5　流水线总览
 
-一个 task 走这几步：
+第 1 层图待单 lane 10 级与三段重叠的拍数定下来后补，届时按 t 标尺把 load、计算、写回三段按拍对齐画在一张图上。
 
-1. Q1 issue_q 出队
-2. G1 gen_ep_info
-3. A1 agu 拆 tile
-4. 两条 load 并行：token 经 Cmem 16 拍，weight 经 Mmem 4 拍
-5. X1 matrix exe：10 级 + `ceil(K × N / 算力)`
-6. S1 stq 拼 1 KB：vlane=1 用 8 拍，vlane=2 用 4 拍
-7. Cmem 写 16 拍 → finish
+参数表记的“执行拍数 / 流水延时 9T”与 matrix exe 一节的“单 Lane 内深度 10 级”差 1 拍，可能是含或不含脉动输出那一级，第 1 层图定稿时一并核定。
 
-task N 计算时 task N+1 load，三段重叠。
+***
 
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 400" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="h0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="1180" height="400" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">MU · 第 1 层（前三级按比例；load、计算、写回段标非按比例，拍数见 Dx）</text>
-  <g stroke="#e5e7eb"><line x1="140" y1="40" x2="140" y2="360"/><line x1="216" y1="40" x2="216" y2="360"/><line x1="292" y1="40" x2="292" y2="360"/><line x1="368" y1="40" x2="368" y2="360"/></g>
-  <g font-size="8.5" fill="#6b7280"><text x="140" y="50">t0</text><text x="216" y="50">t1</text><text x="292" y="50">t2</text><text x="368" y="50">t3</text></g>
+## 6　逐级行为
 
-  <polygon points="24,90 122,90 114,122 16,122" fill="#f8fafc" stroke="#374151"/>
-  <text x="69" y="110" font-size="10" fill="#374151" text-anchor="middle">dsa_cfg</text>
-  <line x1="122" y1="106" x2="138" y2="106" stroke="#475569" marker-end="url(#h0)"/>
-  <rect x="144" y="80" width="68" height="52" fill="#f8fafc" stroke="#374151"/>
-  <rect x="148" y="84" width="60" height="44" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="160" y1="84" x2="160" y2="128"/></g>
-  <text x="166" y="102" font-size="9" fill="#111827">issue_q</text>
-  <text x="166" y="116" font-size="8.5" fill="#475569">FIFO 16</text>
-  <rect x="220" y="80" width="68" height="52" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="224" y="76" font-size="8.5" fill="#6b7280">G1</text><text x="286" y="76" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="226" y="100" font-size="11" fill="#111827">gen_ep_info</text>
-  <text x="226" y="116" font-size="9.5" fill="#475569">local idx · w 地址</text>
-  <line x1="212" y1="106" x2="218" y2="106" stroke="#475569" marker-end="url(#h0)"/>
-  <rect x="296" y="80" width="68" height="52" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="300" y="76" font-size="8.5" fill="#6b7280">A1</text><text x="362" y="76" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="302" y="100" font-size="11" fill="#111827">agu / acu</text>
-  <text x="302" y="116" font-size="9.5" fill="#475569">tile_K → tile_N</text>
-  <line x1="288" y1="106" x2="294" y2="106" stroke="#475569" marker-end="url(#h0)"/>
+第 2 层图与每级的四要素待第 1 层图完成后补，级编号回标到第 1 层图。
 
-  <rect x="400" y="60" width="150" height="44" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="404" y="56" font-size="8.5" fill="#6b7280">T1</text><text x="548" y="56" font-size="8.5" fill="#6b7280" text-anchor="end">D16</text>
-  <text x="406" y="80" font-size="10.5" fill="#7c2d12">Token ldq：Cmem 读</text>
-  <text x="406" y="94" font-size="9.5" fill="#92400e">outstanding 16 · vlane MUX</text>
-  <rect x="400" y="114" width="150" height="44" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="404" y="110" font-size="8.5" fill="#6b7280">W1</text><text x="548" y="110" font-size="8.5" fill="#6b7280" text-anchor="end">D4</text>
-  <text x="406" y="134" font-size="10.5" fill="#7c2d12">Weight ldq：Mmem 读</text>
-  <text x="406" y="148" font-size="9.5" fill="#92400e">一地址广播 32 bank · 乒乓</text>
-  <line x1="364" y1="98" x2="398" y2="82" stroke="#475569" marker-end="url(#h0)"/>
-  <line x1="364" y1="112" x2="398" y2="136" stroke="#475569" marker-end="url(#h0)"/>
-  <polygon points="570,60 660,60 652,92 562,92" fill="#f8fafc" stroke="#374151"/>
-  <text x="611" y="80" font-size="10" fill="#374151" text-anchor="middle">cmem_rd</text>
-  <polygon points="570,114 660,114 652,146 562,146" fill="#f8fafc" stroke="#374151"/>
-  <text x="611" y="134" font-size="10" fill="#374151" text-anchor="middle">mmem_rd</text>
-  <line x1="550" y1="76" x2="562" y2="76" stroke="#475569" marker-end="url(#h0)"/>
-  <line x1="550" y1="130" x2="562" y2="130" stroke="#475569" marker-end="url(#h0)"/>
+***
 
-  <rect x="400" y="200" width="250" height="60" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="404" y="196" font-size="8.5" fill="#6b7280">X1</text><text x="648" y="196" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="406" y="220" font-size="10.5" fill="#7c2d12">matrix exe：32 lane × 10 级</text>
-  <text x="406" y="236" font-size="9.5" fill="#92400e">拍数 = 启动 + ceil(K×N / 算力) + 写回</text>
-  <text x="406" y="250" font-size="9.5" fill="#92400e">token 逐 lane 错 1 拍脉动；CSA 树 + MX scale</text>
-  <line x1="470" y1="104" x2="470" y2="198" stroke="#475569" marker-end="url(#h0)"/>
-  <line x1="500" y1="158" x2="500" y2="198" stroke="#475569" marker-end="url(#h0)"/>
+## 7　参数汇总
 
-  <rect x="400" y="290" width="250" height="60" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="404" y="286" font-size="8.5" fill="#6b7280">S1</text><text x="648" y="286" font-size="8.5" fill="#6b7280" text-anchor="end">D8 / D4 + 16</text>
-  <text x="406" y="310" font-size="10.5" fill="#7c2d12">stq：concat 拼 1 KB → Cmem 写</text>
-  <text x="406" y="326" font-size="9.5" fill="#92400e">vlane=1 横切 8T · vlane=2 纵向 4T</text>
-  <text x="406" y="340" font-size="9.5" fill="#92400e">写延迟 16 · 不足按 mask</text>
-  <line x1="525" y1="262" x2="525" y2="288" stroke="#475569" marker-end="url(#h0)"/>
-  <polygon points="700,300 790,300 782,332 692,332" fill="#f8fafc" stroke="#374151"/>
-  <text x="741" y="320" font-size="10" fill="#374151" text-anchor="middle">cmem_wr</text>
-  <line x1="650" y1="316" x2="692" y2="316" stroke="#475569" marker-end="url(#h0)"/>
-  <polygon points="700,360 790,360 782,392 692,392" fill="#f8fafc" stroke="#374151"/>
-  <text x="741" y="380" font-size="10" fill="#374151" text-anchor="middle">ts_done</text>
-  <polyline points="600,350 600,376 692,376" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#h0)"/>
-  <text x="820" y="380" font-size="9" fill="#6b7280">写完成 → task_finish → issue_q 退出 → last 时报 TS</text>
-
-  <text x="820" y="220" font-size="10" fill="#374151">重叠：task0 写回 ‖ task1 计算 ‖ task2 load。</text>
-  <text x="820" y="238" font-size="10" fill="#374151">issue_q 允许执行通路提前取下一 task。</text>
-</svg>
+```
+物理 lane          32（左右镜像各 16），单 lane 10 级流水
+物理阵列规格        1×K256×N32（输出 128 B）或 1×K128×N64（输出 256 B），二选一
+算力               BF16 4K · MXFP8 8K · W4A8 16K · W4A16 8K MAC/T
+issue_q            16
+Token ldq / Weight ldq / stq   16 / 4 / 16
+Rd outstanding buffer          16 × 256 B = 4 KB
+Wr concat buffer   1～2 KB（各 lane 深度 1～16 不等）
+Core Mem 读 / 写    256 B（接口 512 B / 1 KB）；MU 侧 132 B/T，延迟 11T；MU 读延迟 16、写延迟 16（待定）
+Matrix Mem 读       8 KB（+1 KB scale），lane 内延迟 8T；ldq 侧记 4T（读 sram 2T + 打拍 2T）
+内部启动延迟        40T（流水启动 5T + 20 条指令算地址 30T + core 发射 5T，文档注“偏小”）
+MU 配置耗时上限     < 64 T（未来可能要求 < 32 T）
+单 token 执行耗时   f(N, X) = 4096 × X / N（T），N 是每 core 的专家数、X 是激活数
+Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一，Mmem MAS 记 64 bank。未解，直接影响 8 KB/T 的组织方式
+寄存器地址映射      临时映射（regmap.h），等《MU/DTE 寄存器配置参数》
 ```
 
 ***
 
-## 5　逐级行为
+## 8　机制覆盖
 
-### R1 · regfile（寄存器写与下发）
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `dsa_cfg`、`regs`、`issue_q` 余量 | 1. `req_we` → 写 `regs[addr]`；写 `trigger`（`dsawi.d topk_stream_stride, trigger`）→ 收齐一个 task：`issue_q.push({regs 快照, ids 取随指令附带的 stream / user / task id, last, no_ack})`<br>2. `STATUS.QUEUE_FULL = issue_q 满`；`req_ready = !QUEUE_FULL`（反压 RV core 的 dsa_iss）<br>3. `!req_we` → 下拍 `dsa_rsp`<br>4. `router_expert_count == 0` → 该 task 忽略 topK 相关寄存器 | `regs`、`issue_q`、`dsa_rsp` | D1 |
-
-### Q1 · issue_q（顺序执行与 finish）
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `issue_q`、stq 的 `task_finish` | 1. 队首 task 交给 G1；执行通路可提前取下一 task（load 段），队首仍占位到 finish<br>2. `task_finish(task)` → 出队；`last ∧ !no_ack` → `ts_done = {stream_id, task_id, user_id}` | G1 入口、`ts_done`、`issue_q` | D1 |
-
-### G1 · gen_ep_info
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| 当前 task 的 `regs` 快照、`topk_ep_table[stream_id]`、`local_ep_table` | 1. 对 topK 的每个 `{expert_global, weight}`：`local = local_ep_table[expert_global]`；`w_addr = ADDR_WEIGHT + local × 专家权重步长`<br>2. FC1 / FC3 只用 ids；FC2 用 ids 与 weights（`W_ep` FP32）<br>3. `ep_latch = {task, local, w_addr, w_ep}` | `ep_latch` | D1 |
-
-### A1 · agu ×3 与 acu
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `ep_latch`、`tile_ctx`、`tok_ldq` / `wt_ldq` / `stq` 余量 | 1. `Split`：按原语（K128×N64 等）`k_tiles = K / tile_K`，`n_tiles = N / tile_N`；先循环 tile_K 再 tile_N<br>2. Token agu：`tok_ldq.push({ADDR_TOKEN + k_idx × tile_K × 元素字节, bytes, k_idx})`，burst，byte 对齐<br>3. Weight agu：`wt_ldq.push({row = (w_addr + k_idx × tile_K × tile_N × 字节) / 256, k_idx})`，256 B 对齐，一个行号逐级脉动到各 lane<br>4. Store agu：`stq.push({ADDR_OUT + n_idx × 256 B, n_idx, out_type})`，单 lane 4 B（vlane=2 时 8 B）<br>5. acu：对齐校验、越界捕获 → 断言（异常不建） | `tok_ldq`、`wt_ldq`、`stq`、`tile_ctx` | D1 |
-
-### T1 · Token ldq
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `tok_ldq`、`tok_outstanding` 余量、`cmem_rd` | 1. 每拍从队头发 1 个 `cmem_rd.req`（`tok_outstanding` 有空则先发后回填）<br>2. `rsp_valid` → 按 k_idx 回填 `tok_outstanding`；非对齐移位拼接<br>3. vlane MUX：只读 `256 B / vlane_num`，复制扩展到 256 B → `tok_latch = {a, vlane, acc, out_type, k_idx}`；控制随数据 | `cmem_rd`、`tok_outstanding`、`tok_latch` | D16（Cmem 读延迟，待定） |
-
-### W1 · Weight ldq
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `wt_ldq`、`wt_pingpong`、`mmem_rd` | 1. 每拍发 1 个 `mmem_rd.req{row}`（乒乓有空页时）<br>2. `rsp_valid`（8 KB + 1 KB scale）→ 写入乒乓的空页；MAC 独享 Mmem 带宽<br>3. 乒乓 2 级掩盖 4 拍读出延迟（读 SRAM 2T + 打拍 2T） | `mmem_rd`、`wt_pingpong` | D4 |
-
-### X1 · matrix exe
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `tok_latch`、`wt_pingpong`、`mac_pipe`、`ksplit_acc`、`ep_latch.w_ep` | 1. Token 脉动：lane i 在第 i 拍拿到 `a`（逐 lane 错 1 拍）<br>2. 每 lane 每拍：MAC 后指数对齐，无符号 CSA 树压缩累加；OCP MX scale 每 32 MAC 一组，组内累加后乘 scale，组间累加；`MATH_NAN_INF` Clamp<br>3. vlane=2：CSA 第 128 层旁路 MUX，`ksplit_acc` 两组，单 lane 双结果<br>4. 原语模式 `C = A × B` 或 `C = C + (A × B) × W_ep`（无初始 C，`W_ep` FP32）；bit 级顺序与参考实现同<br>5. 一次原语拍数 = 启动 + `ceil(K × N / 算力)` + 写回；算力 BF16 4K / MXFP8 8K / W4A8 16K / W4A16 8K MAC/T<br>6. 末 K tile → `exe_out_latch = {lane_out[32], n_idx, last}` | `mac_pipe`、`ksplit_acc`、`exe_out_latch` | D变长 |
-
-### S1 · stq 与 concat
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `stq`、`exe_out_latch`、`concat_buf`、`assemble_latch`、`cmem_wr` | 1. 双条件启动：`stq` 队首（store-acu 地址）与 `exe_out_latch.valid`（启动信息）都到<br>2. 各 lane 结果进 `concat_buf[lane]`（深度按到 Cmem 的距离 1～16）<br>3. 拼装：vlane=1 横切，128 B 截面取 8 次凑 1 KB（8T）；vlane=2 纵向，256 B 截面取 4 次（4T）<br>4. 输出类型转换 FP32 / BF16（`numeric`）；`assemble_latch = {data, mask}`，不足 1 KB 按实际标 mask<br>5. `cmem_wr` 突发写（1 KB = 8 拍 132 B）；按绝对地址顺序<br>6. 写完成（bvalid）→ `task_finish(task)` 给 issue_q | `cmem_wr`、`concat_buf`、`assemble_latch`、`task_finish` | D8 / D4 + 16（Cmem 写延迟，待定） |
+| 机制 | 功能 | 用例 |
+| - | - | - |
+| 静态与动态配置分开，trigger 含 last 标志 | F1、F2 | `mu_regfile_split` |
+| streamID / taskID / userID 由 DSA 自读 | F3 | `mu_ids_selfread` |
+| issue_q 顺序执行，任务切换无 bubble | F6、F7 | `mu_issue_q` |
+| task 间三段重叠 | F8 | `mu_three_stage_overlap` |
+| topK 的 global index 经 local_ep_table 转 local index | F10、F11 | `gen_ep_info` |
+| router_expert_count = 0 时忽略 topK 寄存器 | F13 | `no_topk` |
+| 先循环 tile_K 再循环 tile_N | F15 | `tile_order` |
+| acu 越界 / 对齐检查触发 Drain 四步 | F16、F17 | `mu_drain_trap` |
+| Drain 时已进入脉动通路的合法数据照常算完写回 | F18 | `drain_keep_valid` |
+| Weight 各 lane 地址相同，发一个地址逐级脉动 | F23 | `weight_systolic_addr` |
+| MAC 入口乒乓 2 级缓存掩盖 Mmem 读延迟 | F24 | `mac_pingpong` |
+| vlane 影响 Load token 的读取与扩展 | F25 | `vlane_load` |
+| 32 lane × 10 级，六档精度组合的算力 | F26、F28 | `mu_array_spec` |
+| 八种计算原语 | F29 | `mu_primitives` |
+| C = C + (A × B) × W_ep，不支持初始 C 加载 | 定位与边界 | `ep_reduce_in_mu` |
+| vlane 的 CSA 旁路 MUX 与 Ksplit_acc | F31 | `vlane_split` |
+| CSA 树按 scale block 分组累加，与参考实现同序 | F32 | `csa_order` |
+| MATH_NAN_INF 不阻塞流水，硬件自动 Clamp | F33 | `nan_clamp` |
+| 零输入旁路与特殊值穿透 | F34 | `zero_bypass` |
+| stq 不足 1 KB 按实际传输并标记 mask | F37 | `stq_mask` |
+| Wr concat buffer 按物理距离定深度 | F38 | `concat_buffer_depth` |
+| Store concat 按 vlane 分两种拼装 | F39 | `vlane_store` |
+| last 标志决定这一笔要不要报 TS | F40 | `mu_dsa_done` |
 
 ***
 
-## 6　参数汇总
+## 9　取舍
 
-```
-ISSUE_Q_DEPTH        16
-TOK_LDQ_DEPTH        16；TOK_OUTSTANDING 16 × 256 B（4 KB）
-WT_LDQ_DEPTH         4；WT_PINGPONG 2 级
-STQ_DEPTH            16；CONCAT_DEPTH 每 lane 1～16 线性分布（最远 16 拍、最近 1 拍）
-LANES                32（左右镜像各 16）；单 lane 10 级
-PRIMITIVE            K128×N64（输出带宽 256 B）；8 种原语按 TASK_CFG.prim
-MAC_RATE             BF16 4K / MXFP8 8K / W4A8 16K / W4A16 8K MAC/T
-CMEM_RD_LATENCY      16          // 待定
-CMEM_WR_LATENCY      16          // 待定，第 8 章
-MMEM_RD_LATENCY      4（读 SRAM 2T + 打拍 2T）
-CMEM_TOKEN_BW        256 B（接口 512 B / 1 KB）
-MMEM_WEIGHT_BW       8 KB（32 bank × 256 B/T，无 crossbar）
-CMEM_STORE_BW        256 B（接口 1 KB）
-Primitive 1×64×128 且 K=64 时 50% 性能损失；Tile 过小的损失由 RV core 配置延时与启动延时决定
-DIDT 分级启动、零输入旁路、错峰启动、Drain & Trap   不建
-```
-
-***
-
-## 7　机制覆盖
-
-### regfile 与 issue_q
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| 收齐即下发：收完一个 task 全部寄存器（写 `trigger`）后发 issue_q | R1 第 1 条 | `mu_regfile_trigger` |
-| 启动指令 `dsawi.d topk_stream_stride, trigger`；stream / task / user id 由 DSA 从 RV core CSR 读 | R1 第 1 条（随指令附带的 ID） | `mu_ids_from_csr` |
-| `router_expert_count = 0` 忽略 topK | R1 第 4 条 | `mu_no_topk` |
-| 顺序执行、满则拒收（反压 RV core 的 dsa_iss）、not_empty 才发 | R1 第 2 条、Q1 | `mu_issue_q` |
-| 提前调度：task N 计算时 task N+1 load，三段重叠 | Q1 第 1 条 | `mu_overlap` |
-| finish 收集：收 stq 的 task_finish，退出并通知 TS（trigger 含 last） | Q1 第 2 条 | `mu_finish` |
-| 静态 / 动态寄存器划分 | `regmap.h` | `rv_static_dynamic` |
-
-### gen_ep_info、topK 表与专家加权累加
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| gen_ep_info：global index 查 local_ep_table 得 local index，算 weight 地址 | G1 第 1 条 | `mu_gen_ep_info` |
-| FC1 / FC3 只用 ids，FC2 用 ids 与 weights | G1 第 2 条 | `mu_fc_modes` |
-| token 与 topK 分存 | `topk_ep_table` 独立 | — |
-| 专家加权累加 `C = C + (A × B) × W_ep`，无初始 C，W_ep FP32 | X1 第 4 条 | `mu_expert_weighted_sum_bits` |
-| 完整式子 `D = sf_A × sf_B × A × B + C` | X1 + `common/numeric` | `mu_gemv_bits` |
-
-### agu ×3 与 acu
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| 任务拆分：先 tile_K 再 tile_N | A1 第 1 条 | `mu_split` |
-| Token agu：burst，byte 对齐，Cmem 侧移位拼接 | A1 第 2 条 + T1 第 2 条 | `mu_token_agu` |
-| Weight agu：256 B 对齐，一个地址逐级脉动到各 lane，32 bank 同步寻址 | A1 第 3 条 + W1 | `mu_weight_agu` |
-| Store agu | A1 第 4 条 | `mu_store_agu` |
-| acu 对齐校验、越界捕获 | A1 第 5 条 | — |
-
-### ldq ×2 与 Rd outstanding buffer
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| outstanding 掩盖延迟：先发后回填，按使能 K 值读 buffer 输出 | T1 第 1、2 条 | `mu_ldq_outstanding` |
-| 非对齐移位 | T1 第 2 条 | `mu_token_agu` |
-| vlane MUX | T1 第 3 条 | `mu_vlane` |
-| 控制随数据 | `tok_latch` 字段 | — |
-| Weight 乒乓 | W1 第 2、3 条 | `mu_weight_pingpong` |
-| Token 读延迟 16、Weight 读延迟 4T | T1 / W1 的 Dx | `mu_ldq_latency` |
-
-### matrix exe
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| 指数提前 + 纯定点 CSA 树 | X1 第 2 条 + `common/numeric/csa_tree.h` | `mu_csa_bits` |
-| OCP MX scale 每 32 MAC 一组 | X1 第 2 条 | `mu_mx_scale_bits` |
-| 8 种原语、四种精度组合、算力 | X1 第 5 条 | `mu_primitives` |
-| vlane 分组 | X1 第 3 条 | `mu_vlane` |
-| Token 脉动：各 lane 1 拍错位 | X1 第 1 条 | `mu_systolic_skew` |
-| 单 lane 10 级流水；一次原语的拍数 | X1 第 5 条 | `mu_primitive_cycles` |
-| MATH_NAN_INF Clamp | X1 第 2 条 | `mu_nan_clamp` |
-| DIDT 分级启动、零输入旁路、错峰启动 | 不建 | — |
-
-### stq 与 Wr concat buffer
-
-| 机制 | 落点 | 用例 |
-| - | - | - |
-| 双条件启动 | S1 第 1 条 | `mu_stq_start` |
-| vlane=1 横切 8T；vlane=2 纵向 4T | S1 第 3 条 | `mu_stq_assemble` |
-| 凑 1 KB 突发写；不足按实际标 mask | S1 第 4、5 条 | `mu_stq_burst` |
-| 输出类型转换 FP32 / BF16 | S1 第 4 条 | `mu_out_type_bits` |
-| 写完成上报 task_finish 给 issue_q | S1 第 6 条 | `mu_finish` |
-
-***
-
-## 8　取舍
-
-* **Token 与 Weight 两条 load 通路为什么各自独立打拍，在 matrix exe 入口会合**
-  * 两者延迟差一个量级（16 与 4），且由不同存储供给
-  * 把等待放在 `tok_outstanding` 与 `wt_pingpong` 两个缓冲上
-  * matrix exe 本身只在两边都有数据时推进
-* **concat buffer 为什么按 lane 距离给不同深度**
-  * 照搬 MAS 的“越近 buffer 越大”
-  * 让脉动阵列的错拍在写回侧被吸收，而不是在计算侧插空拍
+* **为什么把专家间累加挪进 MU**
+  * `C = C + (A × B) × W_ep` 让 Core Mem 不必为每个用户缓存所有激活专家的中间结果，显著减少容量和带宽需求
+  * VU 保留跨元素归约原语作为备用路径
+* **为什么 Matrix Mem 的 bank 与 lane 一对一垂直贴合**
+  * 省掉 crossbar；各 lane 的 weight 地址相同，发一个地址逐级脉动即可
+* **为什么 Wr concat buffer 越近的 lane 越大**
+  * 各 lane 到 stq 的物理距离不同，最远 16 拍、最近 1 拍
+  * 近的 lane 先到，要多缓一会儿等远的，所以 buffer 反而要大

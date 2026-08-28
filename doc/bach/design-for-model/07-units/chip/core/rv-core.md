@@ -4,361 +4,335 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **RV core ×3**
 
-给实现 RV core 的人：一个独立打拍的模块的端口、存储器、流水线与逐级行为、参数与机制。
-
-* 三个实例，区别只在绑定的 DSA、ITCM 里的镜像、可见的地址空间
-* 指令执行器是 `src/rv32` 的功能模型
+给实现 RV core 的人：一个独立打拍的模块做哪些事、端口与存储怎么定。三个实例硬件相同、接口相同，区别只在绑定的 DSA、ITCM 里的镜像、可见的地址空间。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
 **对应设计**：
 
-* 《Core 内硬件》“RV Core”：指令集、自定义指令、task 下发与完成、dsa_iss 的下发规则、LSU 与访存分流
-* 《软件栈》：“软件执行模型”“各类 core 的软件流程”
+* 《Core 内硬件》“RV Core”全节：指令集、自定义指令、task 下发与完成、dsa_iss 的下发规则、LSU 与访存分流
+* 《软件栈》：“每个 task 的共同形状”“各类 core 的软件流程”
 
 ***
 
 ## 1　定位与边界
 
-RV core 从 TS 收 task，按 `task_pc` 跑 ITCM 里的 kernel，两类指令：
+RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITCM 里的 kernel，配置 DSA 执行任务。它跑两类指令：
 
-* **custom-0 自定义指令**：配置对应的 DSA、读 DSA 寄存器、结束 task
-* **普通 load / store**：访问 DTCM、Share Mem，以及（只有 DTE core 有的）Core Mem 与 Router I/O reg
+* **custom-0 自定义指令**：配置对应的 DSA、读 DSA 寄存器、结束 task、查映射表、循环
+* **普通 load / store**：访问 DTCM、Share Mem，以及只有 DTE core 有的 Core Mem 与 Router I/O reg
 
-指令逐条执行，不建流水线：
-
-* `src/rv32` 的 `SystemRv32` 提供 RV32IMC、M 态 CSR 与译码
-* 本模块覆盖 `Decode` 接入自定义指令
-* 外面包一层 task_queue、dsa_iss、lsq 与 gpr 就绪表做逐拍记账
+指令逐条执行，不建流水线：`src/rv32` 的 `SystemRv32` 提供 RV32IMC、M 态 CSR 与译码，本模块覆盖 `Decode` 接入自定义指令，外面包一层 task_queue、dsa_iss、dsa_rq、lsq 与 gpr 就绪表做逐拍记账。
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 480" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1380 860" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs>
-    <marker id="v0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="v0s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#475569"/></marker>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
+    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
+    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
+    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
+    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
+    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
+    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
+    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
+    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
+    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
   </defs>
-  <rect x="0" y="0" width="1100" height="480" fill="#ffffff"/>
-  <text x="20" y="28" font-size="12" fill="#111827">RV core · 第 0 层</text>
-
-  <polygon points="30,90 130,90 120,126 20,126" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="112" font-size="10.5" fill="#374151" text-anchor="middle">task</text>
-  <text x="75" y="80" font-size="9" fill="#6b7280" text-anchor="middle">← TS rv_task[u]</text>
-  <polygon points="30,170 130,170 120,206 20,206" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="192" font-size="10.5" fill="#374151" text-anchor="middle">task_done</text>
-  <text x="75" y="224" font-size="9" fill="#6b7280" text-anchor="middle">→ TS done_ack</text>
-  <polygon points="30,300 130,300 120,336 20,336" fill="#f8fafc" stroke="#374151"/>
-  <text x="75" y="322" font-size="10.5" fill="#374151" text-anchor="middle">cfg</text>
-  <text x="75" y="354" font-size="9" fill="#6b7280" text-anchor="middle">ITCM / DTCM 装载 · CSR 查询</text>
-
-  <rect x="220" y="60" width="520" height="300" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="232" y="84" font-size="12" fill="#111827">RvCore</text>
-  <rect x="240" y="100" width="220" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="250" y="120" font-size="11" fill="#111827">SystemRv32（src/rv32）</text>
-  <text x="250" y="138" font-size="10" fill="#475569">RV32IMC · M 态 CSR · 译码</text>
-  <text x="250" y="154" font-size="10" fill="#475569">gpr 32×32 b · pc</text>
-  <text x="250" y="170" font-size="10" fill="#475569">Decode 覆盖：custom-0 → bach_insts</text>
-  <text x="250" y="196" font-size="9.5" fill="#9ca3af">每拍同步跑完一条指令</text>
-  <rect x="480" y="100" width="240" height="110" fill="#f8fafc" stroke="#374151"/>
-  <rect x="484" y="104" width="232" height="102" fill="none" stroke="#374151"/>
-  <text x="492" y="122" font-size="11" fill="#111827">itcm · SRAM 4 KB · 1R1W</text>
-  <text x="492" y="138" font-size="11" fill="#111827">dtcm · SRAM 8 KB · 4 bank · 1RW</text>
-  <text x="492" y="158" font-size="10" fill="#475569">task_queue · FIFO 2</text>
-  <text x="492" y="174" font-size="10" fill="#475569">dsa_rq 8 · sm_lsq 16 · cm_lsq 16</text>
-  <text x="492" y="190" font-size="10" fill="#475569">gpr_ready 32 × 就绪拍 · 自定义 CSR</text>
-  <rect x="240" y="230" width="480" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="250" y="250" font-size="11" fill="#111827">逐拍记账</text>
-  <text x="250" y="268" font-size="10" fill="#475569">task_queue → Start：写 pc / stream_id / task_id / user_id CSR</text>
-  <text x="250" y="284" font-size="10" fill="#475569">dsa_iss：每拍 1 条 dsaw / dsar；dsa_rq 按序写回 gpr_ready</text>
-  <text x="250" y="300" font-size="10" fill="#475569">lsq：每拍 1 请求；load 的目的 gpr 记就绪拍</text>
-  <text x="250" y="316" font-size="10" fill="#475569">阻塞：源 gpr 未就绪 / lsq 或 dsa_iss 满 / task_done 后队空</text>
-  <line x1="132" y1="108" x2="218" y2="108" stroke="#475569" marker-end="url(#v0)"/>
-  <line x1="218" y1="188" x2="132" y2="188" stroke="#475569" marker-end="url(#v0)"/>
-  <line x1="132" y1="318" x2="218" y2="318" stroke="#475569" stroke-dasharray="2 3" marker-end="url(#v0)"/>
-
-  <polygon points="800,70 900,70 890,106 790,106" fill="#f8fafc" stroke="#374151"/>
-  <text x="845" y="92" font-size="10.5" fill="#374151" text-anchor="middle">dsa_cfg</text>
-  <polygon points="800,130 900,130 890,166 790,166" fill="#f8fafc" stroke="#374151"/>
-  <text x="845" y="152" font-size="10.5" fill="#374151" text-anchor="middle">dsa_rsp</text>
-  <text x="920" y="92" font-size="9" fill="#6b7280">→ 对应 DSA 的寄存器口</text>
-  <text x="920" y="152" font-size="9" fill="#6b7280">← DSA 读返回</text>
-  <line x1="742" y1="90" x2="790" y2="90" stroke="#475569" marker-end="url(#v0)"/>
-  <line x1="790" y1="150" x2="742" y2="150" stroke="#475569" marker-end="url(#v0)"/>
-  <polygon points="800,210 900,210 890,246 790,246" fill="#f8fafc" stroke="#374151"/>
-  <text x="845" y="232" font-size="10.5" fill="#374151" text-anchor="middle">sm · sm_find</text>
-  <text x="920" y="232" font-size="9" fill="#6b7280">→ Share Mem smem_rv[u] / smem_find</text>
-  <line x1="742" y1="228" x2="790" y2="228" stroke="#475569" marker-start="url(#v0s)" marker-end="url(#v0)"/>
-  <polygon points="800,280 900,280 890,316 790,316" fill="#f8fafc" stroke="#374151"/>
-  <text x="845" y="302" font-size="10.5" fill="#374151" text-anchor="middle">cm</text>
-  <text x="920" y="302" font-size="9" fill="#6b7280">→ Core Mem cmem_rv（仅 DTE core）</text>
-  <line x1="742" y1="298" x2="790" y2="298" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#v0s)" marker-end="url(#v0)"/>
-  <polygon points="800,350 900,350 890,386 790,386" fill="#f8fafc" stroke="#374151"/>
-  <text x="845" y="372" font-size="10.5" fill="#374151" text-anchor="middle">io_reg</text>
-  <text x="920" y="372" font-size="9" fill="#6b7280">→ Router cs_hdr（仅 DTE core）</text>
-  <line x1="742" y1="340" x2="790" y2="368" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#v0s)" marker-end="url(#v0)"/>
-
-  <text x="20" y="420" font-size="10.5" fill="#374151">三个实例的差别：绑定的 DSA（dsa_cfg 接谁）、ITCM 里的镜像、cm 与 io_reg 只有 DTE core 接。</text>
-  <text x="20" y="440" font-size="10.5" fill="#374151">DTCM 的 bank 冲突、ITCM 的 ECC 不建；ITCM 取指 1 拍折进每条指令的 1 拍。</text>
+  <rect x="0" y="0" width="1380" height="860" fill="#ffffff"/>
+  <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 0 层</text>
+  <text x="185" y="26" font-size="9.5" fill="#6b7280">DTE / MU / VU 各一个实例，硬件相同、接口相同；黄色虚线框内是折算成每条指令 1 拍、不建流水线的部分</text>
+  <polygon points="40,116 190,116 181,146 31,146" fill="#f8fafc" stroke="#374151"/>
+  <text x="111" y="135" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack</text>
+  <polygon points="40,742 190,742 181,772 31,772" fill="#f8fafc" stroke="#374151"/>
+  <text x="111" y="761" font-size="9" fill="#374151" text-anchor="middle">rv_done → TS</text>
+  <rect x="250" y="84" width="280" height="142" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="262" y="105" font-size="11" fill="#111827">task_queue</text>
+  <text x="262" y="122" font-size="8.5" fill="#475569">提前接收 TS 下发的 task，做到用户之间</text>
+  <text x="262" y="135.5" font-size="8.5" fill="#475569">　task 的无 bubble 调度</text>
+  <text x="262" y="149.0" font-size="8.5" fill="#475569">按是否有空槽产生 task_ack；未被接收时</text>
+  <text x="262" y="162.5" font-size="8.5" fill="#475569">　TS 不能释放该 task 跳到下一个</text>
+  <text x="262" y="176.0" font-size="8.5" fill="#475569">队头 task 的 task_pc 驱动取指</text>
+  <text x="262" y="189.5" font-size="8.5" fill="#475569">深度 2（待定）</text>
+  <rect x="250" y="286" width="560" height="238" fill="#fefce8" stroke="#a16207" stroke-dasharray="5 4" rx="4"/>
+  <text x="262" y="307" font-size="11" fill="#111827">指令执行器（src/rv32 的 SystemRv32）</text>
+  <text x="262" y="324" font-size="8.5" fill="#475569">RV32IMC，只支持 M 态，实现 M 态 CSR，不支持 S / U / H；fence 实现为 nop</text>
+  <text x="262" y="337.5" font-size="8.5" fill="#475569">覆盖 Decode 接入 custom-0 自定义指令：</text>
+  <text x="262" y="351.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
+  <text x="262" y="364.5" font-size="8.5" fill="#475569">　dsaw.s / dsaw.d / dsawi.s / dsawi.d 写 DSA 寄存器</text>
+  <text x="262" y="378.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· flag_check · loop</text>
+  <text x="262" y="391.5" font-size="8.5" fill="#475569">每条指令 1 拍；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
+  <text x="262" y="405.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch / 双发射 /</text>
+  <text x="262" y="418.5" font-size="8.5" fill="#475569">　gpr 端口 / SEU 的乘除多拍 / DTCM 的 bank 冲突都折算成 1 拍</text>
+  <text x="262" y="432.0" font-size="8.5" fill="#475569">复位后按 io_reg 的 boot_pc 启动；收到 task 后按 task_pc 起始执行</text>
+  <text x="262" y="445.5" font-size="8.5" fill="#475569">task_done：队列有待执行 task 则跳到队头 task 起始 PC，</text>
+  <text x="262" y="459.0" font-size="8.5" fill="#475569">　否则阻塞取指等待；带 TS 标志时通知 TS</text>
+  <rect x="880" y="286" width="250" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="892" y="307" font-size="11" fill="#111827">gpr 就绪表</text>
+  <text x="892" y="324" font-size="8.5" fill="#475569">32 × 32 bit</text>
+  <text x="892" y="337.5" font-size="8.5" fill="#475569">DSA 读返回与访存返回未到时</text>
+  <text x="892" y="351.0" font-size="8.5" fill="#475569">　把对应寄存器标为未就绪</text>
+  <text x="892" y="364.5" font-size="8.5" fill="#475569">读到未就绪的源就等</text>
+  <rect x="880" y="420" width="250" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="892" y="441" font-size="11" fill="#111827">CSR</text>
+  <text x="892" y="458" font-size="8.5" fill="#475569">M 态 CSR + 自定义 CSR</text>
+  <text x="892" y="471.5" font-size="8.5" fill="#475569">stream_id 只读（4 bit）</text>
+  <text x="892" y="485.0" font-size="8.5" fill="#475569">local_user_id 可读写（12 bit）</text>
+  <text x="892" y="498.5" font-size="8.5" fill="#475569">由 ctrl_noc 直接配置，不经流水线</text>
+  <rect x="1180" y="84" width="170" height="180" fill="#f5f3ff" stroke="#7c3aed" rx="4"/>
+  <text x="1192" y="105" font-size="11" fill="#111827">ITCM / DTCM</text>
+  <text x="1192" y="122" font-size="8.5" fill="#475569">ITCM 4 KB，8 B/T，1 拍</text>
+  <text x="1192" y="135.5" font-size="8.5" fill="#475569">　firmware · kernel</text>
+  <text x="1192" y="149.0" font-size="8.5" fill="#475569">　· bootloader</text>
+  <text x="1192" y="162.5" font-size="8.5" fill="#475569">DTCM 8 KB，32 bit × 4 bank</text>
+  <text x="1192" y="176.0" font-size="8.5" fill="#475569">　BSS 段 · 寄存器溢出 · 堆栈</text>
+  <text x="1192" y="189.5" font-size="8.5" fill="#475569">由 ctrl_noc 装载</text>
+  <text x="1192" y="203.0" font-size="8.5" fill="#475569">装载拍数 = 字节数 / 4 B</text>
+  <rect x="250" y="584" width="290" height="192" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="262" y="605" font-size="11" fill="#111827">dsa_iss / dsa_rq</text>
+  <text x="262" y="622" font-size="8.5" fill="#475569">dsa_iss：DSA 调用指令下发通道</text>
+  <text x="262" y="635.5" font-size="8.5" fill="#475569">　每拍最多一条配置或 trigger 指令</text>
+  <text x="262" y="649.0" font-size="8.5" fill="#475569">　按下发通道是否反压阻塞判断是否下发成功</text>
+  <text x="262" y="662.5" font-size="8.5" fill="#475569">dsa_rq：8 项，按顺序记录已下发的读指令</text>
+  <text x="262" y="676.0" font-size="8.5" fill="#475569">　返回数据后按记录的目的寄存器编号写回 gpr</text>
+  <text x="262" y="689.5" font-size="8.5" fill="#475569">DSA 读寄存器指令不支持同步读返回，</text>
+  <text x="262" y="703.0" font-size="8.5" fill="#475569">　软件要查询状态只能轮询</text>
+  <text x="262" y="716.5" font-size="8.5" fill="#475569">任务启动靠写 DSA 的 trigger 寄存器；</text>
+  <text x="262" y="730.0" font-size="8.5" fill="#475569">　last 标志包含在 trigger 里</text>
+  <rect x="870" y="584" width="300" height="192" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="882" y="605" font-size="11" fill="#111827">lsq（顺序发射）</text>
+  <text x="882" y="622" font-size="8.5" fill="#475569">sm_lsq 16 项：Share Mem，5～10 拍</text>
+  <text x="882" y="635.5" font-size="8.5" fill="#475569">cm_lsq 16 项：Core Mem，15～25 拍</text>
+  <text x="882" y="649.0" font-size="8.5" fill="#475569">　只有 DTE core 有；Router I/O reg 复用它</text>
+  <text x="882" y="662.5" font-size="8.5" fill="#475569">DTCM：4 bank 单端口 SRAM，3 拍</text>
+  <text x="882" y="676.0" font-size="8.5" fill="#475569">　可同时接收 2 个不冲突 bank 的请求</text>
+  <text x="882" y="689.5" font-size="8.5" fill="#475569">　同 bank 冲突则阻塞第二条</text>
+  <text x="882" y="703.0" font-size="8.5" fill="#475569">访存带宽 32 bit</text>
+  <text x="882" y="716.5" font-size="8.5" fill="#475569">写回优先级：share_mem / core_mem 优先于 DTCM</text>
+  <text x="882" y="730.0" font-size="8.5" fill="#475569">DTE core 读 Core Mem 固定回 1056 bit，不 burst</text>
+  <polygon points="620,660 780,660 771,690 611,690" fill="#f8fafc" stroke="#374151"/>
+  <text x="696" y="679" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
+  <polygon points="1256,600 1352,600 1343,630 1247,630" fill="#f8fafc" stroke="#374151"/>
+  <text x="1300" y="619" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq</text>
+  <polygon points="1256,660 1352,660 1343,690 1247,690" fill="#f8fafc" stroke="#374151"/>
+  <text x="1300" y="679" font-size="8.5" fill="#374151" text-anchor="middle">cm_lsq</text>
+  <polygon points="1256,720 1352,720 1343,750 1247,750" fill="#f8fafc" stroke="#374151"/>
+  <text x="1300" y="739" font-size="8.5" fill="#374151" text-anchor="middle">io_reg</text>
+  <polygon points="1230,430 1350,430 1341,460 1221,460" fill="#f8fafc" stroke="#374151"/>
+  <text x="1286" y="449" font-size="8.5" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
+  <polyline points="190,131 220,131 220,124 250,124" fill="none" stroke="#0f766e" marker-start="url(#gs)" marker-end="url(#g)"/>
+  <polyline points="390,226 390,256 373,256 373,286" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="810,324 845,324 845,338 880,338" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="810,491 840,491 840,615 870,615" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="373,524 373,554 395,554 395,584" fill="none" stroke="#475569" marker-end="url(#a)"/>
+  <polyline points="540,661 576,661 576,675 611,675" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="1180,214 869,214 869,367 810,367" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#as)" marker-end="url(#a)"/>
+  <text x="970" y="262" font-size="8.5" fill="#6b7280" text-anchor="middle">取指 8 B/T，1 拍</text>
+  <polyline points="1221,445 1176,445 1176,457 1130,457" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
+  <polyline points="1314,430 1314,347 1326,347 1326,264" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
+  <polyline points="1170,615 1247,615" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="1170,675 1247,675" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="1170,735 1247,735" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
+  <polyline points="250,457 220,457 220,757 190,757" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
+  <text x="200" y="724" font-size="8.5" fill="#0f766e" text-anchor="end">rv_done 由 task_done 指令产生</text>
+  <text x="200" y="738" font-size="8.5" fill="#0f766e" text-anchor="end">带 TS 标志时通知 TS</text>
+  <text x="560" y="556" font-size="8.5" fill="#6b7280" text-anchor="start">gpr 就绪表承载访存与 DSA 读的延迟</text>
+  <text x="20" y="820" font-size="10.5" fill="#374151">三个实例的区别只在绑定的 DSA、ITCM 里的镜像、以及可见的地址空间：只有 DTE core 有 cm_lsq 与 Router I/O reg，Matrix Mem 对三个 RV core 都不可见。</text>
+  <text x="20" y="842" font-size="10.5" fill="#374151">firmware 程序结束时要执行一条不通知 TS 的 task_done，等待业务流 task。</text>
 </svg>
 ```
 
 ***
 
-## 2　接口
+## 2　功能清单
+
+一功能一条，编号供“机制覆盖”一章引用。
+
+### task_queue 与 task 下发
+
+| 编号 | 功能 |
+| - | - |
+| F1 | 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个，做到用户之间 task 的无 bubble 调度 |
+| F2 | 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
+| F3 | 下发信息四个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，硬件写入自定义 CSR 且只读；`local_user_id` 12 bit，用于 R core 用户映射表和 Matrix Mem 地址计算，可读写，R core 执行 `flag_check` 后由软件写入 |
+| F4 | 完成信息三个字段：`stream_id`、`local_user_id`、`task_id`。`task_id` 6 bit 只读，异步 datain 任务由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
+
+### 指令执行
+
+| 编号 | 功能 |
+| - | - |
+| F5 | 指令集 RV32IMC：I 基本指令集、M 整型乘除法、C 压缩指令集；不支持 F 与 D，A 考虑支持 |
+| F6 | 特权级只支持 M 态，实现 M 态 CSR，不支持 S / U / H；`fence` 指令实现为 nop |
+| F7 | 每条指令 1 拍。不建流水线：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突都折算进这 1 拍 |
+| F8 | 复位后按 io_reg 的 `boot_pc` 启动；收到 TS 下发的 task 后按 `task_pc` 起始执行 |
+| F9 | 自定义指令 `dsar` / `dsari`：读 DSA 寄存器，地址分别来自 rs1 与立即数 `reg_addr1[4:0]` |
+| F10 | 自定义指令 `dsaw.s` / `dsawi.s`：写 1 个 DSA 寄存器；`dsaw.d` / `dsawi.d` 一次写 2 个。按 RV Core MAS 的“每条最多配置 1 个 DSA 寄存器”建模，`dsawi.d` 先当两条 `dsawi.s` |
+| F11 | 自定义指令 `task_done`：通知当前 task 完成。队列有待执行 task 则跳转到队头 task 起始 PC，否则阻塞取指等待；带 `TS` 标志时通知 TS。firmware 程序结束时要执行一条不通知 TS 的 `task_done`，等待业务流 task |
+| F12 | 自定义指令 `flag_check`：从 Share Mem 的起始地址查到结束地址，找第一个 1 并把位置偏移量写回 rd，查到结束地址仍没找到则返回全 1。B core 与 R core 轮询软件映射表靠它 |
+| F13 | 自定义指令 `loop`：rs1 是最大循环次数、rs2 是当前循环次数，rs2 ≥ rs1 时退出循环，imm 是分支偏移 |
+| F14 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
+| F15 | 任务的启动靠写 DSA 的 trigger 寄存器；last 标志（该任务包是 task 的最后一个，DSA 执行完后通知 TS task 完成）包含在 trigger 寄存器里 |
+| F16 | 性能约束：单个用户各 DSA 对应的软件调度程序在 RV core 上执行时间不超过 200 cycle |
+
+### dsa_iss 与 dsa_rq
+
+| 编号 | 功能 |
+| - | - |
+| F17 | dsa_iss 每拍最多下发一条配置或 trigger 指令 |
+| F18 | DSA 任务配置下发指令按下发通道是否反压阻塞判断是否下发成功 |
+| F19 | DSA 读寄存器指令不会被阻塞 |
+| F20 | dsa_rq 8 项，按顺序记录已下发的读指令信息，返回数据后按记录的目的寄存器编号写回 gpr |
+| F21 | DSA 读寄存器指令不支持同步读返回，软件要查询状态只能轮询 |
+
+### gpr 就绪表
+
+| 编号 | 功能 |
+| - | - |
+| F22 | 32 × 32 bit 的通用寄存器；DSA 读返回与访存返回未到时把对应寄存器标为未就绪 |
+| F23 | 指令读到未就绪的源寄存器就等，等到写回才继续。访存与 DSA 读的延迟就记在这张表上 |
+
+### lsq 与访存分流
+
+| 编号 | 功能 |
+| - | - |
+| F24 | 按地址范围把访存分到四个目标：DTCM、Share Mem、Core Mem、Router I/O reg |
+| F25 | DTCM 是 4 bank 单端口 SRAM、8 KB、32 bit × 4 bank，3 拍；可同时接收 2 个不冲突 bank 的请求，同 bank 冲突则阻塞第二条 |
+| F26 | `sm_lsq` 16 项，访问 Share Mem，5～10 拍，顺序执行，每拍仅发一个读或写请求 |
+| F27 | `cm_lsq` 16 项，访问 Core Mem，15～25 拍，顺序执行，每拍仅发一个请求；只有 DTE core 有 |
+| F28 | Router I/O reg 复用 `cm_lsq`，仅 DTE core 需要 |
+| F29 | 访存带宽 32 bit |
+| F30 | 写回优先级：DTCM 读出数据与 Share Mem / Core Mem 数据同时需写回时，优先写回 Share Mem / Core Mem，阻塞 DTCM |
+| F31 | DTE core 访问 Core Mem 的接口与其余通路不同：一次读请求固定读回 1056 bit，不支持 burst，按 32 bit / 拍返回；地址 18 bit，4 B 粒度；写请求带 4 bit 字节使能 |
+
+### 存储与配置
+
+| 编号 | 功能 |
+| - | - |
+| F32 | ITCM 4 KB，8 B/T，1 拍，存 firmware、kernel、DTE core 的 bootloader |
+| F33 | DTCM 8 KB，存初始化 BSS 数据段、寄存器溢出与堆栈 |
+| F34 | ITCM 与 DTCM 由 ctrl_noc 装载，装载拍数按镜像字节数除以 4 B 计 |
+| F35 | CSR 由 ctrl_noc 直接配置，不经流水线 |
+| F36 | 三个实例可见的地址空间：各自的 ITCM、DTCM、Share Mem、Core Mem 与对应 DSA 的 IO reg；Matrix Mem 对三个 RV core 都不可见 |
+| F37 | 异常九类（Load / Store ECC Error、Load / Store Address Misaligned、Load / Store Access Fault、Fetch Address Misaligned、Fetch Access Fault、Fetch ECC Error、Illegal Instruction、Environment Call、Breakpoint），本轮只留状态位与接口名，不实现行为 |
+
+***
+
+## 3　接口
 
 ```
-port task (slave, valid/ready, clk)               // TS rv_task[u]
-  in  cmd_valid
-  out cmd_ready                                     // = task_queue 有空槽（上拍值）
-  in  task_pc[31:0] · stream_id[3:0] · user_id[15:0] · task_id[5:0] · stream_num[4:0] · dsa_en · is_datain
-port task_done (master, 脉冲, clk)                // task_done 指令带 TS 标志时
-  out valid · stream_id[3:0] · task_id[5:0] · user_id[15:0]
-port dsa_cfg (master, valid/ready, clk)           // dsa_iss：dsaw.* / dsar.* 下发，每拍最多 1 条
-  out req_valid
-  in  req_ready                                     // = DSA 下发通道未反压（上拍值）
-  out req_we                                        // 1 = 写（dsaw），0 = 读（dsar）
-  out req_addr[15:0]                                // DSA 寄存器编号（dsawi 5 bit 立即数或 rs1 的 byte 地址）
-  out req_data[31:0]
-  out req_stream_id[3:0] · req_user_id[15:0] · req_task_id[5:0]   // 随指令附带，取自自定义 CSR
-  out req_rq_idx[2:0]                               // 读指令在 dsa_rq 的编号
-port dsa_rsp (slave, 脉冲, clk)                   // DSA 读返回，按 dsa_rq 编号写回
-  in  valid · rq_idx[2:0] · data[31:0]
-port sm (master, valid/ready, clk)                // Share Mem smem_rv[u]，字段同该口
-  out req_valid · req_addr[14:0] · req_we · req_wdata[31:0] · req_be[3:0]
+port task_cmd (slave, valid/ready, clk)           // TS → RV core：task 下发
+  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_dsa_en
+  out cmd_ready                                     // = task_queue 有空槽（raw ACCEPT）
+port rv_done (master, 脉冲, clk)                  // RV core → TS：task_done 指令带 TS 标志时产生
+  out valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0]
+port dsa_cfg (master, valid/ready, clk)           // dsa_iss → 对应 DSA：配置写与 trigger
+  out req_valid · req_we · req_addr[11:0] · req_wdata[31:0]
+  in  req_ready                                     // = DSA 的配置通路未反压
+port dsa_rdata (slave, 脉冲, clk)                 // DSA → dsa_rq：读寄存器的返回，异步
+  in  valid · rdata[31:0]
+port sm_lsq (master, valid/ready, clk)            // → Share Mem，32 bit
+  out req_valid · req_we · req_addr[14:0] · req_wdata[31:0] · req_be[3:0]
   in  req_ready · rsp_valid · rsp_rdata[31:0]
-port sm_find (master, valid/ready, clk)           // flag_check → Share Mem smem_find
-  out req_valid · req_begin[14:0] · req_end[14:0]
-  in  req_ready · rsp_valid · rsp_offset[31:0]
-port cm (master, valid/ready, clk)                // 仅 DTE core：Core Mem cmem_rv，字段同该口
-  out req_valid · req_addr[19:0] · req_we · req_wdata[31:0] · req_be[3:0]
-  in  req_ready · rsp_valid · rsp_data[1023:0]
-port io_reg (master, valid/ready, clk)            // 仅 DTE core：Router cs_hdr（读包头、写 1 弹出），复用 cm_lsq
-  out rd_valid · pop_valid
-  in  rd_ready · rd_data[63:0]
-port cfg (slave, ctrl_noc 写事务, clk)            // ITCM / DTCM 装载、boot_pc、自定义 CSR 读、ready 电平
-  in  cfg_valid · cfg_addr[15:0] · cfg_we · cfg_wdata[31:0]
+port cm_lsq (master, valid/ready, clk)            // → Core Mem 与 Router I/O reg，只有 DTE core 有
+  out req_valid · req_we · req_addr[17:0] · req_wdata[31:0] · req_be[3:0]
+  in  req_ready · rsp_valid · rsp_rdata[1055:0]     // 读固定回 1056 bit，按 32 bit / 拍取用
+port cfg (slave, ctrl_noc 写事务, clk)            // ITCM / DTCM 装载与 CSR 配置
+  in  cfg_valid · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0]
   out cfg_rdata[31:0]
-  out ready                                         // 电平：进入 wait 后为 1
+port ready (master, 电平, clk)                    // 进 wait 状态后拉高，SCP 据此开放业务接收
+  out ready
 ```
 
 ***
 
-## 3　存储器
+## 4　存储器
 
 ```
-mem itcm          SRAM        1024×4 B（4 KB）          1R1W   cfg 写，取指读                        复位未定义   // kernel 镜像代码段
-mem dtcm          SRAM        4 bank × 512×4 B（8 KB）   1RW/bank  load/store 与 cfg 写              复位未定义   // 数据段、栈；bank 冲突不建
-mem gpr           FF 阵列     32×32 b（SystemRv32）      2R1W   x0 恒 0                              复位 0
-mem pc            FF          32 b（SystemRv32）         1RW    每条指令更新                          复位 boot_pc
-mem csr_custom    FF          {stream_id[3:0], task_id[5:0], user_id[15:0], stream_num[4:0], status[1:0]}  1RW  task 开始硬件写；user_id / task_id 软件可写  复位 0
-mem task_queue    FIFO        深 TASK_QUEUE_DEPTH × {task_pc[31:0], stream_id[3:0], user_id[15:0], task_id[5:0], stream_num[4:0], dsa_en, is_datain}  1W1R  满 → cmd_ready=0  复位空
-mem exec_state    FF          {state[1:0]}                1RW    WAIT_TASK / RUN / BLOCKED / HALT      复位 WAIT_TASK
-mem gpr_ready     FF 阵列     32 × 就绪拍[31:0]           1RW    load / dsar 写，退休清                复位 0        // 值 ≤ now 视为就绪
-mem dsa_rq        FIFO        深 8 × {rd[4:0]}            1W1R   满 → dsar 等待                        复位空        // 在途 DSA 读的目的 gpr
-mem sm_lsq        FIFO        深 16 × {addr[14:0], we, wdata[31:0], be[3:0], rd[4:0]}  1W1R  满 → 等待   复位空
-mem cm_lsq        FIFO        深 16 × {addr[19:0], we, wdata[31:0], be[3:0], rd[4:0], is_io}  1W1R  满 → 等待  复位空   // 仅 DTE core，io_reg 复用
-mem inst_cnt      FF          {retired[31:0], cycles[31:0]}  1RW  每 task 清                          复位 0        // 指令计数与拍数
+mem itcm        SRAM        4 KB，8 B/T，1 拍                                  1R1W  ctrl_noc 装载        复位未定义   // firmware · kernel · bootloader
+mem dtcm        SRAM        8 KB，4 bank × 32 bit，3 拍                        1R1W  同 bank 冲突阻塞第二条  复位未定义   // BSS · 寄存器溢出 · 堆栈
+mem gpr         FF 阵列     32 × 32 bit                                        —     由指令执行器读写      复位 0
+mem gpr_ready   FF          32 b 就绪位图                                       1RW   发出访存 / DSA 读时清，写回时置  复位 全 1
+mem task_q      FIFO        深 2 × {task_pc[31:0], stream_id[3:0], local_user_id[11:0], task_dsa_en}  1W1R  满 → task_ack 拉低  复位空
+mem dsa_rq      FIFO        8 × {rd_idx[4:0]}                                  1W1R  顺序记录，返回时按序写回 gpr  复位空
+mem sm_lsq      FIFO        16 × {we, addr[14:0], wdata[31:0], rd_idx[4:0]}     1W1R  顺序发射，每拍一个    复位空
+mem cm_lsq      FIFO        16 × {we, addr[17:0], wdata[31:0], be[3:0], rd_idx[4:0]}  1W1R  顺序发射，每拍一个；只有 DTE core 有  复位空
+mem csr         FF 阵列     M 态 CSR + 自定义 CSR                              1R1W  stream_id 只读，local_user_id 可读写  复位 0
+mem pc          FF          {pc[31:0], state[2:0]}                             1RW   复位取 boot_pc；收 task 取 task_pc  复位 boot_pc
 ```
 
 ***
 
-## 4　流水线总览
+## 5　流水线总览
 
-一条指令一拍：
+本模块不建流水线，第 1 层图只画 task_queue、指令执行器、dsa_iss / dsa_rq、lsq 四段的拍数记账关系，待这几处的拍数定下来后补。
 
-* E1 取指、译码、执行同拍完成，`SystemRv32` 同步跑完
-* 访存与 DSA 读只发射不等待，延迟落在 gpr 就绪表上
-* 后续指令的源 gpr 未就绪才停
+***
 
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 400" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="e0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="1180" height="400" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 1 层（每条指令 1 拍；访存与 DSA 读的返回标非按比例）</text>
-  <g stroke="#e5e7eb"><line x1="140" y1="40" x2="140" y2="370"/><line x1="216" y1="40" x2="216" y2="370"/><line x1="292" y1="40" x2="292" y2="370"/><line x1="368" y1="40" x2="368" y2="370"/></g>
-  <g font-size="8.5" fill="#6b7280"><text x="140" y="50">t0</text><text x="216" y="50">t1</text><text x="292" y="50">t2</text><text x="368" y="50">t3</text></g>
+## 6　逐级行为
 
-  <polygon points="24,80 122,80 114,112 16,112" fill="#f8fafc" stroke="#374151"/>
-  <text x="69" y="100" font-size="10" fill="#374151" text-anchor="middle">task</text>
-  <line x1="122" y1="96" x2="138" y2="96" stroke="#475569" marker-end="url(#e0)"/>
-  <rect x="144" y="70" width="68" height="52" fill="#f8fafc" stroke="#374151"/>
-  <rect x="148" y="74" width="60" height="44" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="160" y1="74" x2="160" y2="118"/></g>
-  <text x="166" y="92" font-size="9" fill="#111827">task_queue</text>
-  <text x="166" y="106" font-size="8.5" fill="#475569">FIFO 2 · 1W1R</text>
-  <rect x="220" y="70" width="68" height="52" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="224" y="66" font-size="8.5" fill="#6b7280">S1</text><text x="286" y="66" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="226" y="90" font-size="11" fill="#111827">Start</text>
-  <text x="226" y="106" font-size="9.5" fill="#475569">pc ← task_pc</text>
-  <text x="226" y="118" font-size="9.5" fill="#475569">写 CSR</text>
-  <line x1="212" y1="96" x2="218" y2="96" stroke="#475569" marker-end="url(#e0)"/>
+第 2 层图与每级的四要素待第 1 层图完成后补，级编号回标到第 1 层图。
 
-  <rect x="296" y="150" width="220" height="110" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="300" y="146" font-size="8.5" fill="#6b7280">E1</text><text x="514" y="146" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="302" y="170" font-size="11" fill="#111827">取指 · 译码 · 执行</text>
-  <text x="302" y="188" font-size="9.5" fill="#475569">itcm[pc] → Decode → Run</text>
-  <text x="302" y="204" font-size="9.5" fill="#475569">源 gpr 未就绪 → 本拍不执行</text>
-  <text x="302" y="220" font-size="9.5" fill="#475569">load / dsar：发射，记就绪拍</text>
-  <text x="302" y="236" font-size="9.5" fill="#475569">store / dsaw：进 lsq / dsa_iss</text>
-  <text x="302" y="252" font-size="9.5" fill="#475569">task_done：报 TS，取下一 task</text>
-  <polyline points="254,122 254,205 294,205" fill="none" stroke="#475569" marker-end="url(#e0)"/>
-  <rect x="144" y="150" width="120" height="52" fill="#f8fafc" stroke="#374151"/>
-  <rect x="148" y="154" width="112" height="44" fill="none" stroke="#374151"/>
-  <text x="152" y="172" font-size="9" fill="#111827">itcm · SRAM 4 KB · 1R</text>
-  <text x="152" y="186" font-size="9" fill="#111827">gpr · FF 32×32 b · 2R1W</text>
-  <line x1="264" y1="176" x2="294" y2="176" stroke="#475569" marker-end="url(#e0)"/>
-  <rect x="144" y="220" width="120" height="40" fill="#f8fafc" stroke="#374151"/>
-  <rect x="148" y="224" width="112" height="32" fill="none" stroke="#374151"/>
-  <text x="152" y="244" font-size="9" fill="#111827">gpr_ready · FF 32×32 b</text>
-  <line x1="264" y1="240" x2="294" y2="240" stroke="#475569" stroke-dasharray="3 2" marker-end="url(#e0)"/>
+***
 
-  <rect x="540" y="130" width="130" height="44" fill="#f8fafc" stroke="#374151"/>
-  <rect x="544" y="134" width="122" height="36" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="556" y1="134" x2="556" y2="170"/></g>
-  <text x="562" y="150" font-size="9" fill="#111827">dsa_rq · FIFO 8</text>
-  <text x="562" y="164" font-size="8.5" fill="#475569">在途 DSA 读</text>
-  <rect x="540" y="184" width="130" height="44" fill="#f8fafc" stroke="#374151"/>
-  <rect x="544" y="188" width="122" height="36" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="556" y1="188" x2="556" y2="224"/></g>
-  <text x="562" y="204" font-size="9" fill="#111827">sm_lsq · FIFO 16</text>
-  <text x="562" y="218" font-size="8.5" fill="#475569">每拍发 1 请求</text>
-  <rect x="540" y="238" width="130" height="44" fill="#f8fafc" stroke="#374151"/>
-  <rect x="544" y="242" width="122" height="36" fill="none" stroke="#374151"/>
-  <g stroke="#374151"><line x1="556" y1="242" x2="556" y2="278"/></g>
-  <text x="562" y="258" font-size="9" fill="#111827">cm_lsq · FIFO 16</text>
-  <text x="562" y="272" font-size="8.5" fill="#475569">DTE core · io_reg 复用</text>
-  <line x1="516" y1="152" x2="538" y2="152" stroke="#475569" marker-end="url(#e0)"/>
-  <line x1="516" y1="206" x2="538" y2="206" stroke="#475569" marker-end="url(#e0)"/>
-  <line x1="516" y1="260" x2="538" y2="260" stroke="#475569" marker-end="url(#e0)"/>
+## 7　参数汇总
 
-  <rect x="700" y="130" width="140" height="44" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="704" y="126" font-size="8.5" fill="#6b7280">I1</text><text x="838" y="126" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="706" y="150" font-size="10.5" fill="#7c2d12">dsa_iss 每拍 1 条</text>
-  <text x="706" y="166" font-size="9.5" fill="#92400e">反压则等；读返回按 rq 写回</text>
-  <rect x="700" y="184" width="140" height="44" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
-  <text x="704" y="180" font-size="8.5" fill="#6b7280">L1</text><text x="838" y="180" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="706" y="204" font-size="10.5" fill="#7c2d12">lsq 顺序发射</text>
-  <text x="706" y="220" font-size="9.5" fill="#92400e">SM 5～10 · CM 15～25</text>
-  <line x1="670" y1="152" x2="698" y2="152" stroke="#475569" marker-end="url(#e0)"/>
-  <line x1="670" y1="206" x2="698" y2="206" stroke="#475569" marker-end="url(#e0)"/>
-  <line x1="670" y1="260" x2="698" y2="220" stroke="#475569" marker-end="url(#e0)"/>
-  <polygon points="870,138 968,138 960,170 862,170" fill="#f8fafc" stroke="#374151"/>
-  <text x="915" y="158" font-size="10" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rsp</text>
-  <polygon points="870,192 968,192 960,224 862,224" fill="#f8fafc" stroke="#374151"/>
-  <text x="915" y="212" font-size="10" fill="#374151" text-anchor="middle">sm · cm · io_reg</text>
-  <line x1="842" y1="152" x2="860" y2="152" stroke="#475569" marker-end="url(#e0)"/>
-  <line x1="842" y1="206" x2="860" y2="206" stroke="#475569" marker-end="url(#e0)"/>
-  <polyline points="915,226 915,300 204,300 204,262" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#e0)"/>
-  <text x="560" y="296" font-size="9" fill="#6b7280">返回 → gpr_ready[rd] = 就绪拍（DTCM 当拍 + 3 直接记，不经端口）</text>
-
-  <polygon points="24,340 122,340 114,372 16,372" fill="#f8fafc" stroke="#374151"/>
-  <text x="69" y="360" font-size="10" fill="#374151" text-anchor="middle">task_done</text>
-  <polyline points="300,262 300,356 124,356" fill="none" stroke="#475569" marker-end="url(#e0)"/>
-  <text x="130" y="384" font-size="9" fill="#6b7280">task_done 指令带 TS 标志 → 脉冲；队空则回 S1 等 task</text>
-</svg>
+```
+指令集          RV32IMC，只支持 M 态；fence = nop
+每条指令        1 拍
+ITCM / DTCM     4 KB / 8 KB
+gpr             32 × 32 bit
+task_queue      深度 2（待定）
+dsa_rq          8 项
+sm_lsq / cm_lsq 16 / 16 项
+访存延迟        ITCM 1 拍 · DTCM 3 拍 · Share Mem 5～10 拍 · Core Mem 15～25 拍
+访存带宽        32 bit；DTE core 读 Core Mem 固定回 1056 bit，按 32 bit / 拍
+dsa_iss         每拍最多一条配置或 trigger 指令
+内部启动延迟     MU 40T · VU 40T · DTE 85T（含 core 发射 5T）
+性能约束        单个用户各 DSA 对应的软件调度程序执行时间不超过 200 cycle
+custom-0 字段布局   funct3 按第 3 章表；rd / rs1 / rs2 / imm 按 R 型与 I 型标准布局（待定，等 ISA 描述表）
 ```
 
 ***
 
-## 5　逐级行为
+## 8　机制覆盖
 
-### S1 · Start
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `task_queue` 队首、`exec_state` | 1. `exec_state == WAIT_TASK ∧ task_queue 非空` → 出队<br>2. `pc = task_pc`；`csr_custom = {stream_id, task_id, user_id, stream_num}`（`stream_id` / `task_id` 只读位，硬件写）<br>3. `inst_cnt = 0`；`exec_state = RUN`<br>4. `task.cmd_ready = task_queue 未满`（task_queue 提前接收，无 bubble） | `pc`、`csr_custom`、`exec_state`、`task.cmd_ready` | D1 |
-
-### E1 · 取指、译码、执行
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `itcm[pc]`、`gpr`、`gpr_ready`、`csr_custom`、`dtcm`、`sm_lsq` / `cm_lsq` / `dsa_rq` 余量、`dsa_cfg.req_ready` | 1. `exec_state != RUN` → 空拍<br>2. `inst = Decode(itcm[pc])`：opcode 为 custom-0 → `bach_insts`（dsar、dsari、dsaw.s、dsaw.d、dsawi.s、dsawi.d、task_done、flag_check、loop），否则 `src/rv32` 译码表<br>3. `∃ rs ∈ inst.src: gpr_ready[rs] > now` → 本拍不执行（BLOCKED，下拍重试）<br>4. `inst 为 store ∧ 目标 lsq 满`、`inst 为 dsaw ∧ !dsa_cfg.req_ready`、`inst 为 dsar ∧ dsa_rq 满` → 本拍不执行<br>5. `Run(inst)`：`SystemRv32` 同步执行；load 取当拍的值并 `gpr_ready[rd] = now + LAT(目标)`（DTCM +3、SM +`SM_LATENCY`、CM +`CM_RV_LATENCY`）；store 进对应 lsq；`dsaw` → `dsa_cfg.req = {we=1, addr, data, ids}`（`dsaw.d` / `dsawi.d` 拆成两拍两条）；`dsar` → `dsa_cfg.req = {we=0, addr, rq_idx}`，`dsa_rq.push(rd)`，`gpr_ready[rd] = ∞` 直到 `dsa_rsp`；`flag_check` → `sm_find.req`，`gpr_ready[rd] = ∞` 直到 `rsp`；`loop`：`rs2 ≥ rs1` 退出否则按 imm 跳，1 拍无冲刷<br>6. `task_done`：`ts` 标志 → `task_done` 脉冲 `{stream_id, task_id, user_id}`；`exec_state = WAIT_TASK`（S1 下拍取队头；队空则等）<br>7. `pc += 宽度` 或分支目标；`inst_cnt.retired += 1`；`inst_cnt.cycles` 每拍 +1 | `pc`、`gpr`、`gpr_ready`、`dtcm`、`sm_lsq`、`cm_lsq`、`dsa_rq`、`dsa_cfg`、`sm_find`、`task_done`、`exec_state` | D1 |
-
-### I1 · dsa_iss 与读返回
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| E1 的 `dsa_cfg.req`、`dsa_rsp`、`dsa_rq` | 1. 每拍最多下发 1 条；`req_ready` 为上拍值，反压时 E1 第 4 条挡住下一条<br>2. `dsa_rsp.valid` → `rd = dsa_rq[rq_idx]`，`gpr[rd] = data`，`gpr_ready[rd] = now`，`dsa_rq.pop()`（按序写回） | `dsa_cfg`、`gpr`、`gpr_ready`、`dsa_rq` | D变长（DSA 定返回拍） |
-
-### L1 · lsq 顺序发射
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `sm_lsq`、`cm_lsq`、`sm.req_ready`、`cm.req_ready`、`sm.rsp_*`、`cm.rsp_*` | 1. 每个 lsq 每拍从队头发 1 个请求（`req_ready` 上拍值为 1 时）<br>2. store：`rsp_valid` 到 → 出队<br>3. load 的值已在 E1 第 5 条取得，`rsp_valid` 只用于释放 lsq 项；`gpr_ready` 由 E1 记的就绪拍决定<br>4. `cm_lsq` 项 `is_io` → 走 `io_reg` 口（读包头 / 写 1 弹出） | `sm`、`cm`、`io_reg`、`sm_lsq`、`cm_lsq` | D变长 |
-
-### G1 · cfg
-
-| 入口 | 逻辑 | 出口 | Dx |
-| - | - | - | - |
-| `cfg` | 1. 地址落 ITCM / DTCM 区 → 写入（镜像装载，4 B/T）<br>2. 写 `boot_pc`；解复位后 `pc = boot_pc`，firmware 跑到末尾的不通知 TS 的 `task_done` → `WAIT_TASK`，`ready = 1`<br>3. 读自定义 CSR → `cfg_rdata` 下一拍 | `itcm`、`dtcm`、`pc`、`ready`、`cfg_rdata` | D1 |
-
-***
-
-## 6　参数汇总
-
-```
-TASK_QUEUE_DEPTH    2                 // 待定，原文未给
-DSA_RQ_DEPTH        8
-SM_LSQ_DEPTH        16
-CM_LSQ_DEPTH        16
-DTCM_LATENCY        3
-SM_LATENCY          5～10（取 5，待定）
-CM_RV_LATENCY       15～25（取 15，待定）
-ITCM_BYTES          4 KB；DTCM_BYTES 8 KB（镜像硬上限，超出编译失败）
-每条指令 1 拍（双发射、乘法 3 拍、除法多拍、分支预测与冲刷、DTCM bank 冲突不体现）
-指令预算（第 6 章 DTE 33 T、MU 100 T、VU 66 T）是对 inst_cnt 的断言，不是输入
-自定义指令字段布局：funct3 按第 3 章表；rd / rs1 / rs2 / imm 按 R 型与 I 型标准布局   // 待定，等 ISA 描述表
-kernel：C 源码，riscv64-unknown-elf-gcc -march=rv32imc -mabi=ilp32，每类 core 一个 ELF；task_pc = kernel 函数地址，编译侧从符号表导出
-kernel_api.h：kernel 源码侧头文件（自定义指令 inline asm、DSA 寄存器地址、自定义 CSR 编号），模型侧不包含
-```
-
-***
-
-## 7　机制覆盖
-
-| 机制 | 落点 | 用例 |
+| 机制 | 功能 | 用例 |
 | - | - | - |
-| RV32IMC 全部指令、M 态 CSR、`fence` 为 nop | `src/rv32`（`inst_define/`） | `Rv32UnittestsGen` |
-| custom-0 自定义指令按第 3 章表实现 | E1 第 2 条 + `bach_insts.h` | `rv_custom_insts` |
-| task_queue 提前接收，无 bubble | S1 第 1、4 条 | `rv_task_queue` |
-| task_ack 握手：有空槽才 ack | `task.cmd_ready` | `ts_arb_backpressure` |
-| task 开始写 CSR：`task_pc` 设 PC，`stream_id` / `task_id` 写只读 CSR | S1 第 2 条 | `rv_start_csr` |
-| 完成上报：`task_done` 带 TS 标志则上报三个 ID | E1 第 6 条 | `rv_task_done` |
-| task_done 后队空则阻塞等待；firmware 末尾不通知 TS 的 task_done | E1 第 6 条 + S1 + G1 第 2 条 | `rv_task_done_wait` |
-| dsa_iss 每拍一条；配置按反压判成功；读不阻塞，`dsa_rq` 8 项按序写回 | I1 + E1 第 4、5 条 | `rv_dsa_iss` |
-| DSA 指令附带 stream_id / user_id / task_id | E1 第 5 条从 `csr_custom` 取 | `rv_dsa_ids` |
-| `dsaw.d` 当两条 `dsaw.s` | E1 第 5 条 | `rv_dsaw_d` |
-| lsq 顺序执行，每拍 1 请求，等返回释放 | L1 | `rv_lsq` |
-| 访存延迟 ITCM 1 / DTCM 3 / SM 5～10 / CM 15～25 | ITCM 折进每条 1 拍；其余 E1 第 5 条的就绪拍 | `rv_latency` |
-| Core Mem 读固定 1056 bit，不 burst，32 bit / 拍返回 | 存储文档 `cmem_rv` 口 + L1 | `rv_cm_read` |
-| 静态 / 动态配置寄存器：静态初始化配，动态随任务 | kernel 按第 4 章的寄存器划分写 | `rv_static_dynamic` |
-| trigger / last：trigger 启动；last 标志包含在 trigger 寄存器里，DSA 完成后通知 TS | DSA 侧 | `dsa_trigger_last` |
-| DSA 读需轮询 | `dsar` 语义 + `gpr_ready` | `rv_dsa_poll` |
-| `loop` 退出 100% 预测、`flag_check` | E1 第 5 条 | `rv_flag_check` |
-| 单用户各 DSA 的调度程序 ≤ 200 cycle；DTE 约 33 T、MU 约 100 T、VU 约 66 T | `inst_cnt` + 断言 | `rv_budget` |
-| MU core 100 T 内三件事 | `fc_gemv.c` | `kernel_mu_fc` |
-| 两处阻塞：RV core 忙则 task 等；DSA 指令 buffer 满反压 RV core | S1 第 4 条 / E1 第 4 条 | `rv_two_blocks` |
-| 标量 task 不调 DSA，RV core 自报完成 | `check_flag.c` 等 | `bcore_two_chains` |
-| 异常期不受调度、不发 DSA | 不建（本轮） | — |
-
-**kernel 清单**（`rv_core/kernel/`）
-
-| kernel | core | 内容 |
-| - | - | - |
-| `weights_loader` | 全部 | 算这一片落 Matrix Mem 的地址，配 DTE 做 router → MM |
-| `token_datain` | 计算 core | 读包头判链中哪一步，配 DTE 做 router → CM（含 scale、包头、shareMem 写），异步 datain 时写 `task_id` CSR |
-| `fc_gemv` | 计算 core（MU） | 判激活专家落组、挑权重、配 MU 原语与 topK 表 |
-| `silu_dot_quant`、`situ_glu_quant`、`core_reduce` | 计算 core（VU） | 配 VU 宏指令（静态组选择 + 动态参数 + trigger） |
-| `dataout`、`reissue_out` | 计算 core（DTE） | 配 DTE 做 CM → router，改硬件包头 path_id |
-| `bcore_datain`、`check_flag`、`broadcast` | B core | 第 6 章 B core 两条链 |
-| `rcore_datain`、`rcore_arrive_inc`、`rcore_scan`、`rcore_mm2cm`、`rcore_sum`、`rcore_out` | R core | 第 6 章 R core 两条链 |
+| task_queue 提前接收，做到用户之间无 bubble 调度 | F1 | `task_queue_prefetch` |
+| 按空槽产生 task_ack，未接收时 TS 不能跳到下一个 | F2 | `task_ack_handshake` |
+| 下发四字段与完成三字段，stream_id 只读、local_user_id 可写 | F3、F4 | `task_fields` |
+| RV32IMC + 只支持 M 态 + fence 为 nop | F5、F6 | `isa_scope` |
+| 每条指令 1 拍，流水线细节折算进这 1 拍 | F7 | `one_cycle_per_inst` |
+| 八条 custom-0 自定义指令 | F9～F13 | `custom0_insts` |
+| dsawi.d 按两条 dsawi.s 建 | F10 | `dsaw_double` |
+| task_done 的三种行为：跳队头 / 阻塞等待 / 通知 TS | F11 | `task_done_inst` |
+| flag_check 查第一个 1，查不到返回全 1 | F12 | `flag_check` |
+| loop 指令按 rs1 / rs2 比较退出 | F13 | `loop_inst` |
+| 任务启动靠写 trigger 寄存器，last 标志在 trigger 里 | F15 | `dsa_trigger` |
+| dsa_iss 每拍最多一条，按反压判断是否下发成功 | F17、F18 | `dsa_iss_rate` |
+| DSA 读不阻塞，dsa_rq 8 项按序写回 gpr | F19、F20 | `dsa_read_async` |
+| 读寄存器不支持同步返回，软件轮询 | F21 | `dsa_poll` |
+| gpr 就绪表承载访存与 DSA 读的延迟 | F22、F23 | `gpr_ready` |
+| 访存按地址范围分流到四个目标 | F24 | `lsu_routing` |
+| DTCM 可同时收 2 个不冲突 bank，同 bank 阻塞第二条 | F25 | `dtcm_bank` |
+| sm_lsq / cm_lsq 顺序发射，每拍一个请求 | F26、F27 | `lsq_inorder` |
+| Router I/O reg 复用 cm_lsq，仅 DTE core 有 | F28 | `io_reg_access` |
+| 写回优先 share_mem / core_mem，阻塞 DTCM | F30 | `writeback_priority` |
+| DTE core 读 Core Mem 固定 1056 bit，不 burst，32 bit / 拍 | F31 | `rv_cm_read` |
+| ITCM / DTCM 由 ctrl_noc 装载，拍数按字节数 / 4 B | F34 | `tcm_load` |
+| Matrix Mem 对三个 RV core 都不可见 | F36 | `no_mmem_visibility` |
+| 复位取 boot_pc，收 task 取 task_pc | F8 | `boot_and_task_pc` |
 
 ***
 
-## 8　取舍
+## 9　取舍
 
-* **load 与 `dsar` 为什么取发射拍的值、延迟只落在 gpr 就绪表上**
-  * 这是“功能模型一条指令一次跑完”这个前提下最贴硬件的做法
-  * 硬件里 `dsa_rq` 也是按目的寄存器编号写回，就绪表就是它的等价物
-  * 代价是发射拍到就绪拍之间存储内容的变化不体现
-* **自定义指令为什么走 `Decode` 覆盖，不改 `src/rv32` 的译码表**
-  * 生成器不在本仓，译码表按源码维护
+* **为什么设 task_queue**
+  * TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 TS 下发下一个”会产生很长延迟
+  * 提前接收把这段延迟藏在前一个 task 的执行里
+* **为什么不建流水线**
+  * 本轮关心的是 core 内的调度与访存排队，不是标量核自身的 IPC
+  * kernel 是真实 RV32 程序，指令条数是真的；每条 1 拍加上访存与 DSA 读的真实延迟，已经能反映“配置耗时是否小于计算耗时”这一条约束
+  * 代价是双发射、分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争都不体现
+* **为什么 DSA 读寄存器不阻塞而配置写会阻塞**
+  * 配置写要占 DSA 的配置通路，通路满了只能等
+  * 读只是取一个状态，用 dsa_rq 记下目的寄存器就能异步返回，不必占住发射口
