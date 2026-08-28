@@ -117,7 +117,7 @@ Core 内七个单元，各一份文档：
   <text x="52" y="638.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
   <text x="52" y="652.0" font-size="8.5" fill="#475569">Hmem 16 KB + 32 B · LUT 192 B</text>
   <text x="52" y="665.5" font-size="8.5" fill="#475569">RouterTable 副本 · 本级 Reduce credit 表 · PendingTaskQ</text>
-  <text x="52" y="679.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · topK 与 shareMem 写</text>
+  <text x="52" y="679.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
   <rect x="380" y="560" width="310" height="168" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="392" y="581" font-size="11" fill="#111827">MU DSA（七个模块）</text>
   <text x="392" y="598" font-size="8.5" fill="#475569">regfile · issue_q 16 · gen_ep_info（local_ep_table）</text>
@@ -252,6 +252,9 @@ Core 内七个单元，各一份文档：
 | F15 | 生产者与消费者按五对 Release / Acquire 配对：Router 写内部 Buffer 配 Data Ready；RV 写 DMA Command 配 Doorbell；DMA 写目标 Memory 配 DMA Task Done；MU / VU 写 Task 输出配 Task Done；DSA 写输出配 Chain Done |
 | F16 | VU 不能直接读 Matrix Mem。需要 Matrix Mem 里的数据时先由 DTE 搬到 Core Mem |
 | F17 | 特权级只支持 M 态，不实现 MMU，中断异常上报 SCP。本轮只留状态位与接口名 |
+| F18 | DTE RV core 的 `cm_lsq` 按地址范围分流到两个从端：Core Mem 的 `cmem_rv`，与 Router CoreStation 的 `hdr_rd`。包头只有这一条读取通路，DTE DSA 不另接一条 |
+| F19 | 三个 DSA 的任务身份一律由软件写入各自的配置寄存器，core 内**不存在**从 RV core 到 DSA 的身份专用通路：DTE 写 `TASK_CFG_PACK`，MU 与 VU 写各自的动态配置寄存器 |
+| F20 | **三个 DSA 之间没有任何直连**：DTE 进核时把 topK 写进 Core Mem 的 topK 区，MU 自己从那里读回来。DSA 之间的数据一律经存储交换，控制一律经 TS 与各自的 RV core |
 
 ***
 
@@ -329,6 +332,9 @@ core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← 
 | 任务隔离代替一致性维护 | F13、F14 | `task_isolation` |
 | 五对 Release / Acquire 配对 | F15 | `release_acquire_pairs` |
 | VU 不能直接读 Matrix Mem | F16 | `vu_no_mmem` |
+| cm_lsq 按地址分流到 Core Mem 与 Router 包头口，包头只有一条通路 | F18 | `cm_lsq_split` |
+| 三个 DSA 的身份都由软件写寄存器，无专用硬件通路 | F19 | `dsa_id_by_software` |
+| 三个 DSA 之间没有直连，数据一律经存储交换 | F20 | `no_dsa_direct_link` |
 
 ***
 

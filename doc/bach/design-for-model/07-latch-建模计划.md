@@ -51,7 +51,6 @@
 | core | MU：regfile、issue_q、gen_ep_info、agu ×3、ldq ×2、matrix exe、stq | 第 4 章 MU DSA | 模块 ×7 | [`chip/core/mu.md`](07-units/chip/core/mu.md) |
 | core | VU：config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU0 / VALU1 / VALU2 / VSFU、MEXE、SEXE、VRF / MRF / SRF、Profile | 第 4 章 VU DSA | 模块 ×11 | [`chip/core/vu.md`](07-units/chip/core/vu.md) |
 | core | Core Mem、Matrix Mem、Share Mem 及各自的仲裁器 | 第 4 章存储子系统 | 模块 ×3 | [`chip/core/memory.md`](07-units/chip/core/memory.md) |
-| 静态 | 拓扑与地址空间、切分与权重分配、路由表与任务链生成、参考实现 | 第 2 章切分、第 6 章编译器产物 | 静态（编译侧） | — |
 
 ### 对象的层级与文档归属
 
@@ -355,13 +354,13 @@ src/bach/
 | 2 功能清单 | 本单元做的每一件事一条，按模块分组，编号 F1、F2…。这一章是实现的清单，也是第 8 章“机制覆盖”指向的落点 |
 | 3 接口 | 每个端口组一个声明块，注明 master / slave、协议、时钟域；valid/ready 组注明 ready 的成立条件；信号名与代码一致 |
 | 4 存储器 | 全模块的存储清单，含级间 latch，每行给类型、形状、读写口、写规则、复位 |
-| 5 流水线总览 | 第 1 层图。**本轮留位不画**，各模块的逐级拍数定下来后补 |
-| 6 逐级行为 | 第 2 层图与每级的四要素。**本轮留位不写**，第 1 层图完成后补，级编号回标到第 1 层图 |
+| 5 流水线总览 | 第 1 层图：本单元全部模块的级、级间 latch、存储与端口的连接关系，每级标 Mx 与 Dx。图下不超过三行短句，只写图画不出的规则 |
+| 6 逐级行为 | 第 2 层图：每级一张三栏小图（入口存储器 → 组合逻辑 → 出口存储器），过四要素检查（信号连接带位宽、读写的存储、实现功能的赋值表达式、右上角 Dx），级编号与第 1 层图一致 |
 | 7 参数汇总 | latency / 深度 / 位宽常量，注明权威出处；设计未给值的写默认值并标“待定”，全部待定值汇总在本章末尾 |
 | 8 机制覆盖 | 三列：机制、落在哪条功能（第 2 章的编号）、用例（`test/bach/ip/` 下的测试名） |
 | 9 取舍 | 这一单元为什么这么设计，动机与被否掉的方案收在这里 |
 
-装配容器那几份（LPU、Chip、Core）没有自己的一拍工作，第 5、6 两章对它们永远是空的，构造期的接线步骤写在第 2 章的功能清单里。
+LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章对它们永远是空的，构造期的接线步骤写在第 2 章的功能清单里。Chip 那一份除装配外还带 SCP 桩、ctrl_noc 端点与 C2C Bridge 三类模块，第 5、6 两章写这三类。编译侧算好的那些静态表不单独立文档：每张表跟着用它的那个单元，写在该单元第 4 章“存储器”的末尾；跨表的自洽检查没有单一持有者，收在本章“输入”一节。
 
 图一律手写 SVG，用该规范的 stencil；上层盒子名 = 下层图标题，上层箭头上的信号名 = 下层图的端口组名。逐层的缝合关系就是文档的目录层级：LPU 第 0 层图里的一颗 chip 盒子，展开是 Chip 的第 0 层图；Chip 图里的一个 core 盒子，展开是 Core 的第 0 层图；Core 图里的一个单元盒子，展开是该单元文档的第 0 层图。第 0 层图要画全：本单元的每个模块、每条对外通路、每类 credit 的走向都要出现在图上。
 
@@ -374,13 +373,54 @@ src/bach/
 | 类 | 内容 | 来源 |
 | - | - | - |
 | 拓扑与部署 | chip 数 48、tray 数 3（编译器叫 rack）、tray 形状 4 层 × 4 chip、chip 形状 2×5、全局进出口位置（`global_top_left` / `global_bottom_right`）、每 chip 的 Harvest mask、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、GPU 数与每 GPU 的 batch | 编译侧 |
-| 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项，含软件属性 `exe_dest` / `task_group_id` / `reduce_num`）、datain_task、`stream_num`、`CORE_TYPE`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
+| 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项，含软件属性 `exe_dest` / `reduce_num`）、datain_task、`stream_num`、`CORE_TYPE`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 27 MiB 权重分片（含共享专家）与落 Matrix Mem 的地址；注入表（每 token 的 6368 B 级联包与注入拍）；参考实现的期望输出 | 编译侧 + `reference/` |
 
 编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、每 chip 的坏核 mask 与由它推出的 chip 类型、`CreditCounter[path_id][stream_id]` 初值（广播 = 目的 core 数，P2P = 1）。
 
 参数表 `common/params.h` 是全部拍数、带宽、深度的唯一出处，每个值标注来历：MAS 给的、性能需求规格说明书给的、第 8 章冲突项按“建议”取的、本章“待定”默认值。
+
+### 十张只读表
+
+四类东西在模型里落成十张只读的普通内存，不打拍，不进波形。每张表由哪个单元持有，写在该单元文档的“存储器”一章。
+
+```
+grid          48 × {tray, layer, col, gx, gy}                                   LPU
+harvest       48 × 10 b 坏核位图                                                LPU
+logical_map   48 × 10 × {logical_core, role}                                    LPU
+split_param   {ep, tp, pp, dp, mode, gpu_num, batch}                            LPU
+core_cfg      48 × 10 × {rtab 64 项, skip_mask, credit_bypass, task_chain 64 项,
+                         sw_attr 64 项, path_task_map 64 项, datain_task, cfg_misc,
+                         cmem_part, lut 64 项, local_ep_table, vu_static 8 组}   各单元
+credit_init   48 × 10 × 每 {path_id, stream_id} 一个初值                        TS
+kernel_img    每类 core 一个 {itcm 字节流, dtcm 字节流, task_pc 表 64 项}        RV core
+weight_shard  48 × 10 × {字节流, 落 Matrix Mem 的地址}                          入口桩
+inject_tbl    N_token × {inject_cycle, gpu_id, token_id, payload 6368 B}         入口桩
+expect_out    N_token × 12 KiB                                                  出口桩
+```
+
+### 读入时的跨表自洽检查
+
+这些断言在构造期做完，不逐拍。它们查的是**跨表**的一致性 —— 单张表内部的合规性由持有它的单元自己查（例如 `task_chain` 的四项检查在 TS 写 `TS_INIT_FINISH` 时做）。跨表这一层没有哪个单元能独自看到，因此收在这里：
+
+1. `grid` 覆盖 48 项且 `(gx, gy)` 无重复；每 chip 坏核数 ≤ 2；`gx ∈ {0, 3}` 的 chip 坏核数 ≤ 1
+2. 每 chip 的 `logical_map` 里逻辑 0～7 各出现一次，逻辑 8 只在 `gx ∈ {0, 3}` 出现，且 special 与 compute 的物理 core 集合不相交
+3. `cmem_part` 的各分区互不重叠，且都落在 Core Mem 的 1 MB 之内
+4. `task_chain` 里出现的每个 `path_id`，在本 core 的 `rtab` 与 `path_task_map` 里都有 valid 表项，且 `path_task_map[path_id].task_id` 指回配它的那一项
+5. `rtab` 里 `stallWay` 选转存的表项，本 core 的 `task_chain` 里必须有对应的 reissue 任务，且 `cmem_part` 里 `reissue_pkts_per_vc` 不为 0
+6. 坏核的 `rtab` 表项一律不置 Core 位、`streamNeedMask` 全不置位、`stallWay` 只能是留在 VC
+
+第 4、5 两条是软件检查清单里“选进 Core Mem 重发的 path 必须预留空间并安排 reissue 任务”“坏核只能选留在 VC 等待”的机器化形式。三份 RouterTable 一致这一条不在这里查，由 SCP 桩的写入顺序保证。
+
+### 表怎么分发
+
+| 阶段 | 做什么 |
+| - | - |
+| 构造期 | `grid` / `harvest` / `logical_map` / `split_param` 交给 LPU 与各 Chip，决定构造出什么 |
+| boot 期 | `core_cfg` / `credit_init` / `kernel_img` 变成 SCP 桩的配置事务序列，按初始化六步的顺序发出，每笔一拍 |
+| weights 加载模式 | `weight_shard` 由入口桩按“最远路径优先”的顺序注入，走 Router 的 weights path |
+| 业务模式 | `inject_tbl` 按 `inject_cycle` 注入，`expect_out` 交给出口桩 |
 
 ***
 
@@ -420,6 +460,18 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 瓶颈由此能定位到具体资源而不只是慢，而且只有资源那一半是改参数动得了的。
 
+### 原始文档指名要模拟器回答的三个问题
+
+这三处在原始设计文档里写明了“需要模拟器介入”，是本次建模的交付目标，不是可选的观测项：
+
+| 问题 | 出处的原话 | 要给出的结论 |
+| - | - | - |
+| VC 机制到底实不实现 | “实现 VC 机制需要很大的额外面积、设计复杂度和验证空间，成本极高。具体是否实现需要模拟器介入，综合判断开发复杂度和效果收益” | 分别跑“阻塞就进 core 暂存”与“Router 内加 VC Buffer”两套配置，比端到端吞吐、DTE 占用率与 Core Mem 占用 |
+| Broadcast 过快引起的计算空泡有多大 | “此处产生空泡的前提是第 N 个用户在 core0 和 core2 的处理速度不同……在计算量分布均匀的前提下，时间差距主要来自逐级 Reduce。需要模拟器介入协助确认” | 量出同一 TP 组内各 core 的进度差，判断超前发送窗口 N 该取多大 |
+| 包效率与总线对齐效率的实际影响 | “为了面积和效率折中，可以考虑支持 32 B 对齐传输（初步结论是不实现，再算子切分时考虑尽可能不要切出来这么小的包）” | 按激活专家数的实际分布跑，量出只支持 256 B 对齐时损失多少有效带宽 |
+
+前两个都要求模型能跑到稳态并看得见 core 之间的进度差，第三个只要求链路上的字节数按“业务数据 + 32 B 包头、再按对齐规则向上取整”记账。
+
 两条发射端的过滤规则：占用区间丢弃 end 小于 start 的，以及 end 等于 start 且没有显式允许零长的；等待区间丢弃 end 不大于 start 的。被丢的条数单独计数，用来区分“没记到”与“没发生”。
 
 事件在仿真期记在各模块自己的裸 vector 里，`JoinAll()` 之后由主线程汇总落盘。`Cycle()` 里不做文件 IO。汇总时按节点与时刻排全序，否则收集顺序取决于线程调度，产物无法逐行 diff。
@@ -428,7 +480,73 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 ## 建模顺序
 
-本节留空，待各单元的结构图完成后再定。
+按依赖自下而上建，每一步都能单独跑一个用例再进下一步。
+
+| 步 | 建什么 | 跑通的判据 |
+| - | - | - |
+| 1 | `common/`（flit、message、params、arbiter、numeric）与 `ip/module_base.h` | 四种仲裁器的单测；`numeric/` 与 `reference/` 的编解码逐 bit 对齐 |
+| 2 | 链路、PCIe Switch、入口桩与出口桩 | 一个 flit 从入口桩发出、经链路与 Switch 回到出口桩，到达拍与手算一致 |
+| 3 | 三块存储与它们的 bank 仲裁器 | 各 master 端口的端到端拍数等于参数表；同 bank 冲突按优先级授予 |
+| 4 | Router 的八个模块 | Router 单测跑 A2、A5、A15、A16、A17 五个场景；credit 守恒 |
+| 5 | RV core（接 `src/rv32`）与三块存储、Router I/O reg 的连接 | 一个只做标量活的 kernel 跑完并向 TS 报完成 |
+| 6 | TS 的九个模块 | 单 stream 单 task 从 trigger 到 retire 走完；六个写口的冲突用例 |
+| 7 | DTE 的八个模块 | 五个搬运方向各一个用例；Commit 配对接纳与 Join 的用例 |
+| 8 | MU 与 VU | 逐条计算原语与参考实现逐 bit 比对 |
+| 9 | Core 装配、Chip 装配（含 SCP 桩、ctrl_noc 端点、C2C Bridge） | 单 chip 上 boot 走完六步，`ready` 全高 |
+| 10 | LPU 装配与静态表读入 | 48 chip 构造出来，拓扑结构那一类检查全过 |
+| 11 | 端到端 | 注入一个 token 收到一个结果并逐 bit 相等，再放大到 N 个 |
+| 12 | 四种切分模式各跑一遍 | EPTP-NN 先通（每个 core 任务链相同），再 EPTP-NK 的三种角色，再 PPTP-NK 与 PPTP-NN 的三段 chip。四种模式的任务链见 TS 那一份文档 |
+
+第 4 步之前不碰 TS 与 DSA：Router 是唯一一个坏核上也要构造的单元，它先立住，后面每一步都能拿它当数据源与数据汇。
+
+***
+
+## 死锁避免
+
+模型的第一要求是跑得完：注入 N 个 token，出口收到 N 个结果。设计里挡死锁的机制分散在各章，这里按“一个包从进来到出去要过的几道资源”排成一列，每一条都落到某个单元的功能编号上。
+
+### 十二条硬规矩
+
+| # | 规矩 | 落在哪 |
+| - | - | - |
+| 1 | 每个 VC 有 private 2 flit，队头永远能前进一步，不靠共享池。credit 也按 private 与 shared 两级记，与下游 buffer 的占用规则一一对应，一个方向的总量等于下游容量，不超发 | RouterStation 的 VC Buffer 与两级 credit |
+| 2 | 相互依赖的数据流分到不同 VC，避免循环等待 | `RouterTable.nxtVC` 的填法，编译侧保证 |
+| 3 | credit 不足的 VC 被跳过，同一 input port 的其他 VC 不受影响 | RouterStation 的 VA |
+| 4 | 多播全有或全无。只发一半会让同一 User 的数据在不同分支上错位，已发方向占了资源却完不成整体传输 | RouterStation 与 Xbar |
+| 5 | Router 的进 core 表与 TS 内部的 Stream 表按完全一致的逻辑分配空项，因此“Router 通知 TS 的包一定能被 TS 接收” | CoreMemCreditMonitor 与 TS 的 Credit_monitor |
+| 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏核没有 Core Mem，只能留在 VC，因此 path 规划要保证坏核段不会长期阻塞 | `RouterTable.stallWay` 与 CoreMem 重发 |
+| 7 | P2P 传输阻塞时把数据落进 Core Mem 的 P2P 阻塞缓冲，下游 credit 释放后再续传 | TS 的 P2P 阻塞缓冲映射表 |
+| 8 | DTE 的 Commit 配对接纳：RD、WR 两个 TaskQueue 项与 Completion RS 项同时拿到才收，不产生读已开始、写没有落脚点的半任务 | DTE 的 Commit |
+| 9 | DTE 的出核任务先在 `PendingTaskQ` 等到资源授权，再去 Commit 申请那三样，等资源的任务不占 Completion RS | DTE 的 PendingTaskQ |
+| 10 | EP 组间派遣：所有 R core 都有余量才派遣一个用户，派时各减一，链尾返回后各加一 | 入口桩的 LPU Dispatch |
+| 11 | 一条“广播 + P2P + 广播”的路径上，各 core 的 Core Mem 能容纳的用户数**沿数据流方向不能变少**：一致或前窄后宽。满足这一条时 User N 的回程一定排在 User N+4 的去程之前，不会成环 | 编译侧的 `cmem_part` 分配，模型在 boot 期校验 |
+| 12 | ReduceBuffer 不得当流控缓存用。Reduce 结果发不出去时进本 core 的 Core Mem，不许压在 ReduceBuffer 里 | ReduceModule 的输出准入 |
+
+### 反压不许变成丢弃
+
+上面十条都靠反压兜底，反压的前提是没有任何一段通路把请求丢掉。三处特别容易写成丢弃：
+
+* Router 收满一个包后通知 TS 的 trigger 与 token 一一对应，TS 的入口占满时 CoreStation 保持本笔请求，不丢
+* Matrix Mem 同 bank 冲突只执行 MU，被让路的那一笔丢弃并计数，**模型直接断言失败**。这是硬约束被违反的表现，不是正常工作点：DTE 没有重传机制，丢一笔就少一段数据，用重试掩盖会让配置错误一直查不出来
+* MU 的 Drain 只丢越界任务的数据，已进入脉动通路的合法数据照常算完写回
+
+### 运行期要守的三条
+
+跑的过程中每拍都成立，破坏了就是死锁的前兆，比跑完之后查 credit 守恒早得多：
+
+1. **资源的持有与等待不成环**：任何一个模块在等某个资源时，不得同时持有该资源的上游还要用的资源。Commit 的配对接纳与 PendingTaskQ 排在 Commit 之前，是这一条在 DTE 上的两个落点
+2. **每个等待都有唤醒源**：`unit_waits` 里的每条等待区间都能配上一个把它唤醒的事件。等待归因表里的 reason 分依赖与资源两类，资源类的唤醒源是对应的 release 或 grant，依赖类的唤醒源是对应的完成事件
+3. **没有任何一路请求被无限期饿死**：同优先级按先到先得排队，stream_table 的六个写口把回收类排在生成类之前，Xbar 每拍重新 RoundRobin
+
+### 怎么查
+
+三样自动检查，跟在四条不变量后面一起跑：
+
+| 检查 | 做法 |
+| - | - |
+| 全局看门狗 | 连续 K 拍没有任何 flit 前进、没有任何 task 状态变化，就判定卡死，打印各单元当前在等什么。K 取端到端延迟上界的十倍 |
+| 等待时长上界 | `unit_waits` 里任何一条等待区间超过阈值就单独列出，阈值按该资源的最长合法往返定 |
+| 环检测 | 卡死时按“谁在等谁的资源”建一张图，找环。图的边由等待归因的 reason 与该资源的持有者给出 |
 
 ***
 
@@ -505,9 +623,9 @@ Router 的验收场景 A1～A17 中，下面四个直接覆盖了最易实现错
 
 | 参数 | 默认值 |
 | - | - |
-| Router VC Buffer 深度 | 32 flit / VC |
+| Router VC Buffer 深度 | private 2 flit / VC 加每方向 shared pool 20 flit |
 | Stream Resource Table 项数（每方向） | 16 |
-| VC credit 初值 | 下游 VC Buffer 深度 |
+| VC credit 初值 | private 每 VC 2，shared 每方向 20，先扣 private 再扣 shared |
 | RouterTable 表项数、副本数、每副本写入拍数 | 64、5、1 |
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
 | ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度 | 64 flit、4、2、8 |
@@ -516,12 +634,16 @@ Router 的验收场景 A1～A17 中，下面四个直接覆盖了最易实现错
 | VU ISQ 深度 | 8 |
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度 | 2 |
+| TS stream_table 六个写口的优先级 | retire > done > install > issue > wake > create |
+| `reduceInMask` 的逐核取值 | 按 path 图推导；C6、C7 双坏核例子里的值等 Reduce0 / 1 / 2 含义定下后回填 |
+| Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
+| trigger 请求里 `compute` 位在包头中的位置 | 等 Router 接口规范定下包头位域后回填 |
 | custom-0 自定义指令的字段布局 | funct3 按第 3 章表；rd / rs1 / rs2 / imm 按 R 型与 I 型标准布局，等 ISA 描述表到手后改 `bach_insts.h` |
 | MU、DTE 的寄存器地址映射 | `regmap.h` 临时映射 |
 | Mmem MU 读延迟 | 8T |
 | Cmem 的 MU 写延迟 | 16T |
 | `operation` 的 Reduce0 / Reduce1 / Reduce2 含义 | 源分量 / 中继累加 / 最终汇聚 |
-| `exe_dest`、`task_group_id`、`reduce_num` 的承载 | task_chain 的软件侧属性 |
+| `exe_dest`、`reduce_num` 的承载 | task_chain 的软件侧属性 |
 
 ### 风险
 

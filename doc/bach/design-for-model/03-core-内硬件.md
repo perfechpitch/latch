@@ -288,9 +288,9 @@ Bach 用**任务隔离**代替显式一致性维护，建模时这一块可以�
 | 4 | MU / VU 写 Task 输出 | Release + Task Done |
 | 5 | DSA 写输出 | Release + Chain Done |
 
-配图：[Bach_core_MAS_TOP 3 张画板](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/03_Bach_core_MAS_TOP（pending）>)（core 内部连接图、地址空间分配、DTE RV core 调度 DTE）+ 2 张内嵌绘图（`d01` core 外部连接图、`d02` 内存管理流程）
+配图：[Bach_core_MAS_TOP 3 张画板](<Bach/04_四、MAS（Micro Architecture SPEC）/03_Bach_core_MAS_TOP（pending）>)（core 内部连接图、地址空间分配、DTE RV core 调度 DTE）+ 2 张内嵌绘图（`d01` core 外部连接图、`d02` 内存管理流程）
 
-内嵌表格：[Bach_core_MAS_TOP 7 子表](../../../../perfechpitch/_sheets/_JUGvs3)（Task 类型与对应资源 / 典型操作 / 切分边界、模型各阶段的 RV 配置内容与 DSA 计算、三个平面的分工、约束定义、三张地址结构说明）
+内嵌表格：[Bach_core_MAS_TOP 7 子表](_sheets/_JUGvs3)（Task 类型与对应资源 / 典型操作 / 切分边界、模型各阶段的 RV 配置内容与 DSA 计算、三个平面的分工、约束定义、三张地址结构说明）
 
 来源：`04_四、MAS/03_Bach_core_MAS_TOP（pending）.md`、`07_RV Core.md`、`06_第四阶段/04_core内调度机制.md`
 
@@ -444,7 +444,7 @@ TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 T
 | - | - | - | - |
 | `task_pc` | 有 | — | 起始取指 PC |
 | `stream_id` | 有 | 有 | 4 bit，用于计算该用户的 Core Mem 与 share_mem 区域基址；硬件写入自定义 CSR，只读 |
-| `local_user_id` | 有 | 有 | 12 bit，HBU 流控范围内的编号，用于 R-core 用户映射表和 Matrix Mem 地址计算；**可读写**，R-core 执行 flag_check 后由软件写入 |
+| `local_user_id` | 有 | 有 | 12 bit，core 内部软件自己编的号，用于 R-core 用户映射表和 Matrix Mem 地址计算；与全局的 16 bit `user_id` **互不相干，不能互相换算**；**可读写**，R-core 执行 flag_check 后由软件写入 |
 | `task_id` | — | 有 | 6 bit，只读；**异步 datain 任务由软件识别包头后写入**，用于告诉 TS 是任务链中哪一步完成 |
 
 ### dsa_iss 的下发规则
@@ -477,7 +477,7 @@ Fetch Access Fault 的判定：取指地址超出 ITCM 区间，或取指地址�
 * **单个用户各 DSA 对应的软件调度程序在 RV core 上执行时间不超过 200 cycle**
 * 通过 task_queue 提前缓存 task，实现用户与用户之间 task 的无 bubble 调度
 
-配图：[RV Core 15 张内嵌绘图](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/07_RV Core>)：`d01` core 内整体框图、`d02` 外部连接、`d03` **内部流水图**、`d04~d08` pc_gen / ITCM / loop_bp / decode / dispatch 各级、`d09~d11` SEU / LSU / dsa_iss、`d12~d15` 四类异常的流水清空范围
+配图：[RV Core 15 张内嵌绘图](<Bach/04_四、MAS（Micro Architecture SPEC）/07_RV Core>)：`d01` core 内整体框图、`d02` 外部连接、`d03` **内部流水图**、`d04~d08` pc_gen / ITCM / loop_bp / decode / dispatch 各级、`d09~d11` SEU / LSU / dsa_iss、`d12~d15` 四类异常的流水清空范围
 
 来源：`04_四、MAS/07_RV Core.md`、`_sheets/_XT24ss/1qdnTs.csv`（异常类型表）、`01_ISA描述.xlsx`（RV Core sheet）
 

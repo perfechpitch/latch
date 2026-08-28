@@ -215,42 +215,50 @@
 
 | 编号 | 功能 |
 | - | - |
-| F9 | boot 序列：自启动 → 完成 PCIe 链路训练 → 顺序配置启动 core0～core7 |
-| F10 | ctrl_noc 广播开关：关时依次配每个 core，开时只发一次带广播标记的请求给 core0，由 core0 依次广播；默认关 |
-| F11 | 初始化六步，按序做完：RV core firmware 写入 ITCM → DTE bootloader 写入 DTE RV core 的 ITCM → 配置 Bach core 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化 |
-| F12 | RouterTable 的三份副本：等 Router 内部多副本提交完成后，软件才写 DTE 与 ReduceModule 的那两份，硬件不代为同步 |
-| F13 | core 内 boot：把启动程序搬进三个 RV core 的 ITCM，启动三个 RV core 进 wait，确认 `ready` 全高后开放业务接收权限，Router 才开始接收业务 |
-| F14 | TS 没有控制核，只有寄存器，复位清 0 后等外部启动，不需要装载程序 |
-| F15 | 装载拍数按镜像字节数除以 4 B 计，与业务段用同一把尺 |
-| F16 | weights 加载模式的配置：Router 路由表配成 weights 专用的 P2P 路径且只用 1 条 path，TS 的 datain 任务 `pc` 指向 weights loader、`trigger_task_chain_en = 0` |
-| F17 | 加载一笔 weights 的四步：Router 收到数据通知 TS 触发 datain 任务 → TS 通知 DTE core 执行 → DTE core 跑 weights loader 算出落 Matrix Mem 的地址再发 DTE 指令搬运 → datain 完成通知 TS 释放，不触发任务链 |
-| F18 | 切到业务模式改三处：Router 路由表换成业务路径、TS 的 datain `pc` 指向 token 搬移入口且 `trigger_task_chain_en = 1`、各 DSA 写入业务场景的静态配置 |
-| F19 | 异常与中断从 `async_int` 收，转报给上层。本轮只留接口名与状态位，不实现行为 |
+| F9 | boot 序列：自启动 → 完成 PCIe 链路训练 → 按 `harvest_mask` 给**全部 10 个 core 的 Router** 配 RouterTable、Skip Mask 与 Credit Bypass Route → 顺序解复位并配置 8 个好核的 TS、三个 RV core 与三个 DSA |
+| F10 | Router 那一段的上电顺序：PMU 退出 Idle 释放 core 时钟域复位 → 硬件读 fuse `core_bad_mask[9:0]`，`coremem_credit[port]` 置 0 → RouterTable 处于默认状态（**所有条目 bypass / no-op**），VC Buffer 硬件固定初始化 → SCP 经 ctrl_noc 配 RouterTable 与 VC 使能 mask → 正常 core 上电发初始化脉冲，`coremem_credit` 逐步初始化 → 就绪 |
+| F11 | 被 Harvest 的 core，其 Router 的**数据通路可时钟门控，配置通路时钟保持**，对外表现为 Skip 模式 |
+| F12 | 坏核只配 Router 那两样，不配 TS、RV core、DSA，也不解复位它们（那几个模块本来就没构造）。漏掉坏核的 Router 会让经过它的 path 全断，因此这一步排在好核配置之前，全 10 个 core 一个不落 |
+| F13 | ctrl_noc 广播开关：关时依次配每个 core，开时只发一次带广播标记的请求给 core0，由 core0 依次广播；默认关 |
+| F14 | 好核的初始化六步，按序做完：RV core firmware 写入 ITCM → DTE bootloader 写入 DTE RV core 的 ITCM → 配置 Bach core 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化 |
+| F15 | RouterTable 的三份副本：等 Router 内部多副本提交完成后，软件才写 DTE 与 ReduceModule 的那两份，硬件不代为同步 |
+| F16 | core 内 boot：把启动程序搬进三个 RV core 的 ITCM，启动三个 RV core 进 wait，确认 `ready` 全高后开放业务接收权限，Router 才开始接收业务 |
+| F17 | TS 没有控制核，只有寄存器，复位清 0 后等外部启动，不需要装载程序 |
+| F18 | 装载拍数按镜像字节数除以 4 B 计，与业务段用同一把尺 |
+| F19 | weights 加载模式的配置：Router 路由表配成 weights 专用的 P2P 路径且只用 1 条 path，TS 的 datain 任务 `pc` 指向 weights loader、`trigger_task_chain_en = 0` |
+| F20 | 加载一笔 weights 的四步：Router 收到数据通知 TS 触发 datain 任务 → TS 通知 DTE core 执行 → DTE core 跑 weights loader 算出落 Matrix Mem 的地址再发 DTE 指令搬运 → datain 完成通知 TS 释放，不触发任务链 |
+| F21 | 切到业务模式改三处：Router 路由表换成业务路径、TS 的 datain `pc` 指向 token 搬移入口且 `trigger_task_chain_en = 1`、各 DSA 写入业务场景的静态配置 |
+| F22 | 异常与中断从 `async_int` 收，转报给上层。本轮只留接口名与状态位，不实现行为 |
 
 ### ctrl_noc 端点
 
 | 编号 | 功能 |
 | - | - |
-| F20 | 收 `scp_ctrl` 事务，`cfg_core` 命中本 core 或带广播标记时锁存，按 `addr_map` 查出目的模块 |
-| F21 | 下一拍把事务写到目的模块的 `cfg` 口：TS 的 CFG_REG、RouterTable 的 CSR、三个 DSA 的寄存器、Share Mem、RV core 的 ITCM 与 DTCM、Core Mem 与 Matrix Mem 的后门 |
-| F22 | 地址空间视野检查：地址不在本 core 视野内时记地址错。三个 RV core 各自看到 ITCM、DTCM、Share Mem、Core Mem 与对应 DSA 的 IO reg；DTE DSA 另可见 Matrix Mem；MU / VU DSA 只读 Matrix Mem；SCP 看到 core 内全部地址空间 |
-| F23 | `core_id` 是只读寄存器，SCP 经 ctrl_noc 读 MMIO 取得，软件不可修改；weights 落到哪个 core 全靠它 |
-| F24 | 读事务转给目的模块，`rdata` 下一拍回 |
+| F23 | 收 `scp_ctrl` 事务，`cfg_core` 命中本 core 或带广播标记时锁存，按 `addr_map` 查出目的模块 |
+| F24 | 下一拍把事务写到目的模块的 `cfg` 口：TS 的 CFG_REG、RouterTable 的 CSR、三个 DSA 的寄存器、Share Mem、RV core 的 ITCM 与 DTCM、Core Mem 与 Matrix Mem 的后门 |
+| F25 | 地址空间视野检查：地址不在本 core 视野内时记地址错。三个 RV core 各自看到 ITCM、DTCM、Share Mem、Core Mem 与对应 DSA 的 IO reg；DTE DSA 另可见 Matrix Mem；MU / VU DSA 只读 Matrix Mem；SCP 看到 core 内全部地址空间 |
+| F26 | `core_id` 是只读寄存器，SCP 经 ctrl_noc 读 MMIO 取得，软件不可修改；weights 落到哪个 core 全靠它 |
+| F27 | 读事务转给目的模块，`rdata` 下一拍回 |
 
 ### C2C Bridge
 
 | 编号 | 功能 |
 | - | - |
-| F25 | 简化 Router：RC / VA / SA 完整流水线，与 core 内 Router 同一套逻辑 |
-| F26 | TX Engine 拆包：按 4 KB 边界拆分，加 4-bit `seq_id` 与 tail 标记；位宽 2048 转 1024 |
-| F27 | RX Engine 拼包：按 `seq_id` 缓存，tail 到齐后还原原始包；位宽 1024 转 2048 |
-| F28 | AXI Bridge 做 credit 与 AXI4 的协议转换 |
-| F29 | 同向的数据与 credit release 之间做仲裁，小包优先；反向按类型 demux 分流 |
-| F30 | TX 方向的 AXI write 是 posted，写响应可以丢 |
-| F31 | RX 方向的 AXI 需要响应，由 AXI Bridge 返回 dummy response，释放 PCIe 的 outstanding 资源 |
-| F32 | VC Buffer 按方向分档：TX 每 VC private 20 flit 共 4 个，加 shared 约 20 flit，覆盖本级 R2R 往返约 20 cycle；RX private 80 flit，加 shared 约 300 flit，覆盖 PCIe 往返 600 ns @1024-bit |
-| F33 | 跨 chip 时同步上下游的 Reduce credit，防止上游超发；release 的粒度是 flit，在 C2C 上压缩包数量后再传 |
-| F34 | 三类 credit 的 release 一律透传，Bridge 自身不建 Stream 资源表，也不参与 Reduce 累加 |
+| F28 | 简化 Router：RC / VA / SA 完整流水线，与 core 内 Router 同一套逻辑 |
+| F29 | TX Engine 拆包：按 4 KB 边界拆分，加 4-bit `seq_id` 与 tail 标记；位宽 2048 转 1024 |
+| F30 | RX Engine 拼包：按 `seq_id` 缓存，tail 到齐后还原原始包；位宽 1024 转 2048 |
+| F31 | AXI Bridge 做 credit 与 AXI4 的协议转换 |
+| F32 | 同向的数据与 credit release 之间做仲裁，小包优先；反向按类型 demux 分流 |
+| F33 | TX 方向的 AXI write 是 posted，写响应可以丢 |
+| F34 | RX 方向的 AXI 需要响应，由 AXI Bridge 返回 dummy response，释放 PCIe 的 outstanding 资源 |
+| F35 | VC Buffer 按方向分档：TX 是 private 20 flit/VC × 4 = 80 加 shared 约 20，合计 100 flit ≈ 28.8 KB，覆盖本级 R2R 往返约 20 cycle；RX 是 private 20 flit/VC × 4 = 80 加 shared 约 300，合计 380 flit ≈ 109.4 KB，覆盖 PCIe 往返 600 ns @1024-bit。两向合计约 138.7 KB |
+| F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发 |
+| F37 | 跨 chip 时同步上下游的 Reduce credit，防止上游超发；release 的粒度是 flit，在 C2C 上压缩包数量后再传 |
+| F38 | 三类 credit 的 release 一律透传，Bridge 自身不建 Stream 资源表，也不参与 Reduce 累加 |
+| F39 | 三类 credit 可以共享同一个 AXI 传输包同步组包以提高效率，接收侧按分段还原。VC credit 在 Router 上是 flit 粒度，跨 C2C 要先转换成包粒度；业务层的两类本身就是包或 stream 粒度，不转换 |
+| F40 | 反向 AXI write 携带 `{vc_id, vc_type, credit_release_length, credit_release_user}`，用 side band 信息与正常数据包区分，经 Demux 分流后更新本地的 `credit_cnt[vc]` 或 credit user table |
+| F41 | 对着 PCIe Switch 或 CPU 的那一侧没有对端的 PCIe Bridge，硬件要能 **bypass 掉 Bridge 的业务层逻辑**，只保留位宽转换与拆包合包 |
+| F42 | **只做透明传输**：左侧收到的包默认发到右侧，右侧收到的包默认发到左侧，Bridge 不做路由判断。业务上不对 C2C 使用独立地址编码方式访问，接口处做流式通信封装。所有跨 chip 的路由方案都建立在这个前提上 |
 
 ***
 
@@ -293,20 +301,283 @@ mem tx_shared      FIFO      约 20 flit                                        
 mem rx_vc_buf[4]   FIFO      每 VC 80 flit                                          1W1R  满 → 向 PCIe 侧反压  复位空
 mem rx_shared      FIFO      约 300 flit                                            1W1R  同上            复位空
 mem rx_reasm       FF 阵列   按 seq_id 的重组缓冲，16 项                             1RW   tail 到齐即还原 复位空         // C2C Bridge RX 拼包
-mem c2c_credit     FF 阵列   每方向每 VC 一个计数器，加每 UserID 的 Reduce credit    1RW   透传与同步      复位由配置给
+mem c2c_credit     FF 阵列   每方向每 VC 一个 private 计数器，加每方向一个 shared 计数器，另加每 UserID 的 Reduce credit  1RW  与对侧 VC Buffer 的占用规则一一对应：先扣 private 再扣 shared，归还先补 private  复位 TX private 20 / shared 20，RX private 80 / shared 300
 ```
 
 ***
 
 ## 5　流水线总览
 
-第 1 层图待各模块的逐级拍数定下来后补。
+Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与四个 C2C Bridge 里。第 1 层图按两段画：配置段是 boot 期的事，C2C 段是业务期的事，两段互不相干。
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 678 436" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arcov" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="678" height="436" fill="#ffffff"/>
+
+  <text x="20" y="26" font-size="12" fill="#111827">Chip · 第 1 层流水线总览（SCP 与 ctrl_noc 一段，C2C Bridge 一段，两段互不相干）</text>
+  <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
+  <line x1="150" y1="52" x2="150" y2="328" stroke="#e5e7eb"/>
+  <line x1="316" y1="52" x2="316" y2="328" stroke="#e5e7eb"/>
+  <line x1="482" y1="52" x2="482" y2="328" stroke="#e5e7eb"/>
+  <text x="20" y="102" font-size="10.5" fill="#6b7280">配置</text>
+  <rect x="150" y="70" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
+  <text x="160" y="84" font-size="8.5" fill="#92400e">M1</text>
+  <text x="292" y="84" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
+  <text x="160" y="104" font-size="11" fill="#7c2d12">SCP boot 序列</text>
+  <rect x="316" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="326" y="84" font-size="8.5" fill="#6b7280">M2</text>
+  <text x="458" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
+  <text x="326" y="104" font-size="11" fill="#111827">ctrl_noc 端点</text>
+  <text x="326" y="118" font-size="11" fill="#111827">按地址分发</text>
+  <line x1="300" y1="98" x2="314" y2="98" stroke="#475569" marker-end="url(#arcov)"/>
+  <text x="20" y="188" font-size="10.5" fill="#6b7280">C2C 出</text>
+  <rect x="150" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="160" y="170" font-size="8.5" fill="#6b7280">M3</text>
+  <text x="292" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D3</text>
+  <text x="160" y="190" font-size="11" fill="#111827">Bridge RC/VA/SA</text>
+  <rect x="316" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="326" y="170" font-size="8.5" fill="#6b7280">M4</text>
+  <text x="458" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
+  <text x="326" y="190" font-size="11" fill="#111827">TX Engine 拆包</text>
+  <line x1="300" y1="184" x2="314" y2="184" stroke="#475569" marker-end="url(#arcov)"/>
+  <rect x="482" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
+  <text x="492" y="170" font-size="8.5" fill="#92400e">M6</text>
+  <text x="624" y="170" font-size="8.5" fill="#92400e" text-anchor="end">D300</text>
+  <text x="492" y="190" font-size="11" fill="#7c2d12">AXI Bridge</text>
+  <line x1="466" y1="184" x2="480" y2="184" stroke="#475569" marker-end="url(#arcov)"/>
+  <text x="20" y="274" font-size="10.5" fill="#6b7280">C2C 入</text>
+  <rect x="150" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="160" y="256" font-size="8.5" fill="#6b7280">M5</text>
+  <text x="292" y="256" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
+  <text x="160" y="276" font-size="11" fill="#111827">RX Engine 拼包</text>
+  <text x="20" y="352" font-size="10.5" fill="#374151">M1 每笔配置事务一拍，装载拍数按镜像字节数除以 4 B 计，与业务段用同一把尺。</text>
+  <text x="20" y="380" font-size="10.5" fill="#374151">M6 的 300 拍是 PCIe C2C 的 300 ns；Router 到 Router 的 400 T 是这一段加两侧 Bridge 与走线的合计。</text>
+  <text x="20" y="408" font-size="10.5" fill="#374151">C2C Bridge 的 RC / VA / SA 与 core 内 Router 同一套逻辑，只是不建 Stream 资源表、不参与 Reduce 累加。</text>
+</svg>
+```
 
 ***
 
 ## 6　逐级行为
 
-第 2 层图与每级的四要素待第 1 层图完成后补，级编号回标到第 1 层图。
+### M1 · SCP boot 序列
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 934 218" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arc1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="934" height="218" fill="#ffffff"/>
+
+  <rect x="20" y="34" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="38" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="55" font-size="10" fill="#374151" text-anchor="middle">scp_img · FF 配置事务序列 · 1R</text>
+  <rect x="20" y="88" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="92" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="109" font-size="10" fill="#374151" text-anchor="middle">scp_fsm · FF · 1RW</text>
+  <polygon points="30,142 188,142 178,182 20,182" fill="#f8fafc" stroke="#374151"/>
+  <text x="104" y="161" font-size="10.5" fill="#374151" text-anchor="middle">core_ready[i]</text>
+  <text x="104" y="179" font-size="9.5" fill="#6b7280" text-anchor="middle">ready</text>
+  <polygon points="748,70 914,70 904,146 738,146" fill="#f8fafc" stroke="#374151"/>
+  <text x="826" y="89" font-size="10.5" fill="#374151" text-anchor="middle">scp_ctrl</text>
+  <text x="826" y="107" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_valid · cfg_core[3:0]</text>
+  <text x="826" y="125" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_addr[23:0] · cfg_we</text>
+  <text x="826" y="143" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_wdata[31:0] · cfg_bcast</text>
+  <rect x="232" y="20" width="462" height="178" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="250" y="36" font-size="8.5" fill="#6b7280">M1</text>
+  <text x="680" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
+  <text x="250" y="56" font-size="12" fill="#111827">SCP 桩 · 六步初始化逐笔发事务</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. 自启动 → PCIe 训练 → 全 10 个 core 的 Router 配路由表与 credit 旁路</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 再顺序解复位 8 个好核，逐个走六步：RV firmware 进 ITCM → DTE</text>
+  <text x="262" y="118" font-size="10.5" fill="#475569">bootloader 进 ITCM → 解复位 → TS 任务链 → DSA 静态配置 → kernel</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">3. scp_ctrl = {cfg_core, cfg_addr, cfg_we, cfg_wdata, cfg_bcast}，每笔一拍</text>
+  <text x="250" y="158" font-size="10.5" fill="#475569">4. Router 的 commit_done 拉高后才写 DTE 与 ReduceModule 的两份副本</text>
+  <text x="250" y="182" font-size="10" fill="#9ca3af">三个 RV core 的 ready 全高后才开放业务接收</text>
+  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arc1)"/>
+  <line x1="188" y1="109" x2="228" y2="109" stroke="#475569" marker-end="url(#arc1)"/>
+  <line x1="188" y1="162" x2="228" y2="162" stroke="#475569" marker-end="url(#arc1)"/>
+  <line x1="694" y1="108" x2="734" y2="108" stroke="#475569" marker-end="url(#arc1)"/>
+</svg>
+```
+
+### M2 · ctrl_noc 端点分发
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 812 198" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arc2" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="812" height="198" fill="#ffffff"/>
+
+  <polygon points="30,33 188,33 178,109 20,109" fill="#f8fafc" stroke="#374151"/>
+  <text x="104" y="52" font-size="10.5" fill="#374151" text-anchor="middle">scp_ctrl</text>
+  <text x="104" y="70" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_valid · cfg_core[3:0]</text>
+  <text x="104" y="88" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_addr[23:0]</text>
+  <text x="104" y="106" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_wdata[31:0] · cfg_bcast</text>
+  <rect x="20" y="121" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="125" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="142" font-size="10" fill="#374151" text-anchor="middle">addr_map · FF · 1R</text>
+  <polygon points="626,33 792,33 782,109 616,109" fill="#f8fafc" stroke="#374151"/>
+  <text x="704" y="52" font-size="10.5" fill="#374151" text-anchor="middle">core_cfg[i][m]</text>
+  <text x="704" y="70" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_valid · cfg_addr</text>
+  <text x="704" y="88" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_we · cfg_wdata</text>
+  <text x="704" y="106" font-size="9.5" fill="#6b7280" text-anchor="middle">cfg_rdata</text>
+  <rect x="616" y="121" width="176" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="620" y="125" width="168" height="34" fill="none" stroke="#374151"/>
+  <text x="704" y="142" font-size="10" fill="#374151" text-anchor="middle">noc_latch[10] · 级间 latch · 1W</text>
+  <rect x="232" y="20" width="340" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="250" y="36" font-size="8.5" fill="#6b7280">M2</text>
+  <text x="558" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
+  <text x="250" y="56" font-size="12" fill="#111827">ctrl_noc 端点 · 按地址找目的模块</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. take = (cfg_core == 本 core) || cfg_bcast</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. take → noc_latch = {valid, addr, we, wdata}</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. target = addr_map 查 cfg_addr 落在哪个模块的地址段</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 地址不在本 core 视野内 → 记地址错，不下发</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">读事务的 rdata 下一拍回</text>
+  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arc2)"/>
+  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arc2)"/>
+  <line x1="572" y1="71" x2="612" y2="71" stroke="#475569" marker-end="url(#arc2)"/>
+  <line x1="572" y1="142" x2="612" y2="142" stroke="#475569" marker-end="url(#arc2)"/>
+</svg>
+```
+
+### M3 · Bridge RC/VA/SA
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 913 198" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arc3" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="913" height="198" fill="#ffffff"/>
+
+  <polygon points="30,33 188,33 178,109 20,109" fill="#f8fafc" stroke="#374151"/>
+  <text x="104" y="52" font-size="10.5" fill="#374151" text-anchor="middle">bridge2core[d]</text>
+  <text x="104" y="70" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_vc[1:0]</text>
+  <text x="104" y="88" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_head · flit_tail</text>
+  <text x="104" y="106" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_msg</text>
+  <rect x="20" y="121" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="125" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="142" font-size="10" fill="#374151" text-anchor="middle">c2c_credit · FF 每方向每 VC · 1RW</text>
+  <rect x="717" y="53" width="176" height="92" fill="#f1f5f9" stroke="#334155"/>
+  <rect x="717" y="53" width="176" height="18" fill="#334155"/>
+  <text x="805" y="66" font-size="10.5" fill="#ffffff" text-anchor="middle">BR_ST</text>
+  <text x="805" y="93" font-size="10" fill="#334155" text-anchor="middle">out_dir[2:0]</text>
+  <text x="805" y="115" font-size="10" fill="#334155" text-anchor="middle">nxt_vc[1:0]</text>
+  <text x="805" y="137" font-size="10" fill="#334155" text-anchor="middle">is_release</text>
+  <rect x="232" y="20" width="441" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="250" y="36" font-size="8.5" fill="#6b7280">M3</text>
+  <text x="659" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D3</text>
+  <text x="250" y="56" font-size="12" fill="#111827">C2C Bridge · 与 core 内 Router 同一套三关</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. RC：按 path_id 查得出口方向与下一跳 VC</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. VA：查 c2c_credit[方向][VC] &gt; 0，跨 chip 另同步下游的 Reduce credit</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. SA：同向的数据与 credit release 之间仲裁，小包优先</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 Stream 资源表，也不参与 Reduce 累加，三类 release 一律透传</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">反向按类型 demux 分流</text>
+  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arc3)"/>
+  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arc3)"/>
+  <line x1="673" y1="99" x2="713" y2="99" stroke="#475569" marker-end="url(#arc3)"/>
+</svg>
+```
+
+### M4 · TX Engine 拆包
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 812 218" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arc4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="812" height="218" fill="#ffffff"/>
+
+  <rect x="20" y="20" width="168" height="70" fill="#f1f5f9" stroke="#334155"/>
+  <rect x="20" y="20" width="168" height="18" fill="#334155"/>
+  <text x="104" y="33" font-size="10.5" fill="#ffffff" text-anchor="middle">BR_ST</text>
+  <text x="104" y="60" font-size="10" fill="#334155" text-anchor="middle">out_dir[2:0]</text>
+  <text x="104" y="82" font-size="10" fill="#334155" text-anchor="middle">nxt_vc[1:0]</text>
+  <rect x="20" y="102" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="106" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">tx_vc_buf[4] · FIFO 20 flit · 1W1R</text>
+  <rect x="20" y="156" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="160" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">tx_shared · FIFO 20 flit · 1W1R</text>
+  <polygon points="626,79 792,79 782,137 616,137" fill="#f8fafc" stroke="#374151"/>
+  <text x="704" y="98" font-size="10.5" fill="#374151" text-anchor="middle">c2c[d]</text>
+  <text x="704" y="116" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
+  <text x="704" y="134" font-size="9.5" fill="#6b7280" text-anchor="middle">seq_id[3:0] · tail</text>
+  <rect x="232" y="30" width="340" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="250" y="46" font-size="8.5" fill="#6b7280">M4</text>
+  <text x="558" y="46" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
+  <text x="250" y="66" font-size="12" fill="#111827">TX Engine · 按 4 KB 边界拆并降位宽</text>
+  <text x="250" y="88" font-size="10.5" fill="#475569">1. seg = 按 4 KB 边界切分；seq_id = 段号（4 bit）</text>
+  <text x="250" y="108" font-size="10.5" fill="#475569">2. 最后一段置 tail 标记</text>
+  <text x="250" y="128" font-size="10.5" fill="#475569">3. 位宽 2048 转 1024，一拍拆成两拍发出</text>
+  <text x="250" y="148" font-size="10.5" fill="#475569">4. AXI write 是 posted，写响应可以丢</text>
+  <text x="250" y="172" font-size="10" fill="#9ca3af">private 20 flit 覆盖本级 R2R 往返约 20 拍</text>
+  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arc4)"/>
+  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arc4)"/>
+  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arc4)"/>
+  <line x1="572" y1="108" x2="612" y2="108" stroke="#475569" marker-end="url(#arc4)"/>
+</svg>
+```
+
+### M5 · RX Engine 拼包
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 862 208" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arc5" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="862" height="208" fill="#ffffff"/>
+
+  <polygon points="30,20 188,20 178,78 20,78" fill="#f8fafc" stroke="#374151"/>
+  <text x="104" y="39" font-size="10.5" fill="#374151" text-anchor="middle">c2c[d]</text>
+  <text x="104" y="57" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
+  <text x="104" y="75" font-size="9.5" fill="#6b7280" text-anchor="middle">seq_id[3:0] · tail</text>
+  <rect x="20" y="90" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="94" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="111" font-size="10" fill="#374151" text-anchor="middle">rx_vc_buf[4] · FIFO 80 flit · 1W1R</text>
+  <rect x="20" y="144" width="168" height="42" fill="#ffffff" stroke="#374151"/>
+  <rect x="24" y="148" width="160" height="34" fill="none" stroke="#374151"/>
+  <text x="104" y="165" font-size="10" fill="#374151" text-anchor="middle">rx_reasm · FF 16 项 · 1RW</text>
+  <polygon points="676,74 842,74 832,132 666,132" fill="#f8fafc" stroke="#374151"/>
+  <text x="754" y="93" font-size="10.5" fill="#374151" text-anchor="middle">bridge2core[d]</text>
+  <text x="754" y="111" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
+  <text x="754" y="129" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_head · flit_tail</text>
+  <rect x="232" y="25" width="390" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="250" y="41" font-size="8.5" fill="#6b7280">M5</text>
+  <text x="608" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
+  <text x="250" y="61" font-size="12" fill="#111827">RX Engine · 按 seq_id 还原原始包</text>
+  <text x="250" y="83" font-size="10.5" fill="#475569">1. rx_reasm[seq_id] 缓存收到的段</text>
+  <text x="250" y="103" font-size="10.5" fill="#475569">2. tail 到齐 → 按 seq_id 顺序拼回原始包</text>
+  <text x="250" y="123" font-size="10.5" fill="#475569">3. 位宽 1024 转 2048</text>
+  <text x="250" y="143" font-size="10.5" fill="#475569">4. AXI Bridge 回 dummy response，释放 PCIe 的 outstanding 资源</text>
+  <text x="250" y="167" font-size="10" fill="#9ca3af">RX private 80 加 shared 约 300 flit，覆盖 PCIe 往返 600 ns</text>
+  <line x1="188" y1="49" x2="228" y2="49" stroke="#475569" marker-end="url(#arc5)"/>
+  <line x1="188" y1="111" x2="228" y2="111" stroke="#475569" marker-end="url(#arc5)"/>
+  <line x1="188" y1="165" x2="228" y2="165" stroke="#475569" marker-end="url(#arc5)"/>
+  <line x1="622" y1="103" x2="662" y2="103" stroke="#475569" marker-end="url(#arc5)"/>
+</svg>
+```
+
+### M6 · AXI Bridge
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 812 198" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+  <defs><marker id="arc6" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
+  <rect x="0" y="0" width="812" height="198" fill="#ffffff"/>
+
+  <polygon points="30,60 188,60 178,136 20,136" fill="#f8fafc" stroke="#374151"/>
+  <text x="104" y="79" font-size="10.5" fill="#374151" text-anchor="middle">c2c[d]</text>
+  <text x="104" y="97" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
+  <text x="104" y="115" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_release_valid</text>
+  <text x="104" y="133" font-size="9.5" fill="#6b7280" text-anchor="middle">reduce_release_valid</text>
+  <polygon points="626,69 792,69 782,127 616,127" fill="#f8fafc" stroke="#374151"/>
+  <text x="704" y="88" font-size="10.5" fill="#374151" text-anchor="middle">c2c[d]</text>
+  <text x="704" y="106" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
+  <text x="704" y="124" font-size="9.5" fill="#6b7280" text-anchor="middle">vc_release_valid</text>
+  <rect x="232" y="20" width="340" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <text x="250" y="36" font-size="8.5" fill="#6b7280">M6</text>
+  <text x="558" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D300</text>
+  <text x="250" y="56" font-size="12" fill="#111827">AXI Bridge · credit 与 AXI4 的协议转换</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. 出方向：credit 语义转成 AXI write burst</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 入方向：AXI read/write 转回 flit 与三类 release</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. release 的粒度是 flit，在 C2C 上压缩包数量后再传</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 300 拍是 PCIe C2C 的 300 ns，按 1 T = 1 ns 折算</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">Router 到 Router 的 400 T 含这一段与两侧 Bridge</text>
+  <line x1="188" y1="98" x2="228" y2="98" stroke="#475569" marker-end="url(#arc6)"/>
+  <line x1="572" y1="98" x2="612" y2="98" stroke="#475569" marker-end="url(#arc6)"/>
+</svg>
+```
 
 ***
 
@@ -324,7 +595,8 @@ C2C_BRIDGE        每 chip 4 个，分布在 mesh 两侧，不是每 core 一个
 C2C_SPLIT         4 KB 边界拆包，seq_id 4 bit
 C2C_WIDTH         TX 2048 → 1024，RX 1024 → 2048
 C2C_VC_BUF        合计约 138.7 KB；TX private 20 flit/VC ×4 + shared 约 20，RX private 80 + shared 约 300
-C2C_LATENCY       Router 到 Router 400T，PCIe C2C 64 GB/s、300 ns
+C2C_LATENCY       Router 到 Router 400T，PCIe C2C 64 GB/s；HAS 记跨 chip 单向 ≤ 200～300 ns
+C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB；RX private 80 + shared 300 = 380 flit ≈ 109.4 KB
 ```
 
 ***
@@ -338,20 +610,27 @@ C2C_LATENCY       Router 到 Router 400T，PCIe C2C 64 GB/s、300 ns
 | 坏核不能承担 compute / B core / R core；可承担转发、多播、router reduce | F2 | `harvest_roles` |
 | chip 类型从 mask 推出，路由表按 chip 读入不写死 | F7、F8 | `chip_type_from_mask` |
 | 每行左右两端接 C2C Bridge，全 chip 共 4 个 | F5 | `c2c_bridge_four` |
-| core id 由 SCP 经 ctrl_noc 读 MMIO，不可修改 | F23 | `core_id_readonly` |
-| SCP boot 序列：自启动 → PCIe 训练 → 顺序配 core0～core7 | F9 | `boot_sequence` |
-| ctrl_noc 广播开关 | F10 | `ctrl_noc_bcast` |
-| 初始化六步 | F11 | `init_six_steps` |
-| Router 多副本提交完成后软件再写 DTE 与 ReduceModule 副本 | F12 | `router_table_three_copies` |
-| Core 内 boot：ITCM 装载 → 三个 RV core 进 wait → ready 全高 → 开放业务接收 | F13、F14 | `core_boot` |
-| weights 加载模式：只用 1 条 P2P path，不启动任务链 | F16、F17 | `weights_load` |
-| 切到业务模式 | F18 | `switch_to_business` |
-| 地址空间视野 | F22 | `address_map` |
-| C2C 拆包：4 KB 边界 + seq_id + tail | F26 | `c2c_split` |
-| C2C 拼包：按 seq_id 缓存，tail 到齐还原 | F27 | `c2c_reassemble` |
-| 同向数据与 credit release 仲裁，小包优先 | F29 | `c2c_arb_small_first` |
-| TX posted write 丢响应，RX 返回 dummy response | F30、F31 | `c2c_axi_response` |
-| 跨 chip 同步上下游 Reduce credit，release 按 flit 压缩后再传 | F33 | `c2c_reduce_credit` |
+| core id 由 SCP 经 ctrl_noc 读 MMIO，不可修改 | F26 | `core_id_readonly` |
+| SCP boot 序列：自启动 → PCIe 训练 → 全 10 个 Router → 8 个好核 | F9 | `boot_sequence` |
+| 坏核只配 Router 的路由表与 credit 旁路，不解复位 | F13 | `harvest_boot` |
+| ctrl_noc 广播开关 | F13 | `ctrl_noc_bcast` |
+| 初始化六步 | F14 | `init_six_steps` |
+| Router 多副本提交完成后软件再写 DTE 与 ReduceModule 副本 | F15 | `router_table_three_copies` |
+| Core 内 boot：ITCM 装载 → 三个 RV core 进 wait → ready 全高 → 开放业务接收 | F16、F17 | `core_boot` |
+| weights 加载模式：只用 1 条 P2P path，不启动任务链 | F19、F20 | `weights_load` |
+| 切到业务模式 | F21 | `switch_to_business` |
+| 地址空间视野 | F25 | `address_map` |
+| credit 分 private 与 shared 两级，总量等于对侧 buffer 容量 | F37 | `c2c_credit_two_level` |
+| C2C 拆包：4 KB 边界 + seq_id + tail | F29 | `c2c_split` |
+| C2C 拼包：按 seq_id 缓存，tail 到齐还原 | F30 | `c2c_reassemble` |
+| 同向数据与 credit release 仲裁，小包优先 | F32 | `c2c_arb_small_first` |
+| TX posted write 丢响应，RX 返回 dummy response | F33、F34 | `c2c_axi_response` |
+| 跨 chip 同步上下游 Reduce credit，release 按 flit 压缩后再传 | F37 | `c2c_reduce_credit` |
+| 三类 credit 共享一个 AXI 包，VC credit 由 flit 粒度转包粒度 | F39 | `c2c_credit_pack` |
+| 对 PCIe Switch 一侧 bypass 掉 Bridge 的业务层逻辑 | F41 | `c2c_bridge_bypass` |
+| C2C 只做透明传输，左收右发、右收左发 | F42 | `c2c_transparent` |
+| Router 段上电六步，RouterTable 默认 bypass / no-op | F12 | `router_boot_reset` |
+| 坏核 Router 数据通路时钟门控，配置通路时钟保持 | F13 | `harvest_clock_gate` |
 
 ***
 

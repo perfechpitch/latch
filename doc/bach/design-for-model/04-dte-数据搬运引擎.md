@@ -1030,8 +1030,8 @@ stall_cycles  = cycles(valid && !ready)
 
 ***
 
-配图：[DTE DSA 12 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/08_DTE DSA>)：顶层框图、内部结构、包头存储与访存、TS 快速启动流程、Inbound/Outbound/Inner Flow、Concurrency、Commit、通路方案评估
+配图：[DTE DSA 12 张](<Bach/04_四、MAS（Micro Architecture SPEC）/08_DTE DSA>)：顶层框图、内部结构、包头存储与访存、TS 快速启动流程、Inbound/Outbound/Inner Flow、Concurrency、Commit、通路方案评估
 
-内嵌表格：[DTE DSA 4 子表](../../../../perfechpitch/_sheets/_Dx7Ns6)（Reduction only 场景下各通路（R→M 搬入 / C→R 搬出 / M→C 线上归约）的带宽占比、DTE 参数含义、寄存器偏移与位宽）
+内嵌表格：[DTE DSA 4 子表](_sheets/_Dx7Ns6)（Reduction only 场景下各通路（R→M 搬入 / C→R 搬出 / M→C 线上归约）的带宽占比、DTE 参数含义、寄存器偏移与位宽）
 
 来源：`04_四、MAS/08_DTE DSA.md`、`Bach软件文档库/04_总体设计/05_软件计算流程详细评估.md`（DTE 章）

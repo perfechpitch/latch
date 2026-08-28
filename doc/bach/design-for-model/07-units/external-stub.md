@@ -138,6 +138,17 @@ mem rx_asm          FF 阵列   按 (gpu_id, token_id) 的重组缓冲          
 mem done_set        FF 阵列   N_token × {done, mismatch}               1RW    比对后写                        复位 0
 ```
 
+另有两张只在读入时用到的表：
+
+```
+mem weight_shard    FF 阵列   48 × 10 × {字节流, 落 Matrix Mem 的地址}   1R   编译侧读入   复位由输入给   // 每 core 27 MiB，EP6+TP8 下另加共享专家 576 KiB
+mem expect_out      FF 阵列   N_token × 12 KiB（[6144] @BF16）           1R   reference/ 生成  复位由输入给
+```
+
+`expect_out` 由 `reference/` 按与 `numeric/` 完全同一套累加顺序算出，否则逐 bit 比对没有意义。
+
+注入的顺序有一条规矩：**weights 加载阶段先发最远路径的数据**。先发近的会让不进本核的 weights 卡在 Router 里，要等 DTE 把当前数据搬走才能继续收。
+
 ***
 
 ## 4　流水线总览

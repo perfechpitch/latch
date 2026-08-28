@@ -517,6 +517,8 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 坏核上的 Router 只走直通：数据走完整流水线但不投递本 core，credit 也跨过它直接给两侧的好核，见“坏核与跨 chip”。
 
+包落进哪块存储由数据类型决定，不由路由决定：Router 解析包头把数据类型交给 TS，TS 据此配置 DTE 的 `dst_sel`。**残差数据、EP 间的 reduction 数据、EP 间的 broadcast 数据都是 P2P 传输，落点都是 core 的 Matrix Mem**；业务流的 token 落 Core Mem。kernel 与 weight 走的是另一档，`op_type = 0` 时跳过 TS 直接唤醒 DTE，落 Matrix Mem。
+
 #### 直通与多播
 
 * 包经数据总线传到下一级 Router，自动检测包头，按 `PathID` 查到路由信息和资源需求
@@ -584,6 +586,31 @@ Reduce 包从 core 出发这一段由 DTE 管 credit，进了 ReduceModule 之�
 累加本身怎么做、上下文怎么保护、精度怎么定，在“归约”一节。
 
 #### 进 CoreMem 暂存与重发
+
+**判断在 RC 阶段做，按包为单位**：
+
+```
+if need_buffer && !core_bad_mask[本 core] &&
+   (coremem_credit[目标方向] 不可用 || pending_reinject[vc][目标方向] > 0):
+       目标端口改为 local          // 重定向，坏核不接收溢流
+       overflow_reinject = 1
+       pending_reinject[vc][原方向] += 1
+       // 此时暂不更新 coremem_credit
+```
+
+重注入时才结账：Core 与 DTE 保证 `coremem_credit` 可用后才发起，包重新走 RC 查表得到目的 port（包头里不再单独保存路由信息），Output Port 识别到 `overflow_reinject = 1` 时才占位更新 `coremem_credit`，并把 `pending_reinject` 减一。
+
+`overflow_enable` 与 `original_target_port` 曾经是包头字段，现已删除：前者移进 RouterTable 的 `need_buffer`，后者由重发时重查路由表得到。
+
+**core credit 更新信号分三种 action**，Router 给 core 的三条输出方向各一根：
+
+| action | 场景 |
+| - | - |
+| credit release only | 下游 core 发起了 release，本级 port 的 credit 更新 |
+| bypass only | 本级发生 bypass 行为而下游 core 没有 release，传的是 credit 消耗信息，单 port 实现不复用 |
+| bypass + credit release | 两者同时发生，同步传两个 user_id 与 path_id；只发生在 router → core 场景 |
+
+进 core 缓存的包要重发时，**core 内先同步更新本地的 core credit table，之后 router 的 output 检索到该重发包时再更新自己那一份**。Core credit release 还要向多个上游广播，因为多个上游可能在竞争同一个下游的 CoreMem 资源。
 
 下游资源不满足时，`stallWay` 二选一：
 
@@ -770,7 +797,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 | | VC credit | Stream 资源（CoreMem credit） | Reduce credit |
 | - | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
-| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID，flit |
+| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | **core ↔ Rmem 按 UserID；Rmem ↔ Rmem 按 flit 加 UserID 双粒度** |
 | 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router 是唯一有效状态（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table）；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | DTE 维护本级 ReduceModule 的；ReduceModule 维护相邻下游各方向的；Router 不维护 |
 | 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包由 DTE 先向 Router 申请到授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
 | 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 输出 flit 被下游接受后产生携带 UserID 的 release，经业务 credit 的静态旁路路径返回上游 |
@@ -783,6 +810,18 @@ Stream 资源的两条硬规则：
 * **Router 的进 core 表和 TS 内部的 Stream 资源表按完全一致的逻辑申请空项**。分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收”
 
 Router 另外输出 per-port 的 `coremem_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
+
+#### Stream 资源按 1 KB 记账，广播一次扣的量含预留的输出空间
+
+Stream 资源这一类 credit 的单位是 **1 KB**。《通信机制（分析过程）》给了三个走完整流程的例子（数值都是示意）：
+
+| 场景 | 扣 | 什么时候还 |
+| - | - | - |
+| 广播进 core | 该方向的 credit 128 → 96，扣 32 —— 其中 8 KB 是广播数据本身的空间，24 KB 是**提前预留的输出结果空间** | 广播包计算完成、运算结果写到下游的同时，一次性还回上游 Monitor，96 → 128 |
+| Core0 → Core1 的 bypass | Core0 的 Router 查表要 bypass 给 Core1，先查 Core1 的 credit 并扣掉，128 → 112 | Core1 算完释放空间后通知 Core0 的 CreditMonitor，112 → 128 |
+| Core2 → Core1 → Core0 的反向 bypass | 扣 Core1 的 credit，128 → 120 | Core1 把数据发给 Core0 后归还给 Core1，120 → 128 |
+
+第一行是关键：广播扣 credit 时扣的不只是广播数据本身，还含这个用户后续输出结果要占的空间。少扣这一份，广播能进但结果写不下，就要在计算完成的那一刻卡住。
 
 ***
 
@@ -814,15 +853,56 @@ RouterTable 是路径解析与资源判定的唯一依据，**只描述静态路
 | `directionMask` | 各目标方向加 Core 的有效位；单位有效是单播，多位有效是多播 | 输出仲裁、Crossbar |
 | `nxtVC` | 各目标方向下一跳使用的 VC 类型 | 输出 Header、下游 VC credit 查询 |
 | `streamNeedMask` | 各目标方向是否需要 Stream 授权，**Core 方向的需求必须在本级检查** | Stream 资源表 |
-| `operation` | 普通转发还是 Reduce，选择 Bypass / Core / ReduceModule 路径 | 路径选择、ReduceModule |
+| `op_type` | 2 bit：0 kernel / weight 搬运、1 transfer、2 reduce、3 **reduce_twice** | 路径选择、ReduceModule |
+| `flow_dir` | 3 bit：bit0 上下、bit1 左、bit2 右 | 输出仲裁 |
+| `path_core_mask_enable` | 0 按 `path_core_bypass` 定是否进 core，1 按 MSG 的 `path_core_mask` 定 | 进 core 判定 |
+| `path_core_mask_idx` | 4 bit，看 `path_core_mask` 的哪一位 | 进 core 判定 |
+| `path_core_bypass` | 0 进 core，1 bypass | 进 core 判定 |
+| `need_buffer` | 这条 path 允许进 core 缓存，即溢流使能 | RC 的溢流判断 |
+| `cur_credit_type` / `nxt_credit_type` / `cur_credit_require` | 1 / 3 / 6 bit：本级与三个下游方向各要哪类 credit（0 广播、1 P2P），以及进 core 数据在上游分配的 credit 量 | CoreMem credit |
+| `reduce_data_type` | Reduce 加法的数据类型 BF16 / FP32 | ReduceModule |
+| `reduce_port_sel` | reduce 子端口选择：轮询或静态指定 | reduce_0/1/2 分发 |
 | `stallWay` | 资源不足时留在当前 VC 等待，还是转入 CoreMem 暂存由 DTE 重发 | 阻塞处理 |
 | `reducePrecision` | Reduce 输入与输出精度，**中间累加精度固定 FP32** | ReduceModule |
 
-RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点可以按表改写 VC。
+RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点可以按表改写 VC。复位释放后所有条目为 bypass / no-op，配置写入前不投递任何包。另有一组与 RouterTable 分开配的 **Skip Mask 寄存器**，per-core 一位。
+
+**`reduce_data_type` 为什么配在表里而不是由 TS 给**：`reduce_twice` 时 Router 可能先收到两个远程的 Reduce Token，而不是本 core 发出的那一份，那时 TS 还没有介入。
+
+**`op_type = 0` 的 kernel 与 weight 搬运包进 core 时跳过 TS，直接唤醒 DTE**，不走 `router2ts_trigger_ch` 那条建表通路。
+
+#### path_core_mask：用一个动态位图压掉 path 数
+
+`directionMask` 是静态的、一条 path 上所有用户共用；`path_core_mask` 是动态的、每个包各带一份 16 bit。两者相与才是这一个包在本级的实际去向。
+
+* **一位对应一个 EP 组的 B core**，理论上最大支持 EP16；溢出时由 DTE core 的软件程序换一个新的 `path_id`
+* **位到 core 的对应不是固定编码**：每个 core 在自己的 RouterTable 表项里用 `path_core_mask_idx` 指定看哪一位。同一份 mask 在不同 core 上被解释成不同的位
+* 除 EP 广播 path 外，其余 path 可以不用 mask，按 `path_core_bypass` 固定转发或不转发
+* **谁填**：Broadcast 来源的包由 SNIC 的 DPU 经 P4 可编程逻辑自动加入；其余来源由 DTE core 配置包头。DTE 只能改 `path_id` 与 `size`，**不提供 `path_core_mask` 的修改接口**，因此这一位图进 LPU 之前就要填好，全程不变
+
+它解决的是 path 数爆炸：纯 `path_id` 编码要 2^K − 1 条，加上 mask 之后只要 K 条 `path_id` 配 2^K 种 mask。按 dp10 / ep16 / pp3 试算，MoE 优化后 47 条、kernel 与 weight 各 4 条，合计 55 条，64 项的表装得下。
+
+mask 还有第二种用法，与压 path 数无关：**DP 广播固定广播到每一个 core，靠 mask 判断这个 core 做不做计算**。好处是整条 DP 广播只占 1 项 RouterTable，代价是浪费总线带宽 —— 如果只有 core0 做计算，core0 之后那一段广播传输其实是多余的。用不用这一档由软件按场景权衡。
+
+#### 什么时候必须换一个新的 path_id
+
+两个通信事务满足任一条时必须分配新的 `path_id`：
+
+1. 涉及的 R2R 路径有重叠，但后续传播的节点不完全一致。例：一个广播到 core01、另一个广播到 core0123
+2. 在同一个 core 上做的操作不同。例：core0123 上的 broadcast 与 reduce
+
+反过来，路径不冲突时可以共用同一个 `path_id`：
+
+* 分别在 core01 和 core23 上广播 —— 路径完全无关
+* 分别在 core03 和 core23 上做 P2P —— 路径重叠但后半部分完全一致（可以共用，但没必要，原文只作为辅助理解的例子）
 
 ### 第二关：拿资源才放行
 
 VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC 之间选一个。
+
+**VA 与 SA 的分工**：VA 做 credit 检查加 per-input-port 的 VC 选择，按 **Age-based 最老优先**（比 head flit 的到达时间），**以整包为仲裁粒度**并锁定该 packet；SA 做跨 input port 的 per-output-port 竞争，是 flit 级 RoundRobin。credit 不足的 VC 在 VA 就被跳过，进不到 SA。
+
+目标端口的那个 VC 上有本 core 未发完的溢流缓存时，该 VC 同样被 VA 跳过，同 input 的其他 VC 不受影响。
 
 **三层 credit 各管一段**，互不复用：
 
@@ -936,6 +1016,97 @@ credit 不足的 VC 被 VA 跳过，同一个 input port 的其他 VC 不受影�
 
 ***
 
+## 死锁
+
+Data_NOC 的死锁面全部落在 VC 上，Router 硬件不做检查，靠软件在编译期分配 VC 时避开。
+
+### 哪些场景会死锁
+
+| 场景 | 死锁 | 原因 |
+| - | - | - |
+| 单 Router 内，任意 input / output 组合 | 否 | Crossbar 是全连接交换，不存在跨节点的循环依赖 |
+| 跨 Router，同 VC 无环路 | 否 | credit 沿树状或递增路径传递，VC 之间独立，不成循环等待 |
+| **跨 Router，同 VC 形成物理环路** | **是** | A 等 B 的 credit、B 等 A 的 credit |
+| **Reduce 归约回路同 VC 形成物理环路** | **是** | 同上，单 VC 约束 |
+| Reduce 单 Router 内，多操作数汇入加结果输出 | 否 | 操作数来自不同 input port，输出结果经 reduce 端口是独立的 SA 请求 |
+
+**唯一的约束**：同一个 VC 在物理拓扑上不能形成依赖环路，广播、归约、P2P 所有场景都算在内。业务的依赖深度超过 VC 数时，拆到不同 VC。Router 硬件不检查这一条，软件编译期保证。RouterTable 提供 VC 改写能力，事后发现死锁可以靠改 VC 超车，代价是牺牲原有单 VC 内的保序。
+
+### 组播不引入新的死锁
+
+Broadcast 是单向传播树，物理上天然无环：同 Router 内是 input 到多个 output，output 之间无依赖；跨 Router 逐跳发散，credit 沿反向归还。整条广播链用同一个 VC 也不成环。组播的阻塞是性能问题（等所有目标 output 空闲），不是死锁。
+
+### 归约不会在网络上堵死
+
+因为有业务层 reduce 的单独 credit 网络，R2R 之间所有请求都能被下游接收（跨 chip 除外），所以 R2R 之间以及 R2Reduce 之间不会形成死锁。
+
+### VC 怎么分才不死锁
+
+| 规则 | 理由 |
+| - | - |
+| 同一个 VC 尽量只承载单一方向的流量 | 同 VC 内多方向混存会造成 intra-VC 的队头阻塞 |
+| Path 之间没有 VC 使用限制，不同 path 可以用同一个 VC | 只要软件保证单 VC 内无物理环路 |
+| DP 场景下进 core 的流与 bypass 的流分不同 VC | 避免队头阻塞 |
+| 不同 EP 组的流分不同 VC | 一组 credit 耗尽不牵连其他组 |
+| 有计算依赖的数据流分不同 VC | 这是死锁约束，不只是性能 |
+
+四个 VC 的分工是固定的一档加三档可配：
+
+| VC | 承载 | 容量 |
+| - | - | - |
+| VC3 | 只做逐级 reduce | 16 KB |
+| VC0 / VC1 / VC2 | 除 reduce 外的全部操作类型，软件按数据流分配 | 各 8 KB |
+
+VC 数取 4，是因为目前最复杂的场景里一个 Router 最多同时经过 4 条同向数据流。逐级 reduce 单独占一个 VC 有三条理由：这类数据基本不进 core，在 Router 里直接与 core 内的数据求和；绝大多数场景都存在逐级 reduce；reduce 要求整包缓冲，每个 VC 都支持 reduce 的话 buffer 尺寸过大。三个传输方向各一套，VC Buffer 合计 (16 + 8 × 3) × 3 = 120 KB。
+
+软件分配 VC 时两条原则的力度不同：可能互相阻塞导致**死锁**的数据流必须分到不同 VC，可能互相阻塞导致**性能下降**的数据流尽量分到不同 VC。
+
+### 换 VC 怎么换
+
+一条 path 前半段做 reduce、后半段做 bypass 时，要在 DTE 的 RV core 软件不介入的前提下由 Router 自己换 VC。必须实现的是 RouterTable 里为每条 `path_id` 指定“下一跳的 VC”。在此之上两种做法比过，结论已定：
+
+| 做法 | 结论 | 说明 |
+| - | - | - |
+| 下一跳的 VC 编码在包头里，下一跳 Router 解包直接取 | **选中** | 本跳 Router 读到表里的“下一跳 VC”后改写包头里的这个字段，供下一跳读 |
+| 包里不带 VC，每个 Router 各查各的表 | 否决 | 表里要同时存“本跳 VC”与“下一跳 VC”，并强制上一跳的“下一跳 VC”等于本跳的“本跳 VC”，配错就死锁 |
+
+VC 机制本身的实现成本极高 —— 额外面积、设计复杂度、验证空间都很大。原始文档把“到底实不实现”留成待定，写明需要模拟器介入综合判断开发复杂度与效果收益。
+
+
+### 一个具体的死锁实例
+
+EP + PPTP 切分下，FC3 那一行最右侧的 chip：
+
+1. broadcast 把 core 填满
+2. user0 的 FC1 silu result 的 P2P 传输被挡住，EP reduction 的 P2P 传输也被挡住
+3. core7 上 user0 的任务链因此完不成，用户释放不了
+4. 从中间 core 一直到 core7，TS 的表项都释放不了，死锁
+
+两种改法在原始文档里被逐条比过，结论是选第二种：
+
+| 改法 | 缺点 | 优点 |
+| - | - | - |
+| 任何数据流阻塞都进 core 暂存，core 内为 P2P 单独预留缓冲 | 三个方向都要单独的缓冲空间，挤占用户计算可用的 Core Mem；一旦某个 core 的 TS 满，后续连续数据流都要进一遍 Core Mem，传输延时大幅增加；进出 core 都要 DTE 搬，DTE 可能成为瓶颈；TS 要增加按包类型分流的额外任务链，软件要专门配 | Core Mem 够用时不需要额外存储，省面积；Router 设计简单，不需要复杂的数据 mux |
+| **Router 内加 VC Buffer，不同数据流走不同 VC，阻塞只挡同 VC 的流** | 需要额外存储，三个方向的 VC Buffer 各自独立实现；Router 上的数据 mux 走线复杂；设计与验证复杂 | 避免数据流不必要地进出 core，大幅降低传输延时；大幅降低 DTE 的任务负载；credit 只记 Router VC Buffer 的容量，回收链路短、需要的缓冲更少；TS 任务链与 Core Mem 更干净，不必关心不属于本 core 的数据流 |
+
+### 另一类不死锁的前提：Core Mem 容量单调
+
+EP 内 LPU 多播加 PPTP 切分的简化场景里，Path0 是“广播 + P2P + 广播”，会路过但不进入 Core1；Path1 与 Path3 也走 Core1 的通路，会与 Path0 的 P2P 段竞争。这一带不死锁的前提是：**对于 Core1 相关的那两条路径，User N 的 Path1 / Path2 必须排在 User N+4 的 Path0 之前**。
+
+只要每个 Core 的 Core Memory 能容纳的 User 数量一致，或者沿数据流方向前窄后宽，这个次序就永远成立，即不会死锁。
+
+这个场景仍然会出空泡，前提是同一个 User 在 core0 和 core2 上的处理速度不同。一个 TP 组内处理时间差距一般不大，计算量分布均匀时差距主要来自逐级 Reduce —— **原始文档在这里明确写了“需要模拟器介入协助确认”**，是本次建模要回答的问题之一。
+
+### 队头阻塞（不是死锁，但影响性能）
+
+| 场景 | 结果 |
+| - | - |
+| 同 VC 内多方向 flit 混存、多 VC 内同方向 flit 竞争 | 队头阻塞：VC FIFO 头部 flit 的目标 credit = 0 会挡住后面目标 credit > 0 的 flit |
+| 不同 input 到同一个 output | 排队。per-output 的 RoundRobin 加 aging，无饥饿 |
+| 不同 input 到不同 output | 无阻塞，SA 并行处理 |
+
+***
+
 ## 归约
 
 ### ReduceModule
@@ -949,6 +1120,12 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | RMW Pipeline | 首份输入建立上下文，后续方向输入执行 Read-Modify-Write **原位**累加 |
 | Precision Convert | BF16 输入扩展为 FP32；输出按 RouterTable 配置转 FP32 或 BF16 |
 | Downstream Reduce Credit Map | 按 UserID 加目标方向维护相邻下游 Reduce Credit，逐 flit 扣减、按 release 恢复 |
+| 循环队列 | ReduceBuffer 本质是一个循环队列：算完的数据从队头搬走，待算的从队尾进；多个用户的数据可以在传输与计算过程中同时存在 |
+| 两种 action | ReduceBuffer ⇒ ReduceBuffer，以及 Core ⇒ 本级 ReduceBuffer |
+| 分段传输 | ReduceBuffer 之间把 packet 拆成更小的 segment，一个 segment 够 credit 就能发，用来掩盖 R2R 延迟。**Core 到 ReduceBuffer 相反，要等整包备齐再发**，因为这一段延迟本来就小 |
+| release 时机 | ReduceBuffer 发出一笔就向上游返回一笔 credit release |
+| 输出 VC | Rmem 允许改写输出的 `vc_id`。改写的落点是包头里那个“下一跳 VC”字段，下一跳 Router 解包直接取，不再查表 |
+| 边缘压缩 | 跨 chip 的边缘 Rmem 自己做精度压缩，减少 PCIe 带宽 |
 | Input/Output Arbiter | 仲裁最多三路输入的 SRAM、Bank 与计算资源 |
 
 三条硬约束：
@@ -959,6 +1136,24 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 * **精度**：输入 FP32 或 BF16，BF16 转 FP32 后参与计算，中间累加统一 FP32，输出可配 FP32 或 BF16
 
 性能指标：Reduce 输入三路各 160 GB/s，输出 160 GB/s，算力 80 GFLOPS（FP32 / BF16）。
+
+再加两条来自《通信机制（分析过程）》的边界：
+
+* **整包不分段的那一段决定了容量下界**。Core 必须一次性把 Reduce Token 完整发进 Router 的 ReduceBuffer，不能分段传输，否则效率严重下降。按 8192 × 2 B 算，一个 Token 就是 16 KB，ReduceBuffer 至少要装得下这一个整包。
+* **ReduceBuffer 不得用作流量控制的缓存**。“Reduce 完成后不切 `path_id`，直接从 ReduceBuffer 发起 P2P”这种把两条 path 合并的做法能省一次进出 core，但只在后续 P2P 能立即发出时才允许：发不出去就得把数据压在 ReduceBuffer 里，而 ReduceBuffer 只有一项，一压就挡住后续的 Reduce 事务。发不出去的正确做法是让 Reduce 结果先进本 core 的 Core Memory，用 Core Memory 做流控缓冲。
+
+### 逐级与非逐级的分界
+
+同样是 reduce 和 concat，逐级和非逐级走的是两条完全不同的路：
+
+| | 逐级 | 非逐级 |
+| - | - | - |
+| 在哪算 | Router 里 | 必须进 core，在 Core Mem 里算 |
+| 次序 | 按序执行 | 允许不同用户之间乱序到达 |
+| 缓冲 | 只缓存最老那个用户的数据 | 每个用户在 Core Mem 里等其他来源到齐 |
+| 源的数量 | 最多 3 个：两个上游 core 的分量加一个本 core 的分量 | 不限于 3 个 |
+
+非逐级必须进 core，原因是汇聚过程中用户之间会乱序：chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到两个 chip 的汇聚点。Router 里只有一个最老用户的上下文，接不住这种乱序。
 
 ### 用户退休
 
@@ -1008,6 +1203,8 @@ AXI 侧的两处特殊处理：
 * TX 方向 AXI write 是 posted，写响应可以丢
 * RX 方向 AXI 需要响应，由 AXI Bridge 返回 dummy response 以释放 PCIe 的 outstanding 资源
 
+**C2C 只做透明传输**：左侧收到的包默认发到右侧，右侧收到的包默认发到左侧，不做路由判断。业务上不对 C2C 使用独立地址编码方式访问，接口处做流式通信封装。上面所有的路由方案都建立在这个前提上。
+
 ***
 
 ## 配置与一致性
@@ -1056,7 +1253,19 @@ core 对外发数据要同时满足 VC 资源与 Stream 资源。监听这两项
 | 单跳延迟 | ≤6 cycles（六级流水线），优化后 4～5 |
 | RouterTable | 64 条表项 |
 | VC | 每输入方向 4 类（VC0～3），输出方向不设 VC Buffer |
-| VC Buffer | Private 每 VC 深度 2（防死锁），Shared Pool 约 20 flits（覆盖 credit 往返） |
+| VC Buffer | Private 每 VC 20 flits（覆盖 RTT，软件可配，防死锁下限 2）加每方向 Shared Pool 约 20 flits，合计 100 flits/port ≈ 25 KB；SRAM 实现 |
+| flit 存储位宽 | 2048 bit payload + 256 bit header = 2304 bit = 288 B |
+| R2R 往返 | ≤ 20 cycle（shared pool 深度的依据） |
+| Crossbar | 5 入 7 出，每 cycle 最多 7 组 input → output 交换 |
+| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。**与第 5 章的 T_R2R = 40 T 冲突，未解** |
+| 全 chip 广播延迟 | 82 ns（两行并行，Row 0 七跳 82 ns 是关键路径） |
+| 单 VC 传输效率 | 每包额外开销 2 cycles（RC 与 VA 不传 flit）：8 KB 包 94%、16 KB 97%、32 KB 98.5%；多输入竞争时按 80% 折算 |
+| Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |
+| ReduceBuffer 容量 | 通信机制记 8K × FP32 = 32 KB，正反双份 64 KB；Router MAS 记 16 用户 × 16 KiB，**未解** |
+| Reduce 加法器 | 256 B × 1 GHz × 2 输入 = 512 GB/s |
+| DTE-local 桥接 buffer | Router → DTE 方向 60 flits ≈ 16.9 KB |
+| CTRL_NOC 配置时钟 | 800 MHz（R2CU 接口，APB / AXI-lite，32 bit） |
+| 错误四类 | Link 错误、包长度不匹配（VA 阶段查 pkt_length 是否超过目标端口 buffer 能力）、Credit Overflow、Credit Underflow；后两类硬件自动把该 VC 的 credit 复位到固定初值 |
 | Reduce 输入 | 三路各 160 GB/s |
 | Reduce 输出 | 160 GB/s |
 | Reduce 算力 | 80 GFLOPS（FP32 / BF16） |
@@ -1123,7 +1332,7 @@ Header 与 Payload 走**两根独立并行总线**：
 
 ***
 
-配图：[Router 12 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)
+配图：[Router 12 张](<Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)
 
 | 编号 | 内容 |
 | - | - |
@@ -1135,12 +1344,12 @@ Header 与 Payload 走**两根独立并行总线**：
 | `06` | ReduceModule 之间 |
 | `07~12` | RouterTable / CSR / 各 Station 与 Xbar 细节 |
 
-另有 [Router OLD 1 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/05_Router OLD>)。
+另有 [Router OLD 1 张](<Bach/04_四、MAS（Micro Architecture SPEC）/05_Router OLD>)。
 
 内嵌表格：
 
-* [通信机制 6 子表](../../../../perfechpitch/_sheets/_II1Rs6)（每个 path_id 在各 core 上的进出方向：broadcast、reduce、p2p、EP 多播各一张；`N8MvQ8` 是 path_id 加 path_core_mask 的编码对照）
-* [通信机制分析过程 52 子表](../../../../perfechpitch/_sheets/_BTlDsC)（36 张同构的 path_id 路径表覆盖各切分场景，另有 message 动态字段、logic op 说明、合并前后对照）
+* [通信机制 6 子表](_sheets/_II1Rs6)（每个 path_id 在各 core 上的进出方向：broadcast、reduce、p2p、EP 多播各一张；`N8MvQ8` 是 path_id 加 path_core_mask 的编码对照）
+* [通信机制分析过程 52 子表](_sheets/_BTlDsC)（36 张同构的 path_id 路径表覆盖各切分场景，另有 message 动态字段、logic op 说明、合并前后对照）
 
 来源：
 

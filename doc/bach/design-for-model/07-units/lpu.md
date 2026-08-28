@@ -385,6 +385,24 @@ mem entry_exit    FF        {global_top_left{gx,gy}, global_bottom_right{gx,gy}}
 mem link_param    FF 阵列   每条链路一项 {bw, latency}                1R   参数表       复位由输入给
 ```
 
+另有一项切分参数，构造期与各 chip 共用：
+
+```
+mem split_param   FF        {ep[3:0], tp[4:0], pp[2:0], dp[3:0], mode[2:0], gpu_num[7:0], batch[7:0]}  1R  编译侧读入  复位由输入给
+```
+
+这几张表的填法约束：
+
+| 表 | 约束 |
+| - | - |
+| `grid` | `gy = tray × 4 + layer`（0～11），`gx = col`（0～3） |
+| `harvest` | 每 chip 至多 2 个坏核；`gx ∈ {0, 3}` 的 chip 至多 1 个 |
+| `logical_map` | 逻辑 0～7 是 compute，逻辑 8 是 special；special 占的物理 core 不在 compute 集合里 |
+| `entry_exit` | 外部数据从 `global_top_left` 西侧进，结果从 `global_bottom_right` 东侧出 |
+| `split_param` | `mode` 是四种 core 级切分之一：`eptp_nn` / `eptp_nk` / `pptp_nn` / `pptp_nk` |
+
+逻辑 core 8 按 **special 优先**分四步定：按 harvest mask 筛出候选 → 选定并锁定 special 物理 core → 从剩余好核里映射 8 个 compute → 用固定映射搜索全部 route。候选在第一列取 `{core0, core5}`，最后一列取 `{core4, core9}`。
+
 ***
 
 ## 4　流水线总览

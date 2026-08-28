@@ -23,8 +23,8 @@
 | - | - | - | - |
 | RV core 特权态 | MAS_TOP：“仅支持 U 态（用户态）。没有 CSR？” | RV Core MAS：“支持 M 态，支持所有 M 态 CSR；不支持 S、U、H” | 按 RV Core MAS（M 态） |
 | VU 访存带宽 | 性能需求规格：B_VU = 64 B/T | VU MAS：每周期 1 Load + 1 Store 各 128 B | 按 VU MAS |
-| VU 能否直接读 Matrix Mem | 软件流程梳理：R core 链二由 VU DSA 直接从 Matrix Mem 读两路数据做 reduction（[`02_软件流程梳理/d13.png`](<../../../../perfechpitch/Bach软件文档库/01_Bach软件文档库/04_总体设计/02_软件流程梳理/d13.png>) 画的就是 matrix mem → VU dsa → core mem） | MAS_TOP：“VU 不能直接读 Matrix mem”；EP 组间 Reduction 讨论与 core 内调度机制：DTE 先把两笔从 MM 搬到 CM，VU 再求和（[`04_core内调度机制/d40.png`](<../../../../perfechpitch/Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制/d40.png>)） | 按 MAS_TOP（多一步 DTE 搬运），R core 链二因此是 4 个 task 而不是 3 个。这一步直接改变 R core 的 CM 容量与带宽需求 |
-| PPTP 下 silu·dot·量化 落在哪一段 chip | 软件流程梳理伪代码：FC1/FC3 的 reduce 结果都落到 **FC2 段** chip 的 core 0，dot 在那里做 | 本文档 `pptp_nk` 角色表：dot 在 **FC3 chip** 的 `pptp_fc3_nk_dot_core`；板卡结构和模型映射：Silu 在 **FC1 chip**、dot 在 **FC3 chip** | 三处把 VU 的活摆在不同 chip 上，直接改变每段 chip 的 VU 占用与跨段传输量。**未解**，建模前必须定死一种 |
+| VU 能否直接读 Matrix Mem | 软件流程梳理：R core 链二由 VU DSA 直接从 Matrix Mem 读两路数据做 reduction（[`02_软件流程梳理/d13.png`](<Bach软件文档库/01_Bach软件文档库/04_总体设计/02_软件流程梳理/d13.png>) 画的就是 matrix mem → VU dsa → core mem） | MAS_TOP：“VU 不能直接读 Matrix mem”；EP 组间 Reduction 讨论与 core 内调度机制：DTE 先把两笔从 MM 搬到 CM，VU 再求和（[`04_core内调度机制/d40.png`](<Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制/d40.png>)） | 按 MAS_TOP（多一步 DTE 搬运），R core 链二因此是 4 个 task 而不是 3 个。这一步直接改变 R core 的 CM 容量与带宽需求 |
+| PPTP 下 silu·dot·量化 落在哪一段 chip | 软件流程梳理伪代码：FC1/FC3 的 reduce 结果都落到 **FC2 段** chip 的 core 0，dot 在那里做 | 需求分析的 `pptp_nk` 角色表：dot 在 **FC3 chip** 的 `pptp_fc3_nk_dot_core`；板卡结构和模型映射：Silu 在 **FC1 chip**、dot 在 **FC3 chip** | 三处把 VU 的活摆在不同 chip 上，直接改变每段 chip 的 VU 占用与跨段传输量。**已定**：按软件流程梳理那一档，三步统一落在 FC2 段 chip 的逻辑 core 0 |
 | B / R core 的 datain 侧是几个 task | 软件流程梳理：两个 task，DTE 搬完再由另一个 task 置 flag / 更新 `arrive_num` | core 内调度机制与软件计算流程详细评估（GLM5 章 B core 伪代码）：一个 `DATAIN_TASK`，DTE DSA 搬完时顺带置标志并推进 head 指针 | 按一个 datain_task（两处较新的文档一致） |
 | Core Mem 容量 | MAS_TOP 内存结构表：512KB / 1MB | Cmem MAS：1MB + 32KB（8 bank） | 按 Cmem MAS |
 | DTE ↔ Cmem 接口宽度 | DTE MAS：256B + 8B（Data + scale） | Cmem MAS：256B/T | 按 Cmem MAS |
@@ -55,6 +55,20 @@
 | VU 读 CoreMem 带宽 | Top 模拟器：`vu 读/写 core mem = 256 B/T` | 一体化模拟器：`VU_Dsa 访存端口 CoreMem bw=64B`；VU MAS：128 B | 三处不一致，**建模取 VU MAS 的 128 B** |
 | chip 内 core 网格 | 硬件 MAS / 需求分析：2×4（Harvest 后 2×5） | 两套模拟器一律按 **2×5** 建模 | 模拟器口径已含 Harvest，按 2×5 |
 | map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | 示例 map 是旧的 2×4 版本 |
+| VC 数 | DATA_NOC HAS 正文与 VC Buffer 表：每 Input Port V = 4 | 同一份 HAS 的 VC 使能 mask 20-bit、`vc_id` 5-bit、Area 预算按 VC0–19（4×20 + 16×2 + shared 20 = 132 flits/port） | V = 20 是 2026/08/19 缩减 VC 之前的残留，但 Area 与 Architectural Guidelines 两节没同步。按 V = 4 建 |
+| VC private 深度 | HAS 3.2.2 与 REQ-ARCH-025：Private per-VC 深度 = 2（防死锁），软件可配 | 同一份 HAS 的 VC Buffer 结构表：Private ~20 flits/VC（覆盖 RTT），总量 4×20 + shared 20 = 100 flits/port = 25 KB | 2 是防死锁下限，20 是覆盖 RTT 的默认值，两者不矛盾但文档没说清哪个是上电默认。**建议按 20 建**，2 记为软件可配的下限 |
+| R2R 单跳延迟 | DATA_NOC HAS 性能预算：internal 6 ns + wire 10 ns = **16 ns/hop**，mid 无走线延迟 | 第 5 章延迟表与性能需求规格：T_R2R = **40 T** | 差 2.5 倍，直接改变全链路延迟。**未解** |
+| Rmem per-port buffer | HAS ASM-07：per-port **128 flits** | 同一份 HAS 的 Area 预算：Reduce 子系统 3 port × **32 flits** | 未解 |
+| ReduceBuffer 容量 | 《通信机制（分析过程）》：一个用户最大 reduce 数据量 8K × FP32 = 32 KB，正反双份 = **64 KB** | Router MAS：16 用户 × 16 KiB = **256 KB** | 未解。两者对在飞用户数的假设不同 |
+| CoreMem credit 粒度 | 《通信机制（分析过程）》：按 **1 KB 粒度**划分，path 按自己需求申请 | DATA_NOC HAS：按 **user 粒度**的资源表格，16 项 | 未解。前者是容量记账，后者是表项记账 |
+| `coremem_credit` 初值 | HAS Boot 流程：上电 `coremem_credit[port] = 0`，由正常 Core 上电发初始化脉冲逐步初始化 | HAS 4.3.2：`coremem_credit` 为 16 个用户的状态表，**默认为全部使能状态** | 按 Boot 流程那一套（上电 0），另一处是描述稳态 |
+| Router 与 core 的接口协议 | HAS 正文：五类端口统一 Credit-based，local 也是 credit 流控 | HAS 遗留 action：“目前 router 和 core 通信采用 axi stream，如果可以也建议使用同样的 hflit 和 pflit 协议” | 当前实现是 AXI-Stream-Like，credit-based 是建议方向。按当前实现建，DTE-local 桥接做两侧协议转换 |
+| `TASK_EXE_MASK` 的极性 | TS MAS 寄存器表 bit 44：**0 = 按照用户执行，1 = 不按照用户执行**，一位一档 | 同一份 MAS 的 DP+P2P 场景描述：“有些用户只有 P2P 无计算 task、有些是计算无 P2P”，要分出两组就需要两个方向，一位不够 | 按寄存器表的极性建模，`compute = 0` 的用户跳过所有 `TASK_EXE_MASK = 0` 的 task。场景描述那一半的“计算无 P2P”这一支落不下来，**未解** |
+| chip 内 mid 接口 | 第 2 章与我们的 Chip 装配：`core[i]` 与 `core[i+5]` 的 mid 端口全部对接 | HAS ASM-01 括号：“2 行 × 5 列二维 Mesh（**中间 router mid 接口不连接**）” | 未解。若中间列不连 mid，2×5 的跨行通路只剩四对 |
+| VC Buffer 容量 | 《通信机制（分析过程）》按容量记：reduce 专用 VC3 16 KB、三个共享 VC 各 8 KB、三方向各一套，合计 **120 KB** | DATA_NOC HAS 按 flit 记：private 20 flit/VC × 4 加 shared 20，一个方向 100 flit ≈ **25 KB**，三方向 75 KB | 未解。前者按 reduce 要整包缓冲反推，后者按覆盖 credit 往返反推 |
+| ReduceBuffer 容量的第三种口径 | 《通信机制（分析过程）》另一处：Core 必须一次性整包发进 ReduceBuffer，一个 Token 8192 × 2 B = **16 KB** | 同一份文档前文记 64 KB；Router MAS 记 256 KB | 三个数在同一条链上：16 KB 是单包下界，64 KB 是正反双份，256 KB 是 16 用户并发。**未解**，取决于 ReduceBuffer 要同时装几个用户 |
+| CM 物理带宽 | 《Core Memory 容量带宽需求推导》：**512 B/cycle @1 GHz**，每用户 50 KiB 写 + 50 KiB 读 | 《通信机制（分析过程）》：**256 B/cycle @1 GHz**，每用户 25 KiB 写 + 25 KiB 读；《Cmem MAS》：**(1 KB + 32 B)/T** | 三份不一致。第 5 章按 512 B/cycle 记，Cmem MAS 的 1 KB/T 是 8 bank 全开的峰值，两者不是同一个口径 |
+| 逐级 Reduce 的 credit 类型 | 《通信机制（分析过程）》：VC3 专给逐级 reduce，走 VC credit | DATA_NOC HAS：reduce 是独立的 credit 网络，与 VC credit 分离 | 未解。两者可以并存（VC credit 管缓冲槽、reduce credit 管上下文），但文档没写清一个 reduce flit 要不要同时扣两种 |
 
 ## 原始文档里标注为空缺或待定的内容
 
@@ -90,6 +104,9 @@
 
 * 整包传输方案下“长包阻塞可能有死锁场景，需要在架构层考虑不会出现死锁”，死锁避免的具体论证未写
 * 双坏核示例里两处表项原文未定：C0 在 Path2 上的 `streamNeedMask` 是不置位还是右向置位；C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位。`operation` 列的 Reduce0 / Reduce1 / Reduce2 含义原文未定义
+* **VC 机制到底实不实现**。原文的原话是“实现 VC 机制需要很大的额外面积、设计复杂度和验证空间，成本极高。具体是否实现需要模拟器介入，综合判断开发复杂度和效果收益”。这是本次建模要回答的问题之一，不是文档缺口
+* “Broadcast 过快引起空泡”这一档的定量结论，原文明确写了“需要模拟器介入协助确认”。前提是同一个用户在 core0 与 core2 上的处理速度不同，而计算量分布均匀时差距主要来自逐级 Reduce
+* P2P 流量控制的“流量控制使能”配在哪一张表，原文只写“在一个 Core 配置了流量控制使能”，没有指明是 TS 的 CFG_REG 还是 RouterTable。本套文档按配在 TS 建模
 
 **TS**
 
@@ -125,7 +142,6 @@
 * CM → MM 方向后续是否要支持仍是遗留问题，当前倾向不支持
 * LUT 的字段展开与转换等软件仿真结果出来后再固化
 * 目的地址的生成是否全部交给 DTE core（B core 按指针循环累加，R core 的指针方案未定）
-* `path_core_mask` 由谁生成（GPU、slave CPU 还是 SmartNIC）
 * reissue 任务目前硬件只按 `path_id` 判断，是否合适
 * scale 与 data 在 Core Mem 里的存储形式
 * Matrix Mem → Core Mem 搬运的源与目的是否用同一个 `stream_id`
@@ -138,6 +154,15 @@
 
 * DTCM 是否要做，取决于 RV core 访问 SM 的延迟是否满足要求
 * ITCM 溢出处理，当前结论是“不会有溢出场景”
+
+**Data_NOC（DATA_NOC HAS 的 Open Issues）**
+
+* OPEN-04 Routing Table 在线更新机制：是否需要额外的数据通路模式支持运行时在线更新而不中断数据流
+* OPEN-05 拓扑可扩展性：当前默认 2×5 Mesh 需要 mid 接口，若后续采用 1×10 结构 mid 将删除，Router 是否预留 mid 接口的可配置删除能力
+* OPEN-06 Chip to chip 是否支持 VC：支持则两侧要单独例化 SRAM 吸收 600 ns 往返；不支持则要靠软件在业务上单独实现跨 chip 的进 core 流控
+* hflit 与 pflit 并行传输的协议多约 10% 信号线，是否改成统一协议
+* Router 与 core 之间是否从 AXI-Stream 改成同一套 hflit / pflit 协议
+* 会议记录《通信机制》2026.7.16 第 10 问“EP 多播 path_core_mask 的含义是什么”当场没有答复，答案在《通信机制（分析过程）》的 Router Table 一节
 
 **系统软件与业务流控**
 
@@ -164,6 +189,8 @@
 * **VU**：ISQ 深度
 * **RV core**：task_queue 深度
 * **寄存器地址映射**：MU 与 DTE 两处
+* **身份字段**：trigger 请求里 `compute` 位在包头中的位置
+* **超前发送窗口 N**：软件按 path 配的值，编译期确定；使能位与 N 存在哪一张表未定
 
 **专用 core（B core / R core）**
 
@@ -173,4 +200,4 @@
 
 ***
 
-本套文档的两处来源与原始文档的 wiki 链接见 [README](README.md)。本章内容生成于 2026-08-20，2026-08-25 按原始文档更新。
+本套文档的两处来源与原始文档的 wiki 链接见 [README](README.md)。本章内容生成于 2026-08-20，2026-08-25 与 2026-08-28 两次按原始文档更新。

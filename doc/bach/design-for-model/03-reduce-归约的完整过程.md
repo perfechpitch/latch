@@ -532,6 +532,7 @@ TS 的动作：
 
 * 发现是 reduce task 后**顺序连续下发 N 笔 credit 请求**（`router2ts_credit_ch`），credit 满足即可顺序下发，直到收全 N 笔 Reduce Done
 * 完成判定拆成两半：**DTE ack 只代表搬运完成**，执行 `consume_only`，不改 stream 状态；**只有 Router 的 Reduce Done 才有权把 reduce task 置 FINISH**。两个事件可任意顺序到达，Reduce Done 可以被 Hold，但必须等匹配的 DTE ack 被消费后才提交
+* 匹配按包做：包头带 `reduce_seq`（0～N−1），DTE 发出时打上、Router 原样带回，TS 用两张 N 位位图逐位配对，两张全满才提交
 * Router 不携带 stream_id，`Task_done` 按 user_id 找对应 stream
 
 DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduce 资源需求；本级 Reduce credit 够整包才发，否则任务在 PendingTaskQ 等。
@@ -2620,9 +2621,9 @@ bit 级一致性：Router reduce 按到达顺序 FP32 累加，MU 的 CSA 树按
 
 配图：
 
-* [EP 组间 Reduction 讨论 10 张](<../../../../perfechpitch/Bach/02_二、需求分析/04_第二阶段需求分析（功能扩展）/02_EP组间Reduction讨论（过程）>)（`d08` Reduction 传输通路、`d09` core 内计算流程、卡死场景、解卡死机制、派遣机制）
-* [Router 12 张](<../../../../perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)（`05` Core 出 Reduce、`06` ReduceModule 之间、`11` Reduce Module 数据通路与 Credit 职责边界）
-* [core 内调度机制](<../../../../perfechpitch/Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制>)（`d40` R core 的 task_chain 四步）
+* [EP 组间 Reduction 讨论 10 张](<Bach/02_二、需求分析/04_第二阶段需求分析（功能扩展）/02_EP组间Reduction讨论（过程）>)（`d08` Reduction 传输通路、`d09` core 内计算流程、卡死场景、解卡死机制、派遣机制）
+* [Router 12 张](<Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)（`05` Core 出 Reduce、`06` ReduceModule 之间、`11` Reduce Module 数据通路与 Credit 职责边界）
+* [core 内调度机制](<Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制>)（`d40` R core 的 task_chain 四步）
 
 来源：
 
