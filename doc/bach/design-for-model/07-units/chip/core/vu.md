@@ -151,7 +151,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
   <text x="734" y="655.5" font-size="8.5" fill="#475569">vmv.v.v 向量直通缓冲，可当延迟对齐用</text>
   <text x="734" y="669.0" font-size="8.5" fill="#475569">代价是这条宏指令不能再用 VALU2 计算</text>
   <rect x="722" y="724" width="300" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="734" y="745" font-size="11" fill="#111827">VSFU（12 条）</text>
+  <text x="734" y="745" font-size="11" fill="#111827">VSFU0 / VSFU1（12 条）</text>
   <text x="734" y="762" font-size="8.5" fill="#475569">sin / cos / tanh / exp / exp2 / ln / log2</text>
   <text x="734" y="775.5" font-size="8.5" fill="#475569">rcp / rsqrt / sqrt / sigmoid</text>
   <text x="734" y="789.0" font-size="8.5" fill="#475569">源不能取自身的输出</text>
@@ -171,7 +171,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
   <text x="1076" y="677" font-size="11" fill="#111827">DMUX</text>
   <text x="1076" y="694" font-size="8.5" fill="#475569">结果路由：写回 VRF / MRF / SRF 或交给 SU</text>
   <text x="1076" y="707.5" font-size="8.5" fill="#475569">两个 VRF 写口须指向不同执行单元，同时使能时</text>
-  <text x="1076" y="721.0" font-size="8.5" fill="#475569">　写区间不重叠；来源只能是 LU 或 VALU0/1/2/VSFU，</text>
+  <text x="1076" y="721.0" font-size="8.5" fill="#475569">　写区间不重叠；来源只能是 LU 或 VALU0/1/2/VSFU0/1，</text>
   <text x="1076" y="734.5" font-size="8.5" fill="#475569">　其余置 CFG_ERROR</text>
   <text x="1076" y="748.0" font-size="8.5" fill="#475569">VALU1 的归约标量结果走 SRF 虚拟写口</text>
   <text x="1076" y="761.5" font-size="8.5" fill="#475569">MRF 唯一写口的来源是 LU 的 ld.vm_mask、VALU0 的</text>
@@ -280,7 +280,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | - | - |
 | F30 | SMUX 做源路由：执行单元之间允许 bypass 与广播，且不消耗 RF 端口 |
 | F31 | DMUX 做结果路由：写回 VRF / MRF / SRF 或交给 SU |
-| F32 | VRF 两个写口须指向不同执行单元，同时使能时写区间不重叠；来源只能是 LU 或 VALU0 / VALU1 / VALU2 / VSFU，其余置 `CFG_ERROR` |
+| F32 | VRF 两个写口须指向不同执行单元，同时使能时写区间不重叠；来源只能是 LU 或 VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1，其余置 `CFG_ERROR` |
 | F33 | VRF 允许读写寄存器完全重叠或完全不重叠，不允许部分重叠。硬件不检查，由软件保证 |
 | F34 | VALU1 的归约标量结果走 SRF 虚拟写口 |
 | F35 | MRF 唯一写口的来源是 LU 的 `ld.vm_mask`、VALU0 的比较类与 `vfclass.mv`、MEXE 三者之一，同一宏指令内不能同时写回；Mask 不能广播，一条宏指令内最多两处使用 Mask |
@@ -294,10 +294,12 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F38 | VALU1（6 条独有）：加减乘、最值、跨元素归约（求和 / 最大 / 最小）、Top-16 排序（同时输出 16 个 INT16 索引）、标量广播 / 搬出 |
 | F39 | VALU2（1 条独有）：加减乘、最值、标量广播、`vmv.v.v` 向量直通缓冲 |
 | F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。源不能取自身的输出；自定义拟合函数暂定不实现 |
+| F40a | VSFU 有 `VSFU0` 与 `VSFU1` 两个功能一致的单元：FP32 精度下两者独立工作，BF16 精度下两者拼接成一个逻辑单元 |
+| F40b | 除 SEXE 外，每个执行单元在单条宏指令里只能被调用 1 次 |
 | F41 | MEXE（15 条）：Mask 逻辑运算（and / nand / andn / xor / or / nor / orn / xnor）、`vcpop.m`、`vfirst.m`、`vmsbf/vmsif/vmsof.m`、`vmiuset.mv` / `vmiset.mv`（按 16 个 INT16 索引清 / 置 Mask 位，配合 Top-K 做迭代查找） |
 | F42 | SEXE（7 条）：fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）。物理上只有一组，SEXE0/1/2 是同一物理单元在一条宏指令内的 3 次串行迭代 |
 | F43 | SEXE 迭代之间天然链式依赖：SEXE1 的操作数可来自 SEXE0，SEXE2 可来自 SEXE1，因此第 2、3 次迭代只需 1 个额外的 SRF 读端口 |
-| F44 | SEXE 操作数来源只有三处：SRF 读端口、VALU1 的归约输出、前一次 SEXE 迭代的结果。不支持立即数，也不能取 MEXE 为源，因为 MEXE 的标量输出是整数而 SEXE 只有浮点通路 |
+| F44 | SEXE 操作数来源有四处：SRF 读端口、VALU1 的归约输出、LU 的 `ld.s.fp32` 结果、前一次 SEXE 迭代的结果。不支持立即数，也不能取 MEXE 为源，因为 MEXE 的标量输出是整数而 SEXE 只有浮点通路 |
 | F45 | bit 级归约顺序：LANES 内归约再 ⌈log2 SEG⌉ 级累加，参考实现必须用同一顺序 |
 
 ### 数据类型与舍入

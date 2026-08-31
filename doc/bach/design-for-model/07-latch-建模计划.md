@@ -45,7 +45,7 @@
 | chip | Chip（2×5 阵列、Harvest mask、四个 C2C 端口）、SCP 桩、ctrl_noc 端点 ×10、C2C Bridge ×4 | 第 2 章“Chip 与 Harvest”“Boot 流程”、第 3 章 Router 的“坏核与跨 chip” | 装配 + 模块 ×3 类 | [`chip/chip.md`](07-units/chip/chip.md) |
 | core | Core | 第 3 章 Bach Core 顶层 | 装配 | [`chip/core/core.md`](07-units/chip/core/core.md) |
 | core | Router：RouterTable 与 CSR、RouterStation ×3、Xbar、CoreStation、CoreMem 重发、ReduceModule、Retire、CoreMemCreditMonitor | 第 3 章 Router | 模块 ×8 | [`chip/core/router.md`](07-units/chip/core/router.md) |
-| core | TS：CFG_REG、User_Match、DataIn_task_table、Stream_table、Task_ctrl、MU_Arb / VU_Arb、DTE_Arb、Credit_monitor、Task_done | 第 3 章 TS 任务调度器 | 模块 ×9 | [`chip/core/ts.md`](07-units/chip/core/ts.md) |
+| core | TS：User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check | 第 3 章 TS 任务调度器 | 模块 ×9 | [`chip/core/ts.md`](07-units/chip/core/ts.md) |
 | core | RV core ×3：task_queue、指令执行器（`src/rv32`）、dsa_iss、访存（sm_lsq / cm_lsq）、CSR | 第 3 章 RV Core | 模块 ×3 | [`chip/core/rv-core.md`](07-units/chip/core/rv-core.md) |
 | core | DTE：Header Parser、Commit、TaskQueue ×4、Lane ×4（含 AGCU）、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | 第 4 章 DTE DSA | 模块 ×8 | [`chip/core/dte.md`](07-units/chip/core/dte.md) |
 | core | MU：regfile、issue_q、gen_ep_info、agu ×3、ldq ×2、matrix exe、stq | 第 4 章 MU DSA | 模块 ×7 | [`chip/core/mu.md`](07-units/chip/core/mu.md) |
@@ -108,7 +108,7 @@
   <rect x="676" y="144" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="164" font-size="11.5" fill="#111827">TS 任务调度器</text>
   <text x="688" y="180" font-size="9" fill="#475569">CFG_REG · User_Match · DataIn_task_table · Stream_table</text>
-  <text x="688" y="194" font-size="9" fill="#475569">Task_ctrl · DTE_Arb · MU_Arb / VU_Arb · Credit_monitor</text>
+  <text x="688" y="194" font-size="9" fill="#475569">Task_ctrl · DTE_Arb · MU_Arb · VU_Arb · Except Check</text>
   <text x="688" y="208" font-size="9" fill="#475569">Task_done</text>
   <text x="1124" y="164" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×9</text>
   <text x="1124" y="207" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/ts.md</text>
@@ -513,7 +513,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 2 | 相互依赖的数据流分到不同 VC，避免循环等待 | `RouterTable.nxtVC` 的填法，编译侧保证 |
 | 3 | credit 不足的 VC 被跳过，同一 input port 的其他 VC 不受影响 | RouterStation 的 VA |
 | 4 | 多播全有或全无。只发一半会让同一 User 的数据在不同分支上错位，已发方向占了资源却完不成整体传输 | RouterStation 与 Xbar |
-| 5 | Router 的进 core 表与 TS 内部的 Stream 表按完全一致的逻辑分配空项，因此“Router 通知 TS 的包一定能被 TS 接收” | CoreMemCreditMonitor 与 TS 的 Credit_monitor |
+| 5 | Router 的进 core 表与 TS 内部的 Stream 表按完全一致的逻辑分配空项，因此“Router 通知 TS 的包一定能被 TS 接收” | Router 的 CoreMemCreditMonitor 与 TS 的 `task_state_update.credit` |
 | 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏核没有 Core Mem，只能留在 VC，因此 path 规划要保证坏核段不会长期阻塞 | `RouterTable.stallWay` 与 CoreMem 重发 |
 | 7 | P2P 传输阻塞时把数据落进 Core Mem 的 P2P 阻塞缓冲，下游 credit 释放后再续传 | TS 的 P2P 阻塞缓冲映射表 |
 | 8 | DTE 的 Commit 配对接纳：RD、WR 两个 TaskQueue 项与 Completion RS 项同时拿到才收，不产生读已开始、写没有落脚点的半任务 | DTE 的 Commit |

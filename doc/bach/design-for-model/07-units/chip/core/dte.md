@@ -175,7 +175,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
   <text x="652" y="781" font-size="11" fill="#111827">出核前的资源与流控</text>
   <text x="652" y="798" font-size="8.5" fill="#475569">RouterTable 副本：按 PathID 查到 VC 与资源需求，软件写，三方一致</text>
   <text x="652" y="811.5" font-size="8.5" fill="#475569">本级 Reduce credit 表：每用户一个 entry，flit 粒度</text>
-  <text x="652" y="825.0" font-size="8.5" fill="#475569">　用户创建 Stream 资源时分配 credit 数量</text>
+  <text x="652" y="825.0" font-size="8.5" fill="#475569">　用户建 stream credit 表项时分配 credit 数量</text>
   <text x="652" y="838.5" font-size="8.5" fill="#475569">　发 Reduce 包前要求本级 credit 够整包，否则在 PendingTaskQ 等</text>
   <text x="652" y="852.0" font-size="8.5" fill="#475569">　ReduceModule 每完成一次 Reduce 并把 flit 发给下游就还一个</text>
   <text x="652" y="865.5" font-size="8.5" fill="#475569">PendingTaskQ：没申请到下游 Stream 或 Reduce 资源的任务在这里等</text>
@@ -339,7 +339,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F53 | 包对下游 Stream 或 Rmem 资源有需求时，DTE 必须先向 Router 申请到才能发，否则任务在 `PendingTaskQ` 等待 |
 | F54 | `PendingTaskQ` 排在 Commit **之前**：RV core 配好一个出核任务后，先按 `path_id` 查资源需求，需要 Stream 或 Reduce 资源的进 `PendingTaskQ` 等，拿到授权才去 Commit 申请那三样。等资源的任务因此不占 TaskQueue 项，也不占 Completion RS 项 |
 | F55 | `PendingTaskQ` 满时拉低 `dsa_cfg` 的 `req_ready`，反压 DTE RV core，该 RV core 不能参与下一个用户的搬运。反压只落到出核这条链上，进核那条链的 Commit 资源不受影响 |
-| F56 | 本级 Reduce credit 表：每用户一个 entry，flit 粒度。某个用户创建 Stream 资源时给这个用户分配一个 entry 的 credit 数量 |
+| F56 | 本级 Reduce credit 表：每用户一个 entry，flit 粒度。某个用户建 stream credit 表项时给这个用户分配一个 entry 的 credit 数量 |
 | F57 | 搬 Reduce 包前先检查本级 Reduce credit 是否够整包，再在 VC credit 满足的前提下发到 ReduceModule |
 | F58 | ReduceModule 每完成一次 Reduce 并把 flit 发给下游就释放一个 credit，经独立的释放通道把 Valid 加 UserID 送回 DTE |
 | F59 | 出方向按 VC0～3 多线程调度维护多个 VC buffer，某个 VC 阻塞只阻塞对应的那个 buffer；用它吸收整包流量，完成 core 与 Router 之间的协议转换 |
@@ -381,7 +381,7 @@ port out_core_data_ch (master, AXI-Stream-Like, clk)  // DTE → CoreStation：�
   out tvalid · tdata[2047:0] · tkeep[255:0] · tlast · thdr · vc_id[1:0]
   in  tready                                            // = 该 VC 的 Core 方向输入 VC 有空
 port router_credit (slave, 电平 + 脉冲, clk)          // Router 侧回来的三类信息
-  in  coremem_credit_vld[2:0] · coremem_credit_user[2:0][15:0]
+  in  stream_credit_vld[2:0] · stream_credit_user[2:0][15:0]
   in  reduce_release_vld · reduce_release_user[15:0]
   in  vc_credit[3:0][7:0]
 port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss
@@ -422,7 +422,7 @@ mem hmem_sw          SRAM      sw_header_table 16 stream × 64 task × 16 B = 16
 mem hmem_mask        FF 阵列   core_mask_table 16 × 2 B = 32 B                        1R1W  按 stream_id 索引      复位 0
 mem lut              FF 阵列   64 × {path_id[7:0], size[15:0]}，共 192 B              1R    boot 期经 ctrl_noc 配好，按 task_id 索引  复位由输入给   // 硬件包头的静态部分；两个字段分别就是 path_id_table 与 task_len_table
 mem rtab_copy        FF 阵列   64 项，RouterTable 的外部副本                           1R1W  软件写，三方一致        复位 0
-mem reduce_credit    FF 阵列   16 用户 × 计数器（flit 粒度）                           1RW   建 Stream 资源时分配，release 恢复  复位 0
+mem reduce_credit    FF 阵列   16 用户 × 计数器（flit 粒度）                           1RW   建 stream credit时分配，release 恢复  复位 0
 mem pending_taskq    FIFO      16 × Descriptor                                        1W1R  排在 Commit 之前，资源没申请到的出核任务在这里等；满则拉低 dsa_cfg 的 req_ready  复位空
 mem out_vc_buf[4]    FIFO      每 VC 一个，深度按整包容量                              1W1R  某 VC 阻塞只阻塞该 buffer  复位空
 mem cfg_bank[2]      FF 阵列   两个配置 Bank × {TASK_CFG_ADDR, TASK_CFG_TD, TASK_CFG_PACK}  1RW  Bank0 优先  复位空
@@ -869,7 +869,7 @@ stall_cycles  = cycles(valid && !ready)
 TaskQueue          每 Lane 16 项（深度待评估）
 中间 Buffer        inbound + outbound 约 8 KB，256 B × (20～30) T，最大掩盖 32 T 延迟
 Completion RS      16 项（待定）；Done Pending 16 项（待定）
-与 Cmem 接口宽度    256 B + 8 B（Data + scale），双向；按 Cmem MAS 取 256 B
+与 Cmem 接口宽度    256 B/T，双向（DTE MAS 与 Cmem MAS 一致）
 与 Mmem 接口宽度    256 B，双向；写 9T、读 8T
 与 Router 接口宽度  256 B，双向（看不到 scale）
 Hmem               16 KB + 32 B（sw_header_table + core_mask_table）

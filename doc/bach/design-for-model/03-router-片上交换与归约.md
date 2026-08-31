@@ -125,7 +125,7 @@
 <text transform="translate(422 150) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" text-anchor="middle">notify_ch：包头就绪 → TS</text>
 <rect x="70" y="165" width="200" height="78" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="78" y="180" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#7c3aed" font-weight="700" text-anchor="start">Stream Resource Map</text>
-<text x="78" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 Stream 资源表：按 UserID 分配 / 占用 / 释放</text>
+<text x="78" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 stream credit 表：按 UserID 分配 / 占用 / 释放</text>
 <text x="78" y="206" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 是唯一有效状态，DTE 只持 cache</text>
 <text x="78" y="218" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">决定哪些 VC 可以进 core、可以通知 TS</text>
 <path d="M40 195 L70 195" stroke="#d97706" stroke-width="1.3" fill="none" marker-end="url(#kgar)" stroke-linejoin="round" stroke-linecap="round"/>
@@ -311,7 +311,7 @@
 <rect x="560" y="296" width="160" height="13" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="0.9" stroke-dasharray="2 2"/>
 <text x="640.0" y="306" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">只还 VC credit，计数在 DataOut DTE</text>
 <rect x="110" y="226" width="150" height="13" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2"/>
-<text x="185.0" y="236" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#7c3aed" font-weight="700" text-anchor="middle">Stream 资源计数实体（唯一有效）</text>
+<text x="185.0" y="236" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#7c3aed" font-weight="700" text-anchor="middle">stream credit 计数实体（唯一有效）</text>
 <rect x="195" y="575" width="96" height="48" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="203" y="590" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#7c3aed" font-weight="700" text-anchor="start">Stream 映射</text>
 <text x="203" y="604" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">下游各方向的授权</text>
@@ -322,12 +322,12 @@
 <rect x="835" y="702" width="112" height="13" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="0.9" stroke-dasharray="2 2"/>
 <text x="891.0" y="712" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#0d9488" font-weight="400" text-anchor="middle">只转发 release，不计数</text>
 <rect x="590" y="49" width="236" height="13" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.2"/>
-<text x="708.0" y="59" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#0d9488" font-weight="700" text-anchor="middle">Reduce credit 计数实体（本级）·Stream 资源 cache</text>
+<text x="708.0" y="59" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#0d9488" font-weight="700" text-anchor="middle">Reduce credit 计数实体（本级）·stream credit cache</text>
 <rect x="30" y="866" width="1140" height="110" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="883" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">口径：三个 R2R 方向本文档记 left / right / mid，MAS Block Diagram 记 E / W / S/N，S/N 是一个端口；通道名照 MAS 的写法 &lt;方向&gt;_data_in_ch / _data_out_ch / _credit_release_ch_in / _out。</text>
 <text x="46" y="899" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">带宽：每方向 256 B 宽，相邻 Router 双向各 256 GB/s @1GHz；进 core 与出 core 各 256 GB/s，完全并行。Header 与 Payload 走两根独立总线（hflit 256-bit，pflit 2048-bit）。</text>
 <text x="46" y="915" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">CoreMemCreditMonitor 在 MAS 的模块说明里列为独立模块，Block Diagram 里没有单独画，本图按模块说明补画在 Stream Resource Map 下方，细节见“出核前的资源监听”。</text>
-<text x="46" y="931" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">credit 的计数实体（实心标签）：VC credit 在发送侧各 RouterStation 的计数器（每个下游方向 × VC 一个）；Stream 资源在 Stream Resource Map 的表（唯一有效状态，DTE 另持一份 cache）；</text>
+<text x="46" y="931" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">credit 的计数实体（实心标签）：VC credit 在发送侧各 RouterStation 的计数器（每个下游方向 × VC 一个）；stream credit在 Stream Resource Map 的表（唯一有效状态，DTE 另持一份 cache）；</text>
 <text x="46" y="947" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">Reduce credit 在 ReduceModule 的 ResourceMap（相邻下游）与 DTE（本级）。</text>
 <text x="46" y="963" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">虚线标签的位置只做加减或转发，本地没有计数：接收侧的 Credit Release 只归还，RouterStation 的 Stream 映射只查询，CreditBypass XBar 只按静态 Mask 转发 release。</text>
 </svg>
@@ -491,7 +491,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **进 core**
 
-6. 目标含本级 Core 时，先查本级 Stream 资源表：UserID 已命中直接收；未命中且有空项则分配后收；无空项时该 VC 不能向 Core 发，但 VC 有空项仍可继续收上游数据。准入后不再检查 Core 方向的 VC credit，Header 写入 Header FIFO，Payload 写入 in_core_fifo（OutputBuffer），两者保持同一包顺序与边界。
+6. 目标含本级 Core 时，先查本级 stream credit 表：UserID 已命中直接收；未命中且有空项则分配后收；无空项时该 VC 不能向 Core 发，但 VC 有空项仍可继续收上游数据。准入后不再检查 Core 方向的 VC credit，Header 写入 Header FIFO，Payload 写入 in_core_fifo（OutputBuffer），两者保持同一包顺序与边界。
 7. CoreStation 收满一个包，按包头顺序经 `notify_ch` 通知 TS，请求里带 UserID、PathID 与重发标记。DTE Core 经 AXI-Full 类接口读包头生成搬运任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头。
 8. DataIn DTE 按 TS 的调度经 `in_core_data_ch`（AXI-Stream-Like）收拼接好的整包写进 Core Mem。Core 入口以整包为单位，不支持包间交织。被反压时 valid、Header、Payload、首尾标志与有效字节保持不变，解除后从同一 flit 继续。
 
@@ -509,7 +509,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | - | - | - | - | - |
 | 直通（Bypass） | 上游 Router 的 `<方向>_data_in_ch` | RouterStation → CrossBar → 出口 RouterStation 的 output buffer / Packet Shifter | 下游该 VC 的 credit；目标方向需要 Stream 时查本级的下游 Stream 映射表 | 下一个 Router；flit 离开本级 VC 即还上游 VC credit |
 | 多播 | 同上，directionMask 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
-| 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 Stream 资源表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
+| 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
 | 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | 目标 VC 有空才准 DTE 发；下游 Stream / Reduce 资源由 DTE 先向 Router 申请到 | 下一个 Router；发完向 TS 返回 UserID + PathID |
 | Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Reduce credit 够整包（DTE 查）；输出时查目标 VC credit 与下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stallWay 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
@@ -523,7 +523,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 * 包经数据总线传到下一级 Router，自动检测包头，按 `PathID` 查到路由信息和资源需求
 * 数据总线每个 flit 携带 VC 通道号，到达后自动找到对应 VC 存放位置
-* 输入方向的 RouterStation 维护所有下游方向的 Stream 资源映射表，**只有所有需求方向都满足才允许发送**
+* 输入方向的 RouterStation 维护所有下游方向的 stream credit映射表，**只有所有需求方向都满足才允许发送**
 
 **交织规则**（直接决定建模时 buffer 的组织方式）：
 
@@ -534,10 +534,10 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 #### 进 core
 
-* 进 Core 对 Router 而言也是一个输出方向，要维护本级 Core 的 Stream 资源
+* 进 Core 对 Router 而言也是一个输出方向，要维护本级 Core 的 stream credit
 * 已通过 Stream 检查，因此**不再检查对 Core 的 VC credit**，一定有 CM 空间
 
-按 `PathID` 查到需进 Core 后，检查本级 Stream 资源表，按三种结果分别处理：
+按 `PathID` 查到需进 Core 后，检查本级 stream credit 表，按三种结果分别处理：
 
 * **已分配**：包头进 HeaderFIFO、数据进 OutputBuffer
 * **未分配但有空项**：记录 UserID 占用
@@ -576,7 +576,7 @@ DTE 取数这一步：
 
 Reduce 包从 core 出发这一段由 DTE 管 credit，进了 ReduceModule 之后由 ReduceModule 管：
 
-* DTE 持有本级 ReduceModule 每一项的 credit，粒度是一个 flit。某个用户创建 Stream 资源时，给这个用户分配一个 entry 的 credit 数量
+* DTE 持有本级 ReduceModule 每一项的 credit，粒度是一个 flit。某个用户建 stream credit 表项时，给这个用户分配一个 entry 的 credit 数量
 * DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC
 * DTE 搬 Reduce 包前先检查本级 Reduce credit 是否够整包，再在 VC credit 满足的前提下发到 ReduceModule
 * ReduceModule 每完成一次 Reduce 并把 flit 发给下游，就释放一个 credit，经独立的释放通道把 Valid + UserID 送回 DTE
@@ -591,14 +591,14 @@ Reduce 包从 core 出发这一段由 DTE 管 credit，进了 ReduceModule 之�
 
 ```
 if need_buffer && !core_bad_mask[本 core] &&
-   (coremem_credit[目标方向] 不可用 || pending_reinject[vc][目标方向] > 0):
+   (stream_credit[目标方向] 不可用 || pending_reinject[vc][目标方向] > 0):
        目标端口改为 local          // 重定向，坏核不接收溢流
        overflow_reinject = 1
        pending_reinject[vc][原方向] += 1
-       // 此时暂不更新 coremem_credit
+       // 此时暂不更新 stream_credit
 ```
 
-重注入时才结账：Core 与 DTE 保证 `coremem_credit` 可用后才发起，包重新走 RC 查表得到目的 port（包头里不再单独保存路由信息），Output Port 识别到 `overflow_reinject = 1` 时才占位更新 `coremem_credit`，并把 `pending_reinject` 减一。
+重注入时才结账：Core 与 DTE 保证 `stream_credit` 可用后才发起，包重新走 RC 查表得到目的 port（包头里不再单独保存路由信息），Output Port 识别到 `overflow_reinject = 1` 时才占位更新 `stream_credit`，并把 `pending_reinject` 减一。
 
 `overflow_enable` 与 `original_target_port` 曾经是包头字段，现已删除：前者移进 RouterTable 的 `need_buffer`，后者由重发时重查路由表得到。
 
@@ -654,7 +654,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <text x="105" y="162" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="middle">快：flit 一进一出就还</text>
 <rect x="30" y="306" width="1140" height="226" rx="8" fill="#fbfcfd" stroke="#9aa1ad" stroke-width="1.0"/>
 <rect x="30" y="306" width="150" height="226" rx="8" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.0"/>
-<text x="105" y="336" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#7c3aed" font-weight="700" text-anchor="middle">Stream 资源</text>
+<text x="105" y="336" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#7c3aed" font-weight="700" text-anchor="middle">stream credit</text>
 <text x="105" y="358" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">（CoreMem credit）目标 core 的</text>
 <text x="105" y="372" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">Core Mem 有没有空间容纳这个用户</text>
 <text x="105" y="398" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#7c3aed" font-weight="600" text-anchor="middle">慢：等用户跑完整条任务链</text>
@@ -745,7 +745,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <rect x="740" y="402" width="420" height="48" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="748" y="417" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">建与删</text>
 <text x="748" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：新 UserID 首次到达　删：收到 release；或收到 User Retire 后删该用户全部授权表项</text>
-<text x="748" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 另输出 per-port 的 coremem_credit 同步信息给 core 与 DTE，用于判断重注入</text>
+<text x="748" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 另输出 per-port 的 stream_credit 同步信息给 core 与 DTE，用于判断重注入</text>
 <rect x="195" y="564" width="120" height="66" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="203" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">本 core 的 DTE</text>
 <text x="203" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">查本级 Reduce credit</text>
@@ -753,7 +753,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <rect x="195" y="638" width="120" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
 <text x="203" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">DTE 持本级表</text>
 <text x="203" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">每用户一个 entry 的 credit</text>
-<text x="203" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">创建 Stream 资源时分配</text>
+<text x="203" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建 stream credit 表项时分配</text>
 <rect x="345" y="564" width="170" height="66" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="353" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">本级 ReduceModule</text>
 <text x="353" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">首份输入建上下文，后续 RMW</text>
@@ -789,31 +789,31 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <text x="748" y="617" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Router 只负责把 release 按静态 Mask 转发</text>
 <rect x="740" y="638" width="420" height="48" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="748" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">建与删</text>
-<text x="748" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：用户创建 Stream 资源时分配一个 entry 的 credit 数量</text>
+<text x="748" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：用户建 stream credit 表项时分配一个 entry 的 credit 数量</text>
 <text x="748" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">删：延迟回收，收到 Retire 后待相邻下游各方向 credit 全部恢复到初始值</text>
 </svg>
 ```
 
-| | VC credit | Stream 资源（CoreMem credit） | Reduce credit |
+| | VC credit | stream credit（CoreMem credit） | Reduce credit |
 | - | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
 | 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | **core ↔ Rmem 按 UserID；Rmem ↔ Rmem 按 flit 加 UserID 双粒度** |
 | 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router 是唯一有效状态（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table）；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | DTE 维护本级 ReduceModule 的；ReduceModule 维护相邻下游各方向的；Router 不维护 |
 | 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包由 DTE 先向 Router 申请到授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
 | 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 输出 flit 被下游接受后产生携带 UserID 的 release，经业务 credit 的静态旁路路径返回上游 |
-| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到 release，或收到 Retire 后删该用户全部授权表项 | 建：用户创建 Stream 资源时分配一个 entry 的 credit；删：收到 Retire 且 credit 恢复到分配数量 |
+| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到 release，或收到 Retire 后删该用户全部授权表项 | 建：用户建 stream credit 表项时分配一个 entry 的 credit；删：收到 Retire 且 credit 恢复到分配数量 |
 | 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按 flit 还但要等下游 Reduce 完成 |
 
-Stream 资源的两条硬规则：
+stream credit的两条硬规则：
 
 * **只有 Router 负责真正申请表项**。DTE 要发数据必须先从 Router 拿到指定 user 的授权，禁止超额分配或重复授权
-* **Router 的进 core 表和 TS 内部的 Stream 资源表按完全一致的逻辑申请空项**。分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收”
+* **Router 的进 core 表和 TS 内部的 stream credit 表按完全一致的逻辑申请空项**。分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收”
 
-Router 另外输出 per-port 的 `coremem_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
+Router 另外输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
 
-#### Stream 资源按 1 KB 记账，广播一次扣的量含预留的输出空间
+#### stream credit按 1 KB 记账，广播一次扣的量含预留的输出空间
 
-Stream 资源这一类 credit 的单位是 **1 KB**。《通信机制（分析过程）》给了三个走完整流程的例子（数值都是示意）：
+stream credit这一类 credit 的单位是 **1 KB**。《通信机制（分析过程）》给了三个走完整流程的例子（数值都是示意）：
 
 | 场景 | 扣 | 什么时候还 |
 | - | - | - |
@@ -852,7 +852,7 @@ RouterTable 是路径解析与资源判定的唯一依据，**只描述静态路
 | `curVC` | 包进入当前 Router 时使用的 VC 类型 | 输入 VC 分配 |
 | `directionMask` | 各目标方向加 Core 的有效位；单位有效是单播，多位有效是多播 | 输出仲裁、Crossbar |
 | `nxtVC` | 各目标方向下一跳使用的 VC 类型 | 输出 Header、下游 VC credit 查询 |
-| `streamNeedMask` | 各目标方向是否需要 Stream 授权，**Core 方向的需求必须在本级检查** | Stream 资源表 |
+| `streamNeedMask` | 各目标方向是否需要 Stream 授权，**Core 方向的需求必须在本级检查** | stream credit 表 |
 | `op_type` | 2 bit：0 kernel / weight 搬运、1 transfer、2 reduce、3 **reduce_twice** | 路径选择、ReduceModule |
 | `flow_dir` | 3 bit：bit0 上下、bit1 左、bit2 右 | 输出仲裁 |
 | `path_core_mask_enable` | 0 按 `path_core_bypass` 定是否进 core，1 按 MSG 的 `path_core_mask` 定 | 进 core 判定 |
@@ -955,7 +955,7 @@ VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC �
 <text x="40" y="315" font-size="9.5" fill="#475569">怎么释放：flit 离开下游 VC 后经共享总线归还，每个 input port 一拍最多一个 VC 被读出</text>
 <text x="40" y="328" font-size="9.5" fill="#475569">快：flit 一进一出就还。进 Core 这一段不查它，因为 Stream 已经保证了 CM 空间</text>
 <rect x="24" y="348" width="1292" height="128" rx="5" fill="#fbfcfd" stroke="#dbe2ea" stroke-width="1"/>
-<text x="40" y="374" font-size="12.5" fill="#d97706" font-weight="600">Stream 资源</text>
+<text x="40" y="374" font-size="12.5" fill="#d97706" font-weight="600">stream credit</text>
 <rect x="130.0" y="386" width="800.0" height="14" rx="7" fill="#d97706" opacity="0.18"/>
 <path d="M130.0 378 L130.0 408" stroke="#d97706" stroke-width="1.6"/>
 <path d="M930.0 378 L930.0 408" stroke="#d97706" stroke-width="1.6"/>
@@ -1163,7 +1163,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 2. Core 判定任务链结束后**向 Router 和 ReduceModule 广播 User Retire**
 3. **Core 的保证**：仅可在该 UserID 的全部进 core、出 core 数据搬运完成、
    且不会再发起新搬运后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包
-4. **Router 的动作**：停止该 UserID 的新发送，删除其全部 Stream 资源授权表项
+4. **Router 的动作**：停止该 UserID 的新发送，删除其全部 stream credit 授权表项
 5. **ReduceModule 的动作**：**延迟回收**，先记录 Retire，
    待相邻下游各方向 Reduce Credit 全部恢复到初始值后才删除对应用户映射
 
@@ -1175,7 +1175,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 
 * 每 chip 至多 2 个坏 core，由 fuse `core_bad_mask[9:0]` 标记
 * **Router 数据通路不坏，正常 R2R 转发**
-* 坏 core 上：local 侧禁用，不接收溢流，credit pulse 无效，`coremem_credit` 上电默认 0
+* 坏 core 上：local 侧禁用，不接收溢流，credit pulse 无效，`stream_credit` 上电默认 0
 * credit 跨过坏核走：
   * 上游要检查的 credit 对应的是坏核之后那个好核
   * 下游返还 credit 也跨过坏核直接给上游好核
@@ -1225,7 +1225,7 @@ AXI 侧的两处特殊处理：
 
 ### 出核前的资源监听
 
-core 对外发数据要同时满足 VC 资源与 Stream 资源。监听这两项资源的职责在 Router，一次监听走三步：
+core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项资源的职责在 Router，一次监听走三步：
 
 1. TS 发送注册事件
 2. Router 查资源
@@ -1257,7 +1257,8 @@ core 对外发数据要同时满足 VC 资源与 Stream 资源。监听这两项
 | flit 存储位宽 | 2048 bit payload + 256 bit header = 2304 bit = 288 B |
 | R2R 往返 | ≤ 20 cycle（shared pool 深度的依据） |
 | Crossbar | 5 入 7 出，每 cycle 最多 7 组 input → output 交换 |
-| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。**与第 5 章的 T_R2R = 40 T 冲突，未解** |
+| 拓扑 | 2×5 简化二维 Mesh。left / right 连同行相邻 Router，mid 连另一行对称位置那一个；**中间三列的 mid 也连**，作为备份通路（HAS REQ-ARCH-037：Harvest 场景下提供多路径选择） |
+| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。HAS 新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300 ns」，单跳约 10 cycle 以内，与这一档相符；第 5 章的 T_R2R = 40 T 对不上，待确认是不是含 core 侧往返的端到端值 |
 | 全 chip 广播延迟 | 82 ns（两行并行，Row 0 七跳 82 ns 是关键路径） |
 | 单 VC 传输效率 | 每包额外开销 2 cycles（RC 与 VA 不传 flit）：8 KB 包 94%、16 KB 97%、32 KB 98.5%；多输入竞争时按 80% 折算 |
 | Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |
@@ -1301,7 +1302,7 @@ Header 与 Payload 走**两根独立并行总线**：
 | R2R 方向端口 | 三个：left / right / mid（HAS） | MAS 写“上、下、左、右及 Core 五个方向” |
 | Reduce 做在哪 | Router 内的 ReduceModule（MAS） | HAS 写 Router 内不设 Reduce Buffer，累加由独立的 Rmem 子系统完成，经 reduce_0/1/2 三端口接入 |
 | Reduce credit 谁维护 | ReduceModule 维护相邻下游各方向，Router 不维护（MAS） | HAS 写 reduce credit 是单独的流控网络，core 与 reduce 之间按 user 粒度、reduce 之间按 flit 加 user 双粒度 |
-| Stream 资源表 | Router 是唯一有效状态，DTE 持 cache（MAS） | HAS 写 Router 输出单元与 core 内各持一份 credit table，靠 credit release 接口同步 |
+| stream credit 表 | Router 是唯一有效状态，DTE 持 cache（MAS） | HAS 写 Router 输出单元与 core 内各持一份 credit table，靠 credit release 接口同步 |
 | 资源监听队列 | 在 Router，16 项全相连（MAS） | 同一份 MAS 另一处写“功能已转移到 DTE 中” |
 | 仲裁粒度 | flit 级，整包只作为贪婪仲裁的优先级偏好 | MAS 有一节“Interleave 和整包的对比”只列两案优劣、未给结论；MAS 正文与 HAS 都是 flit 级 |
 | R2R 带宽 | 256 GB/s（接口理论值）与 210 GB/s（HAS 的有效带宽）两个都记 | 两份分别只给其中一个 |
@@ -1311,10 +1312,10 @@ Header 与 Payload 走**两根独立并行总线**：
 
 ## 取舍
 
-* **为什么把 VC credit 和 Stream 资源分成两层**
+* **为什么把 VC credit 和 stream credit分成两层**
   * 两者管的东西时间尺度差着数量级
   * VC credit 管下游 Router 的 buffer 槽位，flit 一进一出就归还，快
-  * Stream 资源管下游 core 的 Core Mem 空间，要等那个用户在下游 core 上跑完整条任务链才释放，慢
+  * stream credit管下游 core 的 Core Mem 空间，要等那个用户在下游 core 上跑完整条任务链才释放，慢
   * 合成一层，快的那层会被慢的拖成一样慢
 * **为什么进 Core 之后不再查 VC credit**
   * Stream 检查已经保证目标 core 有 CM 空间，再查一次是重复的资源判定

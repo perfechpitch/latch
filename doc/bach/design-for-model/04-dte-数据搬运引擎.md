@@ -904,7 +904,9 @@ void data_inner_config() {
 
 ### TS 直接启动
 
-标为 P1 优先级，方案待定。它绕过 RV core，由 TS 直接触发 DTE DSA，DSA 用 `stream_id` / `task_id` 索引内部的静态参数查找表取参数。
+**MAS 已删掉这一条**（原第 2 条，标 P1 优先级）。下面记的是它被删之前的内容，建模不按它做。
+
+它它绕过 RV core，由 TS 直接触发 DTE DSA，DSA 用 `stream_id` / `task_id` 索引内部的静态参数查找表取参数。
 
 初始化要走完七步：
 
@@ -924,7 +926,7 @@ void data_inner_config() {
 4. 算出源与目的地址，生成内部搬运描述符
 5. 选 CH0 / CH1 或内部通道启动
 
-现有整理按“只有 DTE core 配置任务给 DSA 这一种启动方式”写，TS 直接启动作为待定项。
+启动方式只有“DTE core 配置任务给 DSA”这一种。
 
 ### 双 Bank 与优先级
 
@@ -986,7 +988,7 @@ Router 与 core 之间**不做独立的桥接模块**，按耦合关系把逻辑
 | 物理数据 Channel | 2 | `inbound_ch` / ch0 与 `outbound_ch` / ch1 |
 | TaskQueue | 16 | 深度待评估 |
 | 中间 Buffer | 约 8 KB | inbound + outbound，约 256B × (20～30) T，最大可掩盖 32 T 延迟 |
-| 与 Cmem 接口宽度 | 256 B + 8 B | Data + scale，双向 |
+| 与 Cmem 接口宽度 | 256 B/T | 双向；DTE MAS 与 Cmem MAS 口径一致 |
 | 与 router 接口宽度 | 256 B | Data（看不到 scale），双向 |
 | Hmem | 16 KB + 32 B | `sw_header_table` + `core_mask_table` |
 | LUT | 192 B | `path_id_table` + `task_len_table` |

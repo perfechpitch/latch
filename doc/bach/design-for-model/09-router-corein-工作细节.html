@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Router · 进 core 与出 core · 动画讲解</title>
+<style>
+:root{
+  --bg:#f7f8fa; --panel:#ffffff; --ink:#16181d; --dim:#5c6370; --line:#d8dce3;
+  --accent:#2563eb; --warn:#d97706; --ok:#0d9488; --bad:#dc2626; --violet:#7c3aed;
+  --box:#f8fafc; --boxb:#374151; --hi:#dbeafe; --hib:#2563eb;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",-apple-system,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#14161a; --panel:#1b1e24; --ink:#e6e8ec; --dim:#9aa1ad; --line:#2c313a;
+        --box:#22262e; --boxb:#5b6472; --hi:#1e3a5f; --hib:#60a5fa; --accent:#60a5fa;}
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.6;
+     display:flex;flex-direction:column;overflow:hidden}
+header{padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel);
+       display:flex;align-items:center;gap:9px 18px;flex-wrap:wrap}
+h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.02em}
+h1 small{font-weight:400;color:var(--dim);font-size:12px;margin-left:8px}
+nav{display:flex;gap:4px;flex-wrap:wrap;flex-basis:100%}   /* 场景按钮固定独占一行，不随窗口宽度上下跳 */
+nav button{font-family:var(--sans);font-size:12.5px;padding:5px 12px;border:1px solid var(--line);
+  background:transparent;color:var(--dim);border-radius:999px;cursor:pointer;transition:.15s}
+nav button:hover{color:var(--ink);border-color:var(--boxb)}
+nav button.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+main{flex:1;display:flex;min-height:0}
+#stagewrap{flex:1;min-width:0;display:flex;flex-direction:column;padding:10px 14px 0}
+#stage{flex:1;min-height:0}
+#stage svg{width:100%;height:100%;display:block}
+aside{width:560px;flex-shrink:0;border-left:1px solid var(--line);background:var(--panel);
+      padding:14px 16px 24px;overflow-y:auto}
+h3.sec{font-size:11px;margin:14px 0 5px;color:var(--dim);font-weight:600;letter-spacing:.06em}
+#stepno{font-family:var(--mono);font-size:11px;color:var(--dim)}
+#steptitle{font-size:15.5px;font-weight:700;margin:2px 0 8px;line-height:1.4}
+#steptext{font-size:13.5px}
+#steptext ol{margin:6px 0 0;padding-left:22px}
+#steptext li{margin:6px 0;line-height:1.65}
+#steptext li::marker{color:var(--dim);font-family:var(--mono);font-size:12px}
+#steptext code{font-family:var(--mono);font-size:12.5px;background:var(--box);
+  padding:1px 4px;border-radius:3px}
+#steplogic pre{margin:0;font-family:var(--mono);font-size:11px;line-height:1.8;
+  background:var(--box);border:1px solid var(--line);border-radius:5px;padding:9px 11px;
+  white-space:pre;overflow-x:auto;color:var(--ink)}
+table.lg{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;
+  background:var(--box);border:1px solid var(--line);border-radius:5px;overflow:hidden}
+table.lg th{text-align:left;color:var(--dim);font-weight:600;padding:5px 9px 4px;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+table.lg td{padding:5px 9px;border-top:1px solid var(--line);
+  vertical-align:top;line-height:1.6;color:var(--ink)}
+table.lg tr.cont td{border-top:none;padding-top:0}
+table.lg tr.cont td:first-child,table.lg tr.cont td:nth-child(2){padding:0}
+table.lg td.d{width:36%;font-weight:600}
+table.lg td.c{width:19%;color:var(--acc)}
+#stepref{margin-top:12px;font-size:11.5px;color:var(--dim);border-left:2px solid var(--warn);
+  padding-left:9px;line-height:1.55}
+#stepref b{color:var(--warn)}
+table.st{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+table.st th{text-align:left;color:var(--dim);font-weight:600;padding:2px 5px 4px;border-bottom:1px solid var(--line)}
+table.st td{padding:2px 5px;border-bottom:1px solid var(--line)}
+table.st tr.chg td{background:var(--hi);color:var(--hib);font-weight:700}
+footer{border-top:1px solid var(--line);background:var(--panel);padding:8px 18px;
+       display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+footer button{font-family:var(--sans);font-size:13px;padding:5px 13px;border:1px solid var(--line);
+  background:var(--box);color:var(--ink);border-radius:6px;cursor:pointer}
+footer button:hover{border-color:var(--accent)}
+footer button.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;min-width:74px}
+#bar{flex:1;min-width:120px;height:5px;background:var(--line);border-radius:3px;overflow:hidden;cursor:pointer}
+#barfill{height:100%;width:0;background:var(--accent);border-radius:3px;transition:width .12s linear}
+#kbd{font-size:11.5px;color:var(--dim);font-family:var(--mono)}
+label.spd{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:5px}
+label.spd input{width:76px}
+.nd rect{fill:var(--box);stroke:var(--boxb);stroke-width:1}
+.nd text{fill:var(--ink);font-family:var(--sans)}
+.nd.act rect{fill:var(--hi);stroke:var(--hib);stroke-width:2}
+.nd.act text.t{fill:var(--hib);font-weight:700}
+.nd.blk rect{fill:#fee2e2;stroke:var(--bad);stroke-width:2}
+@media (prefers-color-scheme:dark){.nd.blk rect{fill:#3f1d1d}}
+.nd.blk text.t{fill:var(--bad);font-weight:700}
+.sub{fill:var(--dim);font-size:9.5px}
+.grp{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:4 3}
+.grpl{fill:var(--dim);font-size:10px;letter-spacing:.06em}
+.ed{fill:none;stroke:var(--boxb);stroke-width:1.1;opacity:.55}
+.ed.act{stroke:var(--accent);stroke-width:2;opacity:1}
+.edl{fill:var(--dim);font-size:9px;font-family:var(--mono)}
+.tok{stroke:none}
+.cnt{font-family:var(--sans);font-variant-numeric:tabular-nums;font-size:10.5px;fill:var(--dim)}
+.cnt.chg{fill:var(--hib);font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <h1>Router · 进 core 与出 core<small>两条完全并行的通路 · 另有 reduce / broadcast / reissue / bypass 四份</small></h1>
+  <nav id="nav"></nav>
+</header>
+<main>
+  <div id="stagewrap"><div id="stage"></div></div>
+  <aside>
+    <div id="stepno"></div>
+    <div id="steptitle"></div>
+    <div id="steptext"></div>
+    <div id="steplogic"></div>
+    <div id="stepref"></div>
+    <div id="statepanel"><h3 class="sec" id="stlabel">状态</h3><div id="sttable"></div></div>
+  </aside>
+</main>
+<footer>
+  <button class="pri" id="play">▶ 播放</button>
+  <button id="prev">‹ 上一步</button>
+  <button id="next">下一步 ›</button>
+  <div id="bar"><div id="barfill"></div></div>
+  <label class="spd">速度 <input type="range" id="spd" min="500" max="4000" step="250" value="1500"></label>
+  <span id="kbd">空格 播放/暂停　← → 单步</span>
+</footer>
+<script>
+/* ===================== 引擎 ===================== */
+const NS='http://www.w3.org/2000/svg';
+function E(tag,a,txt){const n=document.createElementNS(NS,tag);
+  for(const k in a||{})n.setAttribute(k,a[k]); if(txt!=null)n.textContent=txt; return n;}
+function pathd(pts){return 'M'+pts.map(p=>p[0]+','+p[1]).join(' L');}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+let SC=null, SCIDX=0, IDX=0, PLAYING=false, TIMER=null, DUR=1500;
+
+// 浏览进度：这一份看到哪个场景、第几步，只存在看的人自己的浏览器里。
+// 六份共用一套引擎，file:// 下可能共享同一份存储，所以 key 带上文件名。
+const PKEY='bach-anim:'+decodeURIComponent(location.pathname.split('/').pop()||'');
+function saveProgress(){
+  try{localStorage.setItem(PKEY,JSON.stringify({sc:SCIDX,st:IDX}));}catch(e){}}
+function loadProgress(){                          // 存储被禁或内容坏了都当没存过
+  try{const v=JSON.parse(localStorage.getItem(PKEY)||'null');
+      return v&&Number.isInteger(v.sc)&&Number.isInteger(v.st)?v:null;}catch(e){return null;}}
+const stage=document.getElementById('stage');
+let svg=null, nodeEls={}, edgeEls={}, cntEls={}, tokLayer=null, anims=[];
+
+// logic 的一项是 [方向, 通道, 内容] 三元组；通道可以留空
+function logicHtml(rows){
+  if(typeof rows[0]==='string') return '<pre>'+esc(rows.join('\n'))+'</pre>';
+  let h='<table class="lg"><tr><th>方向</th><th>通道</th><th>内容</th></tr>';
+  rows.forEach(r=>{                                // 方向为空的是上一条的续行，不再画分隔线
+    h+='<tr'+(r[0]?'':' class="cont"')+'><td class="d">'+esc(r[0]||'')+'</td><td class="c">'
+      +esc(r[1]||'')+'</td><td>'+esc(r[2]||'')+'</td></tr>';});
+  return h+'</table>';}
+
+function build(sc){
+  SC=sc; nodeEls={}; edgeEls={}; cntEls={};
+  stage.innerHTML='';
+  svg=E('svg',{viewBox:'0 0 '+sc.vb[0]+' '+sc.vb[1],preserveAspectRatio:'xMidYMid meet'});
+  const defs=E('defs');
+  const m=E('marker',{id:'ar',viewBox:'0 0 10 8',refX:9,refY:4,markerWidth:7,markerHeight:6,orient:'auto'});
+  m.appendChild(E('path',{d:'M0 0 L10 4 L0 8 z',fill:'currentColor'}));
+  defs.appendChild(m); svg.appendChild(defs);
+  (sc.groups||[]).forEach(g=>{
+    svg.appendChild(E('rect',{x:g.x,y:g.y,width:g.w,height:g.h,rx:8,class:'grp'}));
+    svg.appendChild(E('text',{x:g.x+10,y:g.y+16,class:'grpl'},g.label));});
+  (sc.edges||[]).forEach(e=>{
+    const g=E('g',{class:'edw',color:'var(--boxb)'});
+    const p=E('path',{d:pathd(e.pts),class:'ed','marker-end':'url(#ar)'});
+    if(e.dash)p.setAttribute('stroke-dasharray','5 4');
+    g.appendChild(p); svg.appendChild(g); edgeEls[e.id]={g:g,p:p};
+    if(e.label)svg.appendChild(E('text',{x:(e.lx!=null?e.lx:e.pts[0][0]),y:(e.ly!=null?e.ly:e.pts[0][1]-5),
+      class:'edl','text-anchor':'middle'},e.label));});
+  (sc.nodes||[]).forEach(n=>{
+    const g=E('g',{class:'nd'});
+    g.appendChild(E('rect',{x:n.x,y:n.y,width:n.w,height:n.h,rx:n.r!=null?n.r:5}));
+    const lines=Array.isArray(n.s)?n.s:(n.s?[n.s]:[]);
+    const cy=n.y+(lines.length?18:n.h/2+4);
+    g.appendChild(E('text',{x:n.x+n.w/2,y:cy,'text-anchor':'middle','font-size':n.fs||11.5,class:'t'},n.t));
+    lines.forEach((L,i)=>g.appendChild(E('text',{x:n.x+n.w/2,y:cy+14+i*12,'text-anchor':'middle',class:'sub'},L)));
+    svg.appendChild(g); nodeEls[n.id]=g;});
+  (sc.counters||[]).forEach(c=>{
+    const t=E('text',{x:c.x,y:c.y,class:'cnt','text-anchor':c.anchor||'start'},c.label+' '+c.val);
+    svg.appendChild(t); cntEls[c.id]={el:t,label:c.label,init:c.val};});
+  tokLayer=E('g'); svg.appendChild(tokLayer); stage.appendChild(svg);
+  document.getElementById('stlabel').textContent=sc.table?sc.table.label:'状态';
+  IDX=0; apply(0,false);
+}
+
+function apply(i,animate){
+  IDX=Math.max(0,Math.min(i,SC.steps.length-1));
+  saveProgress();
+  const s=SC.steps[IDX];
+  anims.forEach(a=>cancelAnimationFrame(a)); anims=[]; tokLayer.innerHTML='';
+  for(const k in nodeEls) nodeEls[k].setAttribute('class','nd');
+  for(const k in edgeEls){edgeEls[k].p.setAttribute('class','ed'); edgeEls[k].g.setAttribute('color','var(--boxb)');}
+  (s.act||[]).forEach(id=>{if(nodeEls[id])nodeEls[id].setAttribute('class','nd act');});
+  (s.blk||[]).forEach(id=>{if(nodeEls[id])nodeEls[id].setAttribute('class','nd blk');});
+  (s.eact||[]).forEach(id=>{if(edgeEls[id]){edgeEls[id].p.setAttribute('class','ed act');
+    edgeEls[id].g.setAttribute('color','var(--accent)');}});
+  const cur={},prev={};
+  for(const k in cntEls){cur[k]=cntEls[k].init;prev[k]=cntEls[k].init;}
+  for(let j=0;j<=IDX;j++){const st=SC.steps[j];
+    if(j===IDX)for(const k in cur)prev[k]=cur[k];
+    for(const k in (st.set||{})) cur[k]=st.set[k];}
+  for(const k in cntEls){const c=cntEls[k];
+    c.el.textContent=c.label+' '+cur[k];
+    c.el.setAttribute('class','cnt'+(cur[k]!==prev[k]?' chg':''));}
+  if(SC.table){
+    const rows=SC.table.rows.map(r=>r.slice()); let chg=new Set();
+    for(let j=0;j<=IDX;j++){const st=SC.steps[j];
+      if(j===IDX)chg=new Set();
+      (st.rows||[]).forEach(w=>{const ri=Array.isArray(w)?w[0]:w.i, rc=Array.isArray(w)?w[1]:w.cells;
+        rows[ri]=rc.slice(); if(j===IDX)chg.add(ri);});}
+    let h='<table class="st"><tr>'+SC.table.cols.map(c=>'<th>'+c+'</th>').join('')+'</tr>';
+    rows.forEach((r,i)=>{h+='<tr'+(chg.has(i)?' class="chg"':'')+'>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>';});
+    document.getElementById('sttable').innerHTML=h+'</table>';
+  } else document.getElementById('sttable').innerHTML='';
+  document.getElementById('stepno').textContent='步骤 '+(IDX+1)+' / '+SC.steps.length;
+  document.getElementById('steptitle').textContent=s.t;
+  document.getElementById('steptext').innerHTML=Array.isArray(s.d)
+    ? '<ol>'+s.d.map(x=>'<li>'+x+'</li>').join('')+'</ol>' : s.d;
+  const lg=document.getElementById('steplogic');
+  lg.innerHTML=(s.logic&&s.logic.length)
+    ? '<h3 class="sec">'+(s.lt||'收到 → 输出')+'</h3>'+logicHtml(s.logic) : '';
+  document.getElementById('stepref').innerHTML=s.ref?('<b>出处</b> '+s.ref):'';
+  document.getElementById('barfill').style.width=((IDX+1)/SC.steps.length*100)+'%';
+  (s.tok||[]).forEach(tk=>runTok(tk,animate));
+}
+
+function runTok(tk,animate){
+  const e=edgeEls[tk.ed]; if(!e)return;
+  const L=e.p.getTotalLength();
+  const g=E('g'); g.appendChild(E('circle',{r:tk.r||7,fill:tk.c||'var(--accent)',class:'tok'}));
+  if(tk.lbl)g.appendChild(E('text',{x:0,y:-12,'text-anchor':'middle','font-size':9.5,
+     fill:tk.c||'var(--accent)','font-family':'var(--mono)','font-weight':700},tk.lbl));
+  tokLayer.appendChild(g);
+  const t0=performance.now(), span=DUR*0.72, delay=(tk.delay||0)*DUR*0.18;
+  function frame(now){
+    let u=(now-t0-delay)/span;
+    if(u<0){g.setAttribute('opacity',0);anims.push(requestAnimationFrame(frame));return;}
+    g.setAttribute('opacity',1); if(u>1)u=1;
+    const p=e.p.getPointAtLength((tk.rev?1-u:u)*L);
+    g.setAttribute('transform','translate('+p.x+','+p.y+')');
+    if(u<1&&animate!==false)anims.push(requestAnimationFrame(frame));
+    else if(animate===false){const q=e.p.getPointAtLength((tk.rev?0:1)*L);
+      g.setAttribute('transform','translate('+q.x+','+q.y+')');}}
+  anims.push(requestAnimationFrame(frame));
+}
+
+function play(){PLAYING=true;document.getElementById('play').textContent='❚❚ 暂停';tick();}
+function pause(){PLAYING=false;document.getElementById('play').textContent='▶ 播放';clearTimeout(TIMER);}
+function tick(){clearTimeout(TIMER);TIMER=setTimeout(()=>{
+  if(!PLAYING)return;
+  if(IDX>=SC.steps.length-1){apply(0,true);}else{apply(IDX+1,true);}
+  tick();},DUR);}
+document.getElementById('play').onclick=()=>PLAYING?pause():play();
+document.getElementById('next').onclick=()=>{pause();apply(IDX+1,true);};
+document.getElementById('prev').onclick=()=>{pause();apply(IDX-1,true);};
+document.getElementById('spd').oninput=e=>{DUR=5000-(+e.target.value)+500;if(PLAYING)tick();};
+document.getElementById('bar').onclick=e=>{pause();
+  const r=e.currentTarget.getBoundingClientRect();
+  apply(Math.floor((e.clientX-r.left)/r.width*SC.steps.length),true);};
+document.addEventListener('keydown',e=>{
+  if(e.key===' '){e.preventDefault();PLAYING?pause():play();}
+  if(e.key==='ArrowRight'){pause();apply(IDX+1,true);}
+  if(e.key==='ArrowLeft'){pause();apply(IDX-1,true);}});
+
+
+
+
+/* ================================================================
+   公共布局
+   平面一：一条 path 上的三跳，本 core 居中
+   平面二：Router 八个模块（左中列）与 core 内对手方（右列）
+   纵向通道：186～216 · 346～376 · 572～620 · 806～840
+   ================================================================ */
+
+/* ---- 平面一：path 上的三跳 ---- */
+function pathNodes(){
+  return [
+   {id:'up',  x:70, y:58, w:210,h:54,fs:11,t:'上游 core',s:['发出这一份分量']},
+   {id:'me',  x:415,y:58, w:210,h:54,fs:11,t:'本 core',s:['中继累加']},
+   {id:'dn',  x:760,y:58, w:210,h:54,fs:11,t:'下游 core',s:['继续往下累加']},
+   {id:'lo',  x:415,y:136,w:210,h:34,fs:10,t:'本 core 的 DTE：出核那一份分量'}];
+}
+function pathEdges(){
+  return [
+   {id:'p_up',pts:[[280,85],[415,85]],label:'left　256 B/T',lx:348,ly:79},
+   {id:'p_dn',pts:[[625,85],[760,85]],label:'right　256 B/T',lx:693,ly:79},
+   {id:'p_lo',pts:[[520,136],[520,112]],label:'local',lx:552,ly:128}];
+}
+
+/* ---- 平面二：Router 内部与 core 内对手方 ----
+   布局照 03-router-片上交换与归约.md 主图，也就是 MAS 的 Block Diagram：
+   5×7 CrossBar 居中，三个 RouterStation 各接一个方向（left 展开画，right / mid 同构），
+   CoreStation 在上，ReduceModule 在右下；core 内的对手方排在最上一行
+   ---- */
+const RT_NODES=[
+ {id:'ts',  x:40, y:206,w:160,h:40,fs:10.5,t:'TS',s:['MAS 记作 TaskScheduler']},
+ {id:'drv', x:212,y:206,w:148,h:40,fs:10.5,t:'DTE RV Core',s:['MAS 记作 DTE Core']},
+ {id:'dte', x:372,y:206,w:148,h:40,fs:10.5,t:'DTE DSA',s:['DataIn / DataOut']},
+ {id:'cm',  x:532,y:206,w:128,h:40,fs:10.5,t:'Core Mem'},
+ {id:'cmcm',x:40, y:262,w:190,h:88,fs:10,  t:'CoreMemCreditMonitor',
+  s:['MAS 图上并作 Stream Resource Map','本级 stream credit 表，唯一有效状态','出核前的资源监听，队列 16 项全相连']},
+ {id:'cs',  x:300,y:262,w:320,h:88,fs:11,  t:'CoreStation',
+  s:['Header FIFO · in_core_fifo · Arbiter','三态准入 · 收满一包 → trigger TS','Packet Join / Split：进核拼包，出核拆包']},
+ {id:'rtab',x:690,y:262,w:310,h:88,fs:11,  t:'CSR / RouterTable',
+  s:['64 条，索引 path_id，内部多副本','Credit 静态 Mask · perf & debug','只描述静态路由与资源需求']},
+ {id:'rs_l',x:40, y:368,w:240,h:102,fs:11, t:'RouterStation[left]',
+  s:['Header Check + RouterTable 副本','allocate → VC0～3 → Arbiter','VC Credit · Stream 映射 · Credit Release','output buffer + Packet Shifter']},
+ {id:'xb',  x:380,y:368,w:180,h:72,fs:11,  t:'Xbar',
+  s:['MAS 记作 CrossBar / Interconnect Matrix','5 入 7 出，按输出独立仲裁','无冲突同拍并行，多播全有或全无']},
+ {id:'rs_r',x:660,y:368,w:200,h:72,fs:11,  t:'RouterStation[right]',
+  s:['结构同 left','行两端这一侧接 C2C Bridge']},
+ {id:'rs_m',x:320,y:462,w:240,h:66,fs:11,  t:'RouterStation[mid]',
+  s:['结构同 left','接另一行对称位的 Router']},
+ {id:'rmod',x:660,y:462,w:340,h:110,fs:11, t:'ReduceModule',
+  s:['ReduceMemory 16 KB × 16 entry · Adder + Convert','RMW 原位累加，中间 FP32','CreditBypass XBar · ResourceMap（相邻下游）']},
+ {id:'reis',x:40, y:496,w:240,h:76,fs:10.5,t:'CoreMem 重发',
+  s:['stallWay 转存时走这里','Bypass 拆成进 core 加出 core','同 VC 保序，不许超车']},
+ {id:'ret', x:320,y:544,w:240,h:56,fs:10.5,t:'Retire',
+  s:['停发该 UserID · 删 Stream 授权','credit 经 crossbar 逐跳回上游']}];
+
+const RT_EDGES=[
+ {id:'e_in_l', pts:[[8,392],[40,392]],label:'left_data_in_ch',lx:76,ly:362},
+ {id:'e_out_l',pts:[[40,446],[8,446]],label:'left_data_out_ch',lx:80,ly:486},
+ {id:'e_in_r', pts:[[1032,392],[860,392]],label:'right_data_in_ch',lx:944,ly:362},
+ {id:'e_out_r',pts:[[860,420],[1032,420]],label:'right_data_out_ch',lx:944,ly:452},
+ {id:'e_in_m', pts:[[600,478],[560,478]],label:'mid_data_in_ch',lx:610,ly:446},
+ {id:'e_out_m',pts:[[560,506],[600,506]],label:'mid_data_out_ch',lx:610,ly:538},
+ {id:'e_l_xb', pts:[[280,392],[380,392]],label:'方向 Mask · flit',lx:330,ly:386},
+ {id:'e_xb_l', pts:[[380,420],[280,420]]},
+ {id:'e_r_xb', pts:[[660,392],[560,392]]},
+ {id:'e_xb_r', pts:[[560,412],[660,412]]},
+ {id:'e_m_xb', pts:[[440,462],[440,440]]},
+ {id:'e_xb_m', pts:[[490,440],[490,462]]},
+ {id:'e_xb_cs',pts:[[440,368],[440,350]],label:'进 core 出口',lx:392,ly:362},
+ {id:'e_cs_xb',pts:[[500,350],[500,368]],label:'local',lx:520,ly:362},
+ {id:'e_xb_rm',pts:[[560,428],[610,428],[610,490],[660,490]],label:'Reduce Data ×3',lx:612,ly:414},
+ {id:'e_rm_xb',pts:[[660,520],[600,520],[600,434],[560,434]],label:'结果回注 第 5 路',lx:600,ly:592},
+ {id:'e_rtab', pts:[[760,350],[760,360],[300,360],[300,368]],dash:1,label:'查表副本',lx:660,ly:356},
+ {id:'e_cs_dte',pts:[[420,262],[420,246]],label:'in_core_data_ch',lx:352,ly:256},
+ {id:'e_dte_cs',pts:[[470,246],[470,262]],label:'out_core_data_ch',lx:544,ly:256},
+ {id:'e_cs_drv',pts:[[320,246],[320,262]],dash:1,label:'hdr_rd',lx:290,ly:256},
+ {id:'e_cs_ts', pts:[[300,306],[265,306],[265,254],[120,254],[120,246]],label:'trigger_ch',lx:265,ly:300},
+ {id:'e_rm_ts', pts:[[660,540],[630,540],[630,608],[16,608],[16,226],[40,226]],label:'rmem2ts_done_ch',lx:706,ly:604},
+ {id:'e_ts_cm', pts:[[100,246],[100,262]],label:'资源注册',lx:70,ly:256},
+ {id:'e_cm_ts', pts:[[160,262],[160,246]],label:'notify_ch',lx:196,ly:256},
+ {id:'e_ts_ret',pts:[[40,240],[28,240],[28,578],[320,578]],label:'user_retire_ch',lx:180,ly:592},
+ {id:'e_reis',  pts:[[280,534],[292,534],[292,252],[532,252],[532,246]],label:'暂存 / 取出',lx:250,ly:586}];
+
+function rtNodes(){return RT_NODES.map(n=>Object.assign({},n));}
+function rtEdges(){return RT_EDGES.map(e=>Object.assign({},e));}
+
+/* ===================== ① 硬件拓扑 ===================== */
+const LT='收到 → 输出';
+const S_TOPO={id:'topo',name:'① 硬件拓扑',vb:[1040,640],
+ groups:[{x:44,y:34,w:960,h:152,label:'一条 path 上的三跳'},
+         {x:20,y:186,w:1000,h:420,label:'本 core 的 Router 八个模块　与 core 内的对手方'}],
+ nodes:pathNodes().concat(rtNodes()),edges:pathEdges().concat(rtEdges()),
+ table:{label:'Router 八个独立打拍的模块',cols:['模块','做什么'],
+  rows:[['RouterStation ×3','每方向一个：Header Parser 查表、VC Buffer、资源检查、输出移位拼接'],
+        ['Xbar','5 入 7 出，per-output RoundRobin，贪婪整包，多播同拍 1→N 复制'],
+        ['CoreStation','进 core 三态准入、HeaderFIFO、收满一包通知 TS、出 core 拆包'],
+        ['ReduceModule','三路输入仲裁、16 用户上下文、读改写累加、输出重进 Xbar'],
+        ['RouterTable / CSR','64 条按 path_id 索引，多副本，全写完才提交'],
+        ['CoreMem 重发','stallWay 选转存时把整包放进 Core Mem，同 VC 保序'],
+        ['Retire','停发该 UserID、删 Stream 授权、credit 逐跳回上游'],
+        ['CoreMemCreditMonitor','监听事件队列 16 项，资源到手通知 TS']]},
+ steps:[
+ {t:'Router 是 core 与片上网络之间的交换点',
+  d:['每个 core 一个，坏核也有。同时承担三件事：包的路由转发、三层流控、Reduce 计算。',
+     '对外三组连接：三个 R2R 方向端口，进 core 与出 core 各一条通路，控制信号接 TS。',
+     '<code>left</code> 与 <code>right</code> 连同行相邻的 Router，<code>mid</code> 连另一行对称位置的那一个，各 256 B/T 双向。'],
+  act:['rs_l','rs_r','rs_m'],eact:['e_in_l','e_in_r','e_in_m','e_out_l','e_out_r','e_out_m'],
+  ref:'router.md 定位与边界'},
+
+ {t:'这一场跟的是一条 reduce path 上的中间那一跳',
+  d:['<code>tp_nk</code> 下 FC1 / FC3 在 chip 内切 K，每个 core 算出的是<b>部分和</b>，要逐跳累加。',
+     '上游 core 的分量从 <code>left</code> 进来，本 core 的 DTE 把自己那份从 <code>local</code> 送进来。',
+     '两份在本 core 的 ReduceModule 里相加，结果从 <code>right</code> 发往下游继续累加。',
+     '<b>链上没有同步点</b>：上游分量到达时不必等本 core 算完，先存进上下文，本地那份出来时再加。'],
+  act:['up','me','dn','lo'],eact:['p_up','p_dn','p_lo'],
+  tok:[{ed:'p_up',lbl:'上游分量',c:'var(--warn)'},{ed:'p_lo',lbl:'本核分量',c:'var(--ok)',delay:1},
+       {ed:'p_dn',lbl:'累加结果',c:'var(--violet)',delay:3}],
+  ref:'router.md F52　03-router 归约'},
+
+ {t:'数据面六级流水线，每级 1 拍',
+  d:['<code>Input VC Buffer → RC 查表 → VA 拿资源 → SA 抢通路 → ST 交换 → Output Pipe</code>。',
+     '单跳延迟 ≤ 6 cycles，优化后 4～5 拍。',
+     '被 mask 掉的坏核走 Skip 直通：数据走完整流水线但不投递本 core，延迟与正常跳一致。',
+     '进出 core、Reduce、溢流重发、控制这四组各自成段，与数据面并行推进。'],
+  act:['rs_l','xb'],eact:['e_l_xb','e_xb_cs'],
+  ref:'03-router「一个包要过的三关」'},
+
+ {t:'RouterTable 是路径解析与资源判定的唯一依据',
+  d:['64 条表项，按 <code>path_id</code> 索引，<b>只描述静态路由与资源需求，不保存包的动态执行状态</b>。',
+     '内部多副本：所有需要并行查询的位置各持一份，更新状态机全写完才向软件返回完成。',
+     '另有两份外部副本由 DTE 与 ReduceModule 各自维护，软件负责写一致，硬件不同步。'],
+  act:['rtab','rs_l','rs_r','rs_m'],eact:['e_rtab'],
+  lt:LT,
+  logic:[
+          ['Router.RouterTable→Router.RouterStation', '', '按 path_id 查出'],
+          ['', 'op_type', '0 搬运 / 1 transfer / 2 reduce / 3 reduce_twice'],
+          ['', 'directionMask', '这条 path 从本级往哪几个方向发'],
+          ['', 'reduceInMask', '这条 path 在本级要等哪几个方向的分量'],
+          ['', '', 'curVC · nxtVC · streamNeedMask · cur_credit_require'],
+          ['', 'stallWay', '拿不到资源时留在 VC 等，还是转进 Core Mem']],
+  ref:'router.md F53、F58～F62'},
+
+ {t:'Xbar：5 入 7 出，每个出口独立仲裁',
+  d:['入是 <code>left</code> / <code>right</code> / <code>mid</code> / <code>local</code> 与 ReduceModule 回注；出是三个方向加 <code>core</code> 加三路 reduce。',
+     '五个输入的目标方向互不冲突时同周期并行传输，不做不必要的串行化。',
+     '仲裁不是纯 RoundRobin，是<b>贪婪整包</b>：优先让能凑成整包的那个命中。',
+     '多播同一拍 1 到 N 复制，<b>任一目标没握手就不推进任何分支</b>。'],
+  act:['xb','rs_l','rs_r','rs_m','cs','rmod'],
+  eact:['e_l_xb','e_r_xb','e_m_xb','e_xb_l','e_xb_r','e_xb_m','e_xb_cs','e_xb_rm','e_rm_xb'],
+  lt:LT,
+  logic:[
+          ['Router.RouterStation→Router.Xbar', '', '方向 Mask · 当前 flit · 下一跳 VC'],
+          ['Router.ReduceModule→Router.Xbar', '', '回注，算作第五路输入'],
+          ['Router.Xbar→Router.CoreStation', '', '目标含本级 core 时'],
+          ['Router.Xbar→Router.ReduceModule', '', 'operation 是 reduce 时，三路并发'],
+          ['Router.Xbar→Router.RouterStation', '', '目标是相邻 Router 时，走出口方向']],
+  ref:'router.md F17～F23'},
+
+ {t:'CoreStation：进 core 与出 core 两条通路完全并行',
+  d:['进 core：三态准入后 Header 写 HeaderFIFO、Payload 写 in_core_fifo，收满一包通知 TS。',
+     '出 core：DTE 先向 Router 申请到资源，再经 <code>out_core_data_ch</code> 发整包，CoreStation 拆包后按 VC 号入队。',
+     '<b>包头只有一条读取通路</b>：DTE RV Core 的 <code>cm_lsq</code> 映射到 Router I/O reg 读，读完写 1 弹出。'],
+  act:['cs','dte','drv'],eact:['e_cs_dte','e_dte_cs','e_cs_drv','e_xb_cs'],
+  tok:[{ed:'e_cs_dte',lbl:'整包',c:'var(--violet)'}],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→DTE DSA', 'in_core_data_ch', 'tdata[2047:0] · tkeep'],
+          ['', '', 'tlast · thdr'],
+          ['DTE DSA→Router.CoreStation', 'out_core_data_ch', '同字段外加 vc_id[1:0]'],
+          ['DTE RV Core→Router.CoreStation', 'hdr_rd', 'araddr → rdata[255:0]'],
+          ['', '', '读完写 1 弹出']],
+  ref:'router.md F24～F35'},
+
+ {t:'Router 与 TS：三条进，两条出',
+  d:['CoreStation 收满一包发 <code>trigger_ch</code>，ReduceModule 归约完一个整包发 <code>rmem_done_ch</code>。',
+     'CoreMemCreditMonitor 收 TS 的资源申请，申请到就经 <code>credit_ch</code> 通知回去。',
+     'Retire 收 TS 的退休请求，回 <code>accepted</code> 之后 TS 才清 valid。',
+     '这五条硬件直连，<b>都不经软件</b>。'],
+  act:['cs','rmod','cmcm','ret','ts'],
+  eact:['e_cs_ts','e_rm_ts','e_ts_cm','e_cm_ts','e_ts_ret'],
+  tok:[{ed:'e_cs_ts',lbl:'trigger',c:'var(--warn)'},{ed:'e_rm_ts',lbl:'reduce_done',c:'var(--ok)',delay:2}],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→TS', 'trigger_ch', 'user_id · path_id'],
+          ['', '', 'reissue · compute'],
+          ['Router.ReduceModule→TS', 'rmem_done_ch', 'user_id · reduce_seq'],
+          ['Router.CoreMemCreditMonitor→TS', 'credit_ch', 'stream_id · task_id'],
+          ['TS→Router.CoreMemCreditMonitor', 'req', 'user_id · stream_id'],
+          ['', '', 'task_id · path_id'],
+          ['TS→Router.Retire', 'retire', 'user_id  →  accepted']],
+  ref:'router.md 接口'},
+
+ {t:'三类 credit 互不复用，管的东西各不相同',
+  d:['<b>VC credit</b> 管下游 VC Buffer 有没有空槽，按 flit，RouterStation 自己维护，最快。',
+     '<b>stream credit</b> 管目标 core 的 Core Mem 有没有这个用户的空间，按 UserID 加方向，Router 是唯一有效状态。',
+     '<b>Reduce credit</b> 管下游 ReduceModule 的上下文，按 UserID，DTE 与 ReduceModule 各管一段。'],
+  act:['rs_l','rs_r','rs_m','rmod','cmcm','ret'],
+  ref:'router.md 定位与边界　F6～F10、F46、F76'},
+
+ {t:'整张拓扑合起来',
+  d:['左边三个 RouterStation 收发三个方向，中间 Xbar 交换，右边 CoreStation 与 ReduceModule 各管一路出口。',
+     'RouterTable 在顶上给所有查表点供数据，Retire 与 CoreMemCreditMonitor 管控制面。',
+     '拿不到资源的包按 <code>stallWay</code> 二选一：留在 VC 等，或转进 Core Mem 由 DTE 重发。',
+     '后面三个场景都在这张平面上跑，位置一格不动。'],
+  act:RT_NODES.map(n=>n.id),eact:RT_EDGES.map(e=>e.id),
+  ref:'router.md 全篇'}
+]};
+
+/* ===================== ② 场景与任务 ===================== */
+const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,640],
+ groups:[{x:20,y:186,w:1000,h:420,label:'本 core 的 Router · 进 core 与出 core 两条通路'}],
+ nodes:rtNodes(),edges:rtEdges(),
+ table:{label:'两条通路的差别',cols:['','进 core','出 core'],
+  rows:[['谁发起','上游 Router 的包，由 Xbar 导向 core 出口','本 core 的 DataOut DTE'],
+        ['经过','RouterStation → Xbar → CoreStation','CoreStation → Xbar → 出口 RouterStation'],
+        ['放行前查','本级 stream credit 表准入','目标 VC 有空；下游资源由 DTE 先申请到'],
+        ['查 VC credit 吗','不查 —— 已过 Stream 检查就一定有空间','查，与 CoreStation 有 credit 协议'],
+        ['谁申请下游资源','—','DTE 必须先从 Router 拿到授权'],
+        ['完成信号','CoreStation 经 trigger_ch 通知 TS','发完向 TS 返回 UserID 加 PathID'],
+        ['交织','整包为单位，不支持包间交织','DTE 内每个 VC 各一个 Buffer，互不牵连'],
+        ['两者关系','完全并行，互不共享数据通路仲裁状态','同上']]},
+ steps:[
+ {t:'这一场要做成的两件事：把包收进核，把结果发出核',
+  d:['两条通路<b>完全并行</b>，不共享数据通路的仲裁状态，一条堵住不影响另一条。',
+     '进核这条由 Router 发起：Xbar 的七个出口里有一个是 core，跟三个 R2R 方向一样要仲裁、要查资源。',
+     '出核这条由 DTE 发起：DTE 拿到下游资源授权后，把整包交给 Router 发出去。'],
+  act:['xb','cs'],eact:['e_xb_cs'],
+  tok:[{ed:'e_xb_cs',lbl:'core 出口',c:'var(--warn)'}],
+  ref:'router.md F24、F84'},
+
+ {t:'进核这条：先占一项，再收整包，收满通知 TS',
+  d:['先在本级 stream credit 表上给这个 UserID 占一项：<b>已在表里</b>直接收，<b>不在表里但有空项</b>记下占用后收，<b>没空项</b>就不往 core 发。',
+     '没空项时堵的是出口不是入口 —— VC 有空槽仍可继续收上游的数据。',
+     '占到项之后不再查 core 方向的 VC credit：Core Mem 空间一定有。',
+     '包体进 <code>in_core_fifo</code> 交给 DTE DSA，收满一整包才 trigger TS。'],
+  act:['cs'],
+  lt:LT,
+  logic:[
+          ['Router.Xbar→Router.CoreStation', '', '带 user_id 的整包'],
+          ['Router.CoreStation→', '', '查 stream credit 表：'],
+          ['', '', '已分配  直接收'],
+          ['', '', '有空项  记录 UserID 占用后收'],
+          ['', '', '无空项  该 VC 不向 Core 发，但仍可收上游数据']],
+  ref:'router.md F24、F25'},
+
+ {t:'出核这条：DTE 先申请到授权，再把整包发出去',
+  d:['DTE 内按 Router 一个方向的 VC 数各有一个 Buffer，某个 VC 阻塞只阻塞对应的那个。',
+     'DTE 里也有一份 RouterTable，按 <code>PathID</code> 查到 VC 与资源需求。',
+     '包对下游 Stream 或 Rmem 有需求时，DTE 必须<b>先申请到才能发</b>，否则任务在 PendingTaskQ 等着。',
+     '真正申请 Stream 表项的只有 Router，DTE 不能超额分配或重复授权。'],
+  act:['dte','cs','cmcm','ts'],eact:['e_dte_cs','e_ts_cm','e_cm_ts'],
+  tok:[{ed:'e_ts_cm',lbl:'先申请',c:'var(--ok)'},{ed:'e_cm_ts',lbl:'到手',c:'var(--ok)',delay:1}],
+  lt:LT,
+  logic:[
+          ['TS→Router.CoreMemCreditMonitor', 'req', 'user_id · stream_id'],
+          ['', '', 'task_id · path_id'],
+          ['Router.CoreMemCreditMonitor→TS', 'credit_ch', '申请到才通知'],
+          ['DTE DSA→Router.CoreStation', 'out_core_data_ch', '整包']],
+  ref:'router.md F34、F83'},
+
+ {t:'起点：stream credit 表有空项，两条通路都空闲',
+  d:['跟的这一进一出：进来的是 <code>user_id = 0x0007</code> 的 broadcast token（<code>path_id = 3</code>、VC1）；',
+     '出去的是本 core 算完的结果（<code>path_id = 9</code>、VC2）。',
+     '<b>两条通路完全并行，互不共享数据通路仲裁状态</b> —— 一条堵住不影响另一条。',
+     'stream credit 表 16 项（待定），此刻全空。'],
+  act:['rs_l','cs','dte'],eact:['e_in_l','e_dte_cs'],
+  tok:[{ed:'e_in_l',lbl:'进来的包',c:'var(--warn)'},{ed:'e_dte_cs',lbl:'出去的包',c:'var(--violet)',delay:1}],
+  ref:'router.md F35　core.md F10'}
+]};
+
+/* ===================== ③ 逐步执行 ===================== */
+const CI_COLS=['','状态','说明'];
+const CI_ROWS=[['stream credit 表','16 项，空','本级 Core Mem 上各 UserID 的占用'],
+               ['HeaderFIFO','空','按接收顺序存包头，DTE 读完写 1 弹出'],
+               ['in_core_fifo','空','整包写入，不支持包间交织'],
+               ['Core 方向输入 VC','空','出核的包在这里排队，与其他方向一样查表仲裁']];
+const S_RUN={id:'run',name:'③ 逐步执行',vb:[1040,640],
+ groups:[{x:20,y:186,w:1000,h:420,label:'本 core 的 Router · 进 core（0x0007 · path_id 3）与出 core（path_id 9）'}],
+ nodes:rtNodes(),edges:rtEdges(),
+ counters:[{id:'stage',x:60,y:622,label:'当前',val:'—'},
+           {id:'inn',x:280,y:622,label:'进 core',val:'未开始'},
+           {id:'out',x:520,y:622,label:'出 core',val:'未开始'},
+           {id:'st',x:760,y:622,label:'stream credit',val:'0 / 16'}],
+ table:{label:'CoreStation 的四样东西',cols:CI_COLS,rows:CI_ROWS},
+ steps:[
+/* ---------- 进 core ---------- */
+ {t:'进 core ①　RC 查表得知目标含本级 core',
+  d:['包从 <code>left</code> 进来，Header Parser 取出字段，按 <code>path_id = 3</code> 查 RouterTable。',
+     '进不进本 core 由两个字段二选一决定：<code>path_core_mask_enable = 0</code> 时按 <code>path_core_bypass</code> 定；',
+     '<code>= 1</code> 时取 MSG 里 <code>path_core_mask</code> 的第 <code>path_core_mask_idx</code> 位。',
+     '<b>位到 core 的对应关系不是固定编码</b>，每个 core 在自己的表项里指定看哪一位。'],
+  act:['rs_l','rtab'],eact:['e_in_l','e_rtab'],
+  tok:[{ed:'e_in_l',lbl:'head flit',c:'var(--warn)'}],
+  lt:LT,
+  logic:[
+          ['上游 core→Router.RouterStation', 'link[left]', 'flit_head · flit_vc 1'],
+          ['Router.RouterTable→Router.RouterStation', '', '按 path_id 3 查出'],
+          ['', '', 'path_core_mask_enable 1 · path_core_mask_idx 5'],
+          ['', '', '该位为 1  →  这一份要落进本 core']],
+  set:{stage:'RC 查表',inn:'查表'},
+  ref:'router.md F1、F54'},
+
+ {t:'进 core ②　VA 查本级 stream credit 表',
+  d:['这个 UserID 还没分配过，但表里有空项 —— <b>记录 UserID 占用后收</b>。',
+     '进 core 这一路<b>不查 Core 方向的 VC credit</b>：已通过 Stream 检查就一定有 Core Mem 空间。',
+     '要是无空项，该 VC 不能向 Core 发数据，<b>但 VC 有空项时仍可继续接收上游数据</b>。'],
+  act:['rs_l','cs'],
+  lt:LT,
+  logic:[
+          ['Router.RouterStation→', '', '查本级 stream credit 表'],
+          ['', '', 'user_id 0x0007 未分配，表里有空项'],
+          ['', '', '→  记录占用，准入'],
+          ['', '', '进 core 不再查 VC credit']],
+  set:{stage:'VA 三态准入',inn:'已准入',st:'1 / 16'},
+  rows:[[0,['stream credit 表','占 1 项：0x0007','本级 Core Mem 上各 UserID 的占用']]],
+  ref:'router.md F24、F25'},
+
+ {t:'进 core ③　ST 交换，整包锁定到尾 flit',
+  d:['Xbar 把 flit 从 input port 交换到 <code>core</code> 出口。',
+     '<b>包一旦开始进入 Core 或 ReduceModule 就锁定到尾 flit</b>，不像 R2R 那样可以在 flit 边界切换包。',
+     '<b>Core 入口以整包为单位</b>，不支持包间交织，必须发完一个整包再发下一个。'],
+  act:['xb','cs'],eact:['e_l_xb','e_xb_cs'],
+  tok:[{ed:'e_xb_cs',lbl:'整包',c:'var(--warn)'}],
+  lt:LT,
+  logic:[
+          ['Router.RouterStation→Router.Xbar', '', '方向 Mask 含 core'],
+          ['Router.Xbar→Router.CoreStation', '', 'core 出口，锁定到尾 flit'],
+          ['', '', '两种交织粒度不能混用']],
+  set:{stage:'ST 交换'},
+  ref:'router.md F23、F27'},
+
+ {t:'进 core ④　Header 与 Payload 进两个 FIFO',
+  d:['<b>Header 写入 HeaderFIFO，Payload 写入 OutputBuffer（in_core_fifo）</b>，两者保持同一包顺序与边界。',
+     'Header 与 Payload 走两根独立并行总线：hflit 256 bit 与 pflit 2048 bit，按同一包边界保持对应。',
+     '进 core 时拼接成完整包，出 core 时自动拆分。'],
+  act:['cs'],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→', '', 'Header  → HeaderFIFO（256 bit/flit，深 16 待定）'],
+          ['', '', 'Payload → in_core_fifo（2048 bit/flit，深 32 待定）'],
+          ['', '', '两者保持同一包顺序与边界']],
+  set:{stage:'写两个 FIFO',inn:'写入中'},
+  rows:[[1,['HeaderFIFO','1 项','按接收顺序存包头，DTE 读完写 1 弹出']],
+        [2,['in_core_fifo','整包','整包写入，不支持包间交织']]],
+  ref:'router.md F26　参数汇总「总线」'},
+
+ {t:'进 core ⑤　收满一个包，通知 TS',
+  d:['判定依据：<b>比较已接收数据量与包头里的 payload 大小</b>。',
+     '按接收包头的顺序经 <code>router2ts_trigger_ch</code> 直接通知 TS，不经 RV core、不经软件。',
+     '请求发出后保持到 TS 拉 <code>ready</code>；TS 入口占满时本笔原地保持，<b>也不清 HeaderFIFO 的队头</b>。',
+     '<code>compute</code> 位取自包头软件 payload，CoreStation <b>原样转给 TS，不做解释</b>。'],
+  act:['cs','ts'],eact:['e_cs_ts'],
+  tok:[{ed:'e_cs_ts',lbl:'trigger',c:'var(--warn)'}],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→TS', 'trigger_ch', 'user_id 0x0007 · path_id 3'],
+          ['', '', 'reissue 0 · compute 1'],
+          ['', '', '← ready 拉低时本笔原地保持，不发下一笔'],
+          ['', '', '也不清 HeaderFIFO 的队头']],
+  set:{stage:'收满通知 TS',inn:'已通知'},
+  ref:'router.md F28～F31'},
+
+ {t:'进 core ⑥　DTE RV Core 读包头',
+  d:['DTE RV Core 经 <code>cm_lsq</code> 映射到 Router I/O reg 的地址段读包头，生成 DTE 任务。',
+     '读完向指定地址写 1 把包头弹出，<b>CoreStation 映射出下一个包头</b>。',
+     'Router 侧的 <code>hdr_rd</code> 是这条通路的从端，<b>core 内不另设第二条读包头的通路</b>。'],
+  act:['cs','drv'],eact:['e_cs_drv'],
+  tok:[{ed:'e_cs_drv',lbl:'包头',c:'var(--dim)'}],
+  lt:LT,
+  logic:[
+          ['DTE RV Core→Router.CoreStation', 'hdr_rd', 'araddr[31:0] · arvalid'],
+          ['', '', '← rdata[255:0]'],
+          ['', '', '读完写 1 → 弹出，映射下一个包头']],
+  set:{stage:'读包头'},
+  rows:[[1,['HeaderFIFO','空','读完写 1 弹出，映射出下一个包头']]],
+  ref:'router.md F32'},
+
+ {t:'进 core ⑦　DTE DSA 收整包',
+  d:['CoreStation 与 DTE 之间用 <b>AXI-Stream-Like</b> 协议传数据。',
+     '被反压时保持 valid、Header、Payload、首尾 flit 标志与有效字节信息不变，<b>传输位置不得前移</b>；',
+     '反压解除后从同一 flit 继续握手，保证<b>包不丢拍、不重拍、不跨包、不串包</b>。'],
+  act:['cs','dte'],eact:['e_cs_dte'],
+  tok:[{ed:'e_cs_dte',lbl:'整包',c:'var(--violet)'}],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→DTE DSA', 'in_core_data_ch', ''],
+          ['', '', 'tvalid · tdata[2047:0] · tkeep[255:0]'],
+          ['', '', 'tlast · thdr'],
+          ['', '', '← tready = DTE inbound buffer 与 Commit 都够']],
+  set:{stage:'整包进核',inn:'完成'},
+  rows:[[2,['in_core_fifo','空','整包已交给 DTE']]],
+  ref:'router.md F33　dte.md 接口'},
+
+/* ---------- 出 core ---------- */
+ {t:'出 core ①　DTE 查自己那份 RouterTable',
+  d:['DTE 中也有一份 RouterTable，按 <code>PathID</code> 查到 VC 和资源需求。',
+     '三份副本：Router 内部多份，另有 DTE 与 ReduceModule 各自维护的外部副本。',
+     '<b>软件负责写入相同配置并保证三方一致，Router 硬件不同步外部副本</b>；',
+     '软件只能在 Router 提交完成后再写它们。'],
+  act:['dte','rtab'],
+  lt:LT,
+  logic:[
+          ['DTE DSA→', '', '查自己那份 RouterTable，按 path_id 9'],
+          ['', '', '得到 nxtVC 2 · streamNeedMask · 是不是 Reduce'],
+          ['', '', 'Router 内部副本与 DTE / ReduceModule 的外部副本由软件保证一致']],
+  set:{stage:'DTE 查表',out:'查表'},
+  ref:'router.md F62　03-router「RouterTable 的三份副本」'},
+
+ {t:'出 core ②　先向 Router 申请下游资源',
+  d:['包对下游 Stream 或 Rmem 资源有需求时，<b>DTE 必须先申请到才能发</b>。',
+     'TS 经 <code>ts2router_req</code> 注册，带 UserID、StreamID、TaskID、PathID。',
+     'Router 按 PathID 查到需要发送的下游方向、VC 需求与 stream 需求。',
+     '申请不到就把需求<b>记进监听队列</b>，资源满足再通知；任务在 <code>PendingTaskQ</code> 等待。'],
+  act:['ts','cmcm'],eact:['e_ts_cm'],blk:['dte'],
+  tok:[{ed:'e_ts_cm',lbl:'req',c:'var(--ok)'}],
+  lt:LT,
+  logic:[
+          ['TS→Router.CoreMemCreditMonitor', 'req', 'user_id · stream_id'],
+          ['', '', 'task_id · path_id 9'],
+          ['Router.CoreMemCreditMonitor→', '', '按 path_id 查出下游方向与需求'],
+          ['', '', '申请不到 → 记进监听队列（16 项全相连）']],
+  set:{stage:'申请资源',out:'等资源'},
+  ref:'router.md F77～F79'},
+
+ {t:'出 core ③　资源到手，通知 TS',
+  d:['申请到就经反向控制通路通知 TS，回 <code>StreamID</code>、<code>TaskID</code>、<code>PathID</code>。',
+     '<b>多个事件同时满足时按 StreamID 仲裁，选最老的任务通知 TS</b>。',
+     '进 core 重发的任务也注册到这个队列，数据进 Core、资源就绪后通知 TS 重发。'],
+  act:['cmcm','ts'],eact:['e_cm_ts'],
+  tok:[{ed:'e_cm_ts',lbl:'credit_ch',c:'var(--ok)'}],
+  lt:LT,
+  logic:[
+          ['Router.CoreMemCreditMonitor→TS', 'credit_ch', 'stream_id · task_id'],
+          ['', 'path_id', ''],
+          ['', '', '多个同时满足时按 StreamID 选最老']],
+  set:{stage:'资源到手',out:'可以发'},
+  ref:'router.md F79、F80'},
+
+ {t:'出 core ④　DTE 发整包，CoreStation 拆包',
+  d:['DTE 发数据到 Router 时与 CoreStation <b>有 credit 协议，保证 VC 有容量才发</b>。',
+     'CoreStation 拆出 Header 与 Payload，<b>按 Header 的 VC 号写入 Core 方向输入 VC</b>。',
+     '之后这个包就跟从三个 R2R 方向进来的包一样：查表、参与仲裁、抢通路。',
+     'DTE 内按 Router 一个方向的 VC 数各有一个 Buffer，<b>某个 VC 阻塞只阻塞对应的那个</b>。'],
+  act:['dte','cs','xb'],eact:['e_dte_cs','e_cs_xb'],
+  tok:[{ed:'e_dte_cs',lbl:'整包出核',c:'var(--violet)'},{ed:'e_cs_xb',lbl:'按 VC 入队',c:'var(--violet)',delay:2}],
+  lt:LT,
+  logic:[
+          ['DTE DSA→Router.CoreStation', 'out_core_data_ch', ''],
+          ['', '', 'tdata · tkeep · tlast · thdr · vc_id 2'],
+          ['', '', '← tready = 该 VC 的 Core 方向输入 VC 有空'],
+          ['Router.CoreStation→Router.Xbar', '', '拆出 Header 与 Payload'],
+          ['', '', '按 vc_id 写入 Core 方向输入 VC']],
+  set:{stage:'出核整包',out:'已发出'},
+  rows:[[3,['Core 方向输入 VC','VC2 有包','与其他方向一样查表、参与仲裁']]],
+  ref:'router.md F34'},
+
+ {t:'出 core ⑤　与其他方向一样查表、仲裁、发出',
+  d:['进了 Core 方向输入 VC 之后，这个包<b>不再有任何特殊待遇</b>：',
+     'RC 查表定去向，VA 查下游该 VC 的 credit 与 Stream 授权，SA 抢通路，ST 交换，Output Pipe 发出。',
+     'Xbar 的五路输入里，<code>local</code> 就是这一路。'],
+  act:['xb','rs_r'],eact:['e_cs_xb','e_xb_r','e_out_r'],
+  tok:[{ed:'e_xb_r',lbl:'仲裁',c:'var(--violet)'},{ed:'e_out_r',lbl:'出核',c:'var(--violet)',delay:2}],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→Router.Xbar', '', 'local 那一路输入'],
+          ['Router.Xbar→Router.RouterStation', '', 'right 出口，RoundRobin 仲裁'],
+          ['Router.RouterStation→下游 core', '', 'Output Buffer + Packet Shifter 拼接']],
+  set:{stage:'出核发送'},
+  ref:'router.md F17、F34'},
+
+ {t:'出 core ⑥　发完向 TS 返回完成信息',
+  d:['无论直接发送还是经 CoreMem 重发，完成后都向 core 内 TS 返回<b>至少含 UserID 加 PathID</b> 的完成信息。',
+     'TS 据此推进同一 stream 的下一个 task。'],
+  act:['dte','ts'],
+  lt:LT,
+  logic:[
+          ['DTE DSA→TS', 'dsa_done', 'stream_id · task_id'],
+          ['', '', '完成信息至少含 UserID 加 PathID'],
+          ['TS→', '', '推进同一 stream 的下一个 task']],
+  set:{stage:'回完成信息',out:'完成'},
+  ref:'router.md F71'},
+
+/* ---------- 并行与反压 ---------- */
+ {t:'两条通路完全并行，互不共享仲裁状态',
+  d:['<b>进 core 与出 core 两条数据通路完全并行</b>，各 256 GB/s @1GHz。',
+     '互不共享数据通路仲裁状态：进核那条堵住时，出核那条照常走。',
+     '这一条在 core 一层也成立 —— <code>core.md</code> 的 F10 说的就是这件事。'],
+  act:['cs','dte'],eact:['e_cs_dte','e_dte_cs'],
+  tok:[{ed:'e_cs_dte',lbl:'进',c:'var(--warn)'},{ed:'e_dte_cs',lbl:'出',c:'var(--violet)'}],
+  lt:LT,
+  logic:[
+          ['Router.CoreStation→DTE DSA', 'in_core_data_ch', '256 GB/s'],
+          ['DTE DSA→Router.CoreStation', 'out_core_data_ch', '256 GB/s'],
+          ['', '', '两条各自成段，不共享仲裁状态']],
+  set:{stage:'并行'},
+  ref:'router.md F35　core.md F10'},
+
+ {t:'一进一出的完整流程走完',
+  d:['进 core 这条：查表 → 三态准入 → 整包锁定 → 两个 FIFO → 通知 TS → 读包头 → 收整包。',
+     '出 core 那条：DTE 查表 → 先申请资源 → 资源到手 → 发整包 → 拆包按 VC 入队 → 与其他方向一样走。',
+     '<b>关键的不对称</b>：进 core 已过 Stream 检查就不再查 VC credit；出 core 反过来，',
+     'VC 容量由 credit 协议保证，下游资源要 DTE 先申请。'],
+  act:RT_NODES.map(n=>n.id),eact:RT_EDGES.map(e=>e.id),
+  set:{stage:'完成',inn:'完成',out:'完成'},
+  ref:'router.md F24～F35'}
+]};
+
+/* ===================== ④ 每个模块的运行逻辑 ===================== */
+const S_MODS={id:'mods',name:'④ 每个模块的运行逻辑',vb:[1040,640],
+ groups:[{x:20,y:186,w:1000,h:420,label:'八个独立打拍的模块，逐个过一遍收什么、判什么、发什么'}],
+ nodes:rtNodes(),edges:rtEdges(),
+ table:{label:'这个模块持有的存储器',cols:['名字','结构','读写'],
+  rows:[['—','—','—'],['—','—','—'],['—','—','—'],['—','—','—']]},
+ steps:[
+ {t:'RouterStation　每方向一个，走完六级流水线的前五级',
+  d:['Header Parser 取字段查表，Payload 按 VC 号入队，头部 flit 检查所有目标方向的资源。',
+     '多播<b>全有或全无</b>，拿不到就按 <code>stallWay</code> 留在 VC 等或转进 Core Mem。',
+     'VC credit 两级记账：先扣 private 再扣 shared，两者都为 0 时该 VC 不能发。',
+     '<b>同 VC 保序</b>：VC Buffer 是 FIFO，VA 与 SA 都不重排；跨 VC、跨 port 不保证顺序。'],
+  act:['rs_l','rs_r','rs_m'],eact:['e_in_l','e_in_r','e_in_m','e_out_l','e_out_r','e_out_m','e_l_xb'],
+  lt:LT,
+  logic:[
+          ['上游 core→Router.RouterStation', '', 'link[d] 的 flit 与三类 release'],
+          ['Router.RouterTable→Router.RouterStation', '', '按 path_id 查出的字段'],
+          ['Router.RouterStation→Router.Xbar', '', '方向 Mask · flit · 下一跳 VC'],
+          ['Router.RouterStation→下游 core', '', '出口 Packet Shifter 拼接后发出'],
+          ['Router.RouterStation→上游 core', '', 'credit_return 走共享总线']],
+  rows:[[0,['VC Buffer','每 VC private 20 + 每方向 shared 20','合计 100 flit ≈ 25 KB = 下游容量']],
+        [1,['VC credit','private[o][v] 与 shared[o]','发先扣 private，还先补 private']],
+        [2,['Stream Resource Table','所有下游方向的 UserID 占用','所有需求方向满足才放行']],
+        [3,['RouterTable 副本','本地一份','并行查询用']]],
+  ref:'router.md F1～F16'},
+
+ {t:'Xbar　5 入 7 出，每个出口一个独立仲裁器',
+  d:['入是三个 R2R 方向加 <code>local</code> 加 ReduceModule 回注；出是三个方向加 <code>core</code> 加三路 reduce。',
+     '目标不冲突时同周期并行，<b>不做不必要的串行化</b>。',
+     '贪婪整包：优先级是接口 priority → 有没有整包 → 是不是上一包的 body → RoundRobin。',
+     '交织粒度两种，进 Core 或 ReduceModule 就锁到尾 flit，<b>两种粒度不能混用</b>。'],
+  act:['xb'],eact:['e_l_xb','e_r_xb','e_m_xb','e_xb_l','e_xb_r','e_xb_m','e_xb_cs','e_xb_rm','e_rm_xb'],
+  lt:LT,
+  logic:[
+          ['Router.RouterStation→Router.Xbar', '', '三个方向的候选 flit'],
+          ['Router.CoreStation→Router.Xbar', '', 'local 那一路（出核的包）'],
+          ['Router.ReduceModule→Router.Xbar', '', '回注，第五路'],
+          ['Router.Xbar→', '', '握手成功后统一扣各目标 credit'],
+          ['', '', '更新包上下文；任一目标没握手则都不推进']],
+  rows:[[0,['包上下文','VC · 输出方向 · 剩余长度 · 包边界','flit 边界切换包时要保存']],
+        [1,['—','Xbar 自己不持有其他存储','—']],
+        [2,['—','—','—']],[3,['—','—','—']]],
+  ref:'router.md F17～F23'},
+
+ {t:'CoreStation　进 core 与出 core 各一条，完全并行',
+  d:['进 core 三态准入；已通过 Stream 检查后不再查 Core 方向的 VC credit。',
+     'Header 与 Payload 分别进 HeaderFIFO 与 in_core_fifo，保持同一包顺序与边界。',
+     '收满一包按顺序通知 TS，<b>请求不允许丢弃</b>。',
+     '出 core：DTE 先拿到资源授权，再发整包；CoreStation 拆包后按 VC 号入队，之后与其他方向一样。'],
+  act:['cs','dte','drv','ts'],eact:['e_xb_cs','e_cs_dte','e_dte_cs','e_cs_drv','e_cs_ts'],
+  lt:LT,
+  logic:[
+          ['Router.Xbar→Router.CoreStation', '', 'core 出口的整包'],
+          ['Router.CoreStation→DTE DSA', 'in_core_data_ch', ''],
+          ['DTE DSA→Router.CoreStation', 'out_core_data_ch', ''],
+          ['DTE RV Core→Router.CoreStation', 'hdr_rd', '读完写 1 弹出'],
+          ['Router.CoreStation→TS', 'trigger_ch', 'user_id · path_id'],
+          ['', '', 'reissue · compute']],
+  rows:[[0,['HeaderFIFO','16 flit（待定）','写：收包　读：hdr_rd']],
+        [1,['OutputBuffer','32 flit（待定）','in_core_fifo']],
+        [2,['stream credit 表','16 项（待定）','与 TS 内那张按完全一致的逻辑分配']],
+        [3,['—','—','—']]],
+  ref:'router.md F24～F35'},
+
+ {t:'ReduceModule　三路输入，16 个用户上下文',
+  d:['第一份输入分配上下文并写入，后续输入<b>读改写累加</b>，中间精度固定 FP32。',
+     '上下文保护：本包全部输入完成并输出前，同一 User 的下一个包不得覆盖。',
+     '<b>必须执行 Reduce</b>：资源不可用时对输入反压，不允许绕过降级为直接转发。',
+     '16 个上下文与进 core 的 Stream 表项<b>一一对应</b>，同占同收，所以反压不必覆盖上下文耗尽。'],
+  act:['rmod','xb','ts'],eact:['e_xb_rm','e_rm_xb','e_rm_ts'],
+  lt:LT,
+  logic:[
+          ['Router.Xbar→Router.ReduceModule', '', '三路输入，进入后锁定到尾 flit'],
+          ['Router.ReduceModule→Router.Xbar', '', '收齐后结果回注，第五路'],
+          ['Router.ReduceModule→TS', 'rmem_done_ch', 'user_id · reduce_seq'],
+          ['', '', 'op_type 2 reduce  第一次收到就写入上下文'],
+          ['', '', 'op_type 3 reduce_twice  第二次或第三次收到才与上下文里的值相加']],
+  rows:[[0,['rdc_user_tab','16 用户 × 16 KiB','首份输入建，Retire 后延迟回收']],
+        [1,['in_done_mask','每上下文一份','与 reduceInMask 比对，相等才输出']],
+        [2,['Downstream Reduce Credit Map','按 UserID 加方向','逐 flit 扣，按 release 恢复']],
+        [3,['输出队列','8 深（待定）','发送前查 VC credit 与下游 Reduce credit']]],
+  ref:'router.md F36～F52'},
+
+ {t:'RouterTable / CSR　只描述静态路由与资源需求',
+  d:['64 条按 <code>path_id</code> 索引。进不进本 core 由两个字段二选一：<code>path_core_mask_enable</code> 为 0 时看 <code>path_core_bypass</code>，为 1 时取 MSG 里 <code>path_core_mask</code> 的第 <code>path_core_mask_idx</code> 位。',
+     '<b>位到 core 的对应关系不是固定编码</b>，每个 core 在自己的表项里指定看哪一位。',
+     '<code>op_type = 0</code> 的 kernel / weight 搬运包进 core 时<b>跳过 TS 直接唤醒 DTE</b>。',
+     '内部多副本由更新状态机统一写，全部写完才向软件返回完成，<b>禁止暴露部分新部分旧的状态</b>。'],
+  act:['rtab','rs_l','rs_r','rs_m'],eact:['e_rtab'],
+  lt:LT,
+  logic:[
+          ['ctrl_noc→Router.RouterTable', '', 'cfg_valid · cfg_addr · cfg_wdata'],
+          ['Router.RouterTable→ctrl_noc', 'commit_done', '全部副本写完才拉高'],
+          ['Router.RouterTable→Router.RouterStation', '', '按 path_id 查出的全部字段'],
+          ['', '', '外部还有两份副本：DTE 与 ReduceModule 各自维护，硬件不同步'],
+          ['', '', '软件只能在 Router 提交完成后再写它们']],
+  rows:[[0,['RouterTable','64 条 × 全部字段','编译侧读入，每颗 chip 不同']],
+        [1,['内部副本','需要并行查询的位置各一份','更新状态机依次写']],
+        [2,['Skip Mask','per-core 一位','标记该 core 是否被跳过']],
+        [3,['Credit Bypass Route','每个 credit 输入端口一个方向 Mask','坏核切 credit 路径靠它']]],
+  ref:'router.md F53～F64'},
+
+ {t:'CoreMem 重发　stallWay 选转存时的那条路',
+  d:['把整包重定向到本地 Core Mem，Router 上的 Bypass 被映射成「进 core 加出 core」两段。',
+     'Core Mem 中<b>只保存包</b>，重发时用 PathID 重新查表，不重复保存 VC 和路由信息。',
+     '包进 core 暂存时改写 <code>overflow_reinject = 1</code>，出 core 重发时改回 0，Output Port 识别到才扣 credit。',
+     '<b>坏核不接收溢流</b>：Router 对坏核不发起进 core 缓存，此时 coremem credit 直接 bypass。'],
+  act:['reis','rs_l','cm'],eact:['e_reis'],
+  lt:LT,
+  logic:[
+          ['Router.RouterStation→Router.CoreMem 重发', '', '整包重定向'],
+          ['Router.CoreMem 重发→Core Mem', '', '包头含 UserID · PathID · size'],
+          ['Router.CoreMem 重发→Core Mem', '', '取出重发时重新查表'],
+          ['Router.CoreMem 重发→TS', '', '完成信息至少含 UserID 加 PathID']],
+  rows:[[0,['重发暂存区','软件在 Core Mem 里预留','每 VC 至少容得下一个整包']],
+        [1,['pending_reinject','按 VC 一个计数器','到上限说明配少了，模型直接断言失败']],
+        [2,['—','—','—']],[3,['—','—','—']]],
+  ref:'router.md F65～F71'},
+
+ {t:'Retire　停发、删授权、credit 回上游',
+  d:['Core 判定任务链结束后广播 User Retire，Router 停止该 UserID 的新发送并删除全部 Stream 授权。',
+     'Core 的保证：Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包。',
+     'ReduceModule 是延迟回收，等相邻下游各方向的 Reduce credit 全恢复才删映射。',
+     'Stream credit 的回程走一个组合逻辑的 core credit crossbar，逐跳传到上游，跨 chip 经 C2C Bridge 透传。'],
+  act:['ret','ts','rmod','rs_l','rs_r','rs_m'],eact:['e_ts_ret','e_out_l','e_out_r','e_out_m'],
+  lt:LT,
+  logic:[
+          ['TS→Router.Retire', 'retire', 'user_id  →  回 accepted'],
+          ['Router.Retire→', '', '停发该 UserID，删 stream credit 授权表项'],
+          ['Router.Retire→上游 core', '', '汇总本级 core 与所有下级出口的 pulse 加 user'],
+          ['', '', '发往除来向外的另两个 R2R port']],
+  rows:[[0,['—','Retire 自己不持有存储','改 Stream Resource Table 与 ReduceModule 的用户映射']],
+        [1,['—','—','—']],[2,['—','—','—']],[3,['—','—','—']]],
+  ref:'router.md F72～F76'},
+
+ {t:'CoreMemCreditMonitor　替 TS 盯着下游资源',
+  d:['监听事件队列 16 项全相连，可同时监听多笔多方向的资源申请。',
+     '申请到就通知 TS，申请不到就把需求记进队列监听，资源满足再通知；多个同时满足时按 StreamID 选最老的。',
+     '<b>只有 Router 负责真正申请 Stream 表项</b>，DTE 要发数据必须先从 Router 拿到授权。',
+     'Router 的进 core 表与 TS 内部那张按<b>完全一致的逻辑</b>申请空项 —— 这保证了 Router 通知 TS 的包一定能被 TS 接收。'],
+  act:['cmcm','ts','reis'],eact:['e_ts_cm','e_cm_ts'],
+  lt:LT,
+  logic:[
+          ['TS→Router.CoreMemCreditMonitor', 'req', 'user_id · stream_id'],
+          ['', '', 'task_id · path_id'],
+          ['Router.CoreMemCreditMonitor→TS', 'credit_ch', 'stream_id · task_id'],
+          ['Router.CoreMemCreditMonitor→', '', '另输出 per-port 的 stream_credit'],
+          ['', '', '给 core 与 DTE，用于判断重注入']],
+  rows:[[0,['监听事件队列','16 项全相连','按 StreamID 仲裁，选最老的通知']],
+        [1,['进 core 表','与 TS 内那张逻辑一致','分配不会多于实际资源数']],
+        [2,['—','—','—']],[3,['—','—','—']]],
+  ref:'router.md F77～F85'},
+
+ {t:'合起来：一个包在 Router 上碰到的全部模块',
+  d:['数据面：<code>RouterStation → Xbar → CoreStation / ReduceModule / 出口 RouterStation</code>。',
+     '控制面：<code>RouterTable</code> 供查表，<code>CoreMemCreditMonitor</code> 与 <code>Retire</code> 对接 TS。',
+     '例外那条：拿不到资源时走 <code>CoreMem 重发</code>，变成进 core 加出 core 两段。',
+     '整条路上<b>没有任何一步经过软件</b>，软件只在上电时经 ctrl_noc 配 RouterTable 与 CSR。'],
+  act:RT_NODES.map(n=>n.id),eact:RT_EDGES.map(e=>e.id),
+  lt:LT,
+  logic:[
+          ['Router.RouterStation→Router.Xbar→Router.CoreStation', '', '进 core'],
+          ['Router.RouterStation→Router.Xbar→Router.ReduceModule', '', '归约'],
+          ['Router.ReduceModule→Router.Xbar→Router.RouterStation', '', '回注后出核'],
+          ['Router.RouterStation→Router.CoreMem 重发→Core Mem', '', '溢流那条'],
+          ['Router.CoreStation→TS', 'trigger_ch', ''],
+          ['Router.ReduceModule→TS', 'rmem_done_ch', '']],
+  rows:[[0,['—','—','—']],[1,['—','—','—']],[2,['—','—','—']],[3,['—','—','—']]],
+  ref:'router.md 全篇'}
+]};
+
+
+const SCENES=[S_TOPO,S_TASK,S_RUN,S_MODS];
+const nav=document.getElementById('nav');
+SCENES.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.name;
+  b.onclick=()=>{pause();[...nav.children].forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');SCIDX=i;build(s);};nav.appendChild(b);});
+
+// 回到上次看到的地方；存的场景或步骤已经不存在了就从头开始
+const PROG=loadProgress();
+const PVALID=!!PROG&&PROG.sc>=0&&PROG.sc<SCENES.length;   // 场景对不上就整条作废，步数不挪用到别的场景
+SCIDX=PVALID?PROG.sc:0;
+nav.children[SCIDX].classList.add('on');
+build(SCENES[SCIDX]);
+if(PVALID&&PROG.st>0&&PROG.st<SCENES[SCIDX].steps.length) apply(PROG.st,false);
+</script>
+</body>
+</html>

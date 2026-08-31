@@ -30,12 +30,21 @@ Core 内七个单元，各一份文档：
 | 单元 | 独立打拍的模块 | 文档 |
 | - | - | - |
 | Router | RouterStation ×3、Xbar、CoreStation、ReduceModule、RouterTable / CSR、CoreMem 重发、Retire、CoreMemCreditMonitor | [`router.md`](router.md) |
-| TS | CFG_REG、User_Match、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb / VU_Arb、Credit_monitor、Task_done | [`ts.md`](ts.md) |
+| TS | User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check（`Stream_table` 内再展开 user_LUT、ptr_ctrl、stream_id_map、task_state_update、task_rdy_check、retire、except_check） | [`ts.md`](ts.md) |
 | RV core ×3 | 每个一个模块：task_queue、指令执行器、dsa_iss、dsa_rq、lsq、CSR | [`rv-core.md`](rv-core.md) |
 | DTE DSA | Header Parser、Commit、TaskQueue ×4、Lane ×4、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | [`dte.md`](dte.md) |
 | MU DSA | regfile、issue_q、gen_ep_info、agu ×3 与 acu、ldq ×2、matrix exe、stq | [`mu.md`](mu.md) |
-| VU DSA | config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU ×3、VSFU、MEXE、SEXE、寄存器堆与 Profile | [`vu.md`](vu.md) |
+| VU DSA | config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU ×3、VSFU ×2、MEXE、SEXE、寄存器堆与 Profile | [`vu.md`](vu.md) |
 | 存储 | Core Mem、Matrix Mem、Share Mem | [`memory.md`](memory.md) |
+
+core MAS 的模块表还列了四个不单独成文档的模块：
+
+| 模块 | MAS 给的描述 | 在本套文档里的位置 |
+| - | - | - |
+| `Core_noc` | SCP 控制通路访问 Bach core 全局的路由模块 | 即 `ctrl_noc` 的 core 内端点，见《Core 内硬件》 |
+| `DTE xbar` | DTE 搬移数据的 xbar | 即 `DMA_XBAR`，接 Core Mem 与 Matrix Mem 各 256 B/T，见《Core 内硬件》与 [`dte.md`](dte.md) |
+| `Debug module` | — | 解析 DMI 操作，实现 core 内组件的 debug，见《系统与部署》 |
+| `Core_monitor` | — | MAS 未给描述，本套文档未建模 |
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1490 1068" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -81,7 +90,7 @@ Core 内七个单元，各一份文档：
   <text x="752" y="188.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 六个写口</text>
   <text x="752" y="202.0" font-size="8.5" fill="#475569">Task_ctrl：SKIP_MASK 一拍跳过 · 原子安装后继 · End task 不可跳</text>
   <text x="752" y="215.5" font-size="8.5" fill="#475569">DTE_Arb（reissue 最高）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
-  <text x="752" y="229.0" font-size="8.5" fill="#475569">Credit_monitor：注册 / 唤醒 / Head-only 退休</text>
+  <text x="752" y="229.0" font-size="8.5" fill="#475569">credit 子模块：注册 / 唤醒 · retire：Head-only 退休</text>
   <text x="752" y="242.5" font-size="8.5" fill="#475569">Task_done：七路完成合流，reduce 拆成 DTE ack 与 Router Done 两半</text>
   <text x="1368" y="297" font-size="8.5" fill="#9ca3af" text-anchor="end">四种工作模式由 CORE_TYPE 与 WEIGHTS_MODE 选定</text>
   <rect x="40" y="360" width="290" height="100" fill="#f8fafc" stroke="#374151" rx="4"/>
@@ -231,7 +240,7 @@ Core 内七个单元，各一份文档：
 | 编号 | 功能 |
 | - | - |
 | F1 | `good` 为真时构造七个单元的全部模块：Router 八个、TS 九个、三个 RV core、三个 DSA 的各模块、三块存储与 ctrl_noc 端点 |
-| F2 | `good` 为假时只构造 Router 的八个模块。CoreStation 永远不准入，ReduceModule 不累加，CoreMemCreditMonitor 空转，`coremem_credit` 上电默认 0 |
+| F2 | `good` 为假时只构造 Router 的八个模块。CoreStation 永远不准入，ReduceModule 不累加，CoreMemCreditMonitor 空转，`stream_credit` 上电默认 0 |
 | F3 | 按各单元文档声明的端口组把生产者的出口端口与消费者的入口端口对接；两侧只看到端口束的字段，不持有对方的类型，装配顺序不受构造顺序牵制 |
 | F4 | 把 Router 三个 RouterStation 的对外端口引到 `data_L` / `data_UD` / `data_R` |
 | F5 | 把 ctrl_noc 端点的入口引到 `cfg`，出口按 `addr_map` 接到各模块的 `cfg` 口 |

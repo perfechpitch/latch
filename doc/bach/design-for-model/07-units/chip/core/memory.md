@@ -281,7 +281,7 @@
   <rect x="300" y="760" width="1180" height="180" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="312" y="781" font-size="11" fill="#111827">scale 与 ECC</text>
   <text x="312" y="798" font-size="8.5" fill="#475569">Core Mem 的 scale : data 比例最大 1 : 32；MU / VU 访问 CM 按 132 B 读写，只访问 SRAM 部分时有效带宽 128 B；scale 读写使能拉高时同时读写对应地址的 scale 寄存器</text>
-  <text x="312" y="811.5" font-size="8.5" fill="#475569">byte_mask 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 byte_mask 机制</text>
+  <text x="312" y="811.5" font-size="8.5" fill="#475569">byte_mask 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 ECC 机制</text>
   <text x="312" y="825.0" font-size="8.5" fill="#475569">Core Mem 的 ECC 按 128 bit 一组，编解码在 SRAM 接口处处理（而非随数据到各访问源端口），能减少 8% 数据传输功耗，代价是面积增加</text>
   <text x="312" y="838.5" font-size="8.5" fill="#475569">Core Mem 的 ECC 1 bit 错用计数器计数（每读端口 1 个、DTE / MU / VU 读写各 1 个），可经 NOC 读取；2 bit 错报错</text>
   <text x="312" y="852.0" font-size="8.5" fill="#475569">Matrix Mem 的 SRAM 内部支持单 bit 自纠错：读出时检测到单 bit 错，纠错后在 SRAM 空闲时写回对应地址覆盖原有错误数据</text>
@@ -314,7 +314,7 @@
 | F12 | 六个 master 都按 valid/ready 握手，未获授权的请求原地保持，本模块不丢请求。同优先级的 master 在 bank 内按先到先得排队，不允许任何一个被长期饿死 |
 | F13 | 不增加 bank 冲突计数器 |
 | F14 | scale : data 比例最大 1 : 32。MU / VU 访问 CM 按 132 B 读写，只访问 SRAM 部分时有效带宽 128 B；scale 读写使能拉高时同时读写对应地址的 scale 寄存器 |
-| F15 | `byte_mask` 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 byte_mask 机制 |
+| F15 | `byte_mask` 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 ECC 机制 |
 | F16 | ECC 按 128 bit 一组，编解码在 SRAM 接口处处理而非随数据到各访问源端口 |
 | F17 | ECC 1 bit 错用计数器计数（每读端口 1 个、DTE / MU / VU 读写各 1 个），可经 NOC 读取；2 bit 错报错。本轮只留状态位与接口名 |
 | F18 | 按 `stream_num` 均等切分，单用户独占空间等于总容量除以 `stream_num`；分片的基址由 master 侧算好，本模块只看物理地址 |
@@ -332,6 +332,8 @@
 | F25 | 最大访存带宽 (8 + 1) KB/T（scale 模式；非 scale 模式最大 8 KB/T） |
 | F26 | 访问延迟：master 请求进 MM 到读出或 bvalid，50T 以内 |
 | F27 | 地址粒度 128 B，不支持按 Byte mask 读写 |
+| F27a | DTE 与 ctrl_noc 按 128 B 写入。顺序写会先写满前 8 个 SRAM，再写 9～16 个，最后两个 scale SRAM 一次只收得下 128 bit × 2 = 32 B，接口利用率掉下来 |
+| F27b | 改成循环写：把每个 SRAM（2048 × 128 bit）的深度按 512 拆成 4 组，轮流写，就能按 128 B 的带宽写满所有 SRAM。4608 个地址分成 9 组、每组深度 512，一次同时访问 8 个 128 bit 的 SRAM，合起来 128 B |
 | F28 | 各 master 的带宽与 lane 内延迟：DTE 读写各 256 B/T（写 9T、读 8T）；MU 只读 (8 + 1) KB/T（8T）；ctrl_noc 读写 4 B/T，地址对齐 128 B、数据粒度 4 B、burst len 最大 32 |
 | F29 | 硬约束：DTE、ctrl_noc、MU 三者不能出现两个 master 同时访问相同 bank；同时访问时只执行 MU 请求，并通过计数器记录报错 |
 | F30 | 被让路的那一笔**直接丢弃**并计一次数，硬件不重试。这是硬约束被违反的表现，不是正常工作点：软件排算子时就该保证三个 master 不会撞同一个 bank。模型遇到这一笔**直接断言失败**，不做等价的重试掩盖 —— 真硬件上丢一笔就是 DTE 少搬一段数据，而 DTE 没有重传通路，结果直接错 |

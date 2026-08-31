@@ -21,7 +21,7 @@ Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，�
 下游收不下有三种不同的原因，Router 用三层互不复用的 credit 分别管：
 
 * **VC Credit**：下游 VC Buffer 的空槽
-* **Stream 资源**：目标 core 的 Core Mem 空间
+* **stream credit**：目标 core 的 Core Mem 空间
 * **Reduce Credit**：下游 ReduceModule 的上下文
 
 展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、按任务类型分的走法、三类 credit 的管理方式、ReduceModule 与用户退休、坏核与 C2C Bridge。
@@ -83,7 +83,7 @@ Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，�
 <rect x="500" y="368" width="210" height="70" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="510" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">VU DSA</text>
 <text x="510" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">1024 bit/T</text>
-<text x="510" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">VALU0/1/2 · VSFU · LU / SU</text>
+<text x="510" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">VALU0/1/2 · VSFU ×2 · LU / SU</text>
 <text x="510" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">VRF / MRF / SRF</text>
 <rect x="740" y="268" width="210" height="70" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
 <text x="750" y="285" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#16181d" font-weight="700" text-anchor="start">DTE RV Core</text>
@@ -110,9 +110,9 @@ Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，�
 <text x="590" y="609" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" font-weight="700" text-anchor="middle">DTE Xbar（DMA_XBAR）　到 Core Mem / Matrix Mem 各 256 B/T</text>
 <rect x="260" y="660" width="690" height="70" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="270" y="677" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router　片上交换与归约中心</text>
-<text x="270" y="692" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 × 5 出 · ReduceModule · CoreMemCreditMonitor</text>
+<text x="270" y="692" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 7 出 · ReduceModule · CoreMemCreditMonitor</text>
 <text x="270" y="705" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每方向 256 B/T，进 core 与出 core 通路完全并行 · Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 16 KiB</text>
-<text x="270" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">两级流控：Stream 资源按 UserID + 方向，VC Credit 按 flit · 总缓存 72 KB × 3 = 216 KB，按 Packet 粒度仲裁</text>
+<text x="270" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">三层 credit：VC 按 flit · stream 按 UserID + 方向 · reduce 按 UserID　VC Buffer 100 flit/port ≈ 25 KB ×3，flit 级仲裁</text>
 <path d="M935 438 L935 660" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#keab)" marker-start="url(#keabs)" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="944" y="470" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">256 B/T ×2</text>
 <text x="944" y="482" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">进 / 出 core</text>

@@ -28,7 +28,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 
 三类 credit 互不复用，管的东西、粒度、维护方、扣还时机都不同：
 
-| | VC credit | Stream 资源（CoreMem credit） | Reduce credit |
+| | VC credit | stream credit（CoreMem credit） | Reduce credit |
 | - | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
 | 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID，flit |
@@ -60,7 +60,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
   <text x="208" y="101" font-size="11" fill="#111827">RouterStation[left]</text>
   <text x="208" y="118" font-size="8.5" fill="#475569">Header Parser：取 path_id · user_id · size</text>
   <text x="208" y="131.5" font-size="8.5" fill="#475569">　operation · directionMask · vc_id，查 RouterTable</text>
-  <text x="208" y="145.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 2 + shared pool 约 20 flit）</text>
+  <text x="208" y="145.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
   <text x="208" y="158.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
   <text x="208" y="172.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
   <text x="208" y="185.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
@@ -73,7 +73,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
   <text x="208" y="317" font-size="11" fill="#111827">RouterStation[right]</text>
   <text x="208" y="334" font-size="8.5" fill="#475569">Header Parser：取 path_id · user_id · size</text>
   <text x="208" y="347.5" font-size="8.5" fill="#475569">　operation · directionMask · vc_id，查 RouterTable</text>
-  <text x="208" y="361.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 2 + shared pool 约 20 flit）</text>
+  <text x="208" y="361.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
   <text x="208" y="374.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
   <text x="208" y="388.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
   <text x="208" y="401.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
@@ -86,7 +86,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
   <text x="208" y="533" font-size="11" fill="#111827">RouterStation[mid]</text>
   <text x="208" y="550" font-size="8.5" fill="#475569">Header Parser：取 path_id · user_id · size</text>
   <text x="208" y="563.5" font-size="8.5" fill="#475569">　operation · directionMask · vc_id，查 RouterTable</text>
-  <text x="208" y="577.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 2 + shared pool 约 20 flit）</text>
+  <text x="208" y="577.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
   <text x="208" y="590.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
   <text x="208" y="604.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
   <text x="208" y="617.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
@@ -206,7 +206,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
   <text x="792" y="848.5" font-size="8.5" fill="#475569">Retire 发出后 Router 上不得再出现以该 Core 为源或</text>
   <text x="792" y="862.0" font-size="8.5" fill="#475569">　目标的该用户包</text>
   <text x="792" y="875.5" font-size="8.5" fill="#475569">Router 的动作：停止该 UserID 的新发送，删除其全部</text>
-  <text x="792" y="889.0" font-size="8.5" fill="#475569">　Stream 资源授权表项</text>
+  <text x="792" y="889.0" font-size="8.5" fill="#475569">　stream credit 授权表项</text>
   <text x="792" y="902.5" font-size="8.5" fill="#475569">ReduceModule 的动作：延迟回收。先记录 Retire，待相邻</text>
   <text x="792" y="916.0" font-size="8.5" fill="#475569">　下游各方向的 Reduce credit 全恢复到初值才删映射</text>
   <text x="792" y="929.5" font-size="8.5" fill="#475569">本级 core 与所有下级出口的 release 经 core credit crossbar</text>
@@ -222,7 +222,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
   <text x="1142" y="889.0" font-size="8.5" fill="#475569">多个事件同时满足时按 StreamID 仲裁，选最老的通知 TS</text>
   <text x="1142" y="902.5" font-size="8.5" fill="#475569">进 core 重发的任务也注册到该队列</text>
   <text x="1142" y="916.0" font-size="8.5" fill="#475569">同一 VC 有未重发完的包时后续包不能提前发</text>
-  <text x="1142" y="929.5" font-size="8.5" fill="#475569">另输出 per-port 的 coremem_credit 给 core 与 DTE</text>
+  <text x="1142" y="929.5" font-size="8.5" fill="#475569">另输出 per-port 的 stream_credit 给 core 与 DTE</text>
   <text x="1458" y="993" font-size="8.5" fill="#9ca3af" text-anchor="end">出核前的资源监听在 Router，不在 TS</text>
   <polyline points="159,770 159,724 298,724 298,698" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
   <polyline points="350,770 350,738 886,738 886,698" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
@@ -253,7 +253,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
   <text x="126" y="1179" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
   <polyline points="200,1175 222,1175 222,1024 93,1024 93,1002" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
   <text x="232" y="1178" font-size="8.5" fill="#7c3aed" text-anchor="start">cfg 写事务 → RouterTable / CSR、Credit Bypass Route、各 Station 的静态配置</text>
-  <text x="20" y="1218" font-size="10.5" fill="#374151">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；Stream 资源管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
+  <text x="20" y="1218" font-size="10.5" fill="#374151">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；stream credit管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
   <text x="20" y="1240" font-size="10.5" fill="#374151">Reduce credit 管下游 ReduceModule 的上下文（DTE 管本级，ReduceModule 管相邻下游，Router 不维护）。</text>
 </svg>
 ```
@@ -273,8 +273,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F3 | VC 头部 flit 检查所有目标方向的资源：下游该 VC 的 credit、目标方向的 Stream 授权、要进 ReduceModule 时的 Reduce 准入 |
 | F4 | 多播要所有目标方向的资源同时到手，任一方向不足则整体等待，不允许各方向独立前进 |
 | F5 | 拿不到资源时按 `stallWay` 二选一：留在当前 VC 等，或把整包转进本地 Core Mem 由 DTE 重发 |
-| F6 | VC credit 分两级记账，与下游 VC Buffer 的分配规则一一对应：每个下游方向的每个 VC 一个 private 计数器上电值 2，另有每个下游方向一个 shared 计数器上电值 20。发送时 `private[o][v] > 0` 就扣 private，否则扣 `shared[o]`；两者都为 0 时该 VC 不能发 |
-| F7 | 一个方向的 credit 总量 = 4 × 2 + 20 = 28，正好等于下游该方向的 VC Buffer 容量，任何时刻都不会超发。上游不需要第二道反压信号，链路上也没有 ready |
+| F6 | VC credit 分两级记账，与下游 VC Buffer 的分配规则一一对应：每个下游方向的每个 VC 一个 private 计数器上电值 20，另有每个下游方向一个 shared 计数器上电值 20。发送时 `private[o][v] > 0` 就扣 private，否则扣 `shared[o]`；两者都为 0 时该 VC 不能发 |
+| F7 | 一个方向的 credit 总量 = 4 × 20 + 20 = 100，正好等于下游该方向的 VC Buffer 容量，任何时刻都不会超发。上游不需要第二道反压信号，链路上也没有 ready |
 | F8 | flit 离开下游 VC Buffer 就归还 VC credit，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 |
 | F9 | 归还按同一条规则回填：`private[o][v] < 2` 就补 private，否则补 `shared[o]`。下游也是先占 private 再借 shared、离开时对称释放，两边规则相同，计数因此不会漂移 |
 | F10 | credit 不足的 VC 被跳过，同一个 input port 的其他 VC 不受影响 |
@@ -301,7 +301,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 
 | 编号 | 功能 |
 | - | - |
-| F24 | 进 core 的三态准入：UserID 已分配则直接收；未分配但 Stream 资源表有空项则记录 UserID 占用后收；无空项时该 VC 不能向 Core 发数据，但 VC 有空项时仍可继续接收上游数据 |
+| F24 | 进 core 的三态准入：UserID 已分配则直接收；未分配但 stream credit 表有空项则记录 UserID 占用后收；无空项时该 VC 不能向 Core 发数据，但 VC 有空项时仍可继续接收上游数据 |
 | F25 | 已通过 Stream 检查，进 core 不再检查对 Core 方向的 VC credit，一定有 Core Mem 空间 |
 | F26 | Header 写入 HeaderFIFO，Payload 写入 OutputBuffer（in_core_fifo），两者保持同一包顺序与边界 |
 | F27 | Core 入口以整包为单位，不支持包间交织，必须发完一个整包再发下一个 |
@@ -332,8 +332,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F47 | Downstream Reduce Credit Map 按 UserID 加目标方向维护相邻下游的 Reduce credit，逐 flit 扣减、按 release 恢复 |
 | F48 | 整包发出后经 `rmem2ts_done_ch` 向 core 返回 UserID 与该包包头里的 `reduce_seq`。TS 只认这一路把 reduce task 置 FINISH，并按 `reduce_seq` 与 DTE 的那一半配对 |
 | F49 | 输入侧只有 VC credit 准入，`credit > 0` 即收；Reduce credit 是另一张网，与数据面分离 |
-| F50 | 表项的建与删：用户创建 Stream 资源时分配一个 entry 的 credit 数量；收到本级 core 该 UserID 的 Retire 且相邻下游各方向的 credit 全部恢复到分配数量后，才删掉这一项给其他用户用 |
-| F51 | 16 个用户上下文与进 core 的 Stream 资源表项**一一对应**，同为 16 项，同在用户创建 Stream 资源时占用、同在 Retire 时回收。因此不会出现 Stream 已授权而 ReduceModule 没有上下文的情况，反压只覆盖 SRAM、Bank 与计算单元三种暂时不可用，不必覆盖上下文耗尽 |
+| F50 | 表项的建与删：用户建 stream credit 表项时分配一个 entry 的 credit 数量；收到本级 core 该 UserID 的 Retire 且相邻下游各方向的 credit 全部恢复到分配数量后，才删掉这一项给其他用户用 |
+| F51 | 16 个用户上下文与进 core 的 stream credit 表项**一一对应**，同为 16 项，同在用户建 stream credit 表项时占用、同在 Retire 时回收。因此不会出现 Stream 已授权而 ReduceModule 没有上下文的情况，反压只覆盖 SRAM、Bank 与计算单元三种暂时不可用，不必覆盖上下文耗尽 |
 | F52 | 链上没有同步点：上游分量到达时不必等本 core 算完，先存进上下文，本地出核的分量出来时再加 |
 
 ### RouterTable / CSR
@@ -371,7 +371,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - |
 | F72 | ReduceModule 完成计算并发出全部包后向 Core 返回 UserID；Core 判定任务链结束后向 Router 和 ReduceModule 广播 User Retire |
 | F73 | Core 的保证：仅可在该 UserID 的全部进 core、出 core 数据搬运完成，且不会再发起新搬运之后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包 |
-| F74 | Router 的动作：停止该 UserID 的新发送，删除其全部 Stream 资源授权表项 |
+| F74 | Router 的动作：停止该 UserID 的新发送，删除其全部 stream credit 授权表项 |
 | F75 | ReduceModule 的动作是延迟回收，先记录 Retire，待相邻下游各方向的 Reduce credit 全部恢复到初始值后才删除对应用户映射 |
 | F76 | Stream credit 的回程：每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 |
 
@@ -386,8 +386,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F81 | 进 core 重发的任务也注册到该队列，数据进 Core、资源就绪后通知 TS 重发 |
 | F82 | 同一 VC 的数据包要保序，当前 VC 有未重发完的数据时后续包不能提前发送 |
 | F83 | 只有 Router 负责真正申请 Stream 表项。DTE 要发数据必须先从 Router 拿到指定 user 的授权，禁止超额分配或重复授权 |
-| F84 | Router 的进 core 表和 TS 内部的 Stream 资源表按完全一致的逻辑申请空项，分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收” |
-| F85 | 另输出 per-port 的 `coremem_credit` 同步信息给 core 与 DTE，用于判断重注入 |
+| F84 | Router 的进 core 表和 TS 内部的 stream credit 表按完全一致的逻辑申请空项，分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收” |
+| F85 | 另输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入 |
 
 ### VC 分配与更换
 
@@ -448,7 +448,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 port link[d] (双向, credit/release, clk)          // d ∈ {left, right, mid}：256 B/T，接相邻 core 的 Router 或 C2C Bridge
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
   in  credit_return_vld · credit_return_vc_id[1:0]        // VC credit 归还，共享总线，一拍最多一个 VC
-  in  stream_release_vld · stream_release_user[15:0]      // Stream 资源 release
+  in  stream_release_vld · stream_release_user[15:0]      // stream credit release
   in  reduce_release_vld · reduce_release_user[15:0]      // Reduce credit release
   out 同字段
 port in_core_data_ch (master, AXI-Stream-Like, clk)   // CoreStation → DTE：进 core 的整包
@@ -473,7 +473,7 @@ port ts2router_req (slave, valid/ready, clk)          // TS → CoreMemCreditMon
 port ts2router_retire (slave, valid/ready, clk)        // TS → Retire：用户退休与 credit 返还
   in  valid · user_id[15:0]
   out accepted                                            // 即 ready：Router 接收后 TS 才清 valid 并推进 head_ptr
-port coremem_credit (master, 电平, clk)               // per-port 的 Stream 资源同步信息，给 core 与 DTE
+port stream_credit (master, 电平, clk)               // per-port 的 stream credit 同步信息，给 core 与 DTE
   out credit_vld[2:0] · credit_user[2:0][15:0]
 port cmem_reissue (master, valid/ready, clk)          // CoreMem 重发与 Core Mem 之间的暂存读写，256 B
   out req_valid · req_we · req_addr[17:0] · req_wdata[2047:0]
@@ -715,7 +715,7 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="112" font-size="10.5" fill="#475569">2. 该 VC 的 private 未满就占 private，满了就占本方向的 shared pool</text>
   <text x="250" y="132" font-size="10.5" fill="#475569">3. head ? hdr_field = Parse(flit_msg) : 追加到该 VC 队尾</text>
   <text x="250" y="152" font-size="10.5" fill="#475569">4. 上游按同一条规则记 credit，因此这里不会出现两边都满还收到 flit</text>
-  <text x="250" y="176" font-size="10" fill="#9ca3af">private 2 flit 只归本 VC，shared 先到先得</text>
+  <text x="250" y="176" font-size="10" fill="#9ca3af">private 20 flit 只归本 VC，shared 先到先得</text>
   <line x1="188" y1="58" x2="228" y2="58" stroke="#475569" marker-end="url(#arr1)"/>
   <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#arr1)"/>
   <line x1="188" y1="183" x2="228" y2="183" stroke="#475569" marker-end="url(#arr1)"/>
@@ -1338,13 +1338,13 @@ RouterTable         64 条表项；字段含 directionMask（出）与 reduceInM
 VC                  每输入方向 4 类（VC0～3），输出方向不设 VC Buffer
                     VC3 专给逐级 reduce，VC0～2 支持除 reduce 外的操作、软件可配；4 这个数来自“最复杂场景下一个 Router 最多经过 4 条同向数据流”
 credit 记账单位      1 KB；广播一次扣的量含提前预留的输出结果空间（原文例：8 KB 广播 + 24 KB 输出 = 扣 32）
-VC Buffer           private 每 VC 深度 2（防死锁）加每方向一个 shared pool 20 flit（覆盖 credit 往返），一个方向合计 28 flit
+VC Buffer           private 每 VC 深度 20（覆盖 RTT，软件可配，防死锁下限 2）加每方向一个 shared pool 20 flit（覆盖 credit 往返），一个方向合计 100 flit ≈ 25 KB
                     private 那 2 flit 任何时候都只归本 VC，shared pool 先到先得。建模按这个结构建，不摊平成每 VC 一个独立深度
                     另一份口径：《通信机制（分析过程）》按容量记 —— reduce 专用 VC3 是 16 KB、三个共享 VC 各 8 KB、三方向各一套，
                     合计 (16 + 8×3) × 3 = 120 KB。两份口径未对齐，见第 8 章
 Stream Resource Table  每方向 16 项（待定）
 VC credit 初值      private 每 VC 2，shared 每方向 20；发送先扣 private 再扣 shared，归还先补 private 再补 shared
-                    一个方向的 credit 总量 4 × 2 + 20 = 28，等于下游该方向的 VC Buffer 容量，不超发，链路上不需要 ready
+                    一个方向的 credit 总量 4 × 20 + 20 = 100，等于下游该方向的 VC Buffer 容量，不超发，链路上不需要 ready
 Reduce 输入 / 输出   三路各 160 GB/s / 160 GB/s；算力 80 GFLOPS（FP32 / BF18）
 ReduceModule 上下文  16 用户 × 16 KiB；单个 Token 16 KB 这个下界来自“Core 必须一次性整包发进 ReduceBuffer，不能分段”
 ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度   64 flit、4、2、8（待定）
@@ -1420,7 +1420,7 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 监听事件队列 16 项全相连，按 StreamID 选最老通知 TS | F77～F80 | `credit_monitor_q` |
 | 进 core 重发的任务也注册到监听队列 | F81 | `reissue_register` |
 | Router 与 TS 的 Stream 表按一致逻辑分配，通知的包一定能被接收 | F84 | `stream_tab_consistent` |
-| per-port coremem_credit 同步给 core 与 DTE | F85 | `coremem_credit_sync` |
+| per-port stream_credit 同步给 core 与 DTE | F85 | `stream_credit_sync` |
 | VC3 专给逐级 reduce，VC0～2 软件可配 | F86、F87 | `vc_class_split` |
 | 三方向各一套独立 VC 与 credit | F88 | `vc_per_direction` |
 | 换 VC 靠改写包头，本跳写下一跳读 | F91、F92 | `vc_swap_in_header` |
@@ -1437,8 +1437,8 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 
 ## 9　取舍
 
-* **为什么把 VC credit 和 Stream 资源分成两层**
-  * 两者管的东西时间尺度差着数量级：VC credit 管下游 Router 的 buffer 槽位，flit 一进一出就归还；Stream 资源要等那个用户在下游 core 上跑完整条任务链才释放
+* **为什么把 VC credit 和 stream credit分成两层**
+  * 两者管的东西时间尺度差着数量级：VC credit 管下游 Router 的 buffer 槽位，flit 一进一出就归还；stream credit要等那个用户在下游 core 上跑完整条任务链才释放
   * 合成一层，快的那层会被慢的拖成一样慢
 * **为什么进 Core 之后不再查 VC credit**
   * Stream 检查已经保证目标 core 有 Core Mem 空间，再查一次是重复的资源判定

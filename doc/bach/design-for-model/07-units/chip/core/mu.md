@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **MU DSA**
 
-给实现 MU 的人：七个独立打拍的模块各自做哪些事、端口与存储怎么定。
+给实现 MU 的人：七个独立打拍的模块各自做哪些事、端口与存储怎么定。MU MAS 的模块表分八项（`config regfile`、`issue_q`、`gen_ep_info`、`agu`、`acu`、`ldq`、`matrix exe`、`stq`），本文档把 `agu` 与 `acu` 合在一节讲，其余一一对应。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -181,7 +181,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 
 一功能一条，编号供“机制覆盖”一章引用。
 
-### regfile
+### config regfile
 
 | 编号 | 功能 |
 | - | - |

@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **TS**
 
-给实现 TS 的人：九个独立打拍的模块各自做哪些事、端口与存储怎么定。
+给实现 TS 的人：各模块做哪些事、端口与存储怎么定。模块划分照 TS MAS，分两层——顶层九个，`Stream_table` 内再展开七个。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -23,7 +23,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 * **两张表**：`task_chain` 是静态的，说清这类 core 的操作流长什么样；`stream_table` 是运行时的，说清每个在途用户走到了哪一步
 * **四个动作**：新用户到了建表、判当前这一步的前置条件齐了没有、同一个执行单元有多个候选时选最老的、收到完成事件推进度并在链尾退休
 
-边界是五组接口：与 Router 的五组信号、与三个 RV core 的 task 下发与 ack、六路 DSA 与 RV core 的完成、ctrl_noc 的配置口、异常上报口。
+边界是五组接口：与 Router 的五组信号、与三个 RV core 的 task 下发与 ack、六路 DSA 与 RV core 的完成（MAS 的 `completion_ack[5:0]` 六个物理端口，Router 的 Reduce Done 另走 `rmem2ts_done_ch`，合起来是七路）、ctrl_noc 的配置口、异常上报口。
 
 四种工作模式由两个配置项选定，上电配好之后运行期间不变：
 
@@ -115,7 +115,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
   <text x="270" y="562.5" font-size="8.5" fill="#475569">Task LUT：按 task_id 查出下发属性</text>
   <text x="270" y="576.0" font-size="8.5" fill="#475569">软件侧属性另存：exe_dest · reduce_num · dsa_en</text>
   <rect x="618" y="430" width="430" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="630" y="451" font-size="11" fill="#111827">Credit_monitor</text>
+  <text x="630" y="451" font-size="11" fill="#111827">credit</text>
   <text x="630" y="468" font-size="8.5" fill="#475569">向 Router 注册资源申请：UserID · StreamID · TaskID · PathID</text>
   <text x="630" y="481.5" font-size="8.5" fill="#475569">收 Router 的 credit 到手通知，唤醒对应 task 置 READY</text>
   <text x="630" y="495.0" font-size="8.5" fill="#475569">credit 粒度是 stream 不是 task；同一 stream 的任务链里</text>
@@ -228,13 +228,24 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 
 ## 2　功能清单
 
+模块划分照 TS MAS 的两张表，分两层。下面的小节按这个划分组织。
+
+| 层 | 模块 |
+| - | - |
+| 顶层（九个） | `User_Match`、`CFG_REG`、`DataIn_task_table`、`Stream_table`、`Task_ctrl`、`DTE_Arb`、`MU_Arb`、`VU_Arb`、`Except Check` |
+| `Stream_table` 内（七个） | `user_LUT`、`ptr_ctrl`、`stream_id_map`、`task_state_update`、`task_rdy_check`、`retire`、`except_check` |
+| `task_state_update` 内（三个） | `task_ctrl`、`task_done`、`credit` |
+
+MAS 里的 `Credit_monitor` 标题划了删除线，已不再是独立模块：出核前的资源监听在 Router 的 `CoreMemCreditMonitor`，TS 这侧的 credit 处理落在 `task_state_update` 的 `credit` 子模块。`Task_ctrl` 与 `Except Check` 在 MAS 的两张表里各出现一次，顶层与子模块同名。
+
+
 一功能一条，编号供“机制覆盖”一章引用。
 
 ### CFG_REG
 
 | 编号 | 功能 |
 | - | - |
-| F1 | `task_chain` 最多 64 项，每项 64 bit，软件经 ctrl_noc 逐项写；每写一项硬件自动把该项的 `TASK_VALID` 置起来 |
+| F1 | `task_chain` 最多 64 项，每项 64 bit，软件经 ctrl_noc 逐项写；每写一项硬件自动把该项的 `TASK_VALID` 置起来。这张表是一条全序链，位域里没有前驱表也没有后继表，依赖信息只有数组下标 |
 | F2 | 表项位域：`TASK_PC`、`TASK_SEND_UNIT`（00=DTE / 01=MU / 10=VU）、`TASK_RECV_UNIT`（00=只调 RV core / 01=调 DSA / 10=DTE DSA 加 Router 的 Rmem）、`SELF_START`、`WAIT_WAKE`、`TASK_Broadcast_REISSUE`、`TASK_P2P_REISSUE`、`TASK_REDUCE`、`TASK_CREDIT_EN`、`TASK_EXE_MASK`、`TASK_PATH_ID`、`TASK_END`、`TASK_VALID` |
 | F3 | `DATAIN_TASK` 是独立的一项寄存器，只有 1 项、只能绑定 DTE，四个字段 `TASK_PC` / `TASK_UNIT` / `WEIGHTS_MODE` / `TASK_VALID` |
 | F4 | 其余配置项：`STREAM_NUM`（1～16）、`CORE_TYPE`、`B_CORE_DIRECTION`、`trigger_task_chain_en`、`TS_INIT_FINISH`、`TS_STATE`，另有按 `path_id` 索引的 `path_flowctl`（`flowctl_en` 加 `window_n`，见超前发送窗口一节） |
@@ -283,12 +294,26 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 | F32 | 异步 datain 提前完成表现为 `done_bitmap` 上某一位先亮而 `task_id` 还没走到那里 |
 | F33 | 当前 task 的属性摊平存在表项里（`task_unit`、`task_dsa_en`、`task_pc`、`is_reissue`、`end`），每次更新 `task_id` 时索引 `task_chain` 得到，随 `task_id` 一起被覆盖 |
 | F34 | `task_fsm` 五个状态：IDLE → WAIT → READY → INFLY → FINISH |
-| F35 | **六个写口**，按来源命名，固定优先级仲裁，每口一拍一笔，请求保持到 `accepted` 才算生效。优先级由高到低：<br>1 `retirement`（Task_done 侧，清 `valid` 并推 `head_ptr`）<br>2 `completion`（Task_done 的三条 Completion Lane）<br>3 `install`（Task_ctrl 生成后继，整项写）<br>4 `issue`（三条发射通路收到 ACCEPT 后改 `TASK_READY → TASK_INFLY`）<br>5 `credit_wake`（Credit_monitor 收到 credit 后置 `TASK_READY`）<br>6 `create`（User_Match 建表，整项写）<br>次序的依据是让表项先腾空再填新的：回收类写口排在生成类前面，`create` 排最后，队头卡住时不会因为新用户不断插队而饿死 |
+| F35 | **六个写口**，按来源命名，固定优先级仲裁，每口一拍一笔，请求保持到 `accepted` 才算生效。优先级由高到低：<br>1 `retirement`（Task_done 侧，清 `valid` 并推 `head_ptr`）<br>2 `completion`（Task_done 的三条 Completion Lane）<br>3 `install`（Task_ctrl 生成后继，整项写）<br>4 `issue`（三条发射通路收到 ACCEPT 后改 `TASK_READY → TASK_INFLY`）<br>5 `credit_wake`（`task_state_update` 的 `credit` 子模块收到 credit 后置 `TASK_READY`）<br>6 `create`（User_Match 建表，整项写）<br>次序的依据是让表项先腾空再填新的：回收类写口排在生成类前面，`create` 排最后，队头卡住时不会因为新用户不断插队而饿死 |
 | F36 | 写失败分两种：`create`、`install` 这类整项写入失败后要重读最新表内容再来；`issue` 这类只改一个字段的失败后只重试这一笔写，不能重新下发已经被 RV core 接收的任务 |
 | F37 | `completion` 口写两样东西，但改哪一样有条件：`done_bitmap[task_id]` 无条件置位；`task_fsm` **只有这一笔的 `task_id` 等于该 stream 当前的 `task_id` 时才改**。异步 datain 提前完成就落在这个分支上 —— 只亮一位，不动状态机 |
 | F38 | `credit_wake` 口除了把 `task_fsm` 置 `TASK_READY`，在这一笔 credit 对应的是一个已经建过表的老用户时，还要把该表项的 `reissue` 置起来 |
 
-### Task_ctrl
+### Stream_table 的七个子模块
+
+MAS 把 `Stream_table` 单独展开一张表。功能描述照 MAS 原文，`-` 表示 MAS 那一栏是空的。
+
+| 子模块 | MAS 给的功能描述 | 本文档对应的条目 |
+| - | - | - |
+| `user_LUT` | — | 建表时按 `user_id` 落项，见 F16～F22 |
+| `ptr_ctrl` | — | `head_ptr` 与 `tail_ptr` 的环形推进，见 F29 |
+| `stream_id_map` | 并行记录多用户的调度任务与执行状态：`task_id` 记当前执行到 `task_chain` 的哪一步，`task_fsm` 记这一步的状态，`done_flag` 记异步 datain 搬移完成的标志 | F30～F34 |
+| `task_state_update` | 按执行单元返回与 Router 的信息更新 task_state。MAS 注明「这只是方便理解抽象出的模块，重点是下面的子模块」：`task_ctrl` 生成 `next_task_id` 并更新 `task_fsm`、`task_done` 收 DSA 与 RV core 的完成标识、`credit` 检测下游 core 的 credit 满足后更新 `task_fsm` | F39～F48、F60～F83 |
+| `task_rdy_check` | 把 `task_fsm` 为 RDY 的用户送到 Task Iss 做发射仲裁 | F49～F52 |
+| `retire` | 检查 `task_finish` 的用户当前任务是不是 `task_end` | F84～F88 |
+| `except_check` | — | 与顶层的 `Except Check` 同名同责，见下一节 |
+
+### Task_ctrl（对应 `task_state_update` 的 `task_ctrl` 子模块）
 
 | 编号 | 功能 |
 | - | - |
@@ -301,7 +326,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 | F45 | 新任务的 `task_id`、`task_fsm`、`end` 与全部下发属性必须一起原子写入才算生成成功 |
 | F46 | 生成后的初始状态按类型分：普通 Generated 置 `TASK_READY`，DataIn 置 `TASK_WAIT` 等 ack，Reissue 置 `TASK_WAIT` 等 credit |
 | F47 | 就绪只有两个来源：前序任务都完成（`done_bitmap` 对应位拉高），以及 credit 到位（本任务不需要 credit，或需要的 credit 已经满足）。datain 任务是例外，被 Router trigger 后立即就绪 |
-| F48 | 异步 datain 搬运完成后只更新 `done_bitmap` 对应位，不推进 `task_id` |
+| F48 | 异步 datain 搬运完成后只更新 `done_bitmap` 对应位，不推进 `task_id`。datain 的执行时刻就是数据到达时刻，与主线走到哪无关：相对链序可以任意提前，也没有压着不搬、等主线走到这一步的机制，链上的位置只用来定点亮 `done_bitmap` 的第几位。数据晚到时停下来等的是主线，它卡在这一项的 `TASK_WAIT` 上，链上排在它后面的任务全部被挡住，不分需不需要这笔数据 |
 
 ### DTE_Arb
 
@@ -324,7 +349,10 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 | F58 | 三条发射通路各自独立打拍，同一拍可以并行下发 3 个 task |
 | F59 | RV core 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
 
-### Credit_monitor
+### credit（`task_state_update` 子模块）
+
+MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_update` 的 `credit` 子模块：检测 Router 送来的下游 core credit，满足后更新 `task_fsm`。
+
 
 | 编号 | 功能 |
 | - | - |
@@ -344,7 +372,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 | F73 | 广播任务的 `CreditCounter[path_id][stream_id]` 初值等于目的 core 数量，P2P 任务初值为 1；够则一次扣掉全部目的数再下发，不够就等 credit 释放 |
 | F74 | 坏核只按路由表透传，不检查 credit、不支持阻塞重发；上游要查的 credit 对应坏核之后那个好核 |
 
-### Task_done
+### task_done（`task_state_update` 子模块）
 
 | 编号 | 功能 |
 | - | - |
@@ -357,6 +385,16 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 | F81 | Router 不携带 `stream_id`，Task_done 内部按 `user_id` 找对应 Stream |
 | F82 | datain 任务的完成事件带的 `task_id` 就是 F27 查出来的那个 `t`，随 `task_cmd` 下发、由软件写进 DSA 的配置寄存器、再由 `dsa_done` 原样回来。`done_bitmap[t] = 1`，`task_id` 不推进 |
 | F83 | 异常检测：异步 task 本该执行 1 次完成却返回多次；RV core 或 DSA 返回非法的 `task_id` / `stream_id`；异步任务长时间没有收到外部 trigger；用户长时间未 retire；Router 请求携带的 `path_id` 在 task_chain 里匹配不到。异常经 `ts2corestatus_int_ch` 上报，本轮只留接口名与状态位 |
+
+### Except Check
+
+MAS 顶层模块表列的第九个模块：「负责检查在调度过程中出现的非法完成，超时等异常」。`Stream_table` 展开表里另有一个同名的 `except_check`，MAS 没给功能描述，两处指的是同一件事。
+
+| 编号 | 功能 |
+| - | - |
+| F83 | 三类异常，见 `task_done` 一节 |
+| F83a | datain 的 token 用 `path_id` 索引出的 `task_id` 如果不是 DTE 任务，算一种错误 |
+| F83b | 超时检测机制：异步任务长时间没有收到完成事件 |
 
 ### 自启动（B core 与 R core）
 
@@ -919,7 +957,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <rect x="232" y="20" width="371" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M8</text>
   <text x="589" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D6</text>
-  <text x="250" y="56" font-size="12" fill="#111827">Credit_monitor · 先还 credit 再清 valid</text>
+  <text x="250" y="56" font-size="12" fill="#111827">retire · 先还 credit 再清 valid</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 条件：i == head_ptr &amp;&amp; valid &amp;&amp; end &amp;&amp; task_fsm==FINISH</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. ts2router_retire = {valid=1, user_id}</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. accepted → stream_table[i].valid = 0；head_ptr += 1</text>
@@ -956,7 +994,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <rect x="232" y="20" width="406" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M9</text>
   <text x="624" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D2</text>
-  <text x="250" y="56" font-size="12" fill="#111827">Credit_monitor · 向 Router 要资源</text>
+  <text x="250" y="56" font-size="12" fill="#111827">credit · 向 Router 要资源</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. reduce task → 顺序连续下发 reduce_num 笔注册请求</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. ts2router_req = {user_id, stream_id, task_id, path_id}</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. req_ready=0 → 本笔保持，不发下一笔</text>
@@ -1020,6 +1058,7 @@ task 唤醒延迟        2～3 cycle（硬件目标值）
 | End task 即使已完成也不能跳，且不再生成后继 | F44 | `end_task_no_skip` |
 | 后继任务的全部字段一起原子写入 | F45 | `install_atomic` |
 | 异步 datain 只更新 done_bitmap，不推进 task_id | F48 | `datain_no_advance` |
+| datain 的执行时刻由数据到达定，不受链序推后；数据晚到时等的是主线 | F48 | `datain_timing` |
 | DTE 三类任务的优先级 | F50、F51 | `dte_arb_priority` |
 | 选中后非抢占保持到 raw ACCEPT | F52 | `non_preemptive` |
 | ACCEPT 后 Generated 提交 INFLY，DataIn 只出槽 | F53 | `accept_handling` |

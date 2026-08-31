@@ -76,6 +76,18 @@
 
 [LPU](07-units/lpu.md)　[链路](07-units/link.md)　[PCIe Switch](07-units/pcie-switch.md)　[片外桩](07-units/external-stub.md)　[Chip](07-units/chip/chip.md)　[Core](07-units/chip/core/core.md)　[Router](07-units/chip/core/router.md)　[TS](07-units/chip/core/ts.md)　[RV core](07-units/chip/core/rv-core.md)　[DTE DSA](07-units/chip/core/dte.md)　[MU DSA](07-units/chip/core/mu.md)　[VU DSA](07-units/chip/core/vu.md)　[存储子系统](07-units/chip/core/memory.md)
 
+**先看动画**：浏览器直接打开，每份四个场景 —— ① 硬件拓扑、② 场景与任务、③ 逐步执行、④ 每个模块的运行逻辑。右侧先用有序列表说清这一步做什么，再用统一的「收到 → 输出」列出信息传递：`源→目的　通道名　字段`，模块名与左图一一对应，内部模块写成 `TS.Stream_table`、`Router.ReduceModule` 这样的形式。
+
+* [`09-ts-工作细节.html`](09-ts-工作细节.html) —— 57 步，跟 `tp_nk` 切分下一个用户的 11 步任务链从建表走到退休，涵盖异步 datain、逐级 reduce 的两半完成、SKIP_MASK 一拍跳过、END task 与 head-only 退休。结构图照 `03-core-内硬件.md` 的 core 顶层结构与 `03-ts-任务调度器.md` 的 TS 模块组成图。
+
+Router 一个走法一份，图与逐步执行各自独立，八个模块的拓扑与运行逻辑五份共用同一套画法：
+
+* [`09-router-reduce-工作细节.html`](09-router-reduce-工作细节.html) —— 39 步。逐级 reduce：六级流水线、建上下文与读改写累加、`all_in` 收齐后回注 Xbar、DTE ack 与 Router Done 按 `reduce_seq` 配对。
+* [`09-router-broadcast-工作细节.html`](09-router-broadcast-工作细节.html) —— 38 步。一次搬运逐跳复制：`directionMask` 多位有效、`path_core_mask` 决定进不进本 core、全有或全无的准入、ST 阶段 1 到 N 复制、阻塞重传。
+* [`09-router-corein-工作细节.html`](09-router-corein-工作细节.html) —— 37 步。进 core 与出 core 两条并行通路：三态准入、HeaderFIFO 与 in_core_fifo、收满通知 TS、DTE 先申请资源再发整包。
+* [`09-router-reissue-工作细节.html`](09-router-reissue-工作细节.html) —— 36 步。`stallWay` 转存：RC 阶段按包判断、Bypass 拆成进 core 加出 core 两段、`overflow_reinject` 标记、同 VC 保序、重注入时才结账。
+* [`09-router-bypass-工作细节.html`](09-router-bypass-工作细节.html) —— 34 步。直通与 credit 旁路：VC credit 两级记账、坏核 Skip 直通、release 不查表不进 Xbar 只按 CSR 的静态方向 Mask 转发。
+
 **[文档缺口与 TBD](08-文档缺口与-TBD.md)**
 
 [口径冲突](<08-文档缺口与-TBD.md#口径冲突>)　[原始文档里标注为空缺或待定的内容](<08-文档缺口与-TBD.md#原始文档里标注为空缺或待定的内容>)　[引用了但本地没有的文档](<08-文档缺口与-TBD.md#引用了但本地没有的文档>)　[设计上仍未确定的问题](<08-文档缺口与-TBD.md#设计上仍未确定的问题>)

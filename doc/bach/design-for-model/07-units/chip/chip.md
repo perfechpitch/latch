@@ -216,7 +216,7 @@
 | 编号 | 功能 |
 | - | - |
 | F9 | boot 序列：自启动 → 完成 PCIe 链路训练 → 按 `harvest_mask` 给**全部 10 个 core 的 Router** 配 RouterTable、Skip Mask 与 Credit Bypass Route → 顺序解复位并配置 8 个好核的 TS、三个 RV core 与三个 DSA |
-| F10 | Router 那一段的上电顺序：PMU 退出 Idle 释放 core 时钟域复位 → 硬件读 fuse `core_bad_mask[9:0]`，`coremem_credit[port]` 置 0 → RouterTable 处于默认状态（**所有条目 bypass / no-op**），VC Buffer 硬件固定初始化 → SCP 经 ctrl_noc 配 RouterTable 与 VC 使能 mask → 正常 core 上电发初始化脉冲，`coremem_credit` 逐步初始化 → 就绪 |
+| F10 | Router 那一段的上电顺序：PMU 退出 Idle 释放 core 时钟域复位 → 硬件读 fuse `core_bad_mask[9:0]`，`stream_credit[port]` 置 0 → RouterTable 处于默认状态（**所有条目 bypass / no-op**），VC Buffer 硬件固定初始化 → SCP 经 ctrl_noc 配 RouterTable 与 VC 使能 mask → 正常 core 上电发初始化脉冲，`stream_credit` 逐步初始化 → 就绪 |
 | F11 | 被 Harvest 的 core，其 Router 的**数据通路可时钟门控，配置通路时钟保持**，对外表现为 Skip 模式 |
 | F12 | 坏核只配 Router 那两样，不配 TS、RV core、DSA，也不解复位它们（那几个模块本来就没构造）。漏掉坏核的 Router 会让经过它的 path 全断，因此这一步排在好核配置之前，全 10 个 core 一个不落 |
 | F13 | ctrl_noc 广播开关：关时依次配每个 core，开时只发一次带广播标记的请求给 core0，由 core0 依次广播；默认关 |
@@ -254,7 +254,7 @@
 | F35 | VC Buffer 按方向分档：TX 是 private 20 flit/VC × 4 = 80 加 shared 约 20，合计 100 flit ≈ 28.8 KB，覆盖本级 R2R 往返约 20 cycle；RX 是 private 20 flit/VC × 4 = 80 加 shared 约 300，合计 380 flit ≈ 109.4 KB，覆盖 PCIe 往返 600 ns @1024-bit。两向合计约 138.7 KB |
 | F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发 |
 | F37 | 跨 chip 时同步上下游的 Reduce credit，防止上游超发；release 的粒度是 flit，在 C2C 上压缩包数量后再传 |
-| F38 | 三类 credit 的 release 一律透传，Bridge 自身不建 Stream 资源表，也不参与 Reduce 累加 |
+| F38 | 三类 credit 的 release 一律透传，Bridge 自身不建 stream credit 表，也不参与 Reduce 累加 |
 | F39 | 三类 credit 可以共享同一个 AXI 传输包同步组包以提高效率，接收侧按分段还原。VC credit 在 Router 上是 flit 粒度，跨 C2C 要先转换成包粒度；业务层的两类本身就是包或 stream 粒度，不转换 |
 | F40 | 反向 AXI write 携带 `{vc_id, vc_type, credit_release_length, credit_release_user}`，用 side band 信息与正常数据包区分，经 Demux 分流后更新本地的 `credit_cnt[vc]` 或 credit user table |
 | F41 | 对着 PCIe Switch 或 CPU 的那一侧没有对端的 PCIe Bridge，硬件要能 **bypass 掉 Bridge 的业务层逻辑**，只保留位宽转换与拆包合包 |
@@ -353,7 +353,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="160" y="276" font-size="11" fill="#111827">RX Engine 拼包</text>
   <text x="20" y="352" font-size="10.5" fill="#374151">M1 每笔配置事务一拍，装载拍数按镜像字节数除以 4 B 计，与业务段用同一把尺。</text>
   <text x="20" y="380" font-size="10.5" fill="#374151">M6 的 300 拍是 PCIe C2C 的 300 ns；Router 到 Router 的 400 T 是这一段加两侧 Bridge 与走线的合计。</text>
-  <text x="20" y="408" font-size="10.5" fill="#374151">C2C Bridge 的 RC / VA / SA 与 core 内 Router 同一套逻辑，只是不建 Stream 资源表、不参与 Reduce 累加。</text>
+  <text x="20" y="408" font-size="10.5" fill="#374151">C2C Bridge 的 RC / VA / SA 与 core 内 Router 同一套逻辑，只是不建 stream credit 表、不参与 Reduce 累加。</text>
 </svg>
 ```
 
@@ -466,7 +466,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="78" font-size="10.5" fill="#475569">1. RC：按 path_id 查得出口方向与下一跳 VC</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. VA：查 c2c_credit[方向][VC] &gt; 0，跨 chip 另同步下游的 Reduce credit</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SA：同向的数据与 credit release 之间仲裁，小包优先</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 Stream 资源表，也不参与 Reduce 累加，三类 release 一律透传</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，三类 release 一律透传</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">反向按类型 demux 分流</text>
   <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arc3)"/>
   <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arc3)"/>
