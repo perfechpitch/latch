@@ -216,6 +216,80 @@
 
 ***
 
+## 上位机与 HBU 之间的收发软件
+
+```svg
+<svg viewBox="0 0 920 370" width="920" height="370" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="上位机与 HBU 之间的收发">
+<title>上位机与 HBU 之间的收发</title>
+<rect width="920" height="370" fill="#ffffff"/>
+<defs><marker id="a" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#6b7280"/></marker><marker id="as" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#6b7280"/></marker><marker id="ab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="abs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="ac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="acs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="ar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="ars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="am" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="ams" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker><marker id="ak" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#be123c"/></marker><marker id="aks" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#be123c"/></marker><marker id="an" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="ans" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker></defs>
+<text x="460.0" y="24" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="middle">上位机与 HBU 之间：收、发、credit 账本三条软件流程</text>
+<rect x="20" y="60" width="120" height="70" rx="7" fill="#eceef1" stroke="#6b7280" stroke-width="1.4"/>
+<text x="80.0" y="86.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#6b7280" font-weight="600" text-anchor="middle">GPU[g]</text>
+<text x="80.0" y="99.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">HBM buffer</text>
+<text x="80.0" y="112.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">window_remaining</text>
+<rect x="200" y="60" width="220" height="90" rx="7" fill="#e4ecfd" stroke="#2563eb" stroke-width="1.4"/>
+<text x="310.0" y="90.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#2563eb" font-weight="600" text-anchor="middle">SNIC / DPU：收</text>
+<text x="310.0" y="103.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">解 batch（或放 GPU 侧）</text>
+<text x="310.0" y="115.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">加 user_id：gpu_id · SNIC 信息 · 自增号</text>
+<text x="310.0" y="128.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">加 path_id（编译器定）· 协议转换</text>
+<rect x="470" y="60" width="120" height="70" rx="7" fill="#eceef1" stroke="#6b7280" stroke-width="1.4"/>
+<text x="530.0" y="92.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#6b7280" font-weight="600" text-anchor="middle">PCIe Switch</text>
+<text x="530.0" y="105.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">组播为可选项</text>
+<rect x="640" y="60" width="260" height="90" rx="7" fill="#dcf3f0" stroke="#0d9488" stroke-width="1.4"/>
+<text x="770.0" y="90.6" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="600" text-anchor="middle">HBU</text>
+<text x="770.0" y="103.1" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">Router → B core 的 Matrix Mem</text>
+<text x="770.0" y="115.6" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">R core 算完，Dataout DTE 发结果</text>
+<text x="770.0" y="128.1" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">写 {g, n_retired} 到 CQ shard</text>
+<rect x="200" y="210" width="220" height="100" rx="7" fill="#e4ecfd" stroke="#2563eb" stroke-width="1.4"/>
+<text x="310.0" y="245.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#2563eb" font-weight="600" text-anchor="middle">SNIC / DPU：发（方案 B）</text>
+<text x="310.0" y="257.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">HBU 写到 SNIC 可见空间，有反压</text>
+<text x="310.0" y="270.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">解析 HBU 包，按 gpu_id 构 RDMA Write WQE</text>
+<text x="310.0" y="282.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">写远端 GPU 后释放 credit</text>
+<rect x="470" y="210" width="430" height="100" rx="7" fill="#ede5fd" stroke="#7c3aed" stroke-width="1.4"/>
+<text x="685.0" y="239.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#7c3aed" font-weight="600" text-anchor="middle">slave CPU：credit 账本</text>
+<text x="685.0" y="251.7" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">Step0 冷启动：granted_pending[g] = K[g]，Σ K ≤ pool_total</text>
+<text x="685.0" y="264.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">Step2 收数：inflight_bach[g] += n，granted_pending[g] −= n</text>
+<text x="685.0" y="276.7" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">Step3 retire：轮询 CQ shard，inflight_bach[g] −= n_retired</text>
+<text x="685.0" y="289.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">Step4 refill：写 GPU 的 window_remaining（MMIO 或中断）</text>
+<path d="M140.0 95.0 L199.0 104.8" stroke="#6b7280" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="136.6" y="42.5" width="66.8" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="170" y="52" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" text-anchor="middle">RDMA Write</text>
+<path d="M420.0 105.0 L469.0 95.2" stroke="#6b7280" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M590.0 95.0 L639.0 104.8" stroke="#6b7280" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="588.1" y="78.5" width="53.8" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="615" y="88" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" text-anchor="middle">token 包</text>
+<path d="M666.0 150.0 L666.0 180.0 L440.0 180.0 L440.0 255.0 L421.0 255.0" stroke="#0d9488" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ac)"/>
+<rect x="492.7" y="166.5" width="120.6" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="553" y="176" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" text-anchor="middle">结果 12 KiB，经 PCIe</text>
+<path d="M200.0 255.0 L80.0 255.0 L80.0 131.0" stroke="#6b7280" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="107.2" y="240.5" width="65.5" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="140" y="250" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" text-anchor="middle">写 GPU HBM</text>
+<path d="M801.2 151.0 L801.0 209.0" stroke="#7c3aed" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#am)" marker-start="url(#ams)"/>
+<rect x="636.8" y="175.5" width="152.5" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="713" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#7c3aed" text-anchor="middle">CQ shard（DDR）· doorbell</text>
+<path d="M420.0 290.0 L469.0 290.0" stroke="#2563eb" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ab)"/>
+<rect x="409.4" y="274.5" width="70.2" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="444.5" y="284" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" text-anchor="middle">释放 credit</text>
+<path d="M599.0 310.0 L599.0 335.0 L40.0 335.0 L40.4 131.0" stroke="#7c3aed" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#am)"/>
+<rect x="277.8" y="321.5" width="84.4" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="320" y="331" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#7c3aed" text-anchor="middle">refill window</text>
+<text x="460" y="360" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="middle">两层 credit 的变量与门控在《软件栈》：1 credit = 1 token；PCIe Switch 组播时按最慢收端聚合后再回报 GPU。</text>
+</svg>
+```
+
+* 收（GPU → HBU）：DPU 的可编程流水线解 batch、加 user_id（gpu_id 由 QP 映射表查，带 SNIC 信息与自增号）、加编译器定的 path_id，协议转换后进 HBU 内部总线；CPU 不参与
+* 发（HBU → GPU）：选方案 B，DPU 转发。HBU 的 DTE 把结果写到 SNIC 的可见空间（不是 DDR，带宽不够），HBU 与 SNIC 之间要有反压；DPU 解析 HBU 包、按 gpu_id 构 RDMA Write WQE 写远端 GPU，完成后释放 credit。方案 A 由 SNIC 读 HBU 内数据，代价大，不做
+* credit 账本（slave CPU）：维护 pool_total、inflight_bach[g]、granted_pending[g]、pool_avail、每 GPU 的窗口 K[g]；retire 由 R core 的 Dataout DTE 写 CQ shard 并 doorbell，CPU 轮询 head / tail
+* 其他收发都要过协议转换
+  * CPU 给 HBU 发数据：CPU 加 HBU 包头作为 payload，发到 HBU 接 PCIe Switch 的 port 地址；不做性能要求
+  * HBU 给 DDR 发：软件包头带目的地址，协议转换模块丢掉包头写 DDR
+  * HBU 经 PCIe Switch 写另一个 HBU：R core 与 B core 之间传 credit，包头带目的 HBU 的 port 地址与专用帧格式指示符
+  * x32 是两个 x16 port：发送时软件包头地址高位 bit 选 port，其余地址位透传；接收侧硬件合并成一路
+* 本节待定：Bach 到 GPU 是否组 micro batch 后批量发、在哪组；path_id 路由到 PCIe 域地址的转换，软件包头里 PCIe offset 的位宽；DDR 带宽是否够（SNIC 50 GB/s 时 DDR 一写一读要 100 GB/s 以上）
+
+***
+
 ## SCP 系统软件
 
 ```svg
@@ -369,6 +443,116 @@
 | token 包 6368 B · 结果 12 KiB | GPU 侧 · core kernel | Router | PCIe msg 流 |
 | boot / launch 完成 · 故障 · 状态 | SCP | 上位机 | PCIe |
 | trace · PMU 计数 | core 内 SRAM | slave CPU 的 DDR，再到上位机 | 独立 noc 通道或复用 ctrl_noc，待定 |
+
+***
+
+## path_id 与其他编号
+
+```svg
+<svg viewBox="0 0 920 400" width="920" height="400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="path_id 的一生">
+<title>path_id 的一生</title>
+<rect width="920" height="400" fill="#ffffff"/>
+<defs><marker id="a" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#6b7280"/></marker><marker id="as" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#6b7280"/></marker><marker id="ab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="abs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="ac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="acs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="ar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="ars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="am" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="ams" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker><marker id="ak" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#be123c"/></marker><marker id="aks" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#be123c"/></marker><marker id="an" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="ans" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="8" markerHeight="7" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker></defs>
+<text x="460.0" y="24" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="middle">path_id：编译器分配，SCP 填表，之后全靠硬件按它查表</text>
+<rect x="20" y="60" width="200" height="70" rx="7" fill="#ede5fd" stroke="#7c3aed" stroke-width="1.4"/>
+<text x="120.0" y="86.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#7c3aed" font-weight="600" text-anchor="middle">编译器：分配 path_id</text>
+<text x="120.0" y="99.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">路由搜索，一条路一个号</text>
+<text x="120.0" y="112.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">写进 operator_routes.toml</text>
+<rect x="270" y="60" width="190" height="70" rx="7" fill="#fde4ea" stroke="#be123c" stroke-width="1.4"/>
+<text x="365.0" y="86.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#be123c" font-weight="600" text-anchor="middle">SCP：boot 期填表</text>
+<text x="365.0" y="99.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">三份 RouterTable 逐项写</text>
+<text x="365.0" y="112.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">坏核也写，不置 Core 位</text>
+<rect x="510" y="60" width="390" height="70" rx="7" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.4"/>
+<text x="705.0" y="86.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#16181d" font-weight="600" text-anchor="middle">每个 core 的 RouterTable[path_id]</text>
+<text x="705.0" y="99.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">同一个号在不同 core 的这一行内容不同</text>
+<text x="705.0" y="112.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">Router · DTE · ReduceModule 各持一份副本</text>
+<path d="M220.0 95.0 L269.0 95.0" stroke="#7c3aed" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#am)"/>
+<rect x="225.2" y="78.5" width="39.5" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="245" y="88" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#7c3aed" text-anchor="middle">路由表</text>
+<path d="M460.0 95.0 L509.0 95.0" stroke="#be123c" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ak)"/>
+<rect x="457.5" y="78.5" width="55.0" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="485" y="88" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#be123c" text-anchor="middle">ctrl_noc</text>
+<rect x="20" y="200" width="130" height="80" rx="7" fill="#e4ecfd" stroke="#2563eb" stroke-width="1.4"/>
+<text x="85.0" y="231.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#2563eb" font-weight="600" text-anchor="middle">DPU：写包头</text>
+<text x="85.0" y="244.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">path_id</text>
+<text x="85.0" y="257.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">path_core_mask</text>
+<rect x="180" y="200" width="120" height="80" rx="7" fill="#eceef1" stroke="#6b7280" stroke-width="1.4"/>
+<text x="240.0" y="231.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#6b7280" font-weight="600" text-anchor="middle">边界桥接</text>
+<text x="240.0" y="244.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">PCIe 地址 ↔</text>
+<text x="240.0" y="257.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">path_id 路由</text>
+<rect x="330" y="200" width="170" height="80" rx="7" fill="#dcf3f0" stroke="#0d9488" stroke-width="1.4"/>
+<text x="415.0" y="231.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#0d9488" font-weight="600" text-anchor="middle">Router</text>
+<text x="415.0" y="244.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">Header Parser 按它查表</text>
+<text x="415.0" y="257.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">分 VC · 选出口 · 进不进核</text>
+<rect x="530" y="200" width="170" height="80" rx="7" fill="#dcf3f0" stroke="#0d9488" stroke-width="1.4"/>
+<text x="615.0" y="225.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#0d9488" font-weight="600" text-anchor="middle">TS</text>
+<text x="615.0" y="237.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">path_task_map 找到任务</text>
+<text x="615.0" y="250.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">CreditCounter 按它扣</text>
+<text x="615.0" y="262.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" text-anchor="middle">资源注册带 PathID</text>
+<rect x="730" y="200" width="170" height="80" rx="7" fill="#dcf3f0" stroke="#0d9488" stroke-width="1.4"/>
+<text x="815.0" y="231.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#0d9488" font-weight="600" text-anchor="middle">DTE</text>
+<text x="815.0" y="244.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">lut 按 task_id 改写包头</text>
+<text x="815.0" y="257.2" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">PendingTaskQ 按它查资源</text>
+<rect x="330" y="320" width="170" height="54" rx="7" fill="#dcf3f0" stroke="#0d9488" stroke-width="1.4"/>
+<text x="415.0" y="344.7" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#0d9488" font-weight="600" text-anchor="middle">ReduceModule</text>
+<text x="415.0" y="357.7" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">reduce_in_mask 判收齐 · 定出口</text>
+<rect x="530" y="320" width="170" height="54" rx="7" fill="#dcf3f0" stroke="#0d9488" stroke-width="1.4"/>
+<text x="615.0" y="344.7" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#0d9488" font-weight="600" text-anchor="middle">CoreMem 重发</text>
+<text x="615.0" y="357.7" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" text-anchor="middle">只存 UserID · PathID · size</text>
+<path d="M150.0 240.0 L179.0 240.0" stroke="#6b7280" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M300.0 240.0 L329.0 240.0" stroke="#6b7280" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="271.7" y="182.5" width="86.5" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="315" y="192" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" text-anchor="middle">包头带 path_id</text>
+<path d="M500.0 240.0 L529.0 240.0" stroke="#0d9488" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ac)"/>
+<rect x="479.9" y="184.5" width="70.2" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="515" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" text-anchor="middle">datain 触发</text>
+<path d="M700.0 240.0 L729.0 240.0" stroke="#0d9488" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ac)"/>
+<rect x="690.4" y="184.5" width="49.2" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="715" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" text-anchor="middle">task_pc</text>
+<path d="M781.0 200.0 L781.0 165.0 L432.0 165.0 L432.0 199.0" stroke="#0d9488" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ac)"/>
+<rect x="540.0" y="151.5" width="131.9" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="606" y="161" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" text-anchor="middle">出核包，包头由 DTE 改写</text>
+<path d="M381.0 280.0 L381.0 319.0" stroke="#0d9488" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ac)"/>
+<rect x="359.2" y="290.5" width="59.7" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="389" y="300" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" text-anchor="middle">reduce 包</text>
+<path d="M466.0 280.0 L466.0 300.0 L581.0 300.0 L581.0 319.0" stroke="#0d9488" stroke-width="1.5" fill="none" stroke-linejoin="round" marker-end="url(#ac)"/>
+<rect x="567.8" y="286.5" width="144.5" height="13.5" rx="3" fill="#ffffff" opacity="0.95"/>
+<text x="640" y="296" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#0d9488" text-anchor="middle">资源不够转存，重发时重查表</text>
+<text x="460" y="392" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="middle">包里没有目的地址，硬件全靠 path_id 查表；软件只在两头碰它：编译器分配和填表，DTE 的 RV core 改包头。</text>
+</svg>
+```
+
+* path_id 是数据面唯一的路由键：包里没有目的地址，硬件全靠它查表。编号本身 8 bit 用 6 bit，不编码任何含义
+* 谁分配：编译器路由搜索时，一条 P2P、一棵广播树、一棵归约树各占一个；weights 加载专用 1 条；写进 `operator_routes.toml`。两个通信事务满足任一条就要换新号：R2R 路径有重叠但后续传播的节点不完全一致；在同一个 core 上做的操作不同
+* EP 广播用 path_id 配包头里 16 bit 的 path_core_mask：K 条 path_id 配 2^K 种 mask，每个 core 在自己的表项里用 `path_core_mask_idx` 指定看哪一位；按 dp10 / ep16 / pp3 试算共 55 条，64 项的表装得下
+* 它背后的信息在两侧
+  * 硬件侧是每个 core 的 RouterTable 里 path_id 那一行，同一个号在不同 core 内容不同：去向（`flow_dir`、`op_type`、`operation`）、VC（`cur_vc`、`nxt_vc`）、进不进核（`path_core_bypass` 或 mask 位）、流控（`stream_table_enable`、进核与各出方向的 credit 池与额度）、缓存与阻塞（`need_buffer`、`stall_way`）、归约（`reduce_in_mask`、输入输出精度）。三份副本，SCP 先写 Router，commit 完成后再写 DTE 与 ReduceModule 的
+  * 软件侧是编译器的一条路由请求：`kind`、`weight`、`sources`、`destinations`、`paired_path_id`、`is_synthetic`、`storage_destination`、`allowed_ep_merge_chips`；普通 reduce 自动拆成归约到 merge core 加 P2P 到存放 core 两条，后一条取 10000 加原号；求解后落成每个 core 的 `recv_mask / send_mask / local_inject / local_consume / enter_internal`
+* 硬件里谁用它
+  * 入口：DPU 把编译器定好的 path_id 写进包头；chip 边界的桥接模块在 PCIe 域地址与 path_id 之间转换
+  * Router：Header Parser 按它查表，RouterStation 按它分 VC，Xbar 按它选出口；C2C Bridge 里的简化 Router 同一套
+  * ReduceModule：按它查副本，拿 `reduce_in_mask` 判收齐，拿输出方向、VC 与精度发结果
+  * CoreMem 重发：转存只记 UserID、PathID、size，重发时重查表
+  * TS：Router 的 datain 触发带 path_id，`path_task_map[path_id]` 找到任务链哪一项；`CreditCounter[path_id][stream_id]` 扣 credit；向 Router 注册资源带 UserID、StreamID、TaskID、PathID；写 `TS_INIT_FINISH` 时查任务链里每个 path_id 在表里有有效项
+  * DTE：出核按 task_id 查 `lut` 得 `{path_id, size}` 改写包头；配好出核任务后先按 path_id 查资源，要 Stream 或 Reduce 资源的进 PendingTaskQ 等授权。DTE 只能改 path_id 与长度，改不了 path_core_mask
+  * SCP：boot 期逐项写三份表，坏核也写，坏核表项不置 Core 位，只按位置转发
+* 其他编号分三层记
+
+| 层 | 编号 | 谁分配 | 作用域 | 用在哪 |
+| - | - | - | - | - |
+| 全局身份 | user_id | 入口 DPU 按到达顺序编 | 全局，跟着包走 | Router 建 stream 表、三类 credit 记账、TS User_Match 认新老用户 |
+| 全局身份 | gpu_id · token_id | DPU 加包头 | 全局 | 结果发回哪个 GPU；token_id 每 GPU 自增；R core 按这两个定位 Matrix Mem |
+| 全局身份 | expert_id | 模型 | 全局专家号 | topK 表每项 {expert_id, weight}，MU 经 local_ep_table 换成本地序号 |
+| core 内身份 | stream_id | TS，新用户建表时占一个槽 | core 内 1～16 | 算该用户的 Core Mem 与 Share Mem 分区基址；DTE 文档叫 SlotID |
+| core 内身份 | local_user_id | core 内软件自己编 | core 内 | R core 的用户映射表与 Matrix Mem 地址；与 user_id 无换算关系 |
+| core 内身份 | task_id | 编译器排任务链时定 | 一条 task_chain 内，最多 64 | TS 推进任务、done_bitmap 对位、完成回报、DTE 的 lut 索引 |
+| core 内身份 | task_pack_id | 软件拆任务包时编 | 一个 DTE 任务内 | 包之间不保证顺序 |
+| 路由与链路 | path_id | 编译器 | 全局，每 core 一行表项 | 本节 |
+| 路由与链路 | vc_id | 路由表给下一跳 | 每条 link | 进哪个 VC buffer，credit 归还按它 |
+| 路由与链路 | core_id | 硬件固定，只读 | chip 内 0～9，row-major | weights 往哪落；编译器按物理号配路由表 |
+| 路由与链路 | 逻辑 core 号 | 编译器映射 | chip 内 0～7，8 是 EP 专用核 | kernel 里只见逻辑号 |
+| 路由与链路 | chip 坐标 | 拓扑文件 | (rack, chip_y, chip_x) | harvest mask、路由搜索；CTRL_NOC 另有 5 bit chip id 跨 chip 配置 |
+| 路由与链路 | seq_id | C2C Bridge 拆包时加 | 一个跨 chip 的包内，4 bit | 收端按它拼回原包 |
 
 ***
 
