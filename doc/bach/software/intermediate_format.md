@@ -2,7 +2,7 @@
 
 > **文档模式：** 规格。只给格式规则，不含动机与取舍。
 > **文档层级：** 详细实现。它只服务于 Bach 在 latch 上的重建这一件事。
-> **目的：** 给写生成侧（Python）与解析侧（C++）的实现者，定下这份文件的编码、记录类型、字段含义与校验规则。两侧按同一份规则编解码，任务表才是两边共用的同一份。
+> **目的：** 给写生成侧（Python）与解析侧（C++）的实现者，定下这份文件的编码、记录类型、字段含义与校验规则。两侧按同一份规则编解码，两边跑的才是同一份配置。
 > **后缀：** `.bachir`
 
 ***
@@ -14,10 +14,25 @@
 * 首行必须是版本行：
 
 ```
-BACHIR 5
+BACHIR 6
 ```
 
 * 版本号是单个整数，格式的任何变化都让它加一。解析器只接受它认识的那个版本号，不做向前或向后兼容
+* 第二行必须是档次行：
+
+```
+PROFILE cycle
+```
+
+* 取 `task_level` 或 `cycle`，一份文件只属于一档：
+
+| 取值 | 这一档的模型怎么读 |
+| --- | --- |
+| `task_level` | 每个 core 的活按任务序列给，单元的执行时间直接写在任务行上 |
+| `cycle` | 每个 core 的活按硬件寄存器的取值给，执行时间由模型逐拍算出 |
+
+* 两档各自要哪些记录、不许出现哪些记录，见“必需记录”与“两档各自的记录集”两节
+* 大块数据不写进这份文件：kernel 镜像、权重分片、注入表与期望输出各自是独立的二进制文件，本文件只登记它们的路径与形状
 * 空行忽略，以 `#` 开头的行是注释，忽略
 * 字段不含空格。唯一的例外是 `META` 记录的值，它吃到行尾，可以含空格
 * 数值一律十进制整数，可带负号。格式里没有浮点：
@@ -90,9 +105,61 @@ CORE <core_id> <group_id> <core_type>
   * 上游给该核开的 credit 额度
   * 直接驱动它的 Host 的 credit 容量
 
+### 3.3 `GRID`
+
+```
+GRID <chip_id> <tray> <layer> <col>
+```
+
+* `cycle` 档每个 chip 一条，`task_level` 档不写
+* 全局坐标由三个字段算出：`gy = tray × 4 + layer`，`gx = col`。`gy` 是全局行、`gx` 是全局列，与 `TASK` 行的 `dst_row` / `dst_col` 同一套坐标
+* `(gx, gy)` 不重复
+
+### 3.4 `HARVEST`
+
+```
+HARVEST <chip_id> <mask>
+```
+
+* `cycle` 档每个 chip 一条，`task_level` 档不写
+* `mask` 是片内坏核位图的十进制值，第 i 位为 1 表示片内第 i 个 core 是坏核
+* 每 chip 至多 2 个坏核；`gx ∈ {0, 3}` 的 chip 至多 1 个
+* 坏核不写 `CORE` 记录：它只构造 Router，不领任务
+
+### 3.5 `LOGICAL`
+
+```
+LOGICAL <core_id> <logical_core>
+```
+
+* `cycle` 档每个好核一条，`task_level` 档不写
+* `logical_core` 取 0～8。同一 chip 内 0～7 各出现一次，8 只在 `gx ∈ {0, 3}` 的 chip 上出现
+* `logical_core` 为 8 的核，它的 `CORE` 记录里 `core_type` 是 `BROADCAST` 或 `REDUCTION`；0～7 是 `NORMAL`
+
+### 3.6 `SPLIT`
+
+```
+SPLIT <ep> <tp> <pp> <dp> <mode> <gpu_num> <batch>
+```
+
+* `cycle` 档恰好一条，`task_level` 档不写
+* `mode` 取 `EPTP_NN`、`EPTP_NK`、`PPTP_NN`、`PPTP_NK` 之一，是四种 core 级切分方式
+
+### 3.7 `ENTRYEXIT`
+
+```
+ENTRYEXIT <in_gx> <in_gy> <out_gx> <out_gy>
+```
+
+* `cycle` 档恰好一条，`task_level` 档不写
+* 两组坐标是 chip 的全局坐标：外部数据从 `(in_gx, in_gy)` 那颗 chip 的西侧进，结果从 `(out_gx, out_gy)` 那颗 chip 的东侧出
+* 权重注入按“最远路径优先”排序时以进口那颗 chip 为起点
+
 ***
 
 ## 4. 任务表
+
+本章的记录只属 `task_level` 档。
 
 ### 4.1 `TASK`
 
@@ -383,7 +450,7 @@ ETHMODE  <boundary> <phase2_ingress> <inject_host> <result_bridge>
 
 ## 6. MoE 与预生成的随机决策
 
-生成侧把 MoE 的分发结果与动态 HitMap 全部算完写进文件，解析侧按 uid 查表。随机数发生器不在解析侧复现。
+本章的记录只属 `task_level` 档。生成侧把 MoE 的分发结果与动态 HitMap 全部算完写进文件，解析侧按 uid 查表。随机数发生器不在解析侧复现。
 
 ### 6.1 `EPGROUP`
 
@@ -480,18 +547,174 @@ DHITMAP <uid> <layer_id> <core_id> [group_id...]
 
 ***
 
-## 7. 解析规则
+## 7. 每 core 的硬件配置
 
-### 7.1 顺序无关
+本章的记录只属 `cycle` 档，给出 boot 期经 ctrl_noc 写进各 core 的全部配置。每条记录的 `core_id` 是全局编号，都必须有对应的 `CORE` 记录：坏核只构造 Router，不领配置，因此不写本章任何记录。
+
+字段一律按名字给值，不按寄存器位打包。位域怎么摆、写哪个地址，由解析侧按寄存器映射决定。
+
+### 7.1 方向的位序
+
+出方向的位序照 DATA_NOC HAS 的 `Flow dir`：
+
+| bit | 方向 |
+| --- | --- |
+| 0 | 上下（mid） |
+| 1 | 左 |
+| 2 | 右 |
+| 3 | reduce1 |
+| 4 | reduce2 |
+
+**进本 core 不占方向位**，它由 `path_core_mask_enable` 与 `path_core_bypass` 单独判定：
+
+```
+进核 = path_core_mask_enable ? path_core_mask 的第 path_core_mask_idx 位 : !path_core_bypass
+```
+
+只涉及三个 R2R 方向的字段用低三位。
+
+### 7.2 Router 的三张表
+
+```
+RTAB <core_id> <path_id> <op_type> <flow_dir> <cur_vc> <nxt_vc> <path_core_mask_enable> <path_core_mask_idx> <path_core_bypass> <need_buffer> <stream_table_enable> <cur_credit_type> <cur_credit_require> <nxt_credit_type> <nxt_credit_require> <reduce_data_type> <reduce_outdata_type> <reduce_in_mask> <operation> <stall_way>
+SKIPMASK <core_id> <mask>
+CREDITBYPASS <core_id> <in_port> <out_mask>
+```
+
+`RTAB` 一条是 RouterTable 的一个表项，按 `path_id` 索引，每 core 最多 64 条。同一个 `path_id` 在不同 core 上表项不同，所以每 core 各写各的，解析侧不从拓扑反推。
+
+字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`：
+
+| 字段 | 位宽 | 出处 | 含义 |
+| --- | --- | --- | --- |
+| `path_id` | 6 | 两者 | 表项下标，0～63 |
+| `op_type` | 2 | HAS | 0 kernel / weight 搬运、1 transfer、2 reduce、3 reduce_twice。0 那一档的包进 core 时跳过 TS 直接唤醒 DTE |
+| `flow_dir` | 5 | HAS | 出方向掩码，按上面的位序。单个有效位是单播，多个有效位是多播 |
+| `cur_vc` | 2 | MAS | 包进入本 Router 时用的 VC，给上一级无法指定 VC 的入口用 |
+| `nxt_vc` | 10 | MAS | 五个出方向各 2 bit，第 i 个方向占 bit[2i+1:2i]。相互依赖的流不排进同一个 VC |
+| `path_core_mask_enable` | 1 | HAS | 0 时按 `path_core_bypass` 判进核，1 时按 MSG 里 `path_core_mask` 的第 `path_core_mask_idx` 位 |
+| `path_core_mask_idx` | 4 | HAS | 看 `path_core_mask` 的哪一位。位到 core 的对应由每个 core 自己指定，不是固定编码 |
+| `path_core_bypass` | 1 | HAS | **0 进 core，1 bypass** |
+| `need_buffer` | 1 | HAS | 这条 path 允许进 core 缓存，后续由 DTE 重发 |
+| `stream_table_enable` | 1 | HAS | 这个包要不要查对应输出端的 stream credit table |
+| `cur_credit_type` | 1 | HAS | 进核占用的 credit 池：0 broadcast 走 vc0，1 P2P 走 vc1 |
+| `cur_credit_require` | 6 | Top 模拟器详设 | 进核占用额度，语义是上游已拨给本核的额度，不是再向下游申请 |
+| `nxt_credit_type` | 3 | HAS | 三个 R2R 方向各一位，取值同 `cur_credit_type` |
+| `nxt_credit_require` | 18 | Top 模拟器详设 | 三个 R2R 方向各 6 bit，第 i 个方向占 bit[6i+5:6i]。某方向为 0 表示该方向不查 credit，只受链路反压 |
+| `reduce_data_type` | 3 | HAS | reduce 计算的输入精度，0 BF16、1 FP32 |
+| `reduce_outdata_type` | 1 | HAS | reduce 输出精度，0 BF16、1 FP32。中间累加固定 FP32 |
+| `reduce_in_mask` | 3 | 见下 | 这条 path 在本级会有哪几个相邻方向送来分量 |
+| `operation` | 2 | MAS | 本级在这条 path 上的角色：0 普通转发、1 Reduce0、2 Reduce1、3 Reduce2 |
+| `stall_way` | 1 | MAS | 0 留在当前 VC 等，1 转 Core Mem 暂存由 DTE 重发 |
+
+`flow_dir` 与 `reduce_in_mask` 一个管出一个管进：前者是这条 path 从本级往哪几个方向发，后者是这条 path 在本级要等哪几个相邻方向的分量。`reduce_in_mask` 的取法是纯拓扑推导：在这条 path 的图上，把本核作为下一跳、且操作是 reduce 的那些相邻核，它们所在的方向置位。出分量的源核填 0，坏核与纯透传的中继核也填 0。
+
+**待确认**：`reduce_in_mask` 与 `operation` 的三档 reduce 取值，两张权威表都没有。前者是逐级归约判断收齐所必需的，后者的 Reduce0 / Reduce1 / Reduce2 含义原始文档未定义，本格式按源分量 / 中继累加 / 最终汇聚给。
+
+`SKIPMASK` 每个好核一条，`mask` 是本 chip 的坏核位图，与该 chip 的 `HARVEST` 取值相同。它与 RouterTable 分开配。
+
+`CREDITBYPASS` 每个业务 credit 输入端口一条：`in_port` 取 `MID`、`LEFT`、`RIGHT` 之一，`out_mask` 用五位的位序，给出这个口收到的 credit 静态转发到哪些方向。
+
+### 7.3 TS 的七张表
+
+```
+CFGMISC     <core_id> <stream_num> <b_core_dir> <trigger_task_chain_en>
+TASKCHAIN   <core_id> <task_id> <send_unit> <recv_unit> <task_pc> <self_start> <wait_wake> <b_reissue> <p2p_reissue> <reduce> <credit_en> <exe_mask> <path_id> <end>
+TASKSW      <core_id> <task_id> <exe_dest> <reduce_num> <dsa_en>
+PATHTASK    <core_id> <path_id> <task_id>
+PATHFLOW    <core_id> <path_id> <flowctl_en> <window_n>
+DATAINTASK  <core_id> <task_pc> <weights_mode>
+CREDITINIT  <core_id> <path_id> <stream_id> <init>
+```
+
+`CFGMISC` 每核一条：`stream_num` 取 1～16，`b_core_dir` 是 `B_CORE_DIRECTION` 的七位方向掩码，`trigger_task_chain_en` 取 0 或 1。这条记录不重复给 `core_type`，它在 `CORE` 记录里。
+
+`TASKCHAIN` 一条是任务链的一项，每核最多 64 条，`task_id` 从 0 开始连续。`TASK_VALID` 不写进文件：硬件在软件写一项时自动置位。
+
+| 字段 | 取值 | 含义 |
+| --- | --- | --- |
+| `send_unit` | `DTE`、`MU`、`VU` | 派给哪个单元 |
+| `recv_unit` | `RV`、`DSA`、`RMEM` | `RV` 只调 RV core，`DSA` 调 DSA，`RMEM` 是 DTE DSA 加 Router 的 Rmem |
+| `task_pc` | 整数 | kernel 入口地址，在该角色的 `TASKPC` 表里有对应项 |
+| `self_start` | 0 / 1 | 复位后直接自启动，只有 B core 与 R core 用 |
+| `wait_wake` | 0 / 1 | 建表时不就绪，等唤醒 |
+| `b_reissue` | 0 / 1 | 广播重发任务 |
+| `p2p_reissue` | 0 / 1 | P2P 重发任务 |
+| `reduce` | 0 / 1 | 逐级 reduce 任务，完成要等 Router 的 reduce_done |
+| `credit_en` | 0 / 1 | 出核前要验资 |
+| `exe_mask` | 0 / 1 | 1 = 这个 task 不按用户区分，所有用户都做；0 = 只有 `compute` 为 1 的用户做 |
+| `path_id` | 整数 | 这一项绑定的 path，不绑时写 `-1` |
+| `end` | 0 / 1 | 任务链的最后一项，一条链上只能有一项 |
+
+`TASKSW` 给硬件位域里没有的三个软件侧属性，与 `TASKCHAIN` 一一对应：`exe_dest` 是执行去向，`reduce_num` 是这一项要收几个分量，`dsa_en` 取 0 或 1。
+
+`PATHTASK` 把 `path_id` 翻译成任务链上的第几项。一个 `path_id` 在一个 core 上最多一条，`task_id` 指回的那一项其 `path_id` 必须等于本条的 `path_id`。
+
+`PATHFLOW` 是超前发送窗口，按 `path_id` 索引：`flowctl_en` 取 0 或 1，`window_n` 是超前几个用户。不写这条记录等于不开。这张表配在 TS 还是 RouterTable，原始设计未指明，本格式按配在 TS 给。
+
+`DATAINTASK` 每核至多一条。`TASK_UNIT` 恒为 DTE，不写进文件。`weights_mode` 取 0 或 1。
+
+`CREDITINIT` 每 `{path_id, stream_id}` 一条：广播任务的 `init` 等于目的 core 数量，P2P 任务是 1。
+
+### 7.4 DSA 与 Core Mem 的五张表
+
+```
+DTELUT   <core_id> <task_id> <path_id> <size>
+MUEP     <core_id> <slot> <expert_id>
+VUSTATIC <core_id> <cfg_idx> <reg_off> <value>
+CMEMPART <core_id> <stream_base> <stream_stride> <scale_base> <topk_base> <header_base> <reissue_base> <reissue_pkts_per_vc>
+CMEMP2P  <core_id> <dir> <base> <entries>
+```
+
+`DTELUT` 是硬件包头的静态部分，按 `task_id` 索引，每核最多 64 条。两个字段就是软件文档里说的 `path_id_table` 与 `task_len_table`，不是两张独立的表。动态部分 `path_core_mask` 由 DTE core 在运行期配，不进文件。
+
+`MUEP` 是本 core 所在 EP Group 内的专家清单：`slot` 是组内序号，`expert_id` 是全局专家号。只有 `core_type` 为 `NORMAL` 的核写这张表。
+
+`VUSTATIC` 按寄存器偏移逐个给静态模板的取值：`cfg_idx` 取 0～7 选哪一组，`reg_off` 是组内字节偏移，该组的绝对地址是 `cfg_idx × 0x100 + 0x1000 + reg_off`。没写到的偏移取 0。
+
+`CMEMPART` 每核一条，给 Core Mem 的分区。各分区互不重叠且都落在 Core Mem 的 1 MB 之内，用不上的分区基址写 `-1`。`reissue_pkts_per_vc` 是溢流重发暂存区每 VC 留几个整包，`stall_way` 选转存的 path 要求它不为 0。
+
+`CMEMP2P` 是 P2P 阻塞缓冲，一个方向一条，最多三条：`dir` 取 `MID`、`LEFT`、`RIGHT` 之一。这一档是可选的，不开就不写。
+
+***
+
+## 8. 外部数据
+
+本章的记录只属 `cycle` 档。四类大块数据各自是独立文件，本章只登记路径与形状。路径相对于这份 `.bachir` 文件所在的目录。
+
+```
+KERNEL  <core_type> <itcm_file> <dtcm_file>
+TASKPC  <core_type> <task_id> <entry_addr>
+WEIGHT  <core_id> <file> <mmem_addr>
+INJECT  <file> <token_num> <payload_bytes>
+EXPECT  <file> <token_num> <token_bytes>
+```
+
+`KERNEL` 每类 core 一条，`core_type` 取 `NORMAL`、`BROADCAST`、`REDUCTION` 之一。两个文件是该角色 RV32 ELF 的代码段与数据段镜像，boot 期分别装进 ITCM 与 DTCM。
+
+`TASKPC` 把任务链每一项的 `task_pc` 指到该角色 kernel 的一个入口地址，每类 core 最多 64 条。
+
+`WEIGHT` 每个好核一条，`file` 是该核的权重分片，`mmem_addr` 是它落 Matrix Mem 的起始地址。
+
+`INJECT` 恰好一条。注入表是定长记录的二进制文件，每条 `{inject_cycle 4 B, gpu_id 1 B, token_id 2 B, payload}`，`payload_bytes` 给出 payload 长度。
+
+`EXPECT` 恰好一条。期望输出是定长记录的二进制文件，每条 `token_bytes` 字节，按 token 顺序排。它由参考实现按与模型完全同一套累加顺序算出。
+
+***
+
+## 9. 解析规则
+
+### 9.1 顺序无关
 
 * 除首行版本行外，记录之间顺序无关
 * 解析分两遍：第一遍读入全部记录，第二遍做校验
 
-### 7.2 遇到不认识的就停
+### 9.2 遇到不认识的就停
 
 一律报错退出：
 
 * 未定义的记录标签
+* 记录标签不属于本文件声明的那一档
 * 未定义的 `PARAM` 名字
 * 未定义的 `TMETA` key
 * 未定义的枚举取值
@@ -501,15 +724,29 @@ DHITMAP <uid> <layer_id> <core_id> [group_id...]
 
 `META` 的 key 是唯一的例外。
 
-### 7.3 必需记录
+### 9.3 必需记录
 
+两档共用：
+
+* `PROFILE` 恰好一条，在版本行的下一行
 * `DIM` 恰好一条
-* `TOTALUSERS` 恰好一条
 * 至少一条 `CORE`
 * 至少一条 `EXTNODE`
+
+`task_level` 档另要：
+
+* `TOTALUSERS` 恰好一条
 * 至少一条 `USER`
 
-### 7.4 引用完整性
+`cycle` 档另要：
+
+* `SPLIT` 与 `ENTRYEXIT` 各恰好一条
+* 每个 chip 一条 `GRID`、一条 `HARVEST`
+* 每个好核一条 `LOGICAL`、一条 `CFGMISC`、一条 `CMEMPART`、一条 `WEIGHT`
+* `INJECT` 与 `EXPECT` 各恰好一条
+* 每个出现过的 `core_type` 一条 `KERNEL`
+
+### 9.4 引用完整性
 
 第二遍校验这些。
 
@@ -554,9 +791,48 @@ Phase1 与以太网：
 
 不在这一层查的：端口有没有真接过线，以及一条路由的出口落在哪。这两项要等装配期拿到实际拓扑才查得了。
 
+`cycle` 档另查这些。
+
+每 core 的配置：
+
+* 第 7 章与第 8 章每条记录的 `core_id` 都有对应的 `CORE` 记录。坏核不出现在这两章的任何记录里
+* 每个 core 的 `TASKCHAIN` 的 `task_id` 从 0 开始连续，不重复；一条链上 `end` 恰好一项，`self_start` 至多一项，且只有 `core_type` 不是 `NORMAL` 的核才允许有
+* 每条 `TASKSW` 与 `DTELUT` 的 `(core_id, task_id)` 有对应的 `TASKCHAIN`
+* 每条 `TASKCHAIN` 里 `path_id` 不为 `-1` 的项，本 core 有对应的 `PATHTASK`，且该 `PATHTASK` 的 `task_id` 指回这一项
+* 每条 `PATHFLOW` 与 `CREDITINIT` 的 `path_id`，本 core 有对应的 `RTAB`
+* 每条 `RTAB` 里 `stall_way` 为 1 的表项，本 core 的 `TASKCHAIN` 有对应的 reissue 任务，且 `CMEMPART` 的 `reissue_pkts_per_vc` 不为 0
+* 每条 `CMEMPART` 里基址不为 `-1` 的分区互不重叠，都落在 Core Mem 的 1 MB 之内
+* 坏核的 `RTAB` 不置 core 位、`stream_need_mask` 全不置位、`stall_way` 只能是 0
+
+拓扑与部署：
+
+* `GRID` 覆盖每个 chip，`(gx, gy)` 不重复
+* 每个 chip 的 `HARVEST` 坏核数不超过 2，`gx ∈ {0, 3}` 的 chip 不超过 1
+* 每个 chip 的 `LOGICAL` 覆盖该 chip 的全部好核，逻辑编号从 0 开始连续、不重复；`core_type` 不是 `NORMAL` 的核占最大的那个逻辑编号，且只在 `gx ∈ {0, 3}` 的 chip 上出现
+
+外部数据：
+
+* 每条 `TASKPC` 的 `core_type` 有对应的 `KERNEL`
+* 每条 `TASKCHAIN` 的 `task_pc`，在本核 `core_type` 那一份 `TASKPC` 表里有对应的 `entry_addr`
+* `INJECT` 与 `EXPECT` 的 `token_num` 相等
+* 五种外部文件都存在且长度与登记的形状相符
+
+### 9.5 两档各自的记录集
+
+记录标签出现在不属于它的那一档里，报错退出。
+
+| 档 | 只属这一档的记录 |
+| --- | --- |
+| `task_level` | `TASK`、`TMETA`、`CREDIT`、`CREDITEDGE`、`SKIPSRC`、`PHASE1SINK`、`PHASE1LANE`、`PHASE1HIT`、`PHASE1USER`、`ETHSW`、`ETHPORT`、`ETHROUTE`、`EXPGROUP`、`ETHMODE`、`EPGROUP`、`HOSTBIND`、`TOTALUSERS`、`TOTALPACKETS`、`USER`、`USERTARGET`、`HITMAP`、`BITMAP`、`OUTFRAG`、`DHITMAP` |
+| `cycle` | `GRID`、`HARVEST`、`LOGICAL`、`SPLIT`、`ENTRYEXIT`、`RTAB`、`SKIPMASK`、`CREDITBYPASS`、`CFGMISC`、`TASKCHAIN`、`TASKSW`、`PATHTASK`、`PATHFLOW`、`DATAINTASK`、`CREDITINIT`、`DTELUT`、`MUEP`、`VUSTATIC`、`CMEMPART`、`CMEMP2P`、`KERNEL`、`TASKPC`、`WEIGHT`、`INJECT`、`EXPECT` |
+
+其余记录两档共用：`META`、`PARAM`、`MODE`、`DIM`、`CORE`、`EXTNODE`、`GATEWAY`、`DIRATTR`、`CHIPLINK`、`PCIESW`、`PCIELINK`、`PCIEROUTE`、`PCIEIROUTE`、`HOSTGROUP`。
+
 ***
 
-## 8. 一个最小完整例子
+## 10. 两档各一个最小完整例子
+
+### 10.1 `task_level` 档
 
 一个 chip、两个 Core、一个 Host、一个 Out、一个 user 的 dense 拓扑：
 
@@ -565,7 +841,8 @@ Phase1 与以太网：
 * 两个核各自退休
 
 ```
-BACHIR 5
+BACHIR 6
+PROFILE task_level
 
 META map_path /home/me/maps/minimal.map
 META map_sha256 59e128d6cb3dcfb5067774f0c1dd5e7ad0f5eb82912fc0ecaf203229964825a8
@@ -613,3 +890,80 @@ OUTFRAG 0 1
 * Core 1 那条 `MOVE` 的 `down_cid` 是标识符 `out`，对应下面那条 `EXTNODE`；它的目标坐标 `0 2` 落在核阵列外
 * 单个 chip 没有片间链路，所以没有 `CHIPLINK` 记录
 * `HITMAP 0` 后面没有 group id，表示这个 dense user 不激活任何 EPGroup
+
+### 10.2 `cycle` 档
+
+同样一个 chip、两个 Core：core 0 是 B core，收 Host 的 token 后广播给 core 1；core 1 算一次 FFN 把结果发给 Out。一条 path，每核两项任务链。
+
+```
+BACHIR 6
+PROFILE cycle
+
+META generator src/bach/tools/export_bachir.py
+META generated_at 2026-09-01T10:22:31
+
+DIM 1 1 1 2 1 1
+
+GRID 0 0 0 0
+HARVEST 0 0
+SPLIT 1 1 1 1 EPTP_NN 1 1
+ENTRYEXIT 0 0 0 0
+
+CORE 0 0 BROADCAST
+CORE 1 0 NORMAL
+LOGICAL 0 1
+LOGICAL 1 0
+
+# path 0：core 0 向右广播到 core 1，core 1 收进本核
+RTAB 0 0 1 4 0 0 0 0 1 0 1 0 0 0 4096 0 0 0 0 0
+RTAB 1 0 1 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0
+SKIPMASK 0 0
+SKIPMASK 1 0
+
+# core 0：task 0 轮询有没有数据，task 1 广播出去
+CFGMISC 0 1 0 0
+TASKCHAIN 0 0 VU RV 4096 1 0 0 0 0 0 1 -1 0
+TASKCHAIN 0 1 DTE DSA 4224 0 0 0 0 0 1 1 0 1
+TASKSW 0 0 0 0 0
+TASKSW 0 1 1 0 1
+PATHTASK 0 0 1
+DATAINTASK 0 4352 1
+DTELUT 0 1 0 6368
+CMEMPART 0 0 16384 -1 -1 262144 -1 0
+
+# core 1：task 0 收数据，task 1 算完发走
+CFGMISC 1 1 0 0
+TASKCHAIN 1 0 DTE DSA 8192 0 1 0 0 0 0 1 0 0
+TASKCHAIN 1 1 MU DSA 8320 0 0 0 0 0 0 1 -1 1
+TASKSW 1 0 1 0 1
+TASKSW 1 1 1 0 1
+PATHTASK 1 0 0
+CREDITINIT 0 0 0 1
+DTELUT 1 0 0 6368
+MUEP 1 0 0
+CMEMPART 1 0 16384 262144 294912 327680 360448 2
+
+KERNEL BROADCAST bcore.itcm bcore.dtcm
+KERNEL NORMAL ncore.itcm ncore.dtcm
+TASKPC BROADCAST 0 4096
+TASKPC BROADCAST 1 4224
+TASKPC NORMAL 0 8192
+TASKPC NORMAL 1 8320
+WEIGHT 0 w0.bin 0
+WEIGHT 1 w1.bin 0
+
+EXTNODE host HOST 0 -1 0 6368 PCIE_WEST 0 0
+EXTNODE out OUT 0 2 1 12288 PCIE_EAST 0 0
+
+INJECT inject.bin 1 6368
+EXPECT expect.bin 1 12288
+```
+
+对着例子看五处：
+
+* 两条 `RTAB` 是同一个 `path_id` 在两个核上的不同表项：core 0 的 `flow_dir` 是 4（右），`path_core_bypass` 为 1 表示数据不再进自己这个核；core 1 的 `flow_dir` 是 0（末端不再外发），`path_core_bypass` 为 0 表示进本核
+* core 0 的 `nxt_credit_require` 是 4096：右方向占 bit[17:12]，值 1 表示向右发要一个坑。core 1 是末端，它向下游不要 credit，进核占 1 记在 `cur_credit_require`
+* core 0 的 task 0 是 `self_start` 为 1 的轮询任务，只有 B core 与 R core 允许这么配
+* 两个核的 `PATHTASK` 都指 path 0，但落到各自任务链的不同项：core 0 是 task 1，core 1 是 task 0
+* core 0 的 `CMEMPART` 里 scale、topk 与溢流重发三段写 `-1`：B core 的数据落 Matrix Mem，Core Mem 上只留 stream 分片与包头
+

@@ -92,19 +92,19 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
   <rect x="210" y="364" width="250" height="208" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="222" y="385" font-size="11" fill="#111827">LU（6 条指令）</text>
   <text x="222" y="402" font-size="8.5" fill="#475569">从 CM 读向量 / Mask / 标量</text>
-  <text x="222" y="415.5" font-size="8.5" fill="#475569">格式转换 FP8_e4m3 / MXFP8 / BF17</text>
-  <text x="222" y="429.0" font-size="8.5" fill="#475569">　→ BF17 / FP32，精确扩宽</text>
-  <text x="222" y="442.5" font-size="8.5" fill="#475569">ld.fp32.vm 在 DATA_TYPE=BF17 下按</text>
+  <text x="222" y="415.5" font-size="8.5" fill="#475569">格式转换 FP8_e4m3 / MXFP8 / BF16</text>
+  <text x="222" y="429.0" font-size="8.5" fill="#475569">　→ BF16 / FP32，精确扩宽</text>
+  <text x="222" y="442.5" font-size="8.5" fill="#475569">ld.fp32.vm 在 DATA_TYPE=BF16 下按</text>
   <text x="222" y="456.0" font-size="8.5" fill="#475569">　TYPE_VL.ROUND_MODE 把 FP32 窄化为</text>
-  <text x="222" y="469.5" font-size="8.5" fill="#475569">　BF17，结果为 NaN 时置 DATA_CVT_ERROR</text>
+  <text x="222" y="469.5" font-size="8.5" fill="#475569">　BF16，结果为 NaN 时置 DATA_CVT_ERROR</text>
   <text x="222" y="483.0" font-size="8.5" fill="#475569">CM 侧数据格式：FP8_e4m3 / MXFP8 /</text>
-  <text x="222" y="496.5" font-size="8.5" fill="#475569">　BF17 / FP32</text>
+  <text x="222" y="496.5" font-size="8.5" fill="#475569">　BF16 / FP32</text>
   <text x="222" y="510.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 LU 完成</text>
   <rect x="210" y="652" width="250" height="208" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="222" y="673" font-size="11" fill="#111827">SU（6 条指令）</text>
   <text x="222" y="690" font-size="8.5" fill="#475569">向 CM 写回</text>
-  <text x="222" y="703.5" font-size="8.5" fill="#475569">格式转换 BF17 / FP32 →</text>
-  <text x="222" y="717.0" font-size="8.5" fill="#475569">　FP8_e4m3 / MXFP8 / BF17 / FP32</text>
+  <text x="222" y="703.5" font-size="8.5" fill="#475569">格式转换 BF16 / FP32 →</text>
+  <text x="222" y="717.0" font-size="8.5" fill="#475569">　FP8_e4m3 / MXFP8 / BF16 / FP32</text>
   <text x="222" y="730.5" font-size="8.5" fill="#475569">高转低按 TYPE_VL.ROUND_MODE 舍入</text>
   <text x="222" y="744.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 SU 完成</text>
   <text x="222" y="757.5" font-size="8.5" fill="#475569">CM 端口每周期 1 次 Load + 1 次 Store，</text>
@@ -215,7 +215,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
   <text x="1506" y="319" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
   <polyline points="1431,315 638,315 638,253 602,253" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
   <text x="20" y="930" font-size="10.5" fill="#374151">单条宏指令的容量上限：CM 端口 1 Load + 1 Store · VRF 2R+2W · MRF 2R+1W · SRF 8 逻辑读 / 6 逻辑写 · 每个执行单元各 1 次（SEXE 例外，同一物理单元 3 次串行迭代）。</text>
-  <text x="20" y="954" font-size="10.5" fill="#374151">向量位宽 1024 bit/cycle（32 个 FP32 或 64 个 BF17）；向量长度 1～16384 element，单条宏指令内完成；内部计算精度 FP32 或 BF17，单条宏指令内不支持混合精度。</text>
+  <text x="20" y="954" font-size="10.5" fill="#374151">向量位宽 1024 bit/cycle（32 个 FP32 或 64 个 BF16）；向量长度 1～16384 element，单条宏指令内完成；内部计算精度 FP32 或 BF16，单条宏指令内不支持混合精度。</text>
 </svg>
 ```
 
@@ -267,9 +267,9 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 
 | 编号 | 功能 |
 | - | - |
-| F24 | LU 6 条指令：从 CM 读向量 / Mask / 标量；格式转换 FP8_e4m3 / MXFP8 / BF17 → BF17 / FP32 为精确扩宽 |
-| F25 | `ld.fp32.vm` 在 DATA_TYPE=BF17 下按 `TYPE_VL.ROUND_MODE` 把 FP32 窄化为 BF17，结果为 NaN 时置 `DATA_CVT_ERROR` |
-| F26 | SU 6 条指令：向 CM 写回；格式转换 BF17 / FP32 → FP8_e4m3 / MXFP8 / BF17 / FP32，高转低按 `TYPE_VL.ROUND_MODE` 舍入 |
+| F24 | LU 6 条指令：从 CM 读向量 / Mask / 标量；格式转换 FP8_e4m3 / MXFP8 / BF16 → BF16 / FP32 为精确扩宽 |
+| F25 | `ld.fp32.vm` 在 DATA_TYPE=BF16 下按 `TYPE_VL.ROUND_MODE` 把 FP32 窄化为 BF16，结果为 NaN 时置 `DATA_CVT_ERROR` |
+| F26 | SU 6 条指令：向 CM 写回；格式转换 BF16 / FP32 → FP8_e4m3 / MXFP8 / BF16 / FP32，高转低按 `TYPE_VL.ROUND_MODE` 舍入 |
 | F27 | CM 接口读写各一条独立通路，一次请求固定 1024 bit，不支持 burst；地址 32 bit 按 128 B 对齐，向量与掩码按 32 B 对齐、标量按 4 B 对齐 |
 | F28 | 跨 128 B 边界的拆分与重组由 LU / SU 完成 |
 | F29 | CM 数据信号 1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 有效 |
@@ -306,8 +306,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 
 | 编号 | 功能 |
 | - | - |
-| F46 | `TYPE_VL.DATA_TYPE` 为 1 bit（bit16：0 = FP32，1 = BF17），只作用于向量通路；标量只有 FP32 一种精度 |
-| F47 | `TYPE_VL.ROUND_MODE` 在 bit[19:17]，只作用于三处高转低转换：LU 的 `ld.fp32.vm` 在 DATA_TYPE=BF17 下把 FP32 窄化为 BF17；SU 的高转低写出（`st.fp8e4m3.vm` / `st.mxfp8.vm` / `st.bf16.vm`）；DATA_TYPE=BF17 时标量进入向量通路的 FP32 → BF17 转换 |
+| F46 | `TYPE_VL.DATA_TYPE` 为 1 bit（bit16：0 = FP32，1 = BF16），只作用于向量通路；标量只有 FP32 一种精度 |
+| F47 | `TYPE_VL.ROUND_MODE` 在 bit[19:17]，只作用于三处高转低转换：LU 的 `ld.fp32.vm` 在 DATA_TYPE=BF16 下把 FP32 窄化为 BF16；SU 的高转低写出（`st.fp8e4m3.vm` / `st.mxfp8.vm` / `st.bf16.vm`）；DATA_TYPE=BF16 时标量进入向量通路的 FP32 → BF16 转换 |
 | F48 | 向量长度 VL 为 1～16384 element，单条宏指令内完成；`0` 等效于 `1`，大于 `16384` 等效于 `16384`，不报错 |
 | F49 | VL 取上限 16384 时单个 FP32 Token 恰好占满全部 VRF；VL 更小时按实际长度占用，剩余容量可同时驻留多个 Token 或宏指令之间传递的中间结果 |
 
@@ -784,13 +784,13 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
 ## 7　参数汇总
 
 ```
-向量位宽 VW        1024 bit/cycle，等效每周期 32 个 FP32 或 64 个 BF17
+向量位宽 VW        1024 bit/cycle，等效每周期 32 个 FP32 或 64 个 BF16
 向量长度 VL        1～16384 element，单条宏指令内完成；0 等效 1，>16384 等效 16384，不报错
 CM 访存带宽        每周期 1 次 Load + 1 次 Store，各 128 B，与访问格式无关
-CM 侧数据格式       FP8_e4m3 / MXFP8 / BF17 / FP32
+CM 侧数据格式       FP8_e4m3 / MXFP8 / BF16 / FP32
 CM 数据信号        1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 有效；地址 32 bit 按 128 B 对齐
 CM 访问延迟        VU 侧 14T
-内部计算精度        FP32 或 BF17，单条宏指令内不支持混合精度
+内部计算精度        FP32 或 BF16，单条宏指令内不支持混合精度
 片内寄存器          VRF 64 KB（128 B/entry × 512 entry，2R2W）· MRF 4 KB（2R1W）· SRF 256 B（4 B × 64 entry，8 逻辑读 / 6 逻辑写）
 执行单元           VEXE（VALU0 / VALU1 / VALU2 / VSFU）· MEXE · SEXE
 宏指令配置          8 组静态配置模板 + 12 个动态参数寄存器；8 组模板由编译侧算好，boot 期经 ctrl_noc 的 cfg 口写入

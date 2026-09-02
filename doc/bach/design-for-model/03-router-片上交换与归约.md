@@ -224,7 +224,7 @@
 <text x="275" y="655" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">R2R 允许 flit 交织</text>
 <path d="M500 505 L480 505 L480 647 L330 647" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kgab)" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M220 647 L192 647" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kgai)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="240" y="690" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">资源不足时按 stallWay：留在 VC 等，或转入 CoreMem 由 DTE 重发</text>
+<text x="240" y="690" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">资源不足时按 stall_way：留在 VC 等，或转入 CoreMem 由 DTE 重发</text>
 <text x="240" y="704" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">多播原子准入：所有目标方向的 VC / Stream / Reduce 资源同时到手才发</text>
 <text x="240" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">Stream / Reduce release 按 CSR 静态 Mask 旁路转发（不查 RouterTable）</text>
 <path d="M40 520 L92 520" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#kgab)" stroke-linejoin="round" stroke-linecap="round"/>
@@ -475,7 +475,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 <path d="M1060 430 L1020 430" stroke="#d97706" stroke-width="1.4" fill="none" marker-end="url(#khar)" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="1064" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="start">Retire</text>
 <rect x="30" y="534" width="1140" height="62" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
-<text x="46" y="551" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">阻塞时的两条岔路：③ 拿不到资源，按 RouterTable 的 stallWay 留在 VC 等，或把包转进 Core Mem（Bypass 变成“进 core + 出 core”），资源就绪后由 DTE 重发，同 VC 内不许越过；</text>
+<text x="46" y="551" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">阻塞时的两条岔路：③ 拿不到资源，按 RouterTable 的 stall_way 留在 VC 等，或把包转进 Core Mem（Bypass 变成“进 core + 出 core”），资源就绪后由 DTE 重发，同 VC 内不许越过；</text>
 <text x="46" y="567" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">⑥ 本级 Stream 表无空项时，该 VC 不能向 core 发（VC 有空项仍可收）。进 core 与出 core 两条路完全并行，互不共享仲裁状态。</text>
 <text x="46" y="583" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">这是进本 core 的主线；直通、多播、Reduce、CoreMem 重发、credit 旁路各自的走法见“按任务类型分的走法”，三类 credit 谁维护、何时扣还见“三类 credit 的管理方式”。</text>
 </svg>
@@ -483,9 +483,9 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **正向路：RouterStation 到 CrossBar**
 
-1. Header 先于或与首个 Payload flit 一起到达 `left_data_in_ch`。RouterStation 的 Header Parser 从包头取出 PathID、UserID、size、operation、方向 Mask 与 VC，按 PathID 查本地 RouterTable 副本，为这个包建立路由与资源上下文（目标方向、下一跳 VC、需不需要 Stream 授权、是不是 Reduce、stallWay）。
+1. Header 先于或与首个 Payload flit 一起到达 `left_data_in_ch`。RouterStation 的 Header Parser 从包头取出 PathID、UserID、size、operation、方向 Mask 与 VC，按 PathID 查本地 RouterTable 副本，为这个包建立路由与资源上下文（目标方向、下一跳 VC、需不需要 Stream 授权、是不是 Reduce、stall_way）。
 2. Payload flit 按 Header 指定的 VC 号写入对应的 VC Buffer。四个 VC 各自独立缓存、独立计 credit，一个 VC 堵住不影响其他 VC。
-3. VC 头部 flit 检查所有目标方向的资源：下游该 VC 的 credit、目标方向的 Stream 授权、要进 ReduceModule 时的 Reduce 准入。多播要所有目标方向同时到手，任一方向不足则整体等待。拿不到资源时按 stallWay 处理：留在 VC 里等，或把包转进本地 Core Mem 由 DTE 重发。
+3. VC 头部 flit 检查所有目标方向的资源：下游该 VC 的 credit、目标方向的 Stream 授权、要进 ReduceModule 时的 Reduce 准入。多播要所有目标方向同时到手，任一方向不足则整体等待。拿不到资源时按 stall_way 处理：留在 VC 里等，或把包转进本地 Core Mem 由 DTE 重发。
 4. 满足条件的请求带着方向 Mask、当前 flit 与下一跳 VC 进 CrossBar 仲裁。CrossBar 按输出独立仲裁，只有竞争同一输出的请求互斥；多播在同一拍向全部目标复制，任一目标没握手就不推进任何分支。握手成功后统一扣各目标的 credit、更新包上下文。
 5. 目标是相邻 Router 时，flit 经出口方向的 RouterStation 的 output buffer 与 Packet Shifter 按总线宽度移位拼接后从 `<方向>_data_out_ch` 发出。Router 到 Router 的通路可在 flit 边界切换包；一旦进入 Core 或 ReduceModule 就锁定到尾 flit。
 
@@ -508,11 +508,11 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 任务 | 从哪来 | 经过的模块 | 放行前查什么 | 到哪去 / 完成信号 |
 | - | - | - | - | - |
 | 直通（Bypass） | 上游 Router 的 `<方向>_data_in_ch` | RouterStation → CrossBar → 出口 RouterStation 的 output buffer / Packet Shifter | 下游该 VC 的 credit；目标方向需要 Stream 时查本级的下游 Stream 映射表 | 下一个 Router；flit 离开本级 VC 即还上游 VC credit |
-| 多播 | 同上，directionMask 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
+| 多播 | 同上，flow_dir 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
 | 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
 | 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | 目标 VC 有空才准 DTE 发；下游 Stream / Reduce 资源由 DTE 先向 Router 申请到 | 下一个 Router；发完向 TS 返回 UserID + PathID |
 | Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Reduce credit 够整包（DTE 查）；输出时查目标 VC credit 与下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
-| 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stallWay 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
+| 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
 
 坏核上的 Router 只走直通：数据走完整流水线但不投递本 core，credit 也跨过它直接给两侧的好核，见“坏核与跨 chip”。
@@ -530,7 +530,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 * Router 到 Router 的通路**允许在 flit 边界切换包**，需保存 VC、输出方向、剩余长度和包边界上下文
 * 包一旦开始进入 Core 或 ReduceModule 就**锁定到尾 flit**
 
-多播是 directionMask 多位有效的直通，走法相同，只是 CrossBar 在 ST 阶段同拍复制、准入要全部目标方向一起满足。
+多播是 flow_dir 多位有效的直通，走法相同，只是 CrossBar 在 ST 阶段同拍复制、准入要全部目标方向一起满足。
 
 #### 进 core
 
@@ -612,7 +612,7 @@ if need_buffer && !core_bad_mask[本 core] &&
 
 进 core 缓存的包要重发时，**core 内先同步更新本地的 core credit table，之后 router 的 output 检索到该重发包时再更新自己那一份**。Core credit release 还要向多个上游广播，因为多个上游可能在竞争同一个下游的 CoreMem 资源。
 
-下游资源不满足时，`stallWay` 二选一：
+下游资源不满足时，`stall_way` 二选一：
 
 * 留在当前 VC 等
 * 把包重定向到本地 Core Mem 缓存，等资源就绪后重发。此时**Router 上的 Bypass 操作被映射成“进 core 加出 core”**
@@ -849,21 +849,23 @@ RouterTable 是路径解析与资源判定的唯一依据，**只描述静态路
 | 字段 | 含义 | 用在哪 |
 | - | - | - |
 | `PathID` | 表项索引，标识一条软件预先规划的业务路径 | Header Parser、重发查询 |
-| `curVC` | 包进入当前 Router 时使用的 VC 类型 | 输入 VC 分配 |
-| `directionMask` | 各目标方向加 Core 的有效位；单位有效是单播，多位有效是多播 | 输出仲裁、Crossbar |
-| `nxtVC` | 各目标方向下一跳使用的 VC 类型 | 输出 Header、下游 VC credit 查询 |
-| `streamNeedMask` | 各目标方向是否需要 Stream 授权，**Core 方向的需求必须在本级检查** | stream credit 表 |
 | `op_type` | 2 bit：0 kernel / weight 搬运、1 transfer、2 reduce、3 **reduce_twice** | 路径选择、ReduceModule |
-| `flow_dir` | 3 bit：bit0 上下、bit1 左、bit2 右 | 输出仲裁 |
+| `flow_dir` | 5 bit 出方向掩码：bit0 上下、bit1 左、bit2 右、bit3 reduce1、bit4 reduce2。**进本 core 不占这里的位** | 输出仲裁、Crossbar |
+| `cur_vc` | 包进入当前 Router 时使用的 VC 类型 | 输入 VC 分配 |
+| `nxt_vc` | 五个出方向各 2 bit，下一跳使用的 VC 类型 | 输出 Header、下游 VC credit 查询 |
 | `path_core_mask_enable` | 0 按 `path_core_bypass` 定是否进 core，1 按 MSG 的 `path_core_mask` 定 | 进 core 判定 |
 | `path_core_mask_idx` | 4 bit，看 `path_core_mask` 的哪一位 | 进 core 判定 |
 | `path_core_bypass` | 0 进 core，1 bypass | 进 core 判定 |
 | `need_buffer` | 这条 path 允许进 core 缓存，即溢流使能 | RC 的溢流判断 |
-| `cur_credit_type` / `nxt_credit_type` / `cur_credit_require` | 1 / 3 / 6 bit：本级与三个下游方向各要哪类 credit（0 广播、1 P2P），以及进 core 数据在上游分配的 credit 量 | CoreMem credit |
-| `reduce_data_type` | Reduce 加法的数据类型 BF16 / FP32 | ReduceModule |
-| `reduce_port_sel` | reduce 子端口选择：轮询或静态指定 | reduce_0/1/2 分发 |
-| `stallWay` | 资源不足时留在当前 VC 等待，还是转入 CoreMem 暂存由 DTE 重发 | 阻塞处理 |
-| `reducePrecision` | Reduce 输入与输出精度，**中间累加精度固定 FP32** | ReduceModule |
+| `stream_table_enable` | 1 bit：这个包出核前要不要查对应输出端的 stream credit table | stream credit 表 |
+| `cur_credit_type` / `cur_credit_require` | 1 / 6 bit：进核占用的 credit 池类型与额度，额度是上游已拨给本核的量 | CoreMem credit |
+| `nxt_credit_type` / `nxt_credit_require` | 3 bit 加三个 R2R 方向各 6 bit：各出方向的 credit 池类型与需求，某方向为 0 表示不查 credit | CoreMem credit |
+| `reduce_data_type` / `reduce_outdata_type` | 3 / 1 bit：Reduce 的输入精度与输出精度，各取 BF16 或 FP32，**中间累加固定 FP32** | ReduceModule |
+| `reduce_in_mask` | 3 bit：这条 path 在本级会有哪几个相邻方向送来分量 | ReduceModule 收齐判据 |
+| `operation` | 2 bit：0 普通转发、1 Reduce0、2 Reduce1、3 Reduce2 | 路径选择、ReduceModule |
+| `stall_way` | 资源不足时留在当前 VC 等待，还是转入 CoreMem 暂存由 DTE 重发 | 阻塞处理 |
+
+字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`，两个 credit require 照《Top 模拟器详设》。`reduce_in_mask` 与 `operation` 的三档 reduce 取值这三份都没有（**待确认**）。
 
 RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点可以按表改写 VC。复位释放后所有条目为 bypass / no-op，配置写入前不投递任何包。另有一组与 RouterTable 分开配的 **Skip Mask 寄存器**，per-core 一位。
 
@@ -873,7 +875,7 @@ RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点�
 
 #### path_core_mask：用一个动态位图压掉 path 数
 
-`directionMask` 是静态的、一条 path 上所有用户共用；`path_core_mask` 是动态的、每个包各带一份 16 bit。两者相与才是这一个包在本级的实际去向。
+`flow_dir` 是静态的、一条 path 上所有用户共用，它定这个包往哪几个方向发；`path_core_mask` 是动态的、每个包各带一份 16 bit，它只决定这个包进不进本 core。两者各管一半，合起来是这一个包在本级的实际去向。
 
 * **一位对应一个 EP 组的 B core**，理论上最大支持 EP16；溢出时由 DTE core 的软件程序换一个新的 `path_id`
 * **位到 core 的对应不是固定编码**：每个 core 在自己的 RouterTable 表项里用 `path_core_mask_idx` 指定看哪一位。同一份 mask 在不同 core 上被解释成不同的位

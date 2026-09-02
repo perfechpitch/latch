@@ -104,7 +104,7 @@
 **Router**
 
 * 整包传输方案下“长包阻塞可能有死锁场景，需要在架构层考虑不会出现死锁”，死锁避免的具体论证未写
-* 双坏核示例里两处表项原文未定：C0 在 Path2 上的 `streamNeedMask` 是不置位还是右向置位；C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位。`operation` 列的 Reduce0 / Reduce1 / Reduce2 含义原文未定义
+* 双坏核示例里一处表项原文未定：C0 在 Path2 上要不要查输出端的 stream credit table。`operation` 列的 Reduce0 / Reduce1 / Reduce2 含义原文未定义。原文另一处“C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位”已不成立：出方向掩码里没有 Core 位，进不进本 core 由 `path_core_bypass` 单独判定
 * **VC 机制到底实不实现**。原文的原话是“实现 VC 机制需要很大的额外面积、设计复杂度和验证空间，成本极高。具体是否实现需要模拟器介入，综合判断开发复杂度和效果收益”。这是本次建模要回答的问题之一，不是文档缺口
 * “Broadcast 过快引起空泡”这一档的定量结论，原文明确写了“需要模拟器介入协助确认”。前提是同一个用户在 core0 与 core2 上的处理速度不同，而计算量分布均匀时差距主要来自逐级 Reduce
 * P2P 流量控制的“流量控制使能”配在哪一张表，原文只写“在一个 Core 配置了流量控制使能”，没有指明是 TS 的 CFG_REG 还是 RouterTable。本套文档按配在 TS 建模

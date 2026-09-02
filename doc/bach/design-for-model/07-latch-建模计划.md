@@ -263,7 +263,7 @@ src/bach/
           router_station.h         ×4：Header Parser、VC Buffer、Packet Context、Stream Resource Table、VC Credit
           xbar.h                   按输出仲裁、多播全有全无、入口锁定
           core_station.h           HeaderFIFO、OutputBuffer、三态准入、TS 通知、出 core VC 流控
-          coremem_reissue.h        stallWay、Bypass 映射成进核加出核、同 VC 保序
+          coremem_reissue.h        stall_way、Bypass 映射成进核加出核、同 VC 保序
           reduce_module.h          16 用户上下文、RMW 累加、Reduce credit、输出队列
           retire.h                 Retire 广播与两处回收
           credit_monitor.h         监听事件队列 16 项全相连
@@ -296,7 +296,7 @@ src/bach/
     params.h                       全部参数的唯一出处
     regmap.h                       DSA 寄存器地址映射（VU 按 MAS；MU、DTE 为临时映射）
     arbiter.h                      四种仲裁器
-    numeric/                       FP8_e4m3 / MXFP8 / MXFP4 / BF16 / FP32 的编解码、舍入、CSA 累加顺序
+    numeric/                       FP8_e4m3 / MXFP8 / MXFP4 / NVFP4 / BF16 / FP32 的编解码、舍入、CSA 累加顺序
   tables/
     router_table.h  task_chain.h  header_tables.h  loader.h      编译侧产物的读入
   observer/
@@ -368,7 +368,7 @@ LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章
 
 ## 输入
 
-模型读入四类东西，格式由《software/》下的文档定义，本章只规定内容要求。
+模型读入四类东西，本章只规定内容要求。文件格式见《Bach 中间文件格式》，它的 `cycle` 档就是本章这十张表；数值格式、舍入与累加顺序见《数值与参考实现》。
 
 | 类 | 内容 | 来源 |
 | - | - | - |
@@ -408,8 +408,8 @@ expect_out    N_token × 12 KiB                                                 
 2. 每 chip 的 `logical_map` 里逻辑 0～7 各出现一次，逻辑 8 只在 `gx ∈ {0, 3}` 出现，且 special 与 compute 的物理 core 集合不相交
 3. `cmem_part` 的各分区互不重叠，且都落在 Core Mem 的 1 MB 之内
 4. `task_chain` 里出现的每个 `path_id`，在本 core 的 `rtab` 与 `path_task_map` 里都有 valid 表项，且 `path_task_map[path_id].task_id` 指回配它的那一项
-5. `rtab` 里 `stallWay` 选转存的表项，本 core 的 `task_chain` 里必须有对应的 reissue 任务，且 `cmem_part` 里 `reissue_pkts_per_vc` 不为 0
-6. 坏核的 `rtab` 表项一律不置 Core 位、`streamNeedMask` 全不置位、`stallWay` 只能是留在 VC
+5. `rtab` 里 `stall_way` 选转存的表项，本 core 的 `task_chain` 里必须有对应的 reissue 任务，且 `cmem_part` 里 `reissue_pkts_per_vc` 不为 0
+6. 坏核的 `rtab` 表项一律不置 Core 位、`stream_table_enable` 全不置位、`stall_way` 只能是留在 VC
 
 第 4、5 两条是软件检查清单里“选进 Core Mem 重发的 path 必须预留空间并安排 reissue 任务”“坏核只能选留在 VC 等待”的机器化形式。三份 RouterTable 一致这一条不在这里查，由 SCP 桩的写入顺序保证。
 
@@ -510,11 +510,11 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | # | 规矩 | 落在哪 |
 | - | - | - |
 | 1 | 每个 VC 有 private 2 flit，队头永远能前进一步，不靠共享池。credit 也按 private 与 shared 两级记，与下游 buffer 的占用规则一一对应，一个方向的总量等于下游容量，不超发 | RouterStation 的 VC Buffer 与两级 credit |
-| 2 | 相互依赖的数据流分到不同 VC，避免循环等待 | `RouterTable.nxtVC` 的填法，编译侧保证 |
+| 2 | 相互依赖的数据流分到不同 VC，避免循环等待 | `RouterTable.nxt_vc` 的填法，编译侧保证 |
 | 3 | credit 不足的 VC 被跳过，同一 input port 的其他 VC 不受影响 | RouterStation 的 VA |
 | 4 | 多播全有或全无。只发一半会让同一 User 的数据在不同分支上错位，已发方向占了资源却完不成整体传输 | RouterStation 与 Xbar |
 | 5 | Router 的进 core 表与 TS 内部的 Stream 表按完全一致的逻辑分配空项，因此“Router 通知 TS 的包一定能被 TS 接收” | Router 的 CoreMemCreditMonitor 与 TS 的 `task_state_update.credit` |
-| 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏核没有 Core Mem，只能留在 VC，因此 path 规划要保证坏核段不会长期阻塞 | `RouterTable.stallWay` 与 CoreMem 重发 |
+| 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏核没有 Core Mem，只能留在 VC，因此 path 规划要保证坏核段不会长期阻塞 | `RouterTable.stall_way` 与 CoreMem 重发 |
 | 7 | P2P 传输阻塞时把数据落进 Core Mem 的 P2P 阻塞缓冲，下游 credit 释放后再续传 | TS 的 P2P 阻塞缓冲映射表 |
 | 8 | DTE 的 Commit 配对接纳：RD、WR 两个 TaskQueue 项与 Completion RS 项同时拿到才收，不产生读已开始、写没有落脚点的半任务 | DTE 的 Commit |
 | 9 | DTE 的出核任务先在 `PendingTaskQ` 等到资源授权，再去 Commit 申请那三样，等资源的任务不占 Completion RS | DTE 的 PendingTaskQ |
@@ -580,7 +580,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 3. **每个目的 core 对同一个 user 的同一份数据只落一次**。
 4. **注入 N 个 token，出口收到 N 个结果**，且逐 bit 等于参考实现。
 
-Router 的验收场景 A1～A17 中，下面四个直接覆盖了最易实现错的语义，先跑这四个：
+Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收场景”一节，下面四个直接覆盖了最易实现错的语义，先跑这四个：
 
 | 场景 | 查什么 |
 | - | - |
@@ -635,10 +635,10 @@ Router 的验收场景 A1～A17 中，下面四个直接覆盖了最易实现错
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度 | 2 |
 | TS stream_table 六个写口的优先级 | retire > done > install > issue > wake > create |
-| `reduceInMask` 的逐核取值 | 按 path 图推导；C6、C7 双坏核例子里的值等 Reduce0 / 1 / 2 含义定下后回填 |
+| `reduce_in_mask` 的逐核取值 | 按 path 图推导；C6、C7 双坏核例子里的值等 Reduce0 / 1 / 2 含义定下后回填 |
 | Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
 | trigger 请求里 `compute` 位在包头中的位置 | 等 Router 接口规范定下包头位域后回填 |
-| custom-0 自定义指令的字段布局 | funct3 按第 3 章表；rd / rs1 / rs2 / imm 按 R 型与 I 型标准布局，等 ISA 描述表到手后改 `bach_insts.h` |
+| `dsar` 与 `dsari` 的区分位 | 《ISA 描述表》给了九条自定义指令的完整编码，逐条见 RV core 那一份文档。只有这两条的编码在表里完全相同，模型按其余四条的规律用 bit31 区分 |
 | MU、DTE 的寄存器地址映射 | `regmap.h` 临时映射 |
 | Mmem MU 读延迟 | 8T |
 | Cmem 的 MU 写延迟 | 16T |
@@ -651,7 +651,7 @@ Router 的验收场景 A1～A17 中，下面四个直接覆盖了最易实现错
 
 **状态机改写的语义等价。** 把硬件里的等待写成跨拍状态机是工作量最大、也最容易引入语义差异的一块。每个状态机要有对照 MAS 时序图的单测，尤其是 Reduce 完成的无序汇合、多播原子准入、Retire 的三方时序、DTE 的配对接纳与 Join 这四条跨阶段持有的语义。
 
-**bit 级一致的累加顺序。** MU 的 CSA 树、VSFU 的查表拟合、VU 的归约树顺序在 MAS 里只给了原则没给细节，参考实现与模型只能按同一份 `numeric/` 实现对齐，与真实硬件是否一致要等 RTL 出来核对。
+**bit 级一致的累加顺序。** MU 的 CSA 树、VSFU 的查表拟合、VU 的归约树顺序在 MAS 里只给了原则没给细节。《数值与参考实现》为这几处各定了一个默认取法并标了待定，参考实现与模型按同一份 `numeric/` 对齐，与真实硬件是否一致要等 RTL 出来核对。
 
 **握手多出的拍数。** 跨模块信号全部打拍，硬件里同拍完成的组合握手在模型里最少两拍。第 2 至 4 章给了时序图的接口按时序图核对拍数；没给的按注册 ready 建，并在等待归因里单列，便于校准。
 

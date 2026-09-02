@@ -196,7 +196,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 <rect x="64" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="72" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">RouterTable</text>
 <text x="72" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">operation=Reduce</text>
-<text x="72" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxtVC · 精度</text>
+<text x="72" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxt_vc · 精度</text>
 <rect x="164" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="172" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">CrossBar</text>
 <text x="172" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">Data 进 Reduce</text>
@@ -228,7 +228,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 <rect x="354" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="362" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">RouterTable</text>
 <text x="362" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">operation=Reduce</text>
-<text x="362" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxtVC · 精度</text>
+<text x="362" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxt_vc · 精度</text>
 <rect x="454" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="462" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">CrossBar</text>
 <text x="462" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">Data 进 Reduce</text>
@@ -260,7 +260,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 <rect x="644" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="652" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">RouterTable</text>
 <text x="652" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">operation=Reduce</text>
-<text x="652" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxtVC · 精度</text>
+<text x="652" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxt_vc · 精度</text>
 <rect x="744" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="752" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">CrossBar</text>
 <text x="752" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">Data 进 Reduce</text>
@@ -292,7 +292,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 <rect x="934" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="942" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">RouterTable</text>
 <text x="942" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">operation=Reduce</text>
-<text x="942" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxtVC · 精度</text>
+<text x="942" y="237" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">方向 · nxt_vc · 精度</text>
 <rect x="1034" y="196" width="92" height="48" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="1042" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">CrossBar</text>
 <text x="1042" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">Data 进 Reduce</text>
@@ -326,7 +326,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 
 1. 每个 core 的 MU / VU 算出本 core 的部分和 `p_k`，完整长度，放在 Core Mem。
 2. DataOut DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC；检查本级 Reduce credit 是否够整包，再在目标 VC 有 credit 的前提下把 `p_k` 作为 Reduce 包发出。不够就在 PendingTaskQ 等。
-3. 包进本 core 的 Router，RouterStation 按 PathID 查 RouterTable：`operation = Reduce`、目标方向、下一跳 VC、`reducePrecision`。CrossBar 把它导向 ReduceModule（Data ×3 之一）。进入后锁定到尾 flit。
+3. 包进本 core 的 Router，RouterStation 按 PathID 查 RouterTable：`operation = Reduce`、目标方向、下一跳 VC、`reduce_outdata_type`。CrossBar 把它导向 ReduceModule（Data ×3 之一）。进入后锁定到尾 flit。
 4. ReduceModule 按 UserID 找上下文：第一份输入分配上下文并写入 FP32 数据；后续方向的输入读出当前值、累加、写回。链上第 k 跳到达的是 `p0 + … + p(k−1)`，与本地出核的 `p_k` 相加。
 5. 该包的全部方向输入完成后，结果进输出队列，按 RouterTable 转成 FP32 或 BF16，检查目标 VC credit 与该方向的下游 Reduce credit，作为 CrossBar 的第五路输入重新仲裁后发往下一跳。
 6. 每发出一个 flit，向上游产生携带 UserID 的 release；输入侧 flit 离开 VC Buffer 时归还 VC credit。
@@ -391,7 +391,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 <path d="M656 165 L668 165" stroke="#16181d" stroke-width="1.3" fill="none" marker-end="url(#rcai)" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="212" y="244" width="232" height="56" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="220" y="259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">RouterTable Copy</text>
-<text x="220" y="273" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">operation / 目标方向 / nxtVC / 输出精度</text>
+<text x="220" y="273" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">operation / 目标方向 / nxt_vc / 输出精度</text>
 <text x="220" y="285" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">软件写入，与 Router、DTE 三方一致</text>
 <rect x="212" y="308" width="232" height="52" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="220" y="323" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">User Context Table</text>

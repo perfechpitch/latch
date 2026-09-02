@@ -847,7 +847,7 @@ stall_cycles  = cycles(valid && !ready)
   <text x="250" y="41" font-size="8.5" fill="#6b7280">M9</text>
   <text x="673" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
   <text x="250" y="61" font-size="12" fill="#111827">PendingTaskQ · 出核任务先拿授权</text>
-  <text x="250" y="83" font-size="10.5" fill="#475569">1. e = rtab_copy[path_id]；need = e.streamNeedMask 或 Reduce 需求</text>
+  <text x="250" y="83" font-size="10.5" fill="#475569">1. e = rtab_copy[path_id]；need = e.stream_table_enable 或 Reduce 需求</text>
   <text x="250" y="103" font-size="10.5" fill="#475569">2. need 非空 → pending_taskq.push(desc)，不进 M2</text>
   <text x="250" y="123" font-size="10.5" fill="#475569">3. reduce 包另要求 reduce_credit[user] ≥ 整包 flit 数</text>
   <text x="250" y="143" font-size="10.5" fill="#475569">4. router_credit 到 → 出队进 M2；pending_taskq 满 → dsa_cfg.req_ready = 0</text>
