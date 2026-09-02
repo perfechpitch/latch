@@ -30,165 +30,270 @@
 | C2C Bridge | 独立打拍的模块 | 4，每行左右两端各一个 |
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1390 720" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1390" height="720" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">Chip · 第 0 层</text>
-  <text x="152" y="26" font-size="9.5" fill="#6b7280">2×5 core 阵列，row-major 编号；每行左右两端接一个 C2C Bridge</text>
-  <rect x="268" y="112" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="280" y="133" font-size="10.5" fill="#111827">core0</text>
-  <text x="280" y="150" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="280" y="163.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="280" y="177.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="280" y="190.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="432" y="112" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="444" y="133" font-size="10.5" fill="#111827">core1</text>
-  <text x="444" y="150" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="444" y="163.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="444" y="177.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="444" y="190.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="596" y="112" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="608" y="133" font-size="10.5" fill="#111827">core2</text>
-  <text x="608" y="150" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="608" y="163.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="608" y="177.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="608" y="190.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="760" y="112" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="772" y="133" font-size="10.5" fill="#111827">core3</text>
-  <text x="772" y="150" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="772" y="163.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="772" y="177.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="772" y="190.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="924" y="112" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="936" y="133" font-size="10.5" fill="#111827">core4</text>
-  <text x="936" y="150" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="936" y="163.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="936" y="177.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="936" y="190.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="268" y="300" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="280" y="321" font-size="10.5" fill="#111827">core5</text>
-  <text x="280" y="338" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="280" y="351.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="280" y="365.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="280" y="378.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="432" y="300" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="444" y="321" font-size="10.5" fill="#111827">core6</text>
-  <text x="444" y="338" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="444" y="351.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="444" y="365.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="444" y="378.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="596" y="300" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="608" y="321" font-size="10.5" fill="#111827">core7</text>
-  <text x="608" y="338" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="608" y="351.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="608" y="365.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="608" y="378.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <rect x="760" y="300" width="146" height="106" fill="#fdf6ec" stroke="#b45309" rx="4"/>
-  <text x="772" y="321" font-size="10.5" fill="#111827">core8</text>
-  <text x="772" y="338" font-size="8.5" fill="#475569">只构造 Router 八个模块</text>
-  <text x="772" y="351.5" font-size="8.5" fill="#475569">local 侧禁用 · 不接收溢流</text>
-  <text x="772" y="365.0" font-size="8.5" fill="#475569">credit 跨过它透传</text>
-  <text x="772" y="378.5" font-size="8.5" fill="#475569">只按路由表转发</text>
-  <text x="894" y="397" font-size="8.5" fill="#9ca3af" text-anchor="end">坏核示例</text>
-  <rect x="924" y="300" width="146" height="106" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="936" y="321" font-size="10.5" fill="#111827">core9</text>
-  <text x="936" y="338" font-size="8.5" fill="#475569">Router · TS</text>
-  <text x="936" y="351.5" font-size="8.5" fill="#475569">RV core ×3</text>
-  <text x="936" y="365.0" font-size="8.5" fill="#475569">DTE / MU / VU DSA</text>
-  <text x="936" y="378.5" font-size="8.5" fill="#475569">Cmem · Mmem · Smem</text>
-  <polyline points="414,142 432,142" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="578,142 596,142" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="742,142 760,142" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="906,142 924,142" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="414,330 432,330" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="578,330 596,330" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="742,330 760,330" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="906,330 924,330" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="700" y="100" font-size="8.5" fill="#6b7280" text-anchor="middle">left / right：同行相邻 Router，256 B/T，40T</text>
-  <polyline points="382,218 382,300" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="546,218 546,300" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="710,218 710,300" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="874,218 874,300" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1038,218 1038,300" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="1024" y="258" font-size="8.5" fill="#6b7280" text-anchor="start">mid：另一行对称位置的 Router，mid-to-mid 直连</text>
-  <rect x="106" y="112" width="124" height="106" fill="#eef2ff" stroke="#4338ca" rx="4"/>
-  <text x="118" y="133" font-size="10.5" fill="#111827">C2C Bridge</text>
-  <text x="118" y="150" font-size="8" fill="#475569">简化 Router（RC/VA/SA）</text>
-  <text x="118" y="163.5" font-size="8" fill="#475569">TX：4 KB 拆包 + seq_id</text>
-  <text x="118" y="177.0" font-size="8" fill="#475569">RX：按 seq_id 拼包</text>
-  <text x="118" y="190.5" font-size="8" fill="#475569">AXI Bridge · credit 透传</text>
-  <text x="218" y="209" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core0 左端</text>
-  <polygon points="22,148 86,148 77,180 13,180" fill="#f8fafc" stroke="#374151"/>
-  <text x="50" y="168" font-size="9" fill="#374151" text-anchor="middle">c2c[N]</text>
-  <rect x="1110" y="112" width="124" height="106" fill="#eef2ff" stroke="#4338ca" rx="4"/>
-  <text x="1122" y="133" font-size="10.5" fill="#111827">C2C Bridge</text>
-  <text x="1122" y="150" font-size="8" fill="#475569">简化 Router（RC/VA/SA）</text>
-  <text x="1122" y="163.5" font-size="8" fill="#475569">TX：4 KB 拆包 + seq_id</text>
-  <text x="1122" y="177.0" font-size="8" fill="#475569">RX：按 seq_id 拼包</text>
-  <text x="1122" y="190.5" font-size="8" fill="#475569">AXI Bridge · credit 透传</text>
-  <text x="1222" y="209" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core4 右端</text>
-  <polygon points="1288,148 1352,148 1343,180 1279,180" fill="#f8fafc" stroke="#374151"/>
-  <text x="1316" y="168" font-size="9" fill="#374151" text-anchor="middle">c2c[E]</text>
-  <rect x="106" y="300" width="124" height="106" fill="#eef2ff" stroke="#4338ca" rx="4"/>
-  <text x="118" y="321" font-size="10.5" fill="#111827">C2C Bridge</text>
-  <text x="118" y="338" font-size="8" fill="#475569">简化 Router（RC/VA/SA）</text>
-  <text x="118" y="351.5" font-size="8" fill="#475569">TX：4 KB 拆包 + seq_id</text>
-  <text x="118" y="365.0" font-size="8" fill="#475569">RX：按 seq_id 拼包</text>
-  <text x="118" y="378.5" font-size="8" fill="#475569">AXI Bridge · credit 透传</text>
-  <text x="218" y="397" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core5 左端</text>
-  <polygon points="22,336 86,336 77,368 13,368" fill="#f8fafc" stroke="#374151"/>
-  <text x="50" y="356" font-size="9" fill="#374151" text-anchor="middle">c2c[W]</text>
-  <rect x="1110" y="300" width="124" height="106" fill="#eef2ff" stroke="#4338ca" rx="4"/>
-  <text x="1122" y="321" font-size="10.5" fill="#111827">C2C Bridge</text>
-  <text x="1122" y="338" font-size="8" fill="#475569">简化 Router（RC/VA/SA）</text>
-  <text x="1122" y="351.5" font-size="8" fill="#475569">TX：4 KB 拆包 + seq_id</text>
-  <text x="1122" y="365.0" font-size="8" fill="#475569">RX：按 seq_id 拼包</text>
-  <text x="1122" y="378.5" font-size="8" fill="#475569">AXI Bridge · credit 透传</text>
-  <text x="1222" y="397" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core9 右端</text>
-  <polygon points="1288,336 1352,336 1343,368 1279,368" fill="#f8fafc" stroke="#374151"/>
-  <text x="1316" y="356" font-size="9" fill="#374151" text-anchor="middle">c2c[S]</text>
-  <polyline points="230,178 268,178" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1070,178 1110,178" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="230,366 268,366" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1070,366 1110,366" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="86,164 106,164" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1234,164 1279,164" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="86,352 106,352" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1234,352 1279,352" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="700" y="438" font-size="8.5" fill="#6b7280" text-anchor="middle">四个 chip 口由 LPU 接到相邻 chip 或 PCIe Switch；C2C 当作一种长延迟的 R2R，Router 到 Router 400T</text>
-  <rect x="96" y="516" width="208" height="124" fill="#fbf3df" stroke="#b45309" rx="4"/>
-  <text x="108" y="537" font-size="10.5" fill="#7c2d12">SCP 桩（每 chip 一个）</text>
-  <text x="108" y="554" font-size="8.5" fill="#92400e">boot：自启动 → PCIe 训练</text>
-  <text x="108" y="567.5" font-size="8.5" fill="#92400e">→ 顺序配 core0～core7</text>
-  <text x="108" y="581.0" font-size="8.5" fill="#92400e">初始化六步 · 广播开关</text>
-  <text x="108" y="594.5" font-size="8.5" fill="#92400e">weights 模式 ↔ 业务模式</text>
-  <rect x="384" y="516" width="700" height="58" fill="#f5f3ff" stroke="#7c3aed" rx="4"/>
-  <text x="396" y="537" font-size="11" fill="#111827">ctrl_noc（32 bit/T，每笔事务一拍）</text>
-  <text x="396" y="554" font-size="8.5" fill="#475569">按地址分发 → 每 core 一个 ctrl_noc 端点 → 各模块的 cfg 口；core id 只读</text>
-  <polyline points="304,551 344,551 344,545 384,545" fill="none" stroke="#7c3aed" marker-end="url(#p)"/>
-  <text x="344" y="530" font-size="8.5" fill="#7c3aed" text-anchor="middle">scp_ctrl</text>
-  <polyline points="298,516 298,461 297,461 297,406" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="462,516 462,461 461,461 461,406" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="626,516 626,461 625,461 625,406" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="790,516 790,461 789,461 789,406" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="954,516 954,461 953,461 953,406" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <text x="1094" y="540" font-size="8.5" fill="#7c3aed" text-anchor="start">cfg 写事务 ↑ 每列两个 core</text>
-  <polygon points="1220,600 1340,600 1331,630 1211,630" fill="#f8fafc" stroke="#374151"/>
-  <text x="1276" y="619" font-size="8.5" fill="#374151" text-anchor="middle">async_int</text>
-  <polyline points="1211,615 1189,615 1189,662 242,662 242,640" fill="none" stroke="#b45309" stroke-dasharray="4 3" marker-end="url(#o)"/>
-  <text x="700" y="660" font-size="8.5" fill="#b45309" text-anchor="middle">async_int：core_status → SCP（本轮只留接口名）</text>
-  <text x="20" y="700" font-size="10.5" fill="#374151">Chip 不打拍，是装配容器：按 harvest mask 构造 10 个 Core、接 mesh、接四个 C2C Bridge、接 ctrl_noc。SCP 桩、ctrl_noc 端点、C2C Bridge 是本层三种独立打拍的模块。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1900 800" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Chip 第 0 层">
+<title>Chip 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="1900" height="800" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">Chip · 第 0 层（两排 core 的 Router 都朝 chip 中部：第 0 排 TS 在上 Router 在下，第 1 排上下镜像；mid 直连；C2C Bridge 长在每排两端）</text>
+<text x="885" y="26" font-size="9.5" fill="#6b7280">紫虚线 = ctrl_noc 配置总线　灰线 = R2R / C2C 数据链路（每方向 256 B/T 双向）</text>
+<rect x="150" y="150" width="1700" height="540" rx="14" fill="none" stroke="#374151" stroke-width="1.2"/>
+<rect x="340" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="580" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="820" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="1060" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="1300" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="340" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="580" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="820" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="1060" y="480" width="200" height="170" rx="5" fill="#fdf6ec" stroke="#374151" stroke-width="1"/>
+<rect x="1300" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<text x="160" y="165" font-size="11" fill="#111827" font-weight="600">一颗 chip：2×5 core 阵列，row-major 编号</text>
+<rect x="348" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="440.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="348" y="196" font-size="10" fill="#111827" font-weight="600">core0</text>
+<rect x="348" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="440.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="348" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="378" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="378" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="410" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="440" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="440" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="472" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="502" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="502" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="348" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="440.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="588" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="680.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="588" y="196" font-size="10" fill="#111827" font-weight="600">core1</text>
+<rect x="588" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="680.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="588" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="618" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="618" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="650" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="680" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="680" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="712" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="742" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="742" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="588" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="680.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="828" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="920.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="828" y="196" font-size="10" fill="#111827" font-weight="600">core2</text>
+<rect x="828" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="920.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="828" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="858" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="858" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="890" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="920" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="920" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="952" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="982" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="982" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="828" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="920.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="1068" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="1160.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="1068" y="196" font-size="10" fill="#111827" font-weight="600">core3</text>
+<rect x="1068" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="1160.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="1068" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="1098" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="1098" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1130" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="1160" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="1160" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1192" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="1222" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="1222" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1068" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="1160.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="1308" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="1400.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="1308" y="196" font-size="10" fill="#111827" font-weight="600">core4</text>
+<rect x="1308" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="1400.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="1308" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="1338" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="1338" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1370" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="1400" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="1400" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1432" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="1462" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="1462" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1308" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="1400.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="348" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="440.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="348" y="642" font-size="10" fill="#111827" font-weight="600">core5</text>
+<rect x="348" y="612" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="440.0" y="624" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="348" y="544" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="378" y="566" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="378" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="410" y="544" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="440" y="566" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="440" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="472" y="544" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="502" y="566" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="502" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="348" y="518" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="440.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="588" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="680.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="588" y="642" font-size="10" fill="#111827" font-weight="600">core6</text>
+<rect x="588" y="612" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="680.0" y="624" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="588" y="544" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="618" y="566" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="618" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="650" y="544" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="680" y="566" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="680" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="712" y="544" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="742" y="566" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="742" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="588" y="518" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="680.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="828" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="920.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="828" y="642" font-size="10" fill="#111827" font-weight="600">core7</text>
+<rect x="828" y="612" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="920.0" y="624" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="828" y="544" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="858" y="566" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="858" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="890" y="544" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="920" y="566" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="920" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="952" y="544" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="982" y="566" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="982" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="828" y="518" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="920.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="1068" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="1160.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="1068" y="642" font-size="10" fill="#111827" font-weight="600">core8</text>
+<text x="1072" y="534.0" font-size="8.5" fill="#92400e">只构造 Router 八个模块</text>
+<text x="1072" y="547.5" font-size="8.5" fill="#92400e">local 侧禁用 · 不接收溢流</text>
+<text x="1072" y="561.0" font-size="8.5" fill="#92400e">credit 跨过它透传</text>
+<text x="1072" y="574.5" font-size="8.5" fill="#92400e">只按路由表转发</text>
+<text x="1252" y="620" font-size="8.5" fill="#9ca3af" text-anchor="end">坏核示例</text>
+<rect x="1308" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
+<text x="1400.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
+<text x="1308" y="642" font-size="10" fill="#111827" font-weight="600">core9</text>
+<rect x="1308" y="612" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="1400.0" y="624" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="1308" y="544" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="1338" y="566" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="1338" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1370" y="544" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="1400" y="566" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="1400" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1432" y="544" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="1462" y="566" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="1462" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1308" y="518" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="1400.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<rect x="150" y="273.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
+<text x="162" y="294.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
+<text x="162.0" y="311.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="162.0" y="324.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
+<text x="162.0" y="338.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
+<text x="162.0" y="351.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
+<text x="288" y="378.0" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core0 左端</text>
+<polygon points="29,314 120,314 111,346 20,346" fill="#f8fafc" stroke="#374151"/>
+<text x="70.0" y="333.5" font-size="9" fill="#374151" text-anchor="middle">c2c[N]</text>
+<rect x="1540" y="273.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1552" y="294.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
+<text x="1552.0" y="311.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="1552.0" y="324.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
+<text x="1552.0" y="338.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
+<text x="1552.0" y="351.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
+<text x="1678" y="378.0" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core4 右端</text>
+<polygon points="1729,314 1820,314 1811,346 1720,346" fill="#f8fafc" stroke="#374151"/>
+<text x="1770.0" y="333.5" font-size="9" fill="#374151" text-anchor="middle">c2c[E]</text>
+<rect x="150" y="443.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
+<text x="162" y="464.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
+<text x="162.0" y="481.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="162.0" y="494.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
+<text x="162.0" y="508.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
+<text x="162.0" y="521.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
+<text x="288" y="548.0" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core5 左端</text>
+<polygon points="29,484 120,484 111,516 20,516" fill="#f8fafc" stroke="#374151"/>
+<text x="70.0" y="503.5" font-size="9" fill="#374151" text-anchor="middle">c2c[W]</text>
+<rect x="1540" y="443.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1552" y="464.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
+<text x="1552.0" y="481.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="1552.0" y="494.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
+<text x="1552.0" y="508.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
+<text x="1552.0" y="521.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
+<text x="1678" y="548.0" font-size="8.5" fill="#9ca3af" text-anchor="end">接 core9 右端</text>
+<polygon points="1729,484 1820,484 1811,516 1720,516" fill="#f8fafc" stroke="#374151"/>
+<text x="1770.0" y="503.5" font-size="9" fill="#374151" text-anchor="middle">c2c[S]</text>
+<path d="M116.5 330.0 L149.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M116.5 500.0 L149.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1691.0 330.0 L1723.5 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1691.0 500.0 L1723.5 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M301.0 330.0 L347.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M301.0 500.0 L347.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1493.0 330.0 L1539.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1493.0 500.0 L1539.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M533.0 330.0 L587.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="528.4" y="313.5" width="63.1" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="560.0" y="321" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">left / right</text>
+<path d="M533.0 500.0 L587.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M773.0 330.0 L827.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M773.0 500.0 L827.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1013.0 330.0 L1067.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1013.0 500.0 L1067.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1253.0 330.0 L1307.0 330.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1253.0 500.0 L1307.0 500.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M440.0 343.0 L440.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="443.8" y="404.9" width="10.5" height="20.3" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 449.0 415.0)" x="449.0" y="418.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">mid</text>
+<path d="M680.0 343.0 L680.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M920.0 343.0 L920.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1160.0 343.0 L1160.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1400.0 343.0 L1400.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="470.0" y="411.0" font-size="8.5" fill="#6b7280" text-anchor="start">left / right：同行相邻 Router，256 B/T，40T</text>
+<text x="470.0" y="425.0" font-size="8.5" fill="#6b7280" text-anchor="start">mid：另一行对称位置的 Router，mid-to-mid 直连</text>
+<text x="950.0" y="411.0" font-size="8.5" fill="#6b7280" text-anchor="start">Router 在 core 的内侧边：第 0 排在底边，第 1 排在顶边，</text>
+<text x="950.0" y="425.0" font-size="8.5" fill="#6b7280" text-anchor="start">十个 Router 排成中间一条带，C2C Bridge 接在这条带的四个端点上</text>
+<rect x="20" y="44" width="240" height="100.0" rx="4" fill="#fbf3df" stroke="#b45309"/>
+<text x="32" y="65" font-size="11" fill="#111827" font-weight="600">SCP 桩（每 chip 一个）</text>
+<text x="32.0" y="82.0" font-size="8.5" fill="#475569">boot：自启动 → PCIe 训练</text>
+<text x="32.0" y="95.5" font-size="8.5" fill="#475569">→ 顺序配 core0～core7</text>
+<text x="32.0" y="109.0" font-size="8.5" fill="#475569">初始化六步 · 广播开关</text>
+<text x="32.0" y="122.5" font-size="8.5" fill="#475569">weights 模式 ↔ 业务模式</text>
+<path d="M260.0 94.0 L300.0 94.0 L300.0 154.0 L1875.0 154.0 L1875.0 676.0 L300.0 676.0" stroke="#7c3aed" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-dasharray="7 4"/>
+<text x="306" y="88.0" font-size="8.5" fill="#7c3aed" text-anchor="start">scp_ctrl</text>
+<text x="320" y="147" font-size="8.5" fill="#7c3aed" text-anchor="start">ctrl_noc 配置总线：按地址分发 → 每 core 一个 ctrl_noc 端点 → 各模块的 cfg 口；core id 只读；32 bit/T，每笔事务一拍</text>
+<path d="M440.0 154.0 L440.0 179.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<rect x="443.8" y="156.9" width="10.5" height="20.3" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 449.0 167.0)" x="449.0" y="170.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">cfg</text>
+<path d="M440.0 676.0 L440.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M680.0 154.0 L680.0 179.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M680.0 676.0 L680.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M920.0 154.0 L920.0 179.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M920.0 676.0 L920.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M1160.0 154.0 L1160.0 179.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M1160.0 676.0 L1160.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M1400.0 154.0 L1400.0 179.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M1400.0 676.0 L1400.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<text x="1510" y="670" font-size="8.5" fill="#7c3aed" text-anchor="start">每 core 一个 ctrl_noc 端点，坏核也配</text>
+<polygon points="29,174.0 140,174.0 131,204.0 20,204.0" fill="#f8fafc" stroke="#374151"/>
+<text x="80.0" y="188.0" font-size="9" fill="#374151" text-anchor="middle">async_int</text>
+<text x="80.0" y="199.0" font-size="7.5" fill="#6b7280" text-anchor="middle">core_status → SCP</text>
+<path d="M84.5 174.0 L80.1 145.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<text x="150" y="194.0" font-size="8.5" fill="#6b7280" text-anchor="start">本轮只留接口名</text>
+<text x="20" y="762" font-size="10.5" fill="#374151" text-anchor="start">四个 chip 口由 LPU 接到相邻 chip 或 PCIe Switch；C2C 当作一种长延迟的 R2R，Router 到 Router 400T。</text>
+<text x="20" y="784" font-size="10.5" fill="#374151" text-anchor="start">Chip 不打拍，是装配容器：按 harvest mask 构造 10 个 Core、接 mesh、接四个 C2C Bridge、接 ctrl_noc。SCP 桩、ctrl_noc 端点、C2C Bridge 是本层三种独立打拍的模块。</text>
 </svg>
 ```
 
@@ -317,8 +422,12 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
 
   <text x="20" y="26" font-size="12" fill="#111827">Chip · 第 1 层流水线总览（SCP 与 ctrl_noc 一段，C2C Bridge 一段，两段互不相干）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
-  <line x1="150" y1="52" x2="150" y2="328" stroke="#e5e7eb"/>
-  <line x1="316" y1="52" x2="316" y2="328" stroke="#e5e7eb"/>
+  <path d="M150 52 L150 156" stroke="#e5e7eb" fill="none"/>
+<path d="M150 212 L150 242" stroke="#e5e7eb" fill="none"/>
+<path d="M150 298 L150 328" stroke="#e5e7eb" fill="none"/>
+  <path d="M316 52 L316 70" stroke="#e5e7eb" fill="none"/>
+<path d="M316 126 L316 156" stroke="#e5e7eb" fill="none"/>
+<path d="M316 212 L316 328" stroke="#e5e7eb" fill="none"/>
   <line x1="482" y1="52" x2="482" y2="328" stroke="#e5e7eb"/>
   <text x="20" y="102" font-size="10.5" fill="#6b7280">配置</text>
   <rect x="150" y="70" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
@@ -330,7 +439,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="458" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="104" font-size="11" fill="#111827">ctrl_noc 端点</text>
   <text x="326" y="118" font-size="11" fill="#111827">按地址分发</text>
-  <line x1="300" y1="98" x2="314" y2="98" stroke="#475569" marker-end="url(#arcov)"/>
+  <path d="M300 98 L315 98" stroke="#475569" marker-end="url(#arcov)" fill="none"/>
   <text x="20" y="188" font-size="10.5" fill="#6b7280">C2C 出</text>
   <rect x="150" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="170" font-size="8.5" fill="#6b7280">M3</text>
@@ -340,12 +449,12 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="326" y="170" font-size="8.5" fill="#6b7280">M4</text>
   <text x="458" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="190" font-size="11" fill="#111827">TX Engine 拆包</text>
-  <line x1="300" y1="184" x2="314" y2="184" stroke="#475569" marker-end="url(#arcov)"/>
+  <path d="M300 184 L315 184" stroke="#475569" marker-end="url(#arcov)" fill="none"/>
   <rect x="482" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="492" y="170" font-size="8.5" fill="#92400e">M6</text>
   <text x="624" y="170" font-size="8.5" fill="#92400e" text-anchor="end">D300</text>
   <text x="492" y="190" font-size="11" fill="#7c2d12">AXI Bridge</text>
-  <line x1="466" y1="184" x2="480" y2="184" stroke="#475569" marker-end="url(#arcov)"/>
+  <path d="M466 184 L481 184" stroke="#475569" marker-end="url(#arcov)" fill="none"/>
   <text x="20" y="274" font-size="10.5" fill="#6b7280">C2C 入</text>
   <rect x="150" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="256" font-size="8.5" fill="#6b7280">M5</text>
@@ -392,10 +501,10 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="138" font-size="10.5" fill="#475569">3. scp_ctrl = {cfg_core, cfg_addr, cfg_we, cfg_wdata, cfg_bcast}，每笔一拍</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">4. Router 的 commit_done 拉高后才写 DTE 与 ReduceModule 的两份副本</text>
   <text x="250" y="182" font-size="10" fill="#9ca3af">三个 RV core 的 ready 全高后才开放业务接收</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arc1)"/>
-  <line x1="188" y1="109" x2="228" y2="109" stroke="#475569" marker-end="url(#arc1)"/>
-  <line x1="188" y1="162" x2="228" y2="162" stroke="#475569" marker-end="url(#arc1)"/>
-  <line x1="694" y1="108" x2="734" y2="108" stroke="#475569" marker-end="url(#arc1)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
+  <path d="M188 109 L231 109" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
+  <path d="M188 162 L231 162" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
+  <path d="M694 108 L742 108" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
 </svg>
 ```
 
@@ -431,10 +540,10 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. target = addr_map 查 cfg_addr 落在哪个模块的地址段</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 地址不在本 core 视野内 → 记地址错，不下发</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">读事务的 rdata 下一拍回</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arc2)"/>
-  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arc2)"/>
-  <line x1="572" y1="71" x2="612" y2="71" stroke="#475569" marker-end="url(#arc2)"/>
-  <line x1="572" y1="142" x2="612" y2="142" stroke="#475569" marker-end="url(#arc2)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arc2)" fill="none"/>
+  <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arc2)" fill="none"/>
+  <path d="M572 71 L620 71" stroke="#475569" marker-end="url(#arc2)" fill="none"/>
+  <path d="M572 142 L615 142" stroke="#475569" marker-end="url(#arc2)" fill="none"/>
 </svg>
 ```
 
@@ -468,9 +577,9 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SA：同向的数据与 credit release 之间仲裁，小包优先</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，三类 release 一律透传</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">反向按类型 demux 分流</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arc3)"/>
-  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arc3)"/>
-  <line x1="673" y1="99" x2="713" y2="99" stroke="#475569" marker-end="url(#arc3)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
+  <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
+  <path d="M673 99 L716 99" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
 </svg>
 ```
 
@@ -505,10 +614,10 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="128" font-size="10.5" fill="#475569">3. 位宽 2048 转 1024，一拍拆成两拍发出</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. AXI write 是 posted，写响应可以丢</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">private 20 flit 覆盖本级 R2R 往返约 20 拍</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arc4)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arc4)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arc4)"/>
-  <line x1="572" y1="108" x2="612" y2="108" stroke="#475569" marker-end="url(#arc4)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arc4)" fill="none"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arc4)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arc4)" fill="none"/>
+  <path d="M572 108 L620 108" stroke="#475569" marker-end="url(#arc4)" fill="none"/>
 </svg>
 ```
 
@@ -542,10 +651,10 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="123" font-size="10.5" fill="#475569">3. 位宽 1024 转 2048</text>
   <text x="250" y="143" font-size="10.5" fill="#475569">4. AXI Bridge 回 dummy response，释放 PCIe 的 outstanding 资源</text>
   <text x="250" y="167" font-size="10" fill="#9ca3af">RX private 80 加 shared 约 300 flit，覆盖 PCIe 往返 600 ns</text>
-  <line x1="188" y1="49" x2="228" y2="49" stroke="#475569" marker-end="url(#arc5)"/>
-  <line x1="188" y1="111" x2="228" y2="111" stroke="#475569" marker-end="url(#arc5)"/>
-  <line x1="188" y1="165" x2="228" y2="165" stroke="#475569" marker-end="url(#arc5)"/>
-  <line x1="622" y1="103" x2="662" y2="103" stroke="#475569" marker-end="url(#arc5)"/>
+  <path d="M188 49 L231 49" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
+  <path d="M188 111 L231 111" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
+  <path d="M188 165 L231 165" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
+  <path d="M622 103 L670 103" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
 </svg>
 ```
 
@@ -574,8 +683,8 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. release 的粒度是 flit，在 C2C 上压缩包数量后再传</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 300 拍是 PCIe C2C 的 300 ns，按 1 T = 1 ns 折算</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Router 到 Router 的 400 T 含这一段与两侧 Bridge</text>
-  <line x1="188" y1="98" x2="228" y2="98" stroke="#475569" marker-end="url(#arc6)"/>
-  <line x1="572" y1="98" x2="612" y2="98" stroke="#475569" marker-end="url(#arc6)"/>
+  <path d="M188 98 L231 98" stroke="#475569" marker-end="url(#arc6)" fill="none"/>
+  <path d="M572 98 L620 98" stroke="#475569" marker-end="url(#arc6)" fill="none"/>
 </svg>
 ```
 

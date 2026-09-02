@@ -47,185 +47,227 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 | `Core_monitor` | — | MAS 未给描述，本套文档未建模 |
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1490 1068" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1490" height="1068" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">Bach Core · 第 0 层</text>
-  <text x="207" y="26" font-size="9.5" fill="#6b7280">灰线 = 数据通路　绿线 = 控制与完成　橙线 = credit 与 retire　紫虚线 = ctrl_noc 配置</text>
-  <polygon points="60,44 180,44 171,76 51,76" fill="#f8fafc" stroke="#374151"/>
-  <text x="116" y="64" font-size="9" fill="#374151" text-anchor="middle">data_L</text>
-  <polygon points="250,44 370,44 361,76 241,76" fill="#f8fafc" stroke="#374151"/>
-  <text x="306" y="64" font-size="9" fill="#374151" text-anchor="middle">data_UD</text>
-  <polygon points="440,44 560,44 551,76 431,76" fill="#f8fafc" stroke="#374151"/>
-  <text x="496" y="64" font-size="9" fill="#374151" text-anchor="middle">data_R</text>
-  <text x="700" y="60" font-size="8.5" fill="#6b7280" text-anchor="start">三个 R2R 方向各 256 B/T 双向，接相邻 core 的 Router 或 chip 边界的 C2C Bridge</text>
-  <text x="700" y="76" font-size="8.5" fill="#6b7280" text-anchor="start">线上跑 flit，另有 vc_release / stream_release / reduce_release 三条独立回程</text>
-  <rect x="40" y="110" width="560" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="131" font-size="11" fill="#111827">Router（八个独立打拍的模块）</text>
-  <text x="52" y="148" font-size="8.5" fill="#475569">RouterStation ×3（left / right / mid）</text>
-  <text x="52" y="161.5" font-size="8.5" fill="#475569">　Header Parser · VC Buffer ×4 · Packet Context</text>
-  <text x="52" y="175.0" font-size="8.5" fill="#475569">　Stream Resource Table · VC Credit 计数器 · Credit Release 静态旁路</text>
-  <text x="52" y="188.5" font-size="8.5" fill="#475569">Xbar 5 入 7 出：按输出 RoundRobin，贪婪整包，多播全有全无</text>
-  <text x="52" y="202.0" font-size="8.5" fill="#475569">CoreStation：HeaderFIFO · OutputBuffer · 三态准入 · 进出 core 并行</text>
-  <text x="52" y="215.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 16 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
-  <text x="52" y="229.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
-  <text x="52" y="242.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
-  <text x="588" y="297" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份，坏核也有</text>
-  <rect x="740" y="110" width="640" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="752" y="131" font-size="11" fill="#111827">TS 任务调度器（九个独立打拍的模块）</text>
-  <text x="752" y="148" font-size="8.5" fill="#475569">CFG_REG：task_chain 64 项 · datain_task 1 项 · stream_num</text>
-  <text x="752" y="161.5" font-size="8.5" fill="#475569">　CORE_TYPE · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
-  <text x="752" y="175.0" font-size="8.5" fill="#475569">User_Match · DataIn_task_table（只有 1 项，占住就反压 Router）</text>
-  <text x="752" y="188.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 六个写口</text>
-  <text x="752" y="202.0" font-size="8.5" fill="#475569">Task_ctrl：SKIP_MASK 一拍跳过 · 原子安装后继 · End task 不可跳</text>
-  <text x="752" y="215.5" font-size="8.5" fill="#475569">DTE_Arb（reissue 最高）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
-  <text x="752" y="229.0" font-size="8.5" fill="#475569">credit 子模块：注册 / 唤醒 · retire：Head-only 退休</text>
-  <text x="752" y="242.5" font-size="8.5" fill="#475569">Task_done：七路完成合流，reduce 拆成 DTE ack 与 Router Done 两半</text>
-  <text x="1368" y="297" font-size="8.5" fill="#9ca3af" text-anchor="end">四种工作模式由 CORE_TYPE 与 WEIGHTS_MODE 选定</text>
-  <rect x="40" y="360" width="290" height="100" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="381" font-size="11" fill="#111827">DTE RV core</text>
-  <text x="52" y="398" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
-  <text x="52" y="411.5" font-size="8.5" fill="#475569">sm_lsq 16 · cm_lsq 16 · Router I/O reg</text>
-  <text x="52" y="425.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
-  <text x="318" y="451" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
-  <rect x="360" y="360" width="290" height="100" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="372" y="381" font-size="11" fill="#111827">MU RV core</text>
-  <text x="372" y="398" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
-  <text x="372" y="411.5" font-size="8.5" fill="#475569">sm_lsq 16</text>
-  <text x="372" y="425.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
-  <text x="638" y="451" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
-  <rect x="680" y="360" width="290" height="100" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="692" y="381" font-size="11" fill="#111827">VU RV core</text>
-  <text x="692" y="398" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
-  <text x="692" y="411.5" font-size="8.5" fill="#475569">sm_lsq 16</text>
-  <text x="692" y="425.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
-  <text x="958" y="451" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
-  <rect x="1150" y="360" width="200" height="100" fill="#f5f3ff" stroke="#7c3aed" rx="4"/>
-  <text x="1162" y="381" font-size="11" fill="#111827">ctrl_noc 端点</text>
-  <text x="1162" y="398" font-size="8.5" fill="#475569">按 addr_map 分发到 core 内各模块的 cfg 口</text>
-  <text x="1162" y="411.5" font-size="8.5" fill="#475569">32 bit/T，每笔事务一拍</text>
-  <text x="1162" y="425.0" font-size="8.5" fill="#475569">core id 只读</text>
-  <polygon points="1392,378 1480,378 1471,408 1383,408" fill="#f8fafc" stroke="#374151"/>
-  <text x="1432" y="397" font-size="8.5" fill="#374151" text-anchor="middle">scp_ctrl</text>
-  <rect x="40" y="560" width="310" height="168" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="52" y="581" font-size="11" fill="#111827">DTE DSA（八个模块）</text>
-  <text x="52" y="598" font-size="8.5" fill="#475569">Header Parser（非法头 Drop Frame）· Commit（双 Bank，Bank0 优先）</text>
-  <text x="52" y="611.5" font-size="8.5" fill="#475569">TaskQueue ×4 · Lane ×4（RD/WR × CH0/CH1，含 AGCU）</text>
-  <text x="52" y="625.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
-  <text x="52" y="638.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
-  <text x="52" y="652.0" font-size="8.5" fill="#475569">Hmem 16 KB + 32 B · LUT 192 B</text>
-  <text x="52" y="665.5" font-size="8.5" fill="#475569">RouterTable 副本 · 本级 Reduce credit 表 · PendingTaskQ</text>
-  <text x="52" y="679.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
-  <rect x="380" y="560" width="310" height="168" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="392" y="581" font-size="11" fill="#111827">MU DSA（七个模块）</text>
-  <text x="392" y="598" font-size="8.5" fill="#475569">regfile · issue_q 16 · gen_ep_info（local_ep_table）</text>
-  <text x="392" y="611.5" font-size="8.5" fill="#475569">agu ×3 与 acu（越界 / 对齐检查 → Drain &amp; Trap）</text>
-  <text x="392" y="625.0" font-size="8.5" fill="#475569">Token ldq 16（Rd outstanding 4 KB）· Weight ldq 4</text>
-  <text x="392" y="638.5" font-size="8.5" fill="#475569">matrix exe：32 lane × 10 级 CSA 树，vlane 1 / 2</text>
-  <text x="392" y="652.0" font-size="8.5" fill="#475569">stq 16 · Wr concat buffer 1～2 KB</text>
-  <text x="392" y="665.5" font-size="8.5" fill="#475569">C = A × B 或 C = C + (A × B) × W_ep</text>
-  <text x="392" y="679.0" font-size="8.5" fill="#475569">先循环 tile_K 再循环 tile_N，task 间三段重叠</text>
-  <rect x="720" y="560" width="330" height="168" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="732" y="581" font-size="11" fill="#111827">VU DSA（十一个模块）</text>
-  <text x="732" y="598" font-size="8.5" fill="#475569">config_register：8 组静态模板 + 12 个动态参数</text>
-  <text x="732" y="611.5" font-size="8.5" fill="#475569">ISQ · pipe_ctrl + Scoreboard（VRF / MRF / SRF 的依赖）</text>
-  <text x="732" y="625.0" font-size="8.5" fill="#475569">LU · SU：CM 每周期 1 Load + 1 Store，各 128 B，不 burst</text>
-  <text x="732" y="638.5" font-size="8.5" fill="#475569">SMUX / DMUX</text>
-  <text x="732" y="652.0" font-size="8.5" fill="#475569">VALU0 / VALU1 / VALU2 · VSFU · MEXE · SEXE（3 次迭代）</text>
-  <text x="732" y="665.5" font-size="8.5" fill="#475569">VRF 64 KB · MRF 4 KB · SRF 256 B · Profile 计数器</text>
-  <text x="732" y="679.0" font-size="8.5" fill="#475569">最多两条相邻宏指令重叠；CM 访存冲突靠 MACRO_INST_FENCE</text>
-  <rect x="1090" y="560" width="310" height="168" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1102" y="581" font-size="11" fill="#111827">Share Mem</text>
-  <text x="1102" y="598" font-size="8.5" fill="#475569">smem · SRAM 32 KB</text>
-  <text x="1102" y="611.5" font-size="8.5" fill="#475569">访问延迟 5～10 拍，不需要初始化</text>
-  <text x="1102" y="625.0" font-size="8.5" fill="#475569">master：三个 RV core 的 sm_lsq</text>
-  <text x="1102" y="638.5" font-size="8.5" fill="#475569">　　　　+ DTE DSA 的 shareMem 写</text>
-  <text x="1102" y="652.0" font-size="8.5" fill="#475569">用途：task 间共享数据</text>
-  <text x="1102" y="665.5" font-size="8.5" fill="#475569">B core 的 head / tail 指针</text>
-  <text x="1102" y="679.0" font-size="8.5" fill="#475569">R core 的 arrive_num 与 tmp_info 表</text>
-  <text x="1388" y="719" font-size="8.5" fill="#9ca3af" text-anchor="end">四个 master 仲裁</text>
-  <rect x="40" y="818" width="620" height="170" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="44" y="822" width="612" height="162" fill="none" stroke="#374151"/>
-  <text x="52" y="839" font-size="11" fill="#111827">Core Mem</text>
-  <text x="52" y="856" font-size="8.5" fill="#475569">cmem_bank ×8：SRAM 1024 × 128 B + 每 bank 4 KB scale = 1 MB + 32 KB</text>
-  <text x="52" y="869.5" font-size="8.5" fill="#475569">最大带宽 (1 KB + 32 B)/T；地址粒度 128 B + 4 B，支持 byte mask</text>
-  <text x="52" y="883.0" font-size="8.5" fill="#475569">master：DTE DSA 256 B/T（13T）· MU 132 B/T（11T）· VU 132 B/T（14T）</text>
-  <text x="52" y="896.5" font-size="8.5" fill="#475569">　　　　DTE RV core（128 B / 16 B / 2 B）· Router 重发 · ctrl_noc 4 B/T</text>
-  <text x="52" y="910.0" font-size="8.5" fill="#475569">仲裁：每 bank 二选一；DTE 端口先判读写各自冲突，再判读写之间</text>
-  <text x="52" y="923.5" font-size="8.5" fill="#475569">非同组优先级 MU &gt; VU = DTE；DTE 部分冲突只反压那个 bank</text>
-  <text x="52" y="937.0" font-size="8.5" fill="#475569">按 stream_num 均等分片，base(stream_id) 在 master 侧算</text>
-  <rect x="700" y="818" width="640" height="170" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="704" y="822" width="632" height="162" fill="none" stroke="#374151"/>
-  <text x="712" y="839" font-size="11" fill="#111827">Matrix Mem</text>
-  <text x="712" y="856" font-size="8.5" fill="#475569">mmem_bank ×64，每 bank 0.5625 MB，合计 32 + 4 MB（scale : data = 1 : 8）</text>
-  <text x="712" y="869.5" font-size="8.5" fill="#475569">最大带宽 (8 + 1) KB/T；地址粒度 128 B，不支持 byte mask</text>
-  <text x="712" y="883.0" font-size="8.5" fill="#475569">master：DTE DSA 读写 256 B/T（写 9T 读 8T）· MU 只读 (8+1) KB/T（8T）</text>
-  <text x="712" y="896.5" font-size="8.5" fill="#475569">　　　　ctrl_noc 4 B/T（地址对齐 128 B，数据粒度 4 B，burst ≤ 32）</text>
-  <text x="712" y="910.0" font-size="8.5" fill="#475569">硬约束：同一 bank 不许两个 master 同时访问，冲突时只执行 MU 并计数报错</text>
-  <text x="712" y="923.5" font-size="8.5" fill="#475569">SRAM 单 bit 自纠错，纠错后在 SRAM 空闲时写回覆盖</text>
-  <text x="712" y="937.0" font-size="8.5" fill="#475569">三种角色：普通 core 存 weight · B core 存 token · R core 存 reduction</text>
-  <polyline points="116,76 116,93 107,93 107,110" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="306,76 306,93 253,93 253,110" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="496,76 496,93 398,93 398,110" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="600,141 740,141" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <text x="670" y="138" font-size="8.5" fill="#0f766e" text-anchor="middle">router2ts_trigger_ch</text>
-  <polyline points="600,173 740,173" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <text x="670" y="169" font-size="8.5" fill="#0f766e" text-anchor="middle">router2ts_credit_ch</text>
-  <polyline points="600,204 740,204" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <text x="670" y="200" font-size="8.5" fill="#0f766e" text-anchor="middle">rmem2ts_done_ch</text>
-  <polyline points="740,243 600,243" fill="none" stroke="#b45309" marker-end="url(#o)"/>
-  <text x="670" y="238" font-size="8.5" fill="#b45309" text-anchor="middle">ts2router 资源注册</text>
-  <polyline points="740,279 600,279" fill="none" stroke="#b45309" marker-end="url(#o)"/>
-  <text x="670" y="290" font-size="8.5" fill="#b45309" text-anchor="middle">retire / stream credit 返还</text>
-  <polyline points="823,306 823,333 185,333 185,360" fill="none" stroke="#0f766e" marker-start="url(#gs)" marker-end="url(#g)"/>
-  <polyline points="970,306 970,333 505,333 505,360" fill="none" stroke="#0f766e" marker-start="url(#gs)" marker-end="url(#g)"/>
-  <polyline points="1124,306 1124,333 825,333 825,360" fill="none" stroke="#0f766e" marker-start="url(#gs)" marker-end="url(#g)"/>
-  <text x="560" y="326" font-size="8.5" fill="#0f766e" text-anchor="middle">task_cmd（task_pc · stream_id · local_user_id）/ task_ack；rv_done（stream_id · local_user_id · task_id）</text>
-  <polyline points="185,460 185,510 195,510 195,560" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="505,460 505,510 535,510 535,560" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="825,460 825,510 885,510 885,560" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="505" y="478" font-size="8.5" fill="#6b7280" text-anchor="middle">dsa_cfg：dsaw / dsawi 写寄存器 + 写 trigger 启动；dsar / dsari 读不阻塞，按 dsa_rq 顺序写回 gpr</text>
-  <polyline points="325,560 325,502 1060,502 1060,306" fill="none" stroke="#0f766e" stroke-dasharray="4 3" marker-end="url(#g)"/>
-  <polyline points="665,560 665,502 1079,502 1079,306" fill="none" stroke="#0f766e" stroke-dasharray="4 3" marker-end="url(#g)"/>
-  <polyline points="1024,560 1024,502 1098,502 1098,306" fill="none" stroke="#0f766e" stroke-dasharray="4 3" marker-end="url(#g)"/>
-  <text x="1140" y="496" font-size="8.5" fill="#0f766e" text-anchor="end">dsa_done ×3 · VU 的 Event 同步信号 → Task_done</text>
-  <polyline points="289,460 289,530 1133,530 1133,560" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="621,460 621,530 1161,530 1161,560" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="953,460 953,530 1189,530 1189,560" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="1086" y="524" font-size="8.5" fill="#6b7280" text-anchor="end">sm_lsq ×3（32 bit，顺序发射，5～10 拍）</text>
-  <polyline points="40,267 14,267 14,610 40,610" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text transform="rotate(-90 28 640)" x="28" y="640" font-size="8.5" fill="#6b7280" text-anchor="middle">in_core / out_core_data_ch（AXI-Stream-Like）+ VC credit</text>
-  <polyline points="57,306 57,333 81,333 81,360" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="112" y="332" font-size="8.5" fill="#6b7280" text-anchor="start">Router I/O reg</text>
-  <polyline points="96,728 96,773 102,773 102,818" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="108" y="776" font-size="8.5" fill="#6b7280" text-anchor="start">cmem_dte 256 B</text>
-  <polyline points="263,728 263,773 802,773 802,818" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="540" y="758" font-size="8.5" fill="#6b7280" text-anchor="middle">mmem_dte 256 B</text>
-  <polyline points="479,728 479,773 424,773 424,818" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="486" y="776" font-size="8.5" fill="#6b7280" text-anchor="start">cmem_mu 132 B</text>
-  <polyline points="653,728 653,773 994,773 994,818" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="920" y="794" font-size="8.5" fill="#6b7280" text-anchor="middle">mmem_mu 只读 (8+1) KB</text>
-  <polyline points="793,728 793,773 598,773 598,818" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="686" y="742" font-size="8.5" fill="#6b7280" text-anchor="middle">cmem_vu 1056 bit，不 burst</text>
-  <polyline points="330,428 352,428 352,796 365,796 365,818" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="371" y="790" font-size="8.5" fill="#6b7280" text-anchor="start">cm_lsq（固定读回 1056 bit，32 bit / 拍）</text>
-  <polyline points="350,721 372,721 372,750 1127,750 1127,728" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
-  <text x="1078" y="772" font-size="8.5" fill="#6b7280" text-anchor="end">shareMem 写（B / R core）</text>
-  <polyline points="1383,393 1366,393 1366,410 1350,410" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="1250,360 1250,333 1252,333 1252,306" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <text x="1480" y="336" font-size="8.5" fill="#7c3aed" text-anchor="end">cfg → TS / RouterTable / 三个 DSA / Share Mem / ITCM · DTCM / Cmem · Mmem</text>
-  <text x="20" y="1052" font-size="10.5" fill="#374151">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接。坏核只构造 Router 的八个模块，其余一律不构造。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2058 1312" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Bach Core 第 0 层">
+<title>Bach Core 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="2058" height="1312" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">Bach Core · 第 0 层（TS 在上，Router 在下；MU / VU / DTE 三列各自 RV core 在上、DSA 在下；存储一行在 DSA 之下，DTE xbar 再往下；core_noc 环绕一圈）</text>
+<text x="978" y="26" font-size="9.5" fill="#6b7280">灰线 = 数据通路　绿线 = 控制与完成　橙线 = credit 与 retire　紫虚线 = ctrl_noc 配置</text>
+<rect x="130" y="92" width="1798" height="1100" rx="14" fill="none" stroke="#374151" stroke-width="1.2"/>
+<rect x="216" y="112" width="1626" height="1066" rx="8" fill="none" stroke="#7c3aed" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="140" y="107" font-size="11" fill="#111827" font-weight="600">Bach Core</text>
+<text x="226" y="1172" font-size="9.5" fill="#7c3aed" font-weight="600">core_noc + debug_noc 环：ctrl_noc 端点按 addr_map 把 cfg 写到环上各模块（TS / RouterTable / 三个 DSA / Share Mem / ITCM · DTCM / Cmem · Mmem），32 bit/T</text>
+<rect x="144" y="130" width="56" height="880" rx="4" fill="#fdf6ec" stroke="#b45309" stroke-dasharray="4 3"/>
+<text transform="rotate(-90 172.0 570.0)" x="172.0" y="573.7" font-size="10.5" fill="#92400e" font-weight="600" text-anchor="middle">Core Monitor：状态影子寄存器 · IPI（未建模，只留 async_int / ts2corestatus 接口名）</text>
+<rect x="1858" y="130" width="56" height="880" rx="4" fill="#f3f4f6" stroke="#6b7280" stroke-dasharray="4 3"/>
+<text transform="rotate(-90 1886.0 570.0)" x="1886.0" y="573.7" font-size="10.5" fill="#4b5563" font-weight="600" text-anchor="middle">Debug Module：解析 DMI，实现 core 内组件的 debug（未建模）</text>
+<rect x="234" y="130" width="1200" height="114" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="246" y="151" font-size="11" fill="#111827" font-weight="600">TS 任务调度器（九个独立打拍的模块）</text>
+<text x="246.0" y="168.0" font-size="8.5" fill="#475569">CFG_REG：task_chain 64 项 · datain_task 1 项 · stream_num</text>
+<text x="246.0" y="181.5" font-size="8.5" fill="#475569">　CORE_TYPE · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
+<text x="246.0" y="195.0" font-size="8.5" fill="#475569">User_Match · DataIn_task_table（只有 1 项，占住就反压 Router）</text>
+<text x="246.0" y="208.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 六个写口</text>
+<text x="834.0" y="168.0" font-size="8.5" fill="#475569">Task_ctrl：SKIP_MASK 一拍跳过 · 原子安装后继 · End task 不可跳</text>
+<text x="834.0" y="181.5" font-size="8.5" fill="#475569">DTE_Arb（reissue 最高）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
+<text x="834.0" y="195.0" font-size="8.5" fill="#475569">credit 子模块：注册 / 唤醒 · retire：Head-only 退休</text>
+<text x="834.0" y="208.5" font-size="8.5" fill="#475569">Task_done：七路完成合流，reduce 拆成 DTE ack 与 Router Done 两半</text>
+<text x="1422" y="235" font-size="8.5" fill="#9ca3af" text-anchor="end">四种工作模式由 CORE_TYPE 与 WEIGHTS_MODE 选定</text>
+<rect x="1524" y="130" width="300" height="86.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
+<text x="1536" y="151" font-size="11" fill="#111827" font-weight="600">ctrl_noc 端点</text>
+<text x="1536.0" y="168.0" font-size="8.5" fill="#475569">按 addr_map 分发到 core 内各模块的 cfg 口</text>
+<text x="1536.0" y="181.5" font-size="8.5" fill="#475569">32 bit/T，每笔事务一拍</text>
+<text x="1536.0" y="195.0" font-size="8.5" fill="#475569">core id 只读</text>
+<rect x="1524" y="256.5" width="300" height="154.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1536" y="277.5" font-size="11" fill="#111827" font-weight="600">Share Mem</text>
+<text x="1536.0" y="294.5" font-size="8.5" fill="#475569">smem · SRAM 32 KB</text>
+<text x="1536.0" y="308.0" font-size="8.5" fill="#475569">访问延迟 5～10 拍，不需要初始化</text>
+<text x="1536.0" y="321.5" font-size="8.5" fill="#475569">master：三个 RV core 的 sm_lsq</text>
+<text x="1536.0" y="335.0" font-size="8.5" fill="#475569">　　　　+ DTE DSA 的 shareMem 写</text>
+<text x="1536.0" y="348.5" font-size="8.5" fill="#475569">用途：task 间共享数据</text>
+<text x="1536.0" y="362.0" font-size="8.5" fill="#475569">B core 的 head / tail 指针</text>
+<text x="1536.0" y="375.5" font-size="8.5" fill="#475569">R core 的 arrive_num 与 tmp_info 表</text>
+<text x="1812" y="402.0" font-size="8.5" fill="#9ca3af" text-anchor="end">四个 master 仲裁</text>
+<rect x="324" y="364" width="330" height="106" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="336" y="385" font-size="11" fill="#111827" font-weight="600">MU RV core</text>
+<text x="336.0" y="402.0" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
+<text x="336.0" y="415.5" font-size="8.5" fill="#475569">sm_lsq 16</text>
+<text x="336.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
+<text x="642" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
+<rect x="324" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="336" y="551" font-size="11" fill="#111827" font-weight="600">MU DSA（七个模块）</text>
+<text x="336.0" y="568.0" font-size="8.5" fill="#475569">regfile · issue_q 16 · gen_ep_info（local_ep_table）</text>
+<text x="336.0" y="581.5" font-size="8.5" fill="#475569">agu ×3 与 acu（越界 / 对齐检查 → Drain &amp; Trap）</text>
+<text x="336.0" y="595.0" font-size="8.5" fill="#475569">Token ldq 16（Rd outstanding 4 KB）· Weight ldq 4</text>
+<text x="336.0" y="608.5" font-size="8.5" fill="#475569">matrix exe：32 lane × 10 级 CSA 树，vlane 1 / 2</text>
+<text x="336.0" y="622.0" font-size="8.5" fill="#475569">stq 16 · Wr concat buffer 1～2 KB</text>
+<text x="336.0" y="635.5" font-size="8.5" fill="#475569">C = A × B 或 C = C + (A × B) × W_ep</text>
+<text x="336.0" y="649.0" font-size="8.5" fill="#475569">先循环 tile_K 再循环 tile_N，task 间三段重叠</text>
+<rect x="714" y="364" width="330" height="106" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="726" y="385" font-size="11" fill="#111827" font-weight="600">VU RV core</text>
+<text x="726.0" y="402.0" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
+<text x="726.0" y="415.5" font-size="8.5" fill="#475569">sm_lsq 16</text>
+<text x="726.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
+<text x="1032" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
+<rect x="714" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="726" y="551" font-size="11" fill="#111827" font-weight="600">VU DSA（十一个模块）</text>
+<text x="726.0" y="568.0" font-size="8.5" fill="#475569">config_register：8 组静态模板 + 12 个动态参数</text>
+<text x="726.0" y="581.5" font-size="8.5" fill="#475569">ISQ · pipe_ctrl + Scoreboard（VRF / MRF / SRF 的依赖）</text>
+<text x="726.0" y="595.0" font-size="8.5" fill="#475569">LU · SU：CM 每周期 1 Load + 1 Store，各 128 B，不 burst</text>
+<text x="726.0" y="608.5" font-size="8.5" fill="#475569">SMUX / DMUX</text>
+<text x="726.0" y="622.0" font-size="8.5" fill="#475569">VALU0 / VALU1 / VALU2 · VSFU · MEXE · SEXE（3 次迭代）</text>
+<text x="726.0" y="635.5" font-size="8.5" fill="#475569">VRF 64 KB · MRF 4 KB · SRF 256 B · Profile 计数器</text>
+<text x="726.0" y="649.0" font-size="8.5" fill="#475569">最多两条相邻宏指令重叠；CM 访存冲突靠 MACRO_INST_FENCE</text>
+<rect x="1104" y="364" width="330" height="106" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1116" y="385" font-size="11" fill="#111827" font-weight="600">DTE RV core</text>
+<text x="1116.0" y="402.0" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
+<text x="1116.0" y="415.5" font-size="8.5" fill="#475569">sm_lsq 16 · cm_lsq 16 · Router I/O reg</text>
+<text x="1116.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
+<text x="1422" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
+<rect x="1104" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（八个模块）</text>
+<text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头 Drop Frame）· Commit（双 Bank，Bank0 优先）</text>
+<text x="1116.0" y="581.5" font-size="8.5" fill="#475569">TaskQueue ×4 · Lane ×4（RD/WR × CH0/CH1，含 AGCU）</text>
+<text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
+<text x="1116.0" y="608.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
+<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 16 KB + 32 B · LUT 192 B</text>
+<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · 本级 Reduce credit 表 · PendingTaskQ</text>
+<text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
+<rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
+<text x="336" y="751" font-size="11" fill="#111827" font-weight="600">Matrix Mem</text>
+<text x="336.0" y="768.0" font-size="8.5" fill="#475569">mmem_bank ×64，每 bank 0.5625 MB，合计 32 + 4 MB（scale : data = 1 : 8）</text>
+<text x="336.0" y="781.5" font-size="8.5" fill="#475569">最大带宽 (8 + 1) KB/T；地址粒度 128 B，不支持 byte mask</text>
+<text x="336.0" y="795.0" font-size="8.5" fill="#475569">master：DTE DSA 读写 256 B/T（写 9T 读 8T）· MU 只读 (8+1) KB/T（8T）</text>
+<text x="336.0" y="808.5" font-size="8.5" fill="#475569">　　　　ctrl_noc 4 B/T（地址对齐 128 B，数据粒度 4 B，burst ≤ 32）</text>
+<text x="336.0" y="822.0" font-size="8.5" fill="#475569">硬约束：同一 bank 不许两个 master 同时访问，冲突时只执行 MU 并计数报错</text>
+<text x="336.0" y="835.5" font-size="8.5" fill="#475569">SRAM 单 bit 自纠错，纠错后在 SRAM 空闲时写回覆盖</text>
+<text x="336.0" y="849.0" font-size="8.5" fill="#475569">三种角色：普通 core 存 weight · B core 存 token · R core 存 reduction</text>
+<rect x="725.58" y="730" width="355.8" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
+<text x="737.58" y="751" font-size="11" fill="#111827" font-weight="600">Core Mem</text>
+<text x="737.6" y="768.0" font-size="8.5" fill="#475569">cmem_bank ×8：SRAM 1024 × 128 B + 每 bank 4 KB scale = 1 MB + 32 KB</text>
+<text x="737.6" y="781.5" font-size="8.5" fill="#475569">最大带宽 (1 KB + 32 B)/T；地址粒度 128 B + 4 B，支持 byte mask</text>
+<text x="737.6" y="795.0" font-size="8.5" fill="#475569">master：DTE DSA 256 B/T（13T）· MU 132 B/T（11T）· VU 132 B/T（14T）</text>
+<text x="737.6" y="808.5" font-size="8.5" fill="#475569">　　　　DTE RV core（128 B / 16 B / 2 B）· Router 重发 · ctrl_noc 4 B/T</text>
+<text x="737.6" y="822.0" font-size="8.5" fill="#475569">仲裁：每 bank 二选一；DTE 端口先判读写各自冲突，再判读写之间</text>
+<text x="737.6" y="835.5" font-size="8.5" fill="#475569">非同组优先级 MU &gt; VU = DTE；DTE 部分冲突只反压那个 bank</text>
+<text x="737.6" y="849.0" font-size="8.5" fill="#475569">按 stream_num 均等分片，base(stream_id) 在 master 侧算</text>
+<rect x="324" y="910" width="869.5" height="60" rx="4" fill="#ecfeff" stroke="#0e7490"/>
+<text x="336" y="931" font-size="11" fill="#111827" font-weight="600">DTE xbar（DMA_XBAR）</text>
+<text x="336.0" y="948.0" font-size="8.5" fill="#475569">DTE DSA 到 Core Mem 与 Matrix Mem 各 256 B/T；Core Mem 8 bank · Matrix Mem 64 bank，命中冲突就排队；MM → CM 的搬移也走这里，VU 不直接读 Matrix Mem</text>
+<rect x="234" y="1040" width="1590" height="114" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="246" y="1061" font-size="11" fill="#111827" font-weight="600">Router（八个独立打拍的模块）</text>
+<text x="246.0" y="1078.0" font-size="8.5" fill="#475569">RouterStation ×3（left / right / mid）</text>
+<text x="246.0" y="1091.5" font-size="8.5" fill="#475569">　Header Parser · VC Buffer ×4 · Packet Context</text>
+<text x="246.0" y="1105.0" font-size="8.5" fill="#475569">　Stream Resource Table · VC Credit 计数器 · Credit Release 静态旁路</text>
+<text x="246.0" y="1118.5" font-size="8.5" fill="#475569">Xbar 5 入 7 出：按输出 RoundRobin，贪婪整包，多播全有全无</text>
+<text x="1029.0" y="1078.0" font-size="8.5" fill="#475569">CoreStation：HeaderFIFO · OutputBuffer · 三态准入 · 进出 core 并行</text>
+<text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 16 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
+<text x="1029.0" y="1105.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
+<text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
+<text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份，坏核也有</text>
+<polygon points="125.0,44 228.0,44 219.0,74 116.0,74" fill="#f8fafc" stroke="#374151"/>
+<text x="172.0" y="58.0" font-size="9" fill="#374151" text-anchor="middle">async_int → SCP</text>
+<text x="172.0" y="69.0" font-size="7.5" fill="#6b7280" text-anchor="middle">core 的中断异常信息</text>
+<polygon points="1623.0,44 1734.0,44 1725.0,74 1614.0,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1674.0" y="58.0" font-size="9" fill="#374151" text-anchor="middle">scp_ctrl</text>
+<text x="1674.0" y="69.0" font-size="7.5" fill="#6b7280" text-anchor="middle">SCP → ctrl_noc，32 bit/T</text>
+<polygon points="1845.0,44 1936.0,44 1927.0,74 1836.0,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1886.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dmi_ch ← DTM</text>
+<polygon points="21,1081.0 116,1081.0 107,1113.0 12,1113.0" fill="#f8fafc" stroke="#374151"/>
+<text x="64.0" y="1096.0" font-size="9" fill="#374151" text-anchor="middle">data_L</text>
+<text x="64.0" y="1107.0" font-size="7.5" fill="#6b7280" text-anchor="middle">left · 256 B/T</text>
+<polygon points="1951,1081.0 2046,1081.0 2037,1113.0 1942,1113.0" fill="#f8fafc" stroke="#374151"/>
+<text x="1994.0" y="1096.0" font-size="9" fill="#374151" text-anchor="middle">data_R</text>
+<text x="1994.0" y="1107.0" font-size="7.5" fill="#6b7280" text-anchor="middle">right · 256 B/T</text>
+<polygon points="978.0,1214 1089.0,1214 1080.0,1246 969.0,1246" fill="#f8fafc" stroke="#374151"/>
+<text x="1029.0" y="1229.0" font-size="9" fill="#374151" text-anchor="middle">data_UD</text>
+<text x="1029.0" y="1240.0" font-size="7.5" fill="#6b7280" text-anchor="middle">mid · 256 B/T</text>
+<path d="M246.0 1040.0 L246.0 245.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="241.0" y="376.2" width="10" height="95.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 246 424)" x="246" y="426.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">router2ts_trigger_ch</text>
+<path d="M262.0 1040.0 L262.0 245.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="257.0" y="498.4" width="10" height="91.1" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 262 544)" x="262" y="546.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">router2ts_credit_ch</text>
+<path d="M278.0 1040.0 L278.0 245.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="273.0" y="627.4" width="10" height="73.2" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 278 664)" x="278" y="666.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">rmem2ts_done_ch</text>
+<path d="M294.0 244.0 L294.0 1039.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<rect x="289.0" y="742.6" width="10" height="82.8" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 294 784)" x="294" y="786.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#b45309" text-anchor="middle">ts2router 资源注册</text>
+<path d="M310.0 244.0 L310.0 1039.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<rect x="305.0" y="857.2" width="10" height="93.7" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 310 904)" x="310" y="906.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#b45309" text-anchor="middle">retire · credit 返还</text>
+<path d="M489.0 245.0 L489.0 363.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="491.8" y="232.0" width="10.5" height="144.0" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 497.0 304.0)" x="497.0" y="307.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">task_cmd / task_ack · rv_done</text>
+<path d="M489.0 471.0 L489.0 529.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="491.8" y="480.3" width="10.5" height="39.3" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 497.0 500.0)" x="497.0" y="503.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">dsa_cfg</text>
+<path d="M879.0 245.0 L879.0 363.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M879.0 471.0 L879.0 529.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1269.0 245.0 L1269.0 363.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1269.0 471.0 L1269.0 529.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M621.0 530.0 L621.0 510.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+<path d="M1011.0 530.0 L1011.0 510.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+<path d="M1401.0 530.0 L1401.0 510.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+<path d="M621.0 510.0 L1474.0 510.0 L1474.0 274.0 L1417.5 274.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+<path d="M1417.5 274.0 L1417.5 245.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<text x="637.0" y="522" font-size="8.5" fill="#0f766e" text-anchor="start">dsa_done ×3 · VU 的 Event 同步信号 → Task_done（绿，DSA 顶边汇成一路上行）</text>
+<path d="M555.0 490.0 L555.0 471.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M945.0 490.0 L945.0 471.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1335.0 490.0 L1335.0 471.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M555.0 490.0 L1832.0 490.0 L1832.0 349.2 L1825.0 349.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="571.0" y="485" font-size="8.5" fill="#6b7280" text-anchor="start">sm_lsq ×3（32 bit，顺序发射，5～10 拍）</text>
+<path d="M489.0 680.0 L489.0 729.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="491.8" y="653.0" width="10.5" height="103.9" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 497.0 705.0)" x="497.0" y="708.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">mmem_mu 只读 (8+1) KB</text>
+<path d="M879.0 681.0 L879.0 729.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="881.8" y="641.1" width="10.5" height="127.7" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 887.0 705.0)" x="887.0" y="708.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">cmem_vu 1056 bit，不 burst</text>
+<path d="M621.0 681.0 L621.0 705.0 L765.6 705.0 L765.6 729.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="659.3" y="693.5" width="67.9" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="693.29" y="701" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">cmem_mu 132 B</text>
+<path d="M1153.5 681.0 L1153.5 909.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="1156.2" y="750.7" width="10.5" height="88.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1161.5 795.0)" x="1161.5" y="798.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">DMA 读写各 256 B/T</text>
+<path d="M468.6 909.0 L468.6 881.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="440.3" y="887.5" width="72.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="476.63200000000006" y="895.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">mmem_dte 256 B</text>
+<path d="M939.1 909.0 L939.1 881.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="910.7" y="887.5" width="72.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="947.0600000000001" y="895.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">cmem_dte 256 B</text>
+<path d="M1302.0 1040.0 L1302.0 681.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1288.8" y="821.3" width="10.5" height="77.4" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1294.0 860.0)" x="1294.0" y="863.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">in_core_data_ch</text>
+<path d="M1368.0 680.0 L1368.0 1039.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1370.8" y="818.9" width="10.5" height="82.2" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1376.0 860.0)" x="1376.0" y="863.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">out_core_data_ch</text>
+<text transform="rotate(-90 1398.0 920.0)" x="1398.0" y="920.0" font-size="8" fill="#6b7280" text-anchor="middle">AXI-Stream-Like + VC credit</text>
+<path d="M172.0 130.0 L167.6 75.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<path d="M1669.5 74.0 L1673.9 129.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M1794.0 216.5 L1794.0 255.5" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<rect x="1796.9" y="232.0" width="54.3" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1824.0" y="239.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">cfg（示例）</text>
+<path d="M1881.5 74.0 L1885.9 129.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<path d="M234.0 187.0 L201.0 187.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<rect x="218.2" y="196.7" width="9.5" height="60.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 223.0 227.0)" x="223.0" y="229.6" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="7.5" fill="#475569" text-anchor="middle">ts2corestatus</text>
+<path d="M112.5 1097.0 L233.0 1097.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1825.0 1097.0 L1945.5 1097.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1029.1 1155.0 L1033.4 1213.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="1524" y="546" font-size="8.5" fill="#4b5563" text-anchor="start">连线说明（灰双向箭头两端都是主动方）：</text>
+<text x="1524" y="559.5" font-size="8.5" fill="#4b5563" text-anchor="start">TS ↔ RV core：task_cmd（task_pc · stream_id ·</text>
+<text x="1524" y="573.0" font-size="8.5" fill="#4b5563" text-anchor="start">　local_user_id）/ task_ack；rv_done（stream_id ·</text>
+<text x="1524" y="586.5" font-size="8.5" fill="#4b5563" text-anchor="start">　local_user_id · task_id）</text>
+<text x="1524" y="600.0" font-size="8.5" fill="#4b5563" text-anchor="start">RV core ↔ DSA：dsa_cfg：dsaw / dsawi 写寄存器 +</text>
+<text x="1524" y="613.5" font-size="8.5" fill="#4b5563" text-anchor="start">　写 trigger 启动；dsar / dsari 读不阻塞，按 dsa_rq</text>
+<text x="1524" y="627.0" font-size="8.5" fill="#4b5563" text-anchor="start">　顺序写回 gpr</text>
+<text x="1524" y="640.5" font-size="8.5" fill="#4b5563" text-anchor="start">DTE RV core ↔ Core Mem：cm_lsq（固定读回 1056 bit，</text>
+<text x="1524" y="654.0" font-size="8.5" fill="#4b5563" text-anchor="start">　32 bit / 拍）；DTE RV core ↔ Router：Router I/O reg。</text>
+<text x="1524" y="667.5" font-size="8.5" fill="#4b5563" text-anchor="start">　这两条只有 DTE 列有，图中不单画</text>
+<text x="1524" y="681.0" font-size="8.5" fill="#4b5563" text-anchor="start">三个 R2R 方向各 256 B/T 双向，接相邻 core 的 Router</text>
+<text x="1524" y="694.5" font-size="8.5" fill="#4b5563" text-anchor="start">　或 chip 边界的 C2C Bridge；线上跑 flit，另有</text>
+<text x="1524" y="708.0" font-size="8.5" fill="#4b5563" text-anchor="start">　vc_release / stream_release / reduce_release 回程</text>
+<text x="20" y="1298" font-size="10.5" fill="#374151" text-anchor="start">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接。坏核只构造 Router 的八个模块，其余一律不构造。Router 贴底边朝 chip 中部：data_L / data_R 走左右，data_UD 走底边。</text>
 </svg>
 ```
 

@@ -25,119 +25,128 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 指令逐条执行，不建流水线：`src/rv32` 的 `SystemRv32` 提供 RV32IMC、M 态 CSR 与译码，本模块覆盖 `Decode` 接入自定义指令，外面包一层 task_queue、dsa_iss、dsa_rq、lsq 与 gpr 就绪表做逐拍记账。
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1380 860" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1380" height="860" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 0 层</text>
-  <text x="185" y="26" font-size="9.5" fill="#6b7280">DTE / MU / VU 各一个实例，硬件相同、接口相同；黄色虚线框内是折算成每条指令 1 拍、不建流水线的部分</text>
-  <polygon points="40,116 190,116 181,146 31,146" fill="#f8fafc" stroke="#374151"/>
-  <text x="111" y="135" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack</text>
-  <polygon points="40,742 190,742 181,772 31,772" fill="#f8fafc" stroke="#374151"/>
-  <text x="111" y="761" font-size="9" fill="#374151" text-anchor="middle">rv_done → TS</text>
-  <rect x="250" y="84" width="280" height="142" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="262" y="105" font-size="11" fill="#111827">task_queue</text>
-  <text x="262" y="122" font-size="8.5" fill="#475569">提前接收 TS 下发的 task，做到用户之间</text>
-  <text x="262" y="135.5" font-size="8.5" fill="#475569">　task 的无 bubble 调度</text>
-  <text x="262" y="149.0" font-size="8.5" fill="#475569">按是否有空槽产生 task_ack；未被接收时</text>
-  <text x="262" y="162.5" font-size="8.5" fill="#475569">　TS 不能释放该 task 跳到下一个</text>
-  <text x="262" y="176.0" font-size="8.5" fill="#475569">队头 task 的 task_pc 驱动取指</text>
-  <text x="262" y="189.5" font-size="8.5" fill="#475569">深度 2（待定）</text>
-  <rect x="250" y="286" width="560" height="238" fill="#fefce8" stroke="#a16207" stroke-dasharray="5 4" rx="4"/>
-  <text x="262" y="307" font-size="11" fill="#111827">指令执行器（src/rv32 的 SystemRv32）</text>
-  <text x="262" y="324" font-size="8.5" fill="#475569">RV32IMC，只支持 M 态，实现 M 态 CSR，不支持 S / U / H；fence 实现为 nop</text>
-  <text x="262" y="337.5" font-size="8.5" fill="#475569">覆盖 Decode 接入 custom-0 自定义指令：</text>
-  <text x="262" y="351.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
-  <text x="262" y="364.5" font-size="8.5" fill="#475569">　dsaw.s / dsaw.d / dsawi.s / dsawi.d 写 DSA 寄存器</text>
-  <text x="262" y="378.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· flag_check · loop</text>
-  <text x="262" y="391.5" font-size="8.5" fill="#475569">每条指令 1 拍；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
-  <text x="262" y="405.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch / 双发射 /</text>
-  <text x="262" y="418.5" font-size="8.5" fill="#475569">　gpr 端口 / SEU 的乘除多拍 / DTCM 的 bank 冲突都折算成 1 拍</text>
-  <text x="262" y="432.0" font-size="8.5" fill="#475569">复位后按 io_reg 的 boot_pc 启动；收到 task 后按 task_pc 起始执行</text>
-  <text x="262" y="445.5" font-size="8.5" fill="#475569">task_done：队列有待执行 task 则跳到队头 task 起始 PC，</text>
-  <text x="262" y="459.0" font-size="8.5" fill="#475569">　否则阻塞取指等待；带 TS 标志时通知 TS</text>
-  <rect x="880" y="286" width="250" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="892" y="307" font-size="11" fill="#111827">gpr 就绪表</text>
-  <text x="892" y="324" font-size="8.5" fill="#475569">32 × 32 bit</text>
-  <text x="892" y="337.5" font-size="8.5" fill="#475569">DSA 读返回与访存返回未到时</text>
-  <text x="892" y="351.0" font-size="8.5" fill="#475569">　把对应寄存器标为未就绪</text>
-  <text x="892" y="364.5" font-size="8.5" fill="#475569">读到未就绪的源就等</text>
-  <rect x="880" y="420" width="250" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="892" y="441" font-size="11" fill="#111827">CSR</text>
-  <text x="892" y="458" font-size="8.5" fill="#475569">M 态 CSR + 自定义 CSR</text>
-  <text x="892" y="471.5" font-size="8.5" fill="#475569">stream_id 只读（4 bit）</text>
-  <text x="892" y="485.0" font-size="8.5" fill="#475569">local_user_id 可读写（12 bit）</text>
-  <text x="892" y="498.5" font-size="8.5" fill="#475569">由 ctrl_noc 直接配置，不经流水线</text>
-  <rect x="1180" y="84" width="170" height="180" fill="#f5f3ff" stroke="#7c3aed" rx="4"/>
-  <text x="1192" y="105" font-size="11" fill="#111827">ITCM / DTCM</text>
-  <text x="1192" y="122" font-size="8.5" fill="#475569">ITCM 4 KB，8 B/T，1 拍</text>
-  <text x="1192" y="135.5" font-size="8.5" fill="#475569">　firmware · kernel</text>
-  <text x="1192" y="149.0" font-size="8.5" fill="#475569">　· bootloader</text>
-  <text x="1192" y="162.5" font-size="8.5" fill="#475569">DTCM 8 KB，32 bit × 4 bank</text>
-  <text x="1192" y="176.0" font-size="8.5" fill="#475569">　BSS 段 · 寄存器溢出 · 堆栈</text>
-  <text x="1192" y="189.5" font-size="8.5" fill="#475569">由 ctrl_noc 装载</text>
-  <text x="1192" y="203.0" font-size="8.5" fill="#475569">装载拍数 = 字节数 / 4 B</text>
-  <rect x="250" y="584" width="290" height="192" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="262" y="605" font-size="11" fill="#111827">dsa_iss / dsa_rq</text>
-  <text x="262" y="622" font-size="8.5" fill="#475569">dsa_iss：DSA 调用指令下发通道</text>
-  <text x="262" y="635.5" font-size="8.5" fill="#475569">　每拍最多一条配置或 trigger 指令</text>
-  <text x="262" y="649.0" font-size="8.5" fill="#475569">　按下发通道是否反压阻塞判断是否下发成功</text>
-  <text x="262" y="662.5" font-size="8.5" fill="#475569">dsa_rq：8 项，按顺序记录已下发的读指令</text>
-  <text x="262" y="676.0" font-size="8.5" fill="#475569">　返回数据后按记录的目的寄存器编号写回 gpr</text>
-  <text x="262" y="689.5" font-size="8.5" fill="#475569">DSA 读寄存器指令不支持同步读返回，</text>
-  <text x="262" y="703.0" font-size="8.5" fill="#475569">　软件要查询状态只能轮询</text>
-  <text x="262" y="716.5" font-size="8.5" fill="#475569">任务启动靠写 DSA 的 trigger 寄存器；</text>
-  <text x="262" y="730.0" font-size="8.5" fill="#475569">　last 标志包含在 trigger 里</text>
-  <rect x="870" y="584" width="300" height="192" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="882" y="605" font-size="11" fill="#111827">lsq（顺序发射）</text>
-  <text x="882" y="622" font-size="8.5" fill="#475569">sm_lsq 16 项：Share Mem，5～10 拍</text>
-  <text x="882" y="635.5" font-size="8.5" fill="#475569">cm_lsq 16 项：Core Mem，15～25 拍</text>
-  <text x="882" y="649.0" font-size="8.5" fill="#475569">　只有 DTE core 有；Router I/O reg 复用它</text>
-  <text x="882" y="662.5" font-size="8.5" fill="#475569">DTCM：4 bank 单端口 SRAM，3 拍</text>
-  <text x="882" y="676.0" font-size="8.5" fill="#475569">　可同时接收 2 个不冲突 bank 的请求</text>
-  <text x="882" y="689.5" font-size="8.5" fill="#475569">　同 bank 冲突则阻塞第二条</text>
-  <text x="882" y="703.0" font-size="8.5" fill="#475569">访存带宽 32 bit</text>
-  <text x="882" y="716.5" font-size="8.5" fill="#475569">写回优先级：share_mem / core_mem 优先于 DTCM</text>
-  <text x="882" y="730.0" font-size="8.5" fill="#475569">DTE core 读 Core Mem 固定回 1056 bit，不 burst</text>
-  <polygon points="620,660 780,660 771,690 611,690" fill="#f8fafc" stroke="#374151"/>
-  <text x="696" y="679" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
-  <polygon points="1256,600 1352,600 1343,630 1247,630" fill="#f8fafc" stroke="#374151"/>
-  <text x="1300" y="619" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq</text>
-  <polygon points="1256,660 1352,660 1343,690 1247,690" fill="#f8fafc" stroke="#374151"/>
-  <text x="1300" y="679" font-size="8.5" fill="#374151" text-anchor="middle">cm_lsq</text>
-  <polygon points="1256,720 1352,720 1343,750 1247,750" fill="#f8fafc" stroke="#374151"/>
-  <text x="1300" y="739" font-size="8.5" fill="#374151" text-anchor="middle">io_reg</text>
-  <polygon points="1230,430 1350,430 1341,460 1221,460" fill="#f8fafc" stroke="#374151"/>
-  <text x="1286" y="449" font-size="8.5" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
-  <polyline points="190,131 220,131 220,124 250,124" fill="none" stroke="#0f766e" marker-start="url(#gs)" marker-end="url(#g)"/>
-  <polyline points="390,226 390,256 373,256 373,286" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="810,324 845,324 845,338 880,338" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="810,491 840,491 840,615 870,615" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="373,524 373,554 395,554 395,584" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="540,661 576,661 576,675 611,675" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1180,214 869,214 869,367 810,367" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="970" y="262" font-size="8.5" fill="#6b7280" text-anchor="middle">取指 8 B/T，1 拍</text>
-  <polyline points="1221,445 1176,445 1176,457 1130,457" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="1314,430 1314,347 1326,347 1326,264" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <polyline points="1170,615 1247,615" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1170,675 1247,675" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1170,735 1247,735" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="250,457 220,457 220,757 190,757" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <text x="200" y="724" font-size="8.5" fill="#0f766e" text-anchor="end">rv_done 由 task_done 指令产生</text>
-  <text x="200" y="738" font-size="8.5" fill="#0f766e" text-anchor="end">带 TS 标志时通知 TS</text>
-  <text x="560" y="556" font-size="8.5" fill="#6b7280" text-anchor="start">gpr 就绪表承载访存与 DSA 读的延迟</text>
-  <text x="20" y="820" font-size="10.5" fill="#374151">三个实例的区别只在绑定的 DSA、ITCM 里的镜像、以及可见的地址空间：只有 DTE core 有 cm_lsq 与 Router I/O reg，Matrix Mem 对三个 RV core 都不可见。</text>
-  <text x="20" y="842" font-size="10.5" fill="#374151">firmware 程序结束时要执行一条不通知 TS 的 task_done，等待业务流 task。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1420 930" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="RV core 第 0 层">
+<title>RV core 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="1420" height="930" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">RV core · 第 0 层（DTE / MU / VU 各一个实例，硬件相同、接口相同。方位：TS 在上，DSA 在下，Share Mem 与 Core Mem 在右，Router 在下，cfg 从上进）</text>
+<text x="947" y="26" font-size="9.5" fill="#6b7280">黄色虚线框内是折算成每条指令 1 拍、不建流水线的部分</text>
+<polygon points="249,44 360,44 351,76 240,76" fill="#f8fafc" stroke="#374151"/>
+<text x="300.0" y="59.0" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack</text>
+<text x="300.0" y="70.0" font-size="7.5" fill="#6b7280" text-anchor="middle">← TS</text>
+<polygon points="509,44 620,44 611,76 500,76" fill="#f8fafc" stroke="#374151"/>
+<text x="560.0" y="63.5" font-size="9" fill="#374151" text-anchor="middle">rv_done → TS</text>
+<polygon points="1209,44 1320,44 1311,74 1200,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1260.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
+<rect x="160" y="110" width="280" height="127.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="172" y="131" font-size="11" fill="#111827" font-weight="600">task_queue</text>
+<text x="172.0" y="148.0" font-size="8.5" fill="#475569">提前接收 TS 下发的 task，做到用户之间</text>
+<text x="172.0" y="161.5" font-size="8.5" fill="#475569">　task 的无 bubble 调度</text>
+<text x="172.0" y="175.0" font-size="8.5" fill="#475569">按是否有空槽产生 task_ack；未被接收时</text>
+<text x="172.0" y="188.5" font-size="8.5" fill="#475569">　TS 不能释放该 task 跳到下一个</text>
+<text x="172.0" y="202.0" font-size="8.5" fill="#475569">队头 task 的 task_pc 驱动取指</text>
+<text x="172.0" y="215.5" font-size="8.5" fill="#475569">深度 2（待定）</text>
+<rect x="1160" y="110" width="200" height="140.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
+<text x="1172" y="131" font-size="11" fill="#111827" font-weight="600">ITCM / DTCM</text>
+<text x="1172.0" y="148.0" font-size="8.5" fill="#475569">ITCM 4 KB，8 B/T，1 拍</text>
+<text x="1172.0" y="161.5" font-size="8.5" fill="#475569">　firmware · kernel</text>
+<text x="1172.0" y="175.0" font-size="8.5" fill="#475569">　· bootloader</text>
+<text x="1172.0" y="188.5" font-size="8.5" fill="#475569">DTCM 8 KB，32 bit × 4 bank</text>
+<text x="1172.0" y="202.0" font-size="8.5" fill="#475569">　BSS 段 · 寄存器溢出 · 堆栈</text>
+<text x="1172.0" y="215.5" font-size="8.5" fill="#475569">由 ctrl_noc 装载</text>
+<text x="1172.0" y="229.0" font-size="8.5" fill="#475569">装载拍数 = 字节数 / 4 B</text>
+<rect x="160" y="320" width="560" height="194.5" rx="4" fill="#fefce8" stroke="#a16207" stroke-dasharray="5 4"/>
+<text x="172" y="341" font-size="11" fill="#111827" font-weight="600">指令执行器（src/rv32 的 SystemRv32）</text>
+<text x="172.0" y="358.0" font-size="8.5" fill="#475569">RV32IMC，只支持 M 态，实现 M 态 CSR，不支持 S / U / H；fence 实现为 nop</text>
+<text x="172.0" y="371.5" font-size="8.5" fill="#475569">覆盖 Decode 接入 custom-0 自定义指令：</text>
+<text x="172.0" y="385.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
+<text x="172.0" y="398.5" font-size="8.5" fill="#475569">　dsaw.s / dsaw.d / dsawi.s / dsawi.d 写 DSA 寄存器</text>
+<text x="172.0" y="412.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· flag_check · loop</text>
+<text x="172.0" y="425.5" font-size="8.5" fill="#475569">每条指令 1 拍；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
+<text x="172.0" y="439.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch / 双发射 /</text>
+<text x="172.0" y="452.5" font-size="8.5" fill="#475569">　gpr 端口 / SEU 的乘除多拍 / DTCM 的 bank 冲突都折算成 1 拍</text>
+<text x="172.0" y="466.0" font-size="8.5" fill="#475569">复位后按 io_reg 的 boot_pc 启动；收到 task 后按 task_pc 起始执行</text>
+<text x="172.0" y="479.5" font-size="8.5" fill="#475569">task_done：队列有待执行 task 则跳到队头 task 起始 PC，</text>
+<text x="172.0" y="493.0" font-size="8.5" fill="#475569">　否则阻塞取指等待；带 TS 标志时通知 TS</text>
+<rect x="780" y="320" width="250" height="100.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="792" y="341" font-size="11" fill="#111827" font-weight="600">gpr 就绪表</text>
+<text x="792.0" y="358.0" font-size="8.5" fill="#475569">32 × 32 bit</text>
+<text x="792.0" y="371.5" font-size="8.5" fill="#475569">DSA 读返回与访存返回未到时</text>
+<text x="792.0" y="385.0" font-size="8.5" fill="#475569">　把对应寄存器标为未就绪</text>
+<text x="792.0" y="398.5" font-size="8.5" fill="#475569">读到未就绪的源就等</text>
+<rect x="1160" y="320" width="200" height="100.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1172" y="341" font-size="11" fill="#111827" font-weight="600">CSR</text>
+<text x="1172.0" y="358.0" font-size="8.5" fill="#475569">M 态 CSR + 自定义 CSR</text>
+<text x="1172.0" y="371.5" font-size="8.5" fill="#475569">stream_id 只读（4 bit）</text>
+<text x="1172.0" y="385.0" font-size="8.5" fill="#475569">local_user_id 可读写（12 bit）</text>
+<text x="1172.0" y="398.5" font-size="8.5" fill="#475569">由 ctrl_noc 直接配置，不经流水线</text>
+<rect x="160" y="584.5" width="320" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="172" y="605.5" font-size="11" fill="#111827" font-weight="600">dsa_iss / dsa_rq</text>
+<text x="172.0" y="622.5" font-size="8.5" fill="#475569">dsa_iss：DSA 调用指令下发通道</text>
+<text x="172.0" y="636.0" font-size="8.5" fill="#475569">　每拍最多一条配置或 trigger 指令</text>
+<text x="172.0" y="649.5" font-size="8.5" fill="#475569">　按下发通道是否反压阻塞判断是否下发成功</text>
+<text x="172.0" y="663.0" font-size="8.5" fill="#475569">dsa_rq：8 项，按顺序记录已下发的读指令</text>
+<text x="172.0" y="676.5" font-size="8.5" fill="#475569">　返回数据后按记录的目的寄存器编号写回 gpr</text>
+<text x="172.0" y="690.0" font-size="8.5" fill="#475569">DSA 读寄存器指令不支持同步读返回，</text>
+<text x="172.0" y="703.5" font-size="8.5" fill="#475569">　软件要查询状态只能轮询</text>
+<text x="172.0" y="717.0" font-size="8.5" fill="#475569">任务启动靠写 DSA 的 trigger 寄存器；</text>
+<text x="172.0" y="730.5" font-size="8.5" fill="#475569">　last 标志包含在 trigger 里</text>
+<rect x="560" y="584.5" width="520" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="572" y="605.5" font-size="11" fill="#111827" font-weight="600">lsq（顺序发射）</text>
+<text x="572.0" y="622.5" font-size="8.5" fill="#475569">sm_lsq 16 项：Share Mem，5～10 拍</text>
+<text x="572.0" y="636.0" font-size="8.5" fill="#475569">cm_lsq 16 项：Core Mem，15～25 拍</text>
+<text x="572.0" y="649.5" font-size="8.5" fill="#475569">　只有 DTE core 有；Router I/O reg 复用它</text>
+<text x="572.0" y="663.0" font-size="8.5" fill="#475569">DTCM：4 bank 单端口 SRAM，3 拍</text>
+<text x="572.0" y="676.5" font-size="8.5" fill="#475569">　可同时接收 2 个不冲突 bank 的请求</text>
+<text x="572.0" y="690.0" font-size="8.5" fill="#475569">　同 bank 冲突则阻塞第二条</text>
+<text x="572.0" y="703.5" font-size="8.5" fill="#475569">访存带宽 32 bit</text>
+<text x="572.0" y="717.0" font-size="8.5" fill="#475569">写回优先级：share_mem / core_mem 优先于 DTCM</text>
+<text x="572.0" y="730.5" font-size="8.5" fill="#475569">DTE core 读 Core Mem 固定回 1056 bit，不 burst</text>
+<polygon points="269,792.0 380,792.0 371,824.0 260,824.0" fill="#f8fafc" stroke="#374151"/>
+<text x="320.0" y="807.0" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
+<text x="320.0" y="818.0" font-size="7.5" fill="#6b7280" text-anchor="middle">→ DSA</text>
+<polygon points="769,792.0 880,792.0 871,824.0 760,824.0" fill="#f8fafc" stroke="#374151"/>
+<text x="820.0" y="807.0" font-size="9" fill="#374151" text-anchor="middle">io_reg</text>
+<text x="820.0" y="818.0" font-size="7.5" fill="#6b7280" text-anchor="middle">→ Router</text>
+<polygon points="1289,598.5 1400,598.5 1391,630.5 1280,630.5" fill="#f8fafc" stroke="#374151"/>
+<text x="1340.0" y="613.5" font-size="9" fill="#374151" text-anchor="middle">sm_lsq</text>
+<text x="1340.0" y="624.5" font-size="7.5" fill="#6b7280" text-anchor="middle">→ Share Mem</text>
+<polygon points="1289,706.0 1400,706.0 1391,738.0 1280,738.0" fill="#f8fafc" stroke="#374151"/>
+<text x="1340.0" y="721.0" font-size="9" fill="#374151" text-anchor="middle">cm_lsq</text>
+<text x="1340.0" y="732.0" font-size="7.5" fill="#6b7280" text-anchor="middle">→ Core Mem</text>
+<path d="M295.6 77.0 L299.9 109.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M300.0 237.0 L300.0 319.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="302.8" y="229.4" width="10.5" height="98.1" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 308 278.5)" x="308" y="281.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">队头 task 的 task_pc</text>
+<path d="M560.0 320.0 L555.5 77.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="562.8" y="148.5" width="10.5" height="138.9" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 568 218.0)" x="568" y="221.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">rv_done 由 task_done 指令产生</text>
+<path d="M721.0 378.2 L779.0 370.1" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="734.2" y="364.9" width="31.5" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="750.0" y="372.35" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">就绪位</text>
+<path d="M327.9 515.5 L320.1 583.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="322.8" y="499.1" width="10.5" height="100.9" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 328 549.5)" x="328" y="552.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">dsa 指令 / 读回写 gpr</text>
+<path d="M320.1 753.0 L324.4 791.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M636.0 515.5 L636.0 583.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="638.8" y="538.0" width="10.5" height="23.0" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 644 549.5)" x="644" y="552.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">访存</text>
+<path d="M1081.0 614.5 L1283.5 614.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="1110.4" y="601.0" width="143.7" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1182.25" y="608.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">sm_lsq 16 项，32 bit，5～10 拍</text>
+<path d="M1081.0 722.0 L1283.5 722.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="1110.4" y="708.5" width="143.7" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1182.25" y="716.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">cm_lsq 16 项，只有 DTE core 有</text>
+<path d="M820.1 753.0 L824.4 791.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1260.0 251.5 L1260.0 300.0 L664.0 300.0 L664.0 319.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="961.0" y="288.5" width="78.1" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1000" y="296" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">取指 8 B/T，1 拍</text>
+<path d="M1255.5 74.0 L1259.9 109.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<rect x="1262.8" y="81.5" width="10.5" height="23.0" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1268 93.0)" x="1268" y="96.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">装载</text>
+<path d="M1160.0 370.0 L1100.0 370.0 L1100.0 312.0 L703.2 312.0 L703.2 319.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<text x="20" y="892" font-size="10.5" fill="#374151" text-anchor="start">三个实例的区别只在绑定的 DSA、ITCM 里的镜像、以及可见的地址空间：只有 DTE core 有 cm_lsq 与 Router I/O reg，Matrix Mem 对三个 RV core 都不可见。</text>
+<text x="20" y="914" font-size="10.5" fill="#374151" text-anchor="start">firmware 程序结束时要执行一条不通知 TS 的 task_done，等待业务流 task。gpr 就绪表承载访存与 DSA 读的延迟。CSR 由 ctrl_noc 直接配置。</text>
 </svg>
 ```
 
@@ -309,9 +318,12 @@ kernel 清单按 RV core 分：
 
   <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 1 层流水线总览（不建流水线，每条指令 1 拍，延迟记在 gpr 就绪表上）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
-  <line x1="150" y1="52" x2="150" y2="328" stroke="#e5e7eb"/>
-  <line x1="316" y1="52" x2="316" y2="328" stroke="#e5e7eb"/>
-  <line x1="482" y1="52" x2="482" y2="328" stroke="#e5e7eb"/>
+  <path d="M150 52 L150 70" stroke="#e5e7eb" fill="none"/>
+<path d="M150 126 L150 328" stroke="#e5e7eb" fill="none"/>
+  <path d="M316 52 L316 156" stroke="#e5e7eb" fill="none"/>
+<path d="M316 212 L316 328" stroke="#e5e7eb" fill="none"/>
+  <path d="M482 52 L482 156" stroke="#e5e7eb" fill="none"/>
+<path d="M482 212 L482 328" stroke="#e5e7eb" fill="none"/>
   <text x="20" y="102" font-size="10.5" fill="#6b7280">取 task</text>
   <rect x="150" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="84" font-size="8.5" fill="#6b7280">M1</text>
@@ -327,12 +339,12 @@ kernel 清单按 RV core 分：
   <text x="326" y="170" font-size="8.5" fill="#6b7280">M3</text>
   <text x="458" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="190" font-size="11" fill="#111827">dsa_iss 下发</text>
-  <line x1="300" y1="184" x2="314" y2="184" stroke="#475569" marker-end="url(#arvov)"/>
+  <path d="M300 184 L315 184" stroke="#475569" marker-end="url(#arvov)" fill="none"/>
   <rect x="482" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="170" font-size="8.5" fill="#6b7280">M6</text>
   <text x="624" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="190" font-size="11" fill="#111827">task_done</text>
-  <line x1="466" y1="184" x2="480" y2="184" stroke="#475569" marker-end="url(#arvov)"/>
+  <path d="M466 184 L481 184" stroke="#475569" marker-end="url(#arvov)" fill="none"/>
   <text x="20" y="274" font-size="10.5" fill="#6b7280">异步返回</text>
   <rect x="150" y="242" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="160" y="256" font-size="8.5" fill="#92400e">M4</text>
@@ -342,7 +354,7 @@ kernel 清单按 RV core 分：
   <text x="326" y="256" font-size="8.5" fill="#92400e">M5</text>
   <text x="458" y="256" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="326" y="276" font-size="11" fill="#7c2d12">lsq 发射与返回</text>
-  <line x1="300" y1="270" x2="314" y2="270" stroke="#475569" marker-end="url(#arvov)"/>
+  <path d="M300 270 L315 270" stroke="#475569" marker-end="url(#arvov)" fill="none"/>
   <text x="20" y="352" font-size="10.5" fill="#374151">M2 一拍一条：pc_gen、译码、双发射、乘除多拍、DTCM bank 冲突都折算进这一拍。</text>
   <text x="20" y="380" font-size="10.5" fill="#374151">M4 与 M5 的拍数由被访问方给：ITCM 1、DTCM 3、Share Mem 5～10、Core Mem 15～25、DSA 读寄存器由该 DSA 决定。</text>
   <text x="20" y="408" font-size="10.5" fill="#374151">M2 读到未就绪的源寄存器就原地等，等待时长就是 M4 或 M5 的拍数。</text>
@@ -387,10 +399,10 @@ kernel 清单按 RV core 分：
   <text x="250" y="118" font-size="10.5" fill="#475569">3. pc = cur.task_pc；csr.stream_id = cur.stream_id（只读）</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. csr.{task_id, user_id, local_user_id} = cur 的对应字段，供软件读出后写给 DSA</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">提前接收让用户之间的切换无 bubble</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arv1)"/>
-  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arv1)"/>
-  <line x1="692" y1="63" x2="732" y2="63" stroke="#475569" marker-end="url(#arv1)"/>
-  <line x1="692" y1="139" x2="732" y2="139" stroke="#475569" marker-end="url(#arv1)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arv1)" fill="none"/>
+  <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arv1)" fill="none"/>
+  <path d="M692 63 L735 63" stroke="#475569" marker-end="url(#arv1)" fill="none"/>
+  <path d="M692 139 L735 139" stroke="#475569" marker-end="url(#arv1)" fill="none"/>
 </svg>
 ```
 
@@ -432,11 +444,11 @@ kernel 清单按 RV core 分：
   <text x="250" y="175" font-size="10.5" fill="#475569">4. pc = 分支成立 ? target : pc + (压缩指令 ? 2 : 4)</text>
   <text x="250" y="199" font-size="10" fill="#9ca3af">流水线细节全部折算进这一拍</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arv2)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arv2)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arv2)"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arv2)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arv2)" fill="none"/>
   <line x1="188" y1="231" x2="228" y2="231" stroke="#475569" marker-end="url(#arv2)"/>
-  <line x1="632" y1="106" x2="672" y2="106" stroke="#475569" marker-end="url(#arv2)"/>
-  <line x1="632" y1="163" x2="672" y2="163" stroke="#475569" marker-end="url(#arv2)"/>
+  <path d="M632 106 L675 106" stroke="#475569" marker-end="url(#arv2)" fill="none"/>
+  <path d="M632 163 L675 163" stroke="#475569" marker-end="url(#arv2)" fill="none"/>
 </svg>
 ```
 
@@ -471,10 +483,10 @@ kernel 清单按 RV core 分：
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 指令是 dsar/dsari → dsa_cfg = {we=0, addr}，不阻塞</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. dsar 同时 dsa_rq.push(rd)，并把 gpr_ready[rd] 清零</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">dsawi.d 按两条 dsawi.s 建</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arv3)"/>
-  <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#arv3)"/>
-  <line x1="589" y1="71" x2="629" y2="71" stroke="#475569" marker-end="url(#arv3)"/>
-  <line x1="589" y1="142" x2="629" y2="142" stroke="#475569" marker-end="url(#arv3)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
+  <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
+  <path d="M589 71 L637 71" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
+  <path d="M589 142 L632 142" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
 </svg>
 ```
 
@@ -506,10 +518,10 @@ kernel 清单按 RV core 分：
   <text x="250" y="118" font-size="10.5" fill="#475569">3. gpr_ready[idx] = 1</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 读寄存器不支持同步返回，软件要查状态只能轮询</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">拍数由对应 DSA 决定</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arv4)"/>
-  <line x1="188" y1="124" x2="228" y2="124" stroke="#475569" marker-end="url(#arv4)"/>
-  <line x1="572" y1="72" x2="612" y2="72" stroke="#475569" marker-end="url(#arv4)"/>
-  <line x1="572" y1="126" x2="612" y2="126" stroke="#475569" marker-end="url(#arv4)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arv4)" fill="none"/>
+  <path d="M188 124 L231 124" stroke="#475569" marker-end="url(#arv4)" fill="none"/>
+  <path d="M572 72 L615 72" stroke="#475569" marker-end="url(#arv4)" fill="none"/>
+  <path d="M572 126 L615 126" stroke="#475569" marker-end="url(#arv4)" fill="none"/>
 </svg>
 ```
 
@@ -545,11 +557,11 @@ kernel 清单按 RV core 分：
   <text x="250" y="118" font-size="10.5" fill="#475569">3. rsp_valid → gpr[rd_idx] = rsp_rdata；gpr_ready[rd_idx] = 1</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. DTCM 与 Share Mem / Core Mem 同拍要写回时优先后者，阻塞 DTCM</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">DTE core 读 Core Mem 固定回 1056 bit，按 32 bit 逐拍取用</text>
-  <line x1="188" y1="45" x2="228" y2="45" stroke="#475569" marker-end="url(#arv5)"/>
-  <line x1="188" y1="99" x2="228" y2="99" stroke="#475569" marker-end="url(#arv5)"/>
-  <line x1="188" y1="153" x2="228" y2="153" stroke="#475569" marker-end="url(#arv5)"/>
-  <line x1="627" y1="71" x2="667" y2="71" stroke="#475569" marker-end="url(#arv5)"/>
-  <line x1="627" y1="133" x2="667" y2="133" stroke="#475569" marker-end="url(#arv5)"/>
+  <path d="M188 45 L231 45" stroke="#475569" marker-end="url(#arv5)" fill="none"/>
+  <path d="M188 99 L231 99" stroke="#475569" marker-end="url(#arv5)" fill="none"/>
+  <path d="M188 153 L231 153" stroke="#475569" marker-end="url(#arv5)" fill="none"/>
+  <path d="M627 71 L675 71" stroke="#475569" marker-end="url(#arv5)" fill="none"/>
+  <path d="M627 133 L670 133" stroke="#475569" marker-end="url(#arv5)" fill="none"/>
 </svg>
 ```
 
@@ -589,11 +601,11 @@ kernel 清单按 RV core 分：
   <text x="250" y="128" font-size="10.5" fill="#475569">3. task_q 空 → state = wait，阻塞取指</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. 三个 RV core 都进 wait → ready 拉高，SCP 才开放业务接收</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">firmware 结束时执行一条不通知 TS 的 task_done</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arv6)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arv6)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arv6)"/>
-  <line x1="707" y1="81" x2="747" y2="81" stroke="#475569" marker-end="url(#arv6)"/>
-  <line x1="707" y1="160" x2="747" y2="160" stroke="#475569" marker-end="url(#arv6)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arv6)" fill="none"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arv6)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arv6)" fill="none"/>
+  <path d="M707 81 L755 81" stroke="#475569" marker-end="url(#arv6)" fill="none"/>
+  <path d="M707 160 L755 160" stroke="#475569" marker-end="url(#arv6)" fill="none"/>
 </svg>
 ```
 

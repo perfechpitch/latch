@@ -85,8 +85,8 @@
   <text x="424" y="304" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
   <text x="424" y="331" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/chip.md</text>
   <polyline points="216,185 232,185 232,172 230,172" fill="none" stroke="#94a3b8"/>
-  <polyline points="216,185 232,185 232,228 230,228" fill="none" stroke="#94a3b8"/>
-  <polyline points="216,185 232,185 232,306 230,306" fill="none" stroke="#94a3b8"/>
+  <path d="M232 194 L232 228 L230 228" fill="none" stroke="#94a3b8"/>
+  <path d="M232 250 L232 306 L230 306" fill="none" stroke="#94a3b8"/>
   <rect x="452" y="278" width="208" height="52" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="464" y="300" font-size="11" fill="#111827">SCP 桩 · ctrl_noc 端点 ×10</text>
   <text x="648" y="300" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×3 类</text>
@@ -96,7 +96,7 @@
   <text x="648" y="376" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
   <text x="648" y="391" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/core.md</text>
   <polyline points="436,312 452,312 452,306 452,306" fill="none" stroke="#94a3b8"/>
-  <polyline points="436,312 452,312 452,378 452,378" fill="none" stroke="#94a3b8"/>
+  <path d="M452 330 L452 378 L452 378" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="60" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="80" font-size="11.5" fill="#111827">Router</text>
   <text x="688" y="96" font-size="9" fill="#475569">RouterStation ×3 · Xbar · CoreStation · ReduceModule</text>
@@ -104,7 +104,11 @@
   <text x="688" y="124" font-size="9" fill="#475569">CoreMem 重发</text>
   <text x="1124" y="80" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
   <text x="1124" y="123" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/router.md</text>
-  <polyline points="660,378 676,378 676,96 676,96" fill="none" stroke="#94a3b8"/>
+  <path d="M660 378 L676 378" fill="none" stroke="#94a3b8"/>
+<path d="M676 368 L676 356" fill="none" stroke="#94a3b8"/>
+<path d="M676 284 L676 272" fill="none" stroke="#94a3b8"/>
+<path d="M676 228 L676 216" fill="none" stroke="#94a3b8"/>
+<path d="M676 144 L676 96 L676 96" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="144" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="164" font-size="11.5" fill="#111827">TS 任务调度器</text>
   <text x="688" y="180" font-size="9" fill="#475569">CFG_REG · User_Match · DataIn_task_table · Stream_table</text>
@@ -112,13 +116,13 @@
   <text x="688" y="208" font-size="9" fill="#475569">Task_done</text>
   <text x="1124" y="164" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×9</text>
   <text x="1124" y="207" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/ts.md</text>
-  <polyline points="660,378 676,378 676,180 676,180" fill="none" stroke="#94a3b8"/>
+  <path d="M676 216 L676 180 L676 180" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="228" width="460" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="248" font-size="11.5" fill="#111827">RV core ×3</text>
   <text x="688" y="264" font-size="9" fill="#475569">task_queue · 指令执行器（src/rv32）· dsa_iss · lsq · CSR</text>
   <text x="1124" y="248" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×3</text>
   <text x="1124" y="263" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/rv-core.md</text>
-  <polyline points="660,378 676,378 676,250 676,250" fill="none" stroke="#94a3b8"/>
+  <path d="M676 272 L676 250 L676 250" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="284" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="304" font-size="11.5" fill="#111827">DTE DSA</text>
   <text x="688" y="320" font-size="9" fill="#475569">Header Parser · Commit · TaskQueue ×4</text>
@@ -126,14 +130,14 @@
   <text x="688" y="348" font-size="9" fill="#475569">topK 与 shareMem 写</text>
   <text x="1124" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
   <text x="1124" y="347" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/dte.md</text>
-  <polyline points="660,378 676,378 676,320 676,320" fill="none" stroke="#94a3b8"/>
+  <path d="M676 356 L676 320 L676 320" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="368" width="460" height="58" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="388" font-size="11.5" fill="#111827">MU DSA</text>
   <text x="688" y="404" font-size="9" fill="#475569">regfile · issue_q · gen_ep_info · agu ×3 · ldq ×2</text>
   <text x="688" y="418" font-size="9" fill="#475569">matrix exe · stq</text>
   <text x="1124" y="388" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×7</text>
   <text x="1124" y="417" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/mu.md</text>
-  <polyline points="660,378 676,378 676,397 676,397" fill="none" stroke="#94a3b8"/>
+  <path d="M676 378 L676 397 L676 397" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="438" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="458" font-size="11.5" fill="#111827">VU DSA</text>
   <text x="688" y="474" font-size="9" fill="#475569">config_register · ISQ · pipe_ctrl · LU · SU</text>
@@ -141,13 +145,13 @@
   <text x="688" y="502" font-size="9" fill="#475569">Profile</text>
   <text x="1124" y="458" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×11</text>
   <text x="1124" y="501" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/vu.md</text>
-  <polyline points="660,378 676,378 676,474 676,474" fill="none" stroke="#94a3b8"/>
+  <path d="M676 426 L676 474 L676 474" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="522" width="460" height="44" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="542" font-size="11.5" fill="#111827">存储</text>
   <text x="688" y="558" font-size="9" fill="#475569">Core Mem · Matrix Mem · Share Mem</text>
   <text x="1124" y="542" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×3</text>
   <text x="1124" y="557" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/memory.md</text>
-  <polyline points="660,378 676,378 676,544 676,544" fill="none" stroke="#94a3b8"/>
+  <path d="M676 510 L676 544 L676 544" fill="none" stroke="#94a3b8"/>
   <text x="20" y="600" font-size="10.5" fill="#374151">装配容器只做构造与接线，自身没有 Cycle()；模块各自持有推进它的协程；桩只模仿接口行为。</text>
   <text x="20" y="622" font-size="10.5" fill="#374151">右下角是这一层对应的单元文档，全部在 07-units/ 下，目录层级与本图一致。</text>
 </svg>

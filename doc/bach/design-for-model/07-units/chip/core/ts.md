@@ -35,192 +35,200 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 | R core | `CORE_TYPE` = R core | 同 B core 的自启动与双链结构，区别在 task 0 查的是“两笔数据是否集齐”，推进顺序由软件映射表决定，不是 TS 的年龄优先 |
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1630 1120" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1630" height="1120" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">TS 任务调度器 · 第 0 层（九个独立打拍的模块）</text>
-  <text x="317" y="26" font-size="9.5" fill="#6b7280">绿线 = 与 Router 的控制通路　灰线 = TS 内部与 RV core 的下发 / 完成　橙线 = credit 与 retire　紫虚线 = ctrl_noc 配置</text>
-  <polygon points="36,104 204,104 195,134 27,134" fill="#f8fafc" stroke="#374151"/>
-  <text x="116" y="123" font-size="8.5" fill="#374151" text-anchor="middle">router2ts_trigger_ch</text>
-  <polygon points="36,648 204,648 195,678 27,678" fill="#f8fafc" stroke="#374151"/>
-  <text x="116" y="667" font-size="8.5" fill="#374151" text-anchor="middle">router2ts_credit_ch</text>
-  <polygon points="36,700 204,700 195,730 27,730" fill="#f8fafc" stroke="#374151"/>
-  <text x="116" y="719" font-size="8.5" fill="#374151" text-anchor="middle">rmem2ts_done_ch</text>
-  <rect x="258" y="84" width="300" height="146" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="270" y="105" font-size="11" fill="#111827">User_Match</text>
-  <text x="270" y="122" font-size="8.5" fill="#475569">拿请求里的 user_id 与 stream_table 比对</text>
-  <text x="270" y="135.5" font-size="8.5" fill="#475569">没匹配上 → 新用户，发建表请求</text>
-  <text x="270" y="149.0" font-size="8.5" fill="#475569">匹配上 → 老用户，复用原 stream_id</text>
-  <text x="270" y="162.5" font-size="8.5" fill="#475569">　当前任务、状态、完成位一律不动</text>
-  <text x="270" y="176.0" font-size="8.5" fill="#475569">　只有带重发标记时才置 reissue</text>
-  <text x="270" y="189.5" font-size="8.5" fill="#475569">建表四条同时满足：新用户 · 不在 weights 模式</text>
-  <text x="270" y="203.0" font-size="8.5" fill="#475569">　· trigger_task_chain_en · tail−head &lt; stream_num</text>
-  <rect x="258" y="262" width="300" height="126" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="270" y="283" font-size="11" fill="#111827">DataIn_task_table</text>
-  <text x="270" y="300" font-size="8.5" fill="#475569">只有 1 项（Depth-1 Hold）</text>
-  <text x="270" y="313.5" font-size="8.5" fill="#475569">空闲时把 datain 任务与请求信息一起登记</text>
-  <text x="270" y="327.0" font-size="8.5" fill="#475569">被占住时反压 Router 的新请求</text>
-  <text x="270" y="340.5" font-size="8.5" fill="#475569">仲裁成功并被 DTE RV core 接收后立即释放</text>
-  <text x="270" y="354.0" font-size="8.5" fill="#475569">datain 的 task_pc 进这里，Task 0 的进 stream_table</text>
-  <text x="270" y="367.5" font-size="8.5" fill="#475569">B core 与 R core 的 datain 任务不建表</text>
-  <rect x="618" y="84" width="430" height="304" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="630" y="105" font-size="11" fill="#111827">Stream_table</text>
-  <text x="630" y="122" font-size="8.5" fill="#475569">16 项顺序 FIFO，head_ptr 与 tail_ptr 环形推进</text>
-  <text x="630" y="135.5" font-size="8.5" fill="#475569"></text>
-  <text x="630" y="149.0" font-size="8.5" fill="#475569">用户级标记（建表写入，整链期间基本不动）：</text>
-  <text x="630" y="162.5" font-size="8.5" fill="#475569">　valid · user_id · reissue · compute</text>
-  <text x="630" y="176.0" font-size="8.5" fill="#475569">进度：</text>
-  <text x="630" y="189.5" font-size="8.5" fill="#475569">　task_id · task_fsm · done_bitmap（64 位对应 64 个 task）</text>
-  <text x="630" y="203.0" font-size="8.5" fill="#475569">　异步 datain 提前完成 = 某位先亮而 task_id 还没走到</text>
-  <text x="630" y="216.5" font-size="8.5" fill="#475569">当前 task 的属性（随 task_id 索引 task_chain 得到）：</text>
-  <text x="630" y="230.0" font-size="8.5" fill="#475569">　task_unit · task_dsa_en · task_pc · is_reissue · end</text>
-  <text x="630" y="243.5" font-size="8.5" fill="#475569"></text>
-  <text x="630" y="257.0" font-size="8.5" fill="#475569">task_fsm 五态：IDLE → WAIT → READY → INFLY → FINISH</text>
-  <text x="630" y="270.5" font-size="8.5" fill="#475569">六个写口在此仲裁，每口一拍一笔，请求保持到 accepted</text>
-  <text x="630" y="284.0" font-size="8.5" fill="#475569">　整项写入失败要重读最新表内容再来</text>
-  <text x="630" y="297.5" font-size="8.5" fill="#475569">　单字段写失败只重试这一笔，不重发已被接收的任务</text>
-  <text x="1036" y="379" font-size="8.5" fill="#9ca3af" text-anchor="end">stream_num 可配 1～16</text>
-  <rect x="1108" y="84" width="450" height="214" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1120" y="105" font-size="11" fill="#111827">Task_ctrl</text>
-  <text x="1120" y="122" font-size="8.5" fill="#475569">当前任务进 TASK_FINISH 后才生成后继</text>
-  <text x="1120" y="135.5" font-size="8.5" fill="#475569">每个 stream 独立推进，不需要全局 Task Pointer</text>
-  <text x="1120" y="149.0" font-size="8.5" fill="#475569">从 head_ptr 环形扫描，只选 valid=1 且 FINISH 且 end=0</text>
-  <text x="1120" y="162.5" font-size="8.5" fill="#475569">一次 64 bit 优先编码，一拍跳过所有可跳过的 task：</text>
-  <text x="1120" y="176.0" font-size="8.5" fill="#475569">　SKIP_MASK = ~END_MASK &amp; ( (DATA_IN_MASK &amp; done_bitmap)</text>
-  <text x="1120" y="189.5" font-size="8.5" fill="#475569">　　　　　　　　　　　| (REISSUE_MASK &amp; ~stream.reissue) )</text>
-  <text x="1120" y="203.0" font-size="8.5" fill="#475569">连续 skip 不增加周期</text>
-  <text x="1120" y="216.5" font-size="8.5" fill="#475569">End task 即使已提前完成也不能跳，且不再生成后继</text>
-  <text x="1120" y="230.0" font-size="8.5" fill="#475569">新任务的 task_id · task_fsm · end 与全部下发属性一起原子写入</text>
-  <text x="1120" y="243.5" font-size="8.5" fill="#475569">初始状态：Generated → READY，DataIn / Reissue → WAIT</text>
-  <rect x="258" y="430" width="300" height="196" fill="#f5f3ff" stroke="#7c3aed" rx="4"/>
-  <text x="270" y="451" font-size="11" fill="#111827">CFG_REG</text>
-  <text x="270" y="468" font-size="8.5" fill="#475569">task_chain 64 项 × 64 bit（写一项自动置 VALID）</text>
-  <text x="270" y="481.5" font-size="8.5" fill="#475569">datain_task 1 项：task_pc · task_unit · weights_mode</text>
-  <text x="270" y="495.0" font-size="8.5" fill="#475569">stream_num 1～16 · CORE_TYPE · B_CORE_DIRECTION</text>
-  <text x="270" y="508.5" font-size="8.5" fill="#475569">trigger_task_chain_en · TS_INIT_FINISH · TS_STATE</text>
-  <text x="270" y="522.0" font-size="8.5" fill="#475569">写 TS_INIT_FINISH 后查五项合规性，结论写 TS_STATE</text>
-  <text x="270" y="535.5" font-size="8.5" fill="#475569">并派生三张 64 位掩码供 Task_ctrl 一拍算 SKIP_MASK：</text>
-  <text x="270" y="549.0" font-size="8.5" fill="#475569">　DATA_IN_MASK · REISSUE_MASK · END_MASK</text>
-  <text x="270" y="562.5" font-size="8.5" fill="#475569">Task LUT：按 task_id 查出下发属性</text>
-  <text x="270" y="576.0" font-size="8.5" fill="#475569">软件侧属性另存：exe_dest · reduce_num · dsa_en</text>
-  <rect x="618" y="430" width="430" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="630" y="451" font-size="11" fill="#111827">credit</text>
-  <text x="630" y="468" font-size="8.5" fill="#475569">向 Router 注册资源申请：UserID · StreamID · TaskID · PathID</text>
-  <text x="630" y="481.5" font-size="8.5" fill="#475569">收 Router 的 credit 到手通知，唤醒对应 task 置 READY</text>
-  <text x="630" y="495.0" font-size="8.5" fill="#475569">credit 粒度是 stream 不是 task；同一 stream 的任务链里</text>
-  <text x="630" y="508.5" font-size="8.5" fill="#475569">　只在第一次往下游发数据时检查，之后不再检查</text>
-  <text x="630" y="522.0" font-size="8.5" fill="#475569">reduce task：按 reduce_num 顺序连续下发 N 笔 credit 请求</text>
-  <text x="630" y="535.5" font-size="8.5" fill="#475569">Head-only 退休：只有 head_ptr 指向的项可退休，条件是</text>
-  <text x="630" y="549.0" font-size="8.5" fill="#475569">　valid=1 且 end=1 且 task_fsm=FINISH</text>
-  <text x="630" y="562.5" font-size="8.5" fill="#475569">先向 Router 持续发 credit 返还请求，Router 接收后</text>
-  <text x="630" y="576.0" font-size="8.5" fill="#475569">　才清该槽位的 valid 并推进 head_ptr</text>
-  <text x="630" y="589.5" font-size="8.5" fill="#475569">B core 的搬出 task 按 B_CORE_DIRECTION 查下游 credit</text>
-  <rect x="1108" y="430" width="450" height="196" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1120" y="451" font-size="11" fill="#111827">Task_done</text>
-  <text x="1120" y="468" font-size="8.5" fill="#475569">七路完成合流，直接写 stream_table，不设统一 Update 模块</text>
-  <text x="1120" y="481.5" font-size="8.5" fill="#475569">　DTE / MU / VU 各有 RV core ack 与 DSA ack，共六路</text>
-  <text x="1120" y="495.0" font-size="8.5" fill="#475569">　DTE 这条 Lane 额外接收 Router 的 Reduce Done</text>
-  <text x="1120" y="508.5" font-size="8.5" fill="#475569">按当前任务的 task_recv_type 判哪一路才算数：</text>
-  <text x="1120" y="522.0" font-size="8.5" fill="#475569">　00 = 只调 RV core / 01 = 调 DSA / 10 = DTE DSA + Rmem 两者都要</text>
-  <text x="1120" y="535.5" font-size="8.5" fill="#475569">Reduce 拆两半：DTE ack 只 consume_only，不改 stream 状态；</text>
-  <text x="1120" y="549.0" font-size="8.5" fill="#475569">　只有 Router Reduce Done 才能置 TASK_FINISH</text>
-  <text x="1120" y="562.5" font-size="8.5" fill="#475569">　两者可任意顺序；Router Done 可被 Hold，但要等匹配的</text>
-  <text x="1120" y="576.0" font-size="8.5" fill="#475569">　DTE ack 被消费后才提交</text>
-  <text x="1120" y="589.5" font-size="8.5" fill="#475569">Router 不携带 stream_id，按 user_id 找对应 Stream</text>
-  <rect x="258" y="800" width="390" height="206" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="270" y="821" font-size="11" fill="#111827">DTE_Arb</text>
-  <text x="270" y="838" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY 且 task_unit=DTE</text>
-  <text x="270" y="851.5" font-size="8.5" fill="#475569">三类任务的优先级：</text>
-  <text x="270" y="865.0" font-size="8.5" fill="#475569">　1. Reissue 任务优先级最高，从 head_ptr 选最老的</text>
-  <text x="270" y="878.5" font-size="8.5" fill="#475569">　2. 没有 Reissue 时，DataIn 与普通 Generated 按相对</text>
-  <text x="270" y="892.0" font-size="8.5" fill="#475569">　　 head_ptr 的 Stream 年龄比较，较老者优先</text>
-  <text x="270" y="905.5" font-size="8.5" fill="#475569">　3. 同一 Stream 时优先选 Generated</text>
-  <text x="270" y="919.0" font-size="8.5" fill="#475569">选中后非抢占保持：锁定任务上下文，命令与相关字段</text>
-  <text x="270" y="932.5" font-size="8.5" fill="#475569">　保持稳定直到 RV core 返回 raw ACCEPT</text>
-  <text x="270" y="946.0" font-size="8.5" fill="#475569">收到 ACCEPT 后：Generated 提交 READY → INFLY；</text>
-  <text x="270" y="959.5" font-size="8.5" fill="#475569">　DataIn 只通知 DataIn_task_table 出槽，不改 stream 状态</text>
-  <text x="270" y="973.0" font-size="8.5" fill="#475569">task_dsa_en=0 的 Generated 下发给 DTE RV core，不配 DSA</text>
-  <rect x="690" y="800" width="340" height="206" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="702" y="821" font-size="11" fill="#111827">MU_Arb</text>
-  <text x="702" y="838" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY</text>
-  <text x="702" y="851.5" font-size="8.5" fill="#475569">　且 task_unit=MU</text>
-  <text x="702" y="865.0" font-size="8.5" fill="#475569">从 head_ptr 开始环形年龄优先，</text>
-  <text x="702" y="878.5" font-size="8.5" fill="#475569">选最老的 Stream</text>
-  <text x="702" y="892.0" font-size="8.5" fill="#475569">发射宽度 1</text>
-  <text x="702" y="905.5" font-size="8.5" fill="#475569">非抢占保持到 raw ACCEPT</text>
-  <text x="702" y="919.0" font-size="8.5" fill="#475569">RV core 的 task_queue 满时会反压</text>
-  <text x="702" y="932.5" font-size="8.5" fill="#475569">ACCEPT 后提交 READY → INFLY</text>
-  <text x="702" y="946.0" font-size="8.5" fill="#475569">Map 返回未接受时只重试这笔</text>
-  <text x="702" y="959.5" font-size="8.5" fill="#475569">　状态写，不重发已被接收的任务</text>
-  <rect x="1072" y="800" width="340" height="206" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1084" y="821" font-size="11" fill="#111827">VU_Arb</text>
-  <text x="1084" y="838" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY</text>
-  <text x="1084" y="851.5" font-size="8.5" fill="#475569">　且 task_unit=VU</text>
-  <text x="1084" y="865.0" font-size="8.5" fill="#475569">规则同 MU_Arb</text>
-  <text x="1084" y="878.5" font-size="8.5" fill="#475569">三条发射通路各自独立打拍，</text>
-  <text x="1084" y="892.0" font-size="8.5" fill="#475569">同一拍可以并行下发 3 个 task</text>
-  <text x="1084" y="905.5" font-size="8.5" fill="#475569"></text>
-  <text x="1084" y="919.0" font-size="8.5" fill="#475569">B core：task 0 借 VU core 跑</text>
-  <text x="1084" y="932.5" font-size="8.5" fill="#475569">　纯标量的 check_flag</text>
-  <text x="1084" y="946.0" font-size="8.5" fill="#475569">R core：task 0 借 MU core 跑</text>
-  <text x="1084" y="959.5" font-size="8.5" fill="#475569">　check flag，求和交给 VU</text>
-  <polyline points="204,119 231,119 231,125 258,125" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <polyline points="558,128 588,128 588,133 618,133" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="588" y="132" font-size="8.5" fill="#6b7280" text-anchor="middle">create</text>
-  <polyline points="366,230 366,262" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="558,307 588,307 588,285 618,285" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <text x="588" y="318" font-size="8.5" fill="#6b7280" text-anchor="middle">datain</text>
-  <polyline points="1048,175 1078,175 1078,148 1108,148" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="204,663 661,663 661,626" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <polyline points="204,715 1198,715 1198,626" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <text x="1092" y="730" font-size="8.5" fill="#0f766e" text-anchor="end">rmem2ts_done_ch 按 user_id 匹配对应 Stream</text>
-  <polyline points="773,430 773,388" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1252,430 1252,320 1495,320 1495,298" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1108,469 1078,469 1078,345 1048,345" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
-  <polyline points="558,571 618,571" fill="none" stroke="#7c3aed" stroke-dasharray="4 3" marker-end="url(#p)"/>
-  <polyline points="444,430 444,414 644,414 644,388" fill="none" stroke="#7c3aed" stroke-dasharray="4 3" marker-end="url(#p)"/>
-  <polyline points="330,430 330,388" fill="none" stroke="#7c3aed" stroke-dasharray="4 3" marker-end="url(#p)"/>
-  <polyline points="543,430 543,400 1130,400 1130,298" fill="none" stroke="#7c3aed" stroke-dasharray="4 3" marker-end="url(#p)"/>
-  <text x="1142" y="406" font-size="8.5" fill="#7c3aed" text-anchor="start">task_chain 属性 / 三张掩码 / Task LUT</text>
-  <polyline points="618,340 596,340 596,766 453,766 453,800" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="618,362 578,362 578,782 860,782 860,800" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1048,340 1070,340 1070,772 1242,772 1242,800" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="292" y="692" font-size="8.5" fill="#6b7280" text-anchor="start">从 Stream_table 取候选与任务属性；三条发射通路各自独立打拍</text>
-  <polygon points="369.0,1048 537.0,1048 528.0,1078 360.0,1078" fill="#f8fafc" stroke="#374151"/>
-  <text x="449" y="1067" font-size="8.5" fill="#374151" text-anchor="middle">task_cmd / task_ack［DTE］</text>
-  <polyline points="453,1006 453,1027 448,1027 448,1048" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="776.0,1048 944.0,1048 935.0,1078 767.0,1078" fill="#f8fafc" stroke="#374151"/>
-  <text x="856" y="1067" font-size="8.5" fill="#374151" text-anchor="middle">task_cmd / task_ack［MU］</text>
-  <polyline points="860,1006 860,1027 856,1027 856,1048" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="1158.0,1048 1326.0,1048 1317.0,1078 1149.0,1078" fill="#f8fafc" stroke="#374151"/>
-  <text x="1238" y="1067" font-size="8.5" fill="#374151" text-anchor="middle">task_cmd / task_ack［VU］</text>
-  <polyline points="1242,1006 1242,1027 1238,1027 1238,1048" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="1440,762 1600,762 1591,792 1431,792" fill="#f8fafc" stroke="#374151"/>
-  <text x="1516" y="781" font-size="9" fill="#374151" text-anchor="middle">ts2router</text>
-  <polyline points="1048,606 1100,606 1100,777 1431,777" fill="none" stroke="#b45309" marker-end="url(#o)"/>
-  <text x="1436" y="754" font-size="8.5" fill="#b45309" text-anchor="end">资源注册 / retire / credit 返还</text>
-  <polygon points="1440,340 1590,340 1581,370 1431,370" fill="#f8fafc" stroke="#374151"/>
-  <text x="1511" y="359" font-size="9" fill="#374151" text-anchor="middle">ts2corestatus</text>
-  <polyline points="1522,430 1522,400 1510,400 1510,370" fill="none" stroke="#b45309" stroke-dasharray="4 3" marker-end="url(#o)"/>
-  <text x="1436" y="306" font-size="8.5" fill="#b45309" text-anchor="end">异常上报 → Core Status → SCP（本轮只留接口名）</text>
-  <polygon points="1440,676 1600,676 1591,706 1431,706" fill="#f8fafc" stroke="#374151"/>
-  <text x="1516" y="695" font-size="9" fill="#374151" text-anchor="middle">rv / dsa done ×6</text>
-  <polyline points="1516,676 1516,651 1495,651 1495,626" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <polygon points="36,780 186,780 177,810 27,810" fill="#f8fafc" stroke="#374151"/>
-  <text x="107" y="799" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
-  <polyline points="186,795 306,795 306,626" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <text x="20" y="1100" font-size="10.5" fill="#374151">TS 是一块固定的硬件逻辑，不是可编程的调度器：上电配好几张表、写 TS_INIT_FINISH 之后就按固定逻辑跑，运行期不接受软件干预，也没有指令可执行。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1130" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="TS 第 0 层">
+<title>TS 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="2000" height="1130" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">TS 任务调度器 · 第 0 层（九个独立打拍的模块。方位：TS 在 core 顶边，RV core 在下方；Router 的四条通路竖着穿过 core，本图画在右侧）</text>
+<text x="849" y="26" font-size="9.5" fill="#6b7280">绿线 = 与 Router 的控制通路　灰线 = TS 内部与 RV core 的下发 / 完成　橙线 = credit 与 retire　紫虚线 = ctrl_noc 配置</text>
+<rect x="160" y="110" width="450" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="172" y="131" font-size="11" fill="#111827" font-weight="600">Task_ctrl</text>
+<text x="172.0" y="148.0" font-size="8.5" fill="#475569">当前任务进 TASK_FINISH 后才生成后继</text>
+<text x="172.0" y="161.5" font-size="8.5" fill="#475569">每个 stream 独立推进，不需要全局 Task Pointer</text>
+<text x="172.0" y="175.0" font-size="8.5" fill="#475569">从 head_ptr 环形扫描，只选 valid=1 且 FINISH 且 end=0</text>
+<text x="172.0" y="188.5" font-size="8.5" fill="#475569">一次 64 bit 优先编码，一拍跳过所有可跳过的 task：</text>
+<text x="172.0" y="202.0" font-size="8.5" fill="#475569">　SKIP_MASK = ~END_MASK &amp; ( (DATA_IN_MASK &amp; done_bitmap)</text>
+<text x="172.0" y="215.5" font-size="8.5" fill="#475569">　　　　　　　　　　　| (REISSUE_MASK &amp; ~stream.reissue) )</text>
+<text x="172.0" y="229.0" font-size="8.5" fill="#475569">连续 skip 不增加周期</text>
+<text x="172.0" y="242.5" font-size="8.5" fill="#475569">End task 即使已提前完成也不能跳，且不再生成后继</text>
+<text x="172.0" y="256.0" font-size="8.5" fill="#475569">新任务的 task_id · task_fsm · end 与全部下发属性一起原子写入</text>
+<text x="172.0" y="269.5" font-size="8.5" fill="#475569">初始状态：Generated → READY，DataIn / Reissue → WAIT</text>
+<rect x="650" y="110" width="300" height="167.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
+<text x="662" y="131" font-size="11" fill="#111827" font-weight="600">CFG_REG</text>
+<text x="662.0" y="148.0" font-size="8.5" fill="#475569">task_chain 64 项 × 64 bit（写一项自动置 VALID）</text>
+<text x="662.0" y="161.5" font-size="8.5" fill="#475569">datain_task 1 项：task_pc · task_unit · weights_mode</text>
+<text x="662.0" y="175.0" font-size="8.5" fill="#475569">stream_num 1～16 · CORE_TYPE · B_CORE_DIRECTION</text>
+<text x="662.0" y="188.5" font-size="8.5" fill="#475569">trigger_task_chain_en · TS_INIT_FINISH · TS_STATE</text>
+<text x="662.0" y="202.0" font-size="8.5" fill="#475569">写 TS_INIT_FINISH 后查五项合规性，结论写 TS_STATE</text>
+<text x="662.0" y="215.5" font-size="8.5" fill="#475569">并派生三张 64 位掩码供 Task_ctrl 一拍算 SKIP_MASK：</text>
+<text x="662.0" y="229.0" font-size="8.5" fill="#475569">　DATA_IN_MASK · REISSUE_MASK · END_MASK</text>
+<text x="662.0" y="242.5" font-size="8.5" fill="#475569">Task LUT：按 task_id 查出下发属性</text>
+<text x="662.0" y="256.0" font-size="8.5" fill="#475569">软件侧属性另存：exe_dest · reduce_num · dsa_en</text>
+<rect x="1000" y="110" width="430" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1012" y="131" font-size="11" fill="#111827" font-weight="600">credit</text>
+<text x="1012.0" y="148.0" font-size="8.5" fill="#475569">向 Router 注册资源申请：UserID · StreamID · TaskID · PathID</text>
+<text x="1012.0" y="161.5" font-size="8.5" fill="#475569">收 Router 的 credit 到手通知，唤醒对应 task 置 READY</text>
+<text x="1012.0" y="175.0" font-size="8.5" fill="#475569">credit 粒度是 stream 不是 task；同一 stream 的任务链里</text>
+<text x="1012.0" y="188.5" font-size="8.5" fill="#475569">　只在第一次往下游发数据时检查，之后不再检查</text>
+<text x="1012.0" y="202.0" font-size="8.5" fill="#475569">reduce task：按 reduce_num 顺序连续下发 N 笔 credit 请求</text>
+<text x="1012.0" y="215.5" font-size="8.5" fill="#475569">Head-only 退休：只有 head_ptr 指向的项可退休，条件是</text>
+<text x="1012.0" y="229.0" font-size="8.5" fill="#475569">　valid=1 且 end=1 且 task_fsm=FINISH</text>
+<text x="1012.0" y="242.5" font-size="8.5" fill="#475569">先向 Router 持续发 credit 返还请求，Router 接收后</text>
+<text x="1012.0" y="256.0" font-size="8.5" fill="#475569">　才清该槽位的 valid 并推进 head_ptr</text>
+<text x="1012.0" y="269.5" font-size="8.5" fill="#475569">B core 的搬出 task 按 B_CORE_DIRECTION 查下游 credit</text>
+<rect x="160" y="420" width="430" height="249.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="172" y="441" font-size="11" fill="#111827" font-weight="600">Stream_table</text>
+<text x="172.0" y="458.0" font-size="8.5" fill="#475569">16 项顺序 FIFO，head_ptr 与 tail_ptr 环形推进</text>
+<text x="172.0" y="471.5" font-size="8.5" fill="#475569"></text>
+<text x="172.0" y="485.0" font-size="8.5" fill="#475569">用户级标记（建表写入，整链期间基本不动）：</text>
+<text x="172.0" y="498.5" font-size="8.5" fill="#475569">　valid · user_id · reissue · compute</text>
+<text x="172.0" y="512.0" font-size="8.5" fill="#475569">进度：</text>
+<text x="172.0" y="525.5" font-size="8.5" fill="#475569">　task_id · task_fsm · done_bitmap（64 位对应 64 个 task）</text>
+<text x="172.0" y="539.0" font-size="8.5" fill="#475569">　异步 datain 提前完成 = 某位先亮而 task_id 还没走到</text>
+<text x="172.0" y="552.5" font-size="8.5" fill="#475569">当前 task 的属性（随 task_id 索引 task_chain 得到）：</text>
+<text x="172.0" y="566.0" font-size="8.5" fill="#475569">　task_unit · task_dsa_en · task_pc · is_reissue · end</text>
+<text x="172.0" y="579.5" font-size="8.5" fill="#475569"></text>
+<text x="172.0" y="593.0" font-size="8.5" fill="#475569">task_fsm 五态：IDLE → WAIT → READY → INFLY → FINISH</text>
+<text x="172.0" y="606.5" font-size="8.5" fill="#475569">六个写口在此仲裁，每口一拍一笔，请求保持到 accepted</text>
+<text x="172.0" y="620.0" font-size="8.5" fill="#475569">　整项写入失败要重读最新表内容再来</text>
+<text x="172.0" y="633.5" font-size="8.5" fill="#475569">　单字段写失败只重试这一笔，不重发已被接收的任务</text>
+<text x="578" y="660.0" font-size="8.5" fill="#9ca3af" text-anchor="end">stream_num 可配 1～16</text>
+<rect x="640" y="420" width="450" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="652" y="441" font-size="11" fill="#111827" font-weight="600">Task_done</text>
+<text x="652.0" y="458.0" font-size="8.5" fill="#475569">七路完成合流，直接写 stream_table，不设统一 Update 模块</text>
+<text x="652.0" y="471.5" font-size="8.5" fill="#475569">　DTE / MU / VU 各有 RV core ack 与 DSA ack，共六路</text>
+<text x="652.0" y="485.0" font-size="8.5" fill="#475569">　DTE 这条 Lane 额外接收 Router 的 Reduce Done</text>
+<text x="652.0" y="498.5" font-size="8.5" fill="#475569">按当前任务的 task_recv_type 判哪一路才算数：</text>
+<text x="652.0" y="512.0" font-size="8.5" fill="#475569">　00 = 只调 RV core / 01 = 调 DSA / 10 = DTE DSA + Rmem 两者都要</text>
+<text x="652.0" y="525.5" font-size="8.5" fill="#475569">Reduce 拆两半：DTE ack 只 consume_only，不改 stream 状态；</text>
+<text x="652.0" y="539.0" font-size="8.5" fill="#475569">　只有 Router Reduce Done 才能置 TASK_FINISH</text>
+<text x="652.0" y="552.5" font-size="8.5" fill="#475569">　两者可任意顺序；Router Done 可被 Hold，但要等匹配的</text>
+<text x="652.0" y="566.0" font-size="8.5" fill="#475569">　DTE ack 被消费后才提交</text>
+<text x="652.0" y="579.5" font-size="8.5" fill="#475569">Router 不携带 stream_id，按 user_id 找对应 Stream</text>
+<rect x="160" y="760" width="300" height="140.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="172" y="781" font-size="11" fill="#111827" font-weight="600">User_Match</text>
+<text x="172.0" y="798.0" font-size="8.5" fill="#475569">拿请求里的 user_id 与 stream_table 比对</text>
+<text x="172.0" y="811.5" font-size="8.5" fill="#475569">没匹配上 → 新用户，发建表请求</text>
+<text x="172.0" y="825.0" font-size="8.5" fill="#475569">匹配上 → 老用户，复用原 stream_id</text>
+<text x="172.0" y="838.5" font-size="8.5" fill="#475569">　当前任务、状态、完成位一律不动</text>
+<text x="172.0" y="852.0" font-size="8.5" fill="#475569">　只有带重发标记时才置 reissue</text>
+<text x="172.0" y="865.5" font-size="8.5" fill="#475569">建表四条同时满足：新用户 · 不在 weights 模式</text>
+<text x="172.0" y="879.0" font-size="8.5" fill="#475569">　· trigger_task_chain_en · tail−head &lt; stream_num</text>
+<rect x="500" y="760" width="300" height="127.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="512" y="781" font-size="11" fill="#111827" font-weight="600">DataIn_task_table</text>
+<text x="512.0" y="798.0" font-size="8.5" fill="#475569">只有 1 项（Depth-1 Hold）</text>
+<text x="512.0" y="811.5" font-size="8.5" fill="#475569">空闲时把 datain 任务与请求信息一起登记</text>
+<text x="512.0" y="825.0" font-size="8.5" fill="#475569">被占住时反压 Router 的新请求</text>
+<text x="512.0" y="838.5" font-size="8.5" fill="#475569">仲裁成功并被 DTE RV core 接收后立即释放</text>
+<text x="512.0" y="852.0" font-size="8.5" fill="#475569">datain 的 task_pc 进这里，Task 0 的进 stream_table</text>
+<text x="512.0" y="865.5" font-size="8.5" fill="#475569">B core 与 R core 的 datain 任务不建表</text>
+<rect x="840" y="760" width="340" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="852" y="781" font-size="11" fill="#111827" font-weight="600">MU_Arb</text>
+<text x="852.0" y="798.0" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY</text>
+<text x="852.0" y="811.5" font-size="8.5" fill="#475569">　且 task_unit=MU</text>
+<text x="852.0" y="825.0" font-size="8.5" fill="#475569">从 head_ptr 开始环形年龄优先，</text>
+<text x="852.0" y="838.5" font-size="8.5" fill="#475569">选最老的 Stream</text>
+<text x="852.0" y="852.0" font-size="8.5" fill="#475569">发射宽度 1</text>
+<text x="852.0" y="865.5" font-size="8.5" fill="#475569">非抢占保持到 raw ACCEPT</text>
+<text x="852.0" y="879.0" font-size="8.5" fill="#475569">RV core 的 task_queue 满时会反压</text>
+<text x="852.0" y="892.5" font-size="8.5" fill="#475569">ACCEPT 后提交 READY → INFLY</text>
+<text x="852.0" y="906.0" font-size="8.5" fill="#475569">Map 返回未接受时只重试这笔</text>
+<text x="852.0" y="919.5" font-size="8.5" fill="#475569">　状态写，不重发已被接收的任务</text>
+<rect x="1220" y="760" width="340" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1232" y="781" font-size="11" fill="#111827" font-weight="600">VU_Arb</text>
+<text x="1232.0" y="798.0" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY</text>
+<text x="1232.0" y="811.5" font-size="8.5" fill="#475569">　且 task_unit=VU</text>
+<text x="1232.0" y="825.0" font-size="8.5" fill="#475569">规则同 MU_Arb</text>
+<text x="1232.0" y="838.5" font-size="8.5" fill="#475569">三条发射通路各自独立打拍，</text>
+<text x="1232.0" y="852.0" font-size="8.5" fill="#475569">同一拍可以并行下发 3 个 task</text>
+<text x="1232.0" y="865.5" font-size="8.5" fill="#475569"></text>
+<text x="1232.0" y="879.0" font-size="8.5" fill="#475569">B core：task 0 借 VU core 跑</text>
+<text x="1232.0" y="892.5" font-size="8.5" fill="#475569">　纯标量的 check_flag</text>
+<text x="1232.0" y="906.0" font-size="8.5" fill="#475569">R core：task 0 借 MU core 跑</text>
+<text x="1232.0" y="919.5" font-size="8.5" fill="#475569">　check flag，求和交给 VU</text>
+<rect x="1600" y="760" width="340" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1612" y="781" font-size="11" fill="#111827" font-weight="600">DTE_Arb</text>
+<text x="1612.0" y="798.0" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY 且 task_unit=DTE</text>
+<text x="1612.0" y="811.5" font-size="8.5" fill="#475569">三类任务的优先级：</text>
+<text x="1612.0" y="825.0" font-size="8.5" fill="#475569">　1. Reissue 任务优先级最高，从 head_ptr 选最老的</text>
+<text x="1612.0" y="838.5" font-size="8.5" fill="#475569">　2. 没有 Reissue 时，DataIn 与普通 Generated 按相对</text>
+<text x="1612.0" y="852.0" font-size="8.5" fill="#475569">　　 head_ptr 的 Stream 年龄比较，较老者优先</text>
+<text x="1612.0" y="865.5" font-size="8.5" fill="#475569">　3. 同一 Stream 时优先选 Generated</text>
+<text x="1612.0" y="879.0" font-size="8.5" fill="#475569">选中后非抢占保持：锁定任务上下文，命令与相关字段</text>
+<text x="1612.0" y="892.5" font-size="8.5" fill="#475569">　保持稳定直到 RV core 返回 raw ACCEPT</text>
+<text x="1612.0" y="906.0" font-size="8.5" fill="#475569">收到 ACCEPT 后：Generated 提交 READY → INFLY；</text>
+<text x="1612.0" y="919.5" font-size="8.5" fill="#475569">　DataIn 只通知 DataIn_task_table 出槽，不改 stream 状态</text>
+<text x="1612.0" y="933.0" font-size="8.5" fill="#475569">task_dsa_en=0 的 Generated 下发给 DTE RV core，不配 DSA</text>
+<polygon points="749,44 860,44 851,74 740,74" fill="#f8fafc" stroke="#374151"/>
+<text x="800.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
+<polygon points="29,300 140,300 131,332 20,332" fill="#f8fafc" stroke="#374151"/>
+<text x="80.0" y="319.5" font-size="9" fill="#374151" text-anchor="middle">ts2corestatus</text>
+<polygon points="244,1040 385,1040 376,1070 235,1070" fill="#f8fafc" stroke="#374151"/>
+<text x="310.0" y="1058.5" font-size="9" fill="#374151" text-anchor="middle">router2ts_trigger_ch</text>
+<polygon points="949,1040 1090,1040 1081,1070 940,1070" fill="#f8fafc" stroke="#374151"/>
+<text x="1015.0" y="1058.5" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack［MU］</text>
+<polygon points="1329,1040 1470,1040 1461,1070 1320,1070" fill="#f8fafc" stroke="#374151"/>
+<text x="1395.0" y="1058.5" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack［VU］</text>
+<polygon points="1709,1040 1850,1040 1841,1070 1700,1070" fill="#f8fafc" stroke="#374151"/>
+<text x="1775.0" y="1058.5" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack［DTE］</text>
+<polygon points="1859,157.35 1980,157.35 1971,189.35 1850,189.35" fill="#f8fafc" stroke="#374151"/>
+<text x="1915.0" y="176.8" font-size="9" fill="#374151" text-anchor="middle">router2ts_credit_ch</text>
+<polygon points="1859,229.75 1980,229.75 1971,261.75 1850,261.75" fill="#f8fafc" stroke="#374151"/>
+<text x="1915.0" y="249.2" font-size="9" fill="#374151" text-anchor="middle">ts2router</text>
+<polygon points="1859,467.35 1980,467.35 1971,499.35 1850,499.35" fill="#f8fafc" stroke="#374151"/>
+<text x="1915.0" y="486.9" font-size="9" fill="#374151" text-anchor="middle">rmem2ts_done_ch</text>
+<polygon points="1859,539.75 1980,539.75 1971,571.75 1850,571.75" fill="#f8fafc" stroke="#374151"/>
+<text x="1915.0" y="559.2" font-size="9" fill="#374151" text-anchor="middle">rv / dsa done ×6</text>
+<path d="M795.5 74.0 L799.9 109.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M650.0 193.8 L611.0 200.3" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<rect x="542.0" y="94.5" width="176.0" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="630" y="102" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">task_chain 属性 / 三张掩码 / Task LUT</text>
+<path d="M710.0 277.5 L710.0 376.0 L547.0 376.0 L547.0 419.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<rect x="579.9" y="364.5" width="120.2" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="640" y="372" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">stream_num · datain_task</text>
+<path d="M482.5 420.0 L497.4 292.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="500.2" y="317.0" width="10.5" height="77.1" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 505.5 355.5)" x="505.5" y="358.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">候选 task 与属性</text>
+<path d="M160.0 200.5 L110.0 200.5 L110.0 720.0 L1770.0 720.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round"/>
+<path d="M1010.0 720.0 L1010.0 759.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1390.0 720.0 L1390.0 759.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1770.0 720.0 L1770.0 759.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<text transform="rotate(-90 104 525.5)" x="104" y="525.5" font-size="8" fill="#6b7280" text-anchor="middle">下一条可跳过后的 task，按 task_unit 分到三条发射通路</text>
+<path d="M640.0 510.5 L590.8 543.9" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="571.5" y="404.5" width="86.9" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="615" y="412" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">task_state_update</text>
+<path d="M1064.5 291.0 L1064.0 396.0 L568.5 396.0 L568.5 419.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="751.4" y="384.5" width="97.1" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="800" y="392" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">READY（credit 到手）</text>
+<path d="M310.0 760.0 L374.4 669.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="312.8" y="697.2" width="10.5" height="34.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 318 714.5)" x="318" y="717.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">create</text>
+<path d="M460.0 830.2 L499.0 823.7" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="462.2" y="810.0" width="34.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="479.5069706146114" y="817.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">datain</text>
+<path d="M314.5 1040.0 L310.0 901.5" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="312.8" y="902.6" width="10.5" height="135.2" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 318 970.25)" x="318" y="973.2" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#0f766e" text-anchor="middle">user_id · path_id · 重发标记</text>
+<path d="M1854.5 483.4 L1091.0 483.4" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="1369.6" y="469.9" width="200.8" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1470.0" y="477.35" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#0f766e" text-anchor="middle">rmem2ts_done_ch 按 user_id 匹配对应 Stream</text>
+<path d="M1854.5 555.8 L1091.0 555.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1383.7" y="542.2" width="172.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1470.0" y="549.75" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">rv_done ×3 · dsa_done ×3 · VU Event</text>
+<path d="M1010.1 942.0 L1019.4 1039.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1390.1 942.0 L1399.4 1039.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1770.1 955.5 L1779.4 1039.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1854.5 173.3 L1431.0 173.3" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="1573.4" y="159.8" width="133.2" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1640.0" y="167.35" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#0f766e" text-anchor="middle">收 Router 的 credit 到手通知</text>
+<path d="M1430.0 245.8 L1853.5 245.8" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<rect x="1566.3" y="232.2" width="147.4" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1640.0" y="239.75" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#b45309" text-anchor="middle">资源注册 / retire / credit 返还</text>
+<path d="M160.0 494.7 L150.0 494.7 L150.0 316.0 L136.5 316.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<rect x="153.2" y="345.4" width="9.5" height="120.0" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 158 405.35)" x="158" y="408.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="7.5" fill="#475569" text-anchor="middle">异常上报 → Core Status → SCP</text>
+<text x="20" y="348" font-size="8" fill="#6b7280" text-anchor="start">（本轮只留接口名）</text>
+<text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">TS 是一块固定的硬件逻辑，不是可编程的调度器：上电配好几张表、写 TS_INIT_FINISH 之后就按固定逻辑跑，运行期不接受软件干预，也没有指令可执行。三条发射通路各自独立打拍。Router 在 core 底边，四条通路物理上竖穿 core。</text>
 </svg>
 ```
 
@@ -610,11 +618,20 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
 
   <text x="20" y="26" font-size="12" fill="#111827">TS · 第 1 层流水线总览（拍数取 TS LLD 时序图的逐级值）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
-  <line x1="150" y1="52" x2="150" y2="414" stroke="#e5e7eb"/>
-  <line x1="316" y1="52" x2="316" y2="414" stroke="#e5e7eb"/>
-  <line x1="482" y1="52" x2="482" y2="414" stroke="#e5e7eb"/>
-  <line x1="648" y1="52" x2="648" y2="414" stroke="#e5e7eb"/>
-  <line x1="814" y1="52" x2="814" y2="414" stroke="#e5e7eb"/>
+  <path d="M150 52 L150 70" stroke="#e5e7eb" fill="none"/>
+<path d="M150 126 L150 156" stroke="#e5e7eb" fill="none"/>
+<path d="M150 212 L150 242" stroke="#e5e7eb" fill="none"/>
+<path d="M150 298 L150 328" stroke="#e5e7eb" fill="none"/>
+<path d="M150 384 L150 414" stroke="#e5e7eb" fill="none"/>
+  <path d="M316 52 L316 70" stroke="#e5e7eb" fill="none"/>
+<path d="M316 126 L316 156" stroke="#e5e7eb" fill="none"/>
+<path d="M316 212 L316 414" stroke="#e5e7eb" fill="none"/>
+  <path d="M482 52 L482 156" stroke="#e5e7eb" fill="none"/>
+<path d="M482 212 L482 414" stroke="#e5e7eb" fill="none"/>
+  <path d="M648 52 L648 156" stroke="#e5e7eb" fill="none"/>
+<path d="M648 212 L648 414" stroke="#e5e7eb" fill="none"/>
+  <path d="M814 52 L814 156" stroke="#e5e7eb" fill="none"/>
+<path d="M814 212 L814 414" stroke="#e5e7eb" fill="none"/>
   <text x="20" y="102" font-size="10.5" fill="#6b7280">建表</text>
   <rect x="150" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="84" font-size="8.5" fill="#6b7280">M1</text>
@@ -625,7 +642,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="326" y="84" font-size="8.5" fill="#6b7280">M2</text>
   <text x="458" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D3</text>
   <text x="326" y="104" font-size="11" fill="#111827">CREATE 建表</text>
-  <line x1="300" y1="98" x2="314" y2="98" stroke="#475569" marker-end="url(#artov)"/>
+  <path d="M300 98 L315 98" stroke="#475569" marker-end="url(#artov)" fill="none"/>
   <text x="20" y="188" font-size="10.5" fill="#6b7280">推进</text>
   <rect x="150" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="170" font-size="8.5" fill="#6b7280">M3</text>
@@ -635,24 +652,24 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="326" y="170" font-size="8.5" fill="#6b7280">M4</text>
   <text x="458" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="190" font-size="11" fill="#111827">选最老发射</text>
-  <line x1="300" y1="184" x2="314" y2="184" stroke="#475569" marker-end="url(#artov)"/>
+  <path d="M300 184 L315 184" stroke="#475569" marker-end="url(#artov)" fill="none"/>
   <rect x="482" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="170" font-size="8.5" fill="#6b7280">M5</text>
   <text x="624" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="190" font-size="11" fill="#111827">ACCEPT</text>
   <text x="492" y="204" font-size="11" fill="#111827">回写 INFLY</text>
-  <line x1="466" y1="184" x2="480" y2="184" stroke="#475569" marker-end="url(#artov)"/>
+  <path d="M466 184 L481 184" stroke="#475569" marker-end="url(#artov)" fill="none"/>
   <rect x="648" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="658" y="170" font-size="8.5" fill="#6b7280">M6</text>
   <text x="790" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D3</text>
   <text x="658" y="190" font-size="11" fill="#111827">completion 七路合流</text>
-  <line x1="632" y1="184" x2="646" y2="184" stroke="#475569" marker-end="url(#artov)"/>
+  <path d="M632 184 L647 184" stroke="#475569" marker-end="url(#artov)" fill="none"/>
   <rect x="814" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="824" y="170" font-size="8.5" fill="#6b7280">M7</text>
   <text x="956" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D4</text>
   <text x="824" y="190" font-size="11" fill="#111827">INSTALL</text>
   <text x="824" y="204" font-size="11" fill="#111827">生成后继</text>
-  <line x1="798" y1="184" x2="812" y2="184" stroke="#475569" marker-end="url(#artov)"/>
+  <path d="M798 184 L813 184" stroke="#475569" marker-end="url(#artov)" fill="none"/>
   <text x="20" y="274" font-size="10.5" fill="#6b7280">退休</text>
   <rect x="150" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="256" font-size="8.5" fill="#6b7280">M8</text>
@@ -716,11 +733,11 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="262" y="216" font-size="10.5" fill="#475569">task_chain[t.task_id].TASK_PC, user_id, path_id}</text>
   <text x="250" y="240" font-size="10" fill="#9ca3af">一条链上多个 datain 任务靠这一步分开</text>
   <line x1="188" y1="58" x2="228" y2="58" stroke="#475569" marker-end="url(#art1)"/>
-  <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#art1)"/>
-  <line x1="188" y1="183" x2="228" y2="183" stroke="#475569" marker-end="url(#art1)"/>
-  <line x1="188" y1="237" x2="228" y2="237" stroke="#475569" marker-end="url(#art1)"/>
-  <line x1="738" y1="140" x2="778" y2="140" stroke="#475569" marker-end="url(#art1)"/>
-  <line x1="738" y1="241" x2="778" y2="241" stroke="#475569" marker-end="url(#art1)"/>
+  <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#art1)" fill="none"/>
+  <path d="M188 183 L231 183" stroke="#475569" marker-end="url(#art1)" fill="none"/>
+  <path d="M188 237 L231 237" stroke="#475569" marker-end="url(#art1)" fill="none"/>
+  <path d="M738 140 L781 140" stroke="#475569" marker-end="url(#art1)" fill="none"/>
+  <path d="M738 241 L781 241" stroke="#475569" marker-end="url(#art1)" fill="none"/>
 </svg>
 ```
 
@@ -755,10 +772,10 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="262" y="138" font-size="10.5" fill="#475569">task_id=0, task_fsm=Task0 类型定, done_bitmap=0, task_chain[0] 的属性}</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">3. can → tail_ptr += 1；!can → 拉低 ready，CoreStation 保持本笔，下拍重判</text>
   <text x="250" y="182" font-size="10" fill="#9ca3af">datain 或 reissue 起 TASK_WAIT，self_start 起 TASK_RDY</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#art2)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#art2)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#art2)"/>
-  <line x1="676" y1="109" x2="716" y2="109" stroke="#475569" marker-end="url(#art2)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#art2)" fill="none"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#art2)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#art2)" fill="none"/>
+  <path d="M676 109 L719 109" stroke="#475569" marker-end="url(#art2)" fill="none"/>
 </svg>
 ```
 
@@ -787,9 +804,9 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="118" font-size="10.5" fill="#475569">3. ready = dep_ok &amp;&amp; cr_ok；datain 被 trigger 后直接 ready</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. ready → task_fsm = TASK_READY（issue 口写一个字段）</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">就绪只有前序完成与 credit 到位两个来源</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#art3)"/>
-  <line x1="188" y1="126" x2="228" y2="126" stroke="#475569" marker-end="url(#art3)"/>
-  <line x1="655" y1="99" x2="695" y2="99" stroke="#475569" marker-end="url(#art3)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#art3)" fill="none"/>
+  <path d="M188 126 L231 126" stroke="#475569" marker-end="url(#art3)" fill="none"/>
+  <path d="M655 99 L698 99" stroke="#475569" marker-end="url(#art3)" fill="none"/>
 </svg>
 ```
 
@@ -823,10 +840,10 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="118" font-size="10.5" fill="#475569">3. age(i) = (i − head_ptr) mod 16，取最小</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. task_cmd[u] = {task_pc, stream_id, local_user_id, task_id, user_id, dsa_en}</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">选中后非抢占保持，命令字段到 ACCEPT 前不变</text>
-  <line x1="188" y1="45" x2="228" y2="45" stroke="#475569" marker-end="url(#art4)"/>
-  <line x1="188" y1="99" x2="228" y2="99" stroke="#475569" marker-end="url(#art4)"/>
-  <line x1="188" y1="153" x2="228" y2="153" stroke="#475569" marker-end="url(#art4)"/>
-  <line x1="722" y1="98" x2="762" y2="98" stroke="#475569" marker-end="url(#art4)"/>
+  <path d="M188 45 L231 45" stroke="#475569" marker-end="url(#art4)" fill="none"/>
+  <path d="M188 99 L231 99" stroke="#475569" marker-end="url(#art4)" fill="none"/>
+  <path d="M188 153 L231 153" stroke="#475569" marker-end="url(#art4)" fill="none"/>
+  <path d="M722 98 L770 98" stroke="#475569" marker-end="url(#art4)" fill="none"/>
 </svg>
 ```
 
@@ -854,9 +871,9 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="98" font-size="10.5" fill="#475569">2. Generated → stream_table[i].task_fsm = TASK_INFLY</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. DataIn → datain_hold.valid = 0，不改 stream_table 的当前状态</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 写未被接受时只重试这一笔字段写，不重新下发已被接收的 task</text>
-  <line x1="188" y1="89" x2="228" y2="89" stroke="#475569" marker-end="url(#art5)"/>
-  <line x1="627" y1="63" x2="667" y2="63" stroke="#475569" marker-end="url(#art5)"/>
-  <line x1="627" y1="117" x2="667" y2="117" stroke="#475569" marker-end="url(#art5)"/>
+  <path d="M188 89 L231 89" stroke="#475569" marker-end="url(#art5)" fill="none"/>
+  <path d="M627 63 L670 63" stroke="#475569" marker-end="url(#art5)" fill="none"/>
+  <path d="M627 117 L670 117" stroke="#475569" marker-end="url(#art5)" fill="none"/>
 </svg>
 ```
 
@@ -891,10 +908,10 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="158" font-size="10.5" fill="#475569">4. done_bitmap[task_id] 无条件置位；task_id == 当前 task_id 才改 task_fsm</text>
   <text x="262" y="178" font-size="10.5" fill="#475569">自启动 core：把 rv_done.local_user_id 写进该 stream 的同名字段</text>
   <text x="250" y="202" font-size="10" fill="#9ca3af">七路都是脉冲，本级永远就绪，不向上游反压</text>
-  <line x1="188" y1="64" x2="228" y2="64" stroke="#475569" marker-end="url(#art6)"/>
-  <line x1="188" y1="125" x2="228" y2="125" stroke="#475569" marker-end="url(#art6)"/>
-  <line x1="188" y1="178" x2="228" y2="178" stroke="#475569" marker-end="url(#art6)"/>
-  <line x1="672" y1="119" x2="712" y2="119" stroke="#475569" marker-end="url(#art6)"/>
+  <path d="M188 64 L231 64" stroke="#475569" marker-end="url(#art6)" fill="none"/>
+  <path d="M188 125 L231 125" stroke="#475569" marker-end="url(#art6)" fill="none"/>
+  <path d="M188 178 L231 178" stroke="#475569" marker-end="url(#art6)" fill="none"/>
+  <path d="M672 119 L715 119" stroke="#475569" marker-end="url(#art6)" fill="none"/>
 </svg>
 ```
 
@@ -927,10 +944,10 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="262" y="138" font-size="10.5" fill="#475569">| (REISSUE_MASK &amp; ~reissue) | GROUP_SKIP)</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">4. next_id = PriorityEncode(~SKIP_MASK &amp; task_id 之后的位)，原子写整项</text>
   <text x="250" y="182" font-size="10" fill="#9ca3af">End task 即使已完成也不跳过，且不再生成后继</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#art7)"/>
-  <line x1="188" y1="109" x2="228" y2="109" stroke="#475569" marker-end="url(#art7)"/>
-  <line x1="188" y1="163" x2="228" y2="163" stroke="#475569" marker-end="url(#art7)"/>
-  <line x1="665" y1="109" x2="705" y2="109" stroke="#475569" marker-end="url(#art7)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#art7)" fill="none"/>
+  <path d="M188 109 L231 109" stroke="#475569" marker-end="url(#art7)" fill="none"/>
+  <path d="M188 163 L231 163" stroke="#475569" marker-end="url(#art7)" fill="none"/>
+  <path d="M665 109 L708 109" stroke="#475569" marker-end="url(#art7)" fill="none"/>
 </svg>
 ```
 
@@ -963,10 +980,10 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="118" font-size="10.5" fill="#475569">3. accepted → stream_table[i].valid = 0；head_ptr += 1</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. !accepted → 保持 valid 与请求，head_ptr 不动</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">只允许队头退休，head_ptr 才能单调推进</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#art8)"/>
-  <line x1="188" y1="126" x2="228" y2="126" stroke="#475569" marker-end="url(#art8)"/>
-  <line x1="603" y1="71" x2="643" y2="71" stroke="#475569" marker-end="url(#art8)"/>
-  <line x1="603" y1="133" x2="643" y2="133" stroke="#475569" marker-end="url(#art8)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#art8)" fill="none"/>
+  <path d="M188 126 L231 126" stroke="#475569" marker-end="url(#art8)" fill="none"/>
+  <path d="M603 71 L651 71" stroke="#475569" marker-end="url(#art8)" fill="none"/>
+  <path d="M603 133 L646 133" stroke="#475569" marker-end="url(#art8)" fill="none"/>
 </svg>
 ```
 
@@ -1000,10 +1017,10 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="118" font-size="10.5" fill="#475569">3. req_ready=0 → 本笔保持，不发下一笔</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. router2ts_credit_ch 到 → 对应 task 走 M3 的 cr_ok 分支置 READY</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">credit 的单位是 stream，同一 stream 只在第一次发数据时查</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#art9)"/>
-  <line x1="188" y1="126" x2="228" y2="126" stroke="#475569" marker-end="url(#art9)"/>
-  <line x1="638" y1="71" x2="678" y2="71" stroke="#475569" marker-end="url(#art9)"/>
-  <line x1="638" y1="141" x2="678" y2="141" stroke="#475569" marker-end="url(#art9)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#art9)" fill="none"/>
+  <path d="M188 126 L231 126" stroke="#475569" marker-end="url(#art9)" fill="none"/>
+  <path d="M638 71 L686 71" stroke="#475569" marker-end="url(#art9)" fill="none"/>
+  <path d="M638 141 L686 141" stroke="#475569" marker-end="url(#art9)" fill="none"/>
 </svg>
 ```
 

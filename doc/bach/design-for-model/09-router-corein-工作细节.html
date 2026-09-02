@@ -317,8 +317,8 @@ const RT_NODES=[
   s:['停发该 UserID · 删 Stream 授权','credit 经 crossbar 逐跳回上游']}];
 
 const RT_EDGES=[
- {id:'e_in_l', pts:[[8,392],[40,392]],label:'left_data_in_ch',lx:76,ly:362},
- {id:'e_out_l',pts:[[40,446],[8,446]],label:'left_data_out_ch',lx:80,ly:486},
+ {id:'e_in_l', pts:[[18,392],[40,392]],label:'left_data_in_ch',lx:76,ly:362},
+ {id:'e_out_l',pts:[[40,446],[18,446]],label:'left_data_out_ch',lx:80,ly:486},
  {id:'e_in_r', pts:[[1032,392],[860,392]],label:'right_data_in_ch',lx:944,ly:362},
  {id:'e_out_r',pts:[[860,420],[1032,420]],label:'right_data_out_ch',lx:944,ly:452},
  {id:'e_in_m', pts:[[600,478],[560,478]],label:'mid_data_in_ch',lx:610,ly:446},
@@ -333,15 +333,15 @@ const RT_EDGES=[
  {id:'e_cs_xb',pts:[[500,350],[500,368]],label:'local',lx:520,ly:362},
  {id:'e_xb_rm',pts:[[560,428],[610,428],[610,490],[660,490]],label:'Reduce Data ×3',lx:612,ly:414},
  {id:'e_rm_xb',pts:[[660,520],[600,520],[600,434],[560,434]],label:'结果回注 第 5 路',lx:600,ly:592},
- {id:'e_rtab', pts:[[760,350],[760,360],[300,360],[300,368]],dash:1,label:'查表副本',lx:660,ly:356},
+ {id:'e_rtab', pts:[[760,350],[760,360],[270,360],[270,368]],dash:1,label:'查表副本',lx:660,ly:356},
  {id:'e_cs_dte',pts:[[420,262],[420,246]],label:'in_core_data_ch',lx:352,ly:256},
  {id:'e_dte_cs',pts:[[470,246],[470,262]],label:'out_core_data_ch',lx:544,ly:256},
  {id:'e_cs_drv',pts:[[320,246],[320,262]],dash:1,label:'hdr_rd',lx:290,ly:256},
- {id:'e_cs_ts', pts:[[300,306],[265,306],[265,254],[120,254],[120,246]],label:'trigger_ch',lx:265,ly:300},
- {id:'e_rm_ts', pts:[[660,540],[630,540],[630,608],[16,608],[16,226],[40,226]],label:'rmem2ts_done_ch',lx:706,ly:604},
+ {id:'e_cs_ts', pts:[[300,306],[265,306],[265,254],[180,254],[180,246]],label:'trigger_ch',lx:265,ly:300},
+ {id:'e_rm_ts', pts:[[660,540],[630,540],[630,608],[6,608],[6,226],[40,226]],label:'rmem2ts_done_ch',lx:706,ly:604},
  {id:'e_ts_cm', pts:[[100,246],[100,262]],label:'资源注册',lx:70,ly:256},
- {id:'e_cm_ts', pts:[[160,262],[160,246]],label:'notify_ch',lx:196,ly:256},
- {id:'e_ts_ret',pts:[[40,240],[28,240],[28,578],[320,578]],label:'user_retire_ch',lx:180,ly:592},
+ {id:'e_cm_ts', pts:[[160,262],[160,246]],label:'notify_ch',lx:140,ly:256},
+ {id:'e_ts_ret',pts:[[40,240],[12,240],[12,578],[320,578]],label:'user_retire_ch',lx:180,ly:592},
  {id:'e_reis',  pts:[[280,534],[292,534],[292,252],[532,252],[532,246]],label:'暂存 / 取出',lx:250,ly:586}];
 
 function rtNodes(){return RT_NODES.map(n=>Object.assign({},n));}

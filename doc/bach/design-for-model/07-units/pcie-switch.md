@@ -43,12 +43,12 @@ PCIe Switch 是 chip 阵列与片外之间的交换节点：
   <polygon points="60,110 190,110 180,146 50,146" fill="#f8fafc" stroke="#374151"/>
   <text x="120" y="132" font-size="10.5" fill="#374151" text-anchor="middle">port[chip]</text>
   <text x="120" y="170" font-size="9" fill="#6b7280" text-anchor="middle">两层 chip 的边缘口</text>
-  <line x1="192" y1="128" x2="328" y2="128" stroke="#475569" marker-start="url(#w0s)" marker-end="url(#w0)"/>
+  <path d="M186 128 L329 128" stroke="#475569" marker-start="url(#w0s)" marker-end="url(#w0)" fill="none"/>
 
   <polygon points="890,110 1020,110 1010,146 880,146" fill="#f8fafc" stroke="#374151"/>
   <text x="950" y="132" font-size="10.5" fill="#374151" text-anchor="middle">port[stub]</text>
   <text x="950" y="170" font-size="9" fill="#6b7280" text-anchor="middle">片外桩</text>
-  <line x1="752" y1="128" x2="878" y2="128" stroke="#475569" marker-start="url(#w0s)" marker-end="url(#w0)"/>
+  <path d="M751 128 L884 128" stroke="#475569" marker-start="url(#w0s)" marker-end="url(#w0)" fill="none"/>
 
   <text x="20" y="260" font-size="10.5" fill="#374151">同层 chip 左右直连、同列 chip 上下直连，都不经 Switch；Switch 只在阵列边缘与片外之间。</text>
   <text x="20" y="282" font-size="10.5" fill="#374151">当前部署选定 LPU 广播，token 只从一个入口进阵列，组播开关默认关。</text>

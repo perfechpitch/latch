@@ -38,223 +38,230 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按 flit 还但要等下游 Reduce 完成 |
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1700 1250" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1700" height="1250" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">Router · 第 0 层（八个独立打拍的模块；每 Core 一份，坏核也有）</text>
-  <text x="460" y="26" font-size="9.5" fill="#6b7280">灰线 = flit 数据面　橙线 = 三类 credit 与 release　绿线 = 与 TS 的控制通路　紫虚线 = ctrl_noc 配置</text>
-  <polygon points="36,142 160,142 151,174 27,174" fill="#f8fafc" stroke="#374151"/>
-  <text x="94" y="162" font-size="9" fill="#374151" text-anchor="middle">left_data_ch</text>
-  <rect x="196" y="80" width="340" height="186" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="208" y="101" font-size="11" fill="#111827">RouterStation[left]</text>
-  <text x="208" y="118" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
-  <text x="208" y="131.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
-  <text x="208" y="145.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
-  <text x="208" y="158.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
-  <text x="208" y="172.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
-  <text x="208" y="185.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
-  <text x="208" y="199.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
-  <text x="208" y="212.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
-  <text x="208" y="226.0" font-size="8.5" fill="#475569">坏核：只透传，不查 credit、不支持阻塞重发</text>
-  <polygon points="36,358 160,358 151,390 27,390" fill="#f8fafc" stroke="#374151"/>
-  <text x="94" y="378" font-size="9" fill="#374151" text-anchor="middle">right_data_ch</text>
-  <rect x="196" y="296" width="340" height="186" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="208" y="317" font-size="11" fill="#111827">RouterStation[right]</text>
-  <text x="208" y="334" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
-  <text x="208" y="347.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
-  <text x="208" y="361.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
-  <text x="208" y="374.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
-  <text x="208" y="388.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
-  <text x="208" y="401.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
-  <text x="208" y="415.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
-  <text x="208" y="428.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
-  <text x="208" y="442.0" font-size="8.5" fill="#475569">坏核：只透传，不查 credit、不支持阻塞重发</text>
-  <polygon points="36,574 160,574 151,606 27,606" fill="#f8fafc" stroke="#374151"/>
-  <text x="94" y="594" font-size="9" fill="#374151" text-anchor="middle">mid_data_ch</text>
-  <rect x="196" y="512" width="340" height="186" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="208" y="533" font-size="11" fill="#111827">RouterStation[mid]</text>
-  <text x="208" y="550" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
-  <text x="208" y="563.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
-  <text x="208" y="577.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
-  <text x="208" y="590.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
-  <text x="208" y="604.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
-  <text x="208" y="617.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
-  <text x="208" y="631.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
-  <text x="208" y="644.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
-  <text x="208" y="658.0" font-size="8.5" fill="#475569">坏核：只透传，不查 credit、不支持阻塞重发</text>
-  <rect x="596" y="80" width="150" height="618" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="608" y="101" font-size="11" fill="#111827">Xbar</text>
-  <text x="608" y="118" font-size="8.5" fill="#475569">5 入 7 出</text>
-  <text x="608" y="131.5" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="145.0" font-size="8.5" fill="#475569">入：left · right</text>
-  <text x="608" y="158.5" font-size="8.5" fill="#475569">　　mid · local</text>
-  <text x="608" y="172.0" font-size="8.5" fill="#475569">　　reduce 回注</text>
-  <text x="608" y="185.5" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="199.0" font-size="8.5" fill="#475569">出：left · right</text>
-  <text x="608" y="212.5" font-size="8.5" fill="#475569">　　mid · core</text>
-  <text x="608" y="226.0" font-size="8.5" fill="#475569">　　reduce_0/1/2</text>
-  <text x="608" y="239.5" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="253.0" font-size="8.5" fill="#475569">按输出独立</text>
-  <text x="608" y="266.5" font-size="8.5" fill="#475569">RoundRobin</text>
-  <text x="608" y="280.0" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="293.5" font-size="8.5" fill="#475569">贪婪整包：</text>
-  <text x="608" y="307.0" font-size="8.5" fill="#475569">整包 &gt; 上包 body</text>
-  <text x="608" y="320.5" font-size="8.5" fill="#475569">&gt; 轮询</text>
-  <text x="608" y="334.0" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="347.5" font-size="8.5" fill="#475569">多播同拍复制</text>
-  <text x="608" y="361.0" font-size="8.5" fill="#475569">全有或全无</text>
-  <text x="608" y="374.5" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="388.0" font-size="8.5" fill="#475569">入口锁定到尾 flit</text>
-  <text x="608" y="401.5" font-size="8.5" fill="#475569">（进 core 或</text>
-  <text x="608" y="415.0" font-size="8.5" fill="#475569">ReduceModule）</text>
-  <text x="608" y="428.5" font-size="8.5" fill="#475569"></text>
-  <text x="608" y="442.0" font-size="8.5" fill="#475569">R2R 可在 flit</text>
-  <text x="608" y="455.5" font-size="8.5" fill="#475569">边界切换包</text>
-  <polyline points="160,158 196,158" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="536,158 566,158 566,170 596,170" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="160,374 196,374" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="536,374 566,374 566,386 596,386" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="160,590 196,590" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="536,590 566,590 566,602 596,602" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <rect x="806" y="80" width="400" height="254" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="818" y="101" font-size="11" fill="#111827">CoreStation</text>
-  <text x="818" y="118" font-size="8.5" fill="#475569">HeaderFIFO：按接收顺序存包头，DTE 读完写 1 弹出</text>
-  <text x="818" y="131.5" font-size="8.5" fill="#475569">OutputBuffer（in_core_fifo）：整包写入，不支持包间交织</text>
-  <text x="818" y="145.0" font-size="8.5" fill="#475569">三态准入：UserID 已分配 → 直接收；未分配但有空项 → 记录占用；</text>
-  <text x="818" y="158.5" font-size="8.5" fill="#475569">　无空项 → 该 VC 不能向 Core 发，但 VC 有空仍可继续收上游</text>
-  <text x="818" y="172.0" font-size="8.5" fill="#475569">已过 Stream 检查，进 core 不再查 VC credit</text>
-  <text x="818" y="185.5" font-size="8.5" fill="#475569">出 core：Core 方向输入 VC，与 DTE 之间按 VC credit 协议</text>
-  <text x="818" y="199.0" font-size="8.5" fill="#475569">反压时 valid / Header / Payload / 首尾标志 / 有效字节保持不变</text>
-  <text x="818" y="212.5" font-size="8.5" fill="#475569">收满一个包按顺序经 router2ts_trigger_ch 直接通知 TS</text>
-  <text x="818" y="226.0" font-size="8.5" fill="#475569">判定收完：比较已接收数据量与包头里的 payload 大小</text>
-  <text x="818" y="239.5" font-size="8.5" fill="#475569">进 core 与出 core 两条路完全并行，不共享仲裁状态</text>
-  <rect x="806" y="384" width="400" height="314" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="818" y="405" font-size="11" fill="#111827">ReduceModule</text>
-  <text x="818" y="422" font-size="8.5" fill="#475569">三路输入仲裁（Data ×3）：仲裁 SRAM / Bank / 计算资源</text>
-  <text x="818" y="435.5" font-size="8.5" fill="#475569">　进入后锁定当前包直至尾 flit；资源不足对输入反压</text>
-  <text x="818" y="449.0" font-size="8.5" fill="#475569">输入精度处理：BF16 扩展为 FP32，数据面统一 FP32</text>
-  <text x="818" y="462.5" font-size="8.5" fill="#475569">Reduce Context SRAM：16 用户 × 16 KiB，FP32 中间结果</text>
-  <text x="818" y="476.0" font-size="8.5" fill="#475569">RMW 管线：首份输入建上下文，后续输入原位累加，80 GFLOPS</text>
-  <text x="818" y="489.5" font-size="8.5" fill="#475569">User Context Table：UserID · 包状态 · 输入完成 · 输出状态 · Retire</text>
-  <text x="818" y="503.0" font-size="8.5" fill="#475569">RouterTable Copy：输出方向 · 下一跳 VC · operation · 输出精度</text>
-  <text x="818" y="516.5" font-size="8.5" fill="#475569">结果生成与发送：全部输入完成 → 输出队列 → 转 FP32 / BF16</text>
-  <text x="818" y="530.0" font-size="8.5" fill="#475569">　发送前查目标 VC credit 与该方向的下游 Reduce credit</text>
-  <text x="818" y="543.5" font-size="8.5" fill="#475569">Downstream Reduce Credit Map：按 UserID 加方向，逐 flit 扣、</text>
-  <text x="818" y="557.0" font-size="8.5" fill="#475569">　按 release 恢复</text>
-  <text x="818" y="570.5" font-size="8.5" fill="#475569">三条硬约束：必须执行 Reduce 不许降级 · 上下文保护 ·</text>
-  <text x="818" y="584.0" font-size="8.5" fill="#475569">　中间累加固定 FP32</text>
-  <text x="818" y="597.5" font-size="8.5" fill="#475569">整包发出后向 core 返回 UserID</text>
-  <text x="1194" y="689" font-size="8.5" fill="#9ca3af" text-anchor="end">输入三路各 160 GB/s，输出 160 GB/s</text>
-  <polyline points="746,142 776,142 776,141 806,141" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="776" y="110" font-size="8.5" fill="#6b7280" text-anchor="middle">→ core</text>
-  <polyline points="806,298 776,298 776,302 746,302" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="776" y="306" font-size="8.5" fill="#6b7280" text-anchor="middle">local ←</text>
-  <polyline points="746,451 776,451 776,441 806,441" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="776" y="436" font-size="8.5" fill="#6b7280" text-anchor="middle">→ reduce ×3</text>
-  <polyline points="806,673 776,673 776,636 746,636" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="776" y="646" font-size="8.5" fill="#6b7280" text-anchor="middle">结果回注 ←</text>
-  <polygon points="1250,150 1410,150 1401,182 1241,182" fill="#f8fafc" stroke="#374151"/>
-  <text x="1326" y="170" font-size="9" fill="#374151" text-anchor="middle">in_core_data_ch</text>
-  <polygon points="1250,262 1410,262 1401,294 1241,294" fill="#f8fafc" stroke="#374151"/>
-  <text x="1326" y="282" font-size="9" fill="#374151" text-anchor="middle">out_core_data_ch</text>
-  <polyline points="1206,141 1224,141 1224,166 1241,166" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="1228" y="158" font-size="8.5" fill="#6b7280" text-anchor="middle">AXI-Stream-Like</text>
-  <polyline points="1241,278 1224,278 1224,258 1206,258" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="1228" y="300" font-size="8.5" fill="#6b7280" text-anchor="middle">AXI-Stream-Like</text>
-  <text x="1252" y="330" font-size="8.5" fill="#6b7280" text-anchor="start">↔ 本 core 的 DTE DSA（VC credit 协议）</text>
-  <rect x="60" y="770" width="330" height="232" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="72" y="791" font-size="11" fill="#111827">RouterTable / CSR</text>
-  <text x="72" y="808" font-size="8.5" fill="#475569">64 条表项，索引 path_id</text>
-  <text x="72" y="821.5" font-size="8.5" fill="#475569">字段：cur_vc · flow_dir · nxt_vc · stream_table_enable</text>
-  <text x="72" y="835.0" font-size="8.5" fill="#475569">　　　operation · stall_way · reduce_outdata_type</text>
-  <text x="72" y="848.5" font-size="8.5" fill="#475569">只描述静态路由与资源需求，不保存包的动态状态</text>
-  <text x="72" y="862.0" font-size="8.5" fill="#475569">内部多副本：所有需并行查询的位置各一份</text>
-  <text x="72" y="875.5" font-size="8.5" fill="#475569">更新状态机把同一笔写依次写入全部副本并记完成</text>
-  <text x="72" y="889.0" font-size="8.5" fill="#475569">全部副本写完才向软件返回完成，禁止部分新部分旧</text>
-  <text x="72" y="902.5" font-size="8.5" fill="#475569">外部两份（DTE、ReduceModule）由软件写，硬件不同步</text>
-  <text x="72" y="916.0" font-size="8.5" fill="#475569">Credit Bypass Route：每个业务 credit 输入端口一张</text>
-  <text x="72" y="929.5" font-size="8.5" fill="#475569">　静态输出方向 Mask，坏核场景靠改它切换 credit 路径</text>
-  <text x="378" y="993" font-size="8.5" fill="#9ca3af" text-anchor="end">软件经 R2CU 接口配置</text>
-  <rect x="420" y="770" width="330" height="232" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="432" y="791" font-size="11" fill="#111827">CoreMem 重发</text>
-  <text x="432" y="808" font-size="8.5" fill="#475569">stall_way = 转存时：整包重定向到本地 Core Mem</text>
-  <text x="432" y="821.5" font-size="8.5" fill="#475569">Bypass 被映射成“进 core + 出 core”两段</text>
-  <text x="432" y="835.0" font-size="8.5" fill="#475569">CoreMem 中只保存包（含 UserID · PathID · size）</text>
-  <text x="432" y="848.5" font-size="8.5" fill="#475569">重发时用 PathID 重查 RouterTable，不重复保存 VC 与路由</text>
-  <text x="432" y="862.0" font-size="8.5" fill="#475569">同 VC 保序：该 VC 有未完成的重发包时后续包不得越过</text>
-  <text x="432" y="875.5" font-size="8.5" fill="#475569">按 VC 粒度维护 pending_reinject 计数器防超车</text>
-  <text x="432" y="889.0" font-size="8.5" fill="#475569">进 core 暂存时改写 overflow_reinject = 1</text>
-  <text x="432" y="902.5" font-size="8.5" fill="#475569">出 core 重发时改回 0；Output Port 识别到该标记才扣 credit</text>
-  <text x="432" y="916.0" font-size="8.5" fill="#475569">坏核不接收溢流，coremem credit 直接 bypass</text>
-  <text x="432" y="929.5" font-size="8.5" fill="#475569">无论直接发还是重发，完成后都向 TS 回 UserID + PathID</text>
-  <rect x="780" y="770" width="320" height="232" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="792" y="791" font-size="11" fill="#111827">Retire</text>
-  <text x="792" y="808" font-size="8.5" fill="#475569">Core 判定任务链结束后向 Router 与 ReduceModule 广播</text>
-  <text x="792" y="821.5" font-size="8.5" fill="#475569">Core 的保证：该 UserID 全部进 core、出 core 搬运完成</text>
-  <text x="792" y="835.0" font-size="8.5" fill="#475569">　且不会再发起新搬运之后才发 Retire</text>
-  <text x="792" y="848.5" font-size="8.5" fill="#475569">Retire 发出后 Router 上不得再出现以该 Core 为源或</text>
-  <text x="792" y="862.0" font-size="8.5" fill="#475569">　目标的该用户包</text>
-  <text x="792" y="875.5" font-size="8.5" fill="#475569">Router 的动作：停止该 UserID 的新发送，删除其全部</text>
-  <text x="792" y="889.0" font-size="8.5" fill="#475569">　stream credit 授权表项</text>
-  <text x="792" y="902.5" font-size="8.5" fill="#475569">ReduceModule 的动作：延迟回收。先记录 Retire，待相邻</text>
-  <text x="792" y="916.0" font-size="8.5" fill="#475569">　下游各方向的 Reduce credit 全恢复到初值才删映射</text>
-  <text x="792" y="929.5" font-size="8.5" fill="#475569">本级 core 与所有下级出口的 release 经 core credit crossbar</text>
-  <text x="792" y="943.0" font-size="8.5" fill="#475569">　汇总，发往除来向外的另两个 R2R port，逐跳传到上游</text>
-  <rect x="1130" y="770" width="340" height="232" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1142" y="791" font-size="11" fill="#111827">CoreMemCreditMonitor</text>
-  <text x="1142" y="808" font-size="8.5" fill="#475569">监听事件队列：16 项全相连</text>
-  <text x="1142" y="821.5" font-size="8.5" fill="#475569">TS 注册时带 UserID · StreamID · TaskID · PathID</text>
-  <text x="1142" y="835.0" font-size="8.5" fill="#475569">Router 按 PathID 查出要发的下游方向、VC 与 stream 需求</text>
-  <text x="1142" y="848.5" font-size="8.5" fill="#475569">申请到 → 经反向控制通路通知 TS</text>
-  <text x="1142" y="862.0" font-size="8.5" fill="#475569">　（回 StreamID · TaskID · PathID）</text>
-  <text x="1142" y="875.5" font-size="8.5" fill="#475569">申请不到 → 需求记进队列监听，资源满足再通知</text>
-  <text x="1142" y="889.0" font-size="8.5" fill="#475569">多个事件同时满足时按 StreamID 仲裁，选最老的通知 TS</text>
-  <text x="1142" y="902.5" font-size="8.5" fill="#475569">进 core 重发的任务也注册到该队列</text>
-  <text x="1142" y="916.0" font-size="8.5" fill="#475569">同一 VC 有未重发完的包时后续包不能提前发</text>
-  <text x="1142" y="929.5" font-size="8.5" fill="#475569">另输出 per-port 的 stream_credit 给 core 与 DTE</text>
-  <text x="1458" y="993" font-size="8.5" fill="#9ca3af" text-anchor="end">出核前的资源监听在 Router，不在 TS</text>
-  <polyline points="159,770 159,724 298,724 298,698" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
-  <polyline points="350,770 350,738 886,738 886,698" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
-  <polyline points="559,770 559,712 671,712 671,698" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a)"/>
-  <polyline points="1184,770 1184,752 1102,752 1102,698" fill="none" stroke="#b45309" stroke-dasharray="4 3" marker-end="url(#o)"/>
-  <polyline points="1062,770 1062,734 1014,734 1014,698" fill="none" stroke="#b45309" stroke-dasharray="4 3" marker-end="url(#o)"/>
-  <text x="64" y="700" font-size="8.5" fill="#6b7280" text-anchor="start">查表结果 → 各 RouterStation 与 ReduceModule；Reduce credit 与 Retire 的回收 → ReduceModule</text>
-  <polygon points="1516,110 1688,110 1679,142 1507,142" fill="#f8fafc" stroke="#374151"/>
-  <text x="1598" y="130" font-size="8.5" fill="#374151" text-anchor="middle">router2ts_trigger_ch</text>
-  <polygon points="1516,172 1688,172 1679,204 1507,204" fill="#f8fafc" stroke="#374151"/>
-  <text x="1598" y="192" font-size="8.5" fill="#374151" text-anchor="middle">router2ts_credit_ch</text>
-  <polygon points="1516,234 1688,234 1679,266 1507,266" fill="#f8fafc" stroke="#374151"/>
-  <text x="1598" y="254" font-size="8.5" fill="#374151" text-anchor="middle">rmem2ts_done_ch</text>
-  <polygon points="1516,296 1688,296 1679,328 1507,328" fill="#f8fafc" stroke="#374151"/>
-  <text x="1598" y="316" font-size="8.5" fill="#374151" text-anchor="middle">ts2router 资源注册</text>
-  <polygon points="1516,358 1688,358 1679,390 1507,390" fill="#f8fafc" stroke="#374151"/>
-  <text x="1598" y="378" font-size="8.5" fill="#374151" text-anchor="middle">ts2router retire / credit 返还</text>
-  <polyline points="1166,334 1166,352 1440,352 1440,126 1507,126" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <polyline points="1470,835 1492,835 1492,188 1507,188" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <polyline points="1206,447 1466,447 1466,250 1507,250" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <polyline points="1507,312 1300,312 1300,770" fill="none" stroke="#b45309" marker-end="url(#o)"/>
-  <polyline points="1507,374 1240,374 1240,742 1020,742 1020,770" fill="none" stroke="#b45309" marker-end="url(#o)"/>
-  <text x="1512" y="472" font-size="8.5" fill="#0f766e" text-anchor="end">user_id · path_id · 重发标记</text>
-  <text x="1512" y="486" font-size="8.5" fill="#0f766e" text-anchor="end">stream_id · task_id · path_id</text>
-  <text x="1512" y="500" font-size="8.5" fill="#0f766e" text-anchor="end">UserID（reduce 整包完成）</text>
-  <text x="1512" y="514" font-size="8.5" fill="#b45309" text-anchor="end">UserID · StreamID · TaskID · PathID</text>
-  <polygon points="60,1160 200,1160 191,1190 51,1190" fill="#f8fafc" stroke="#374151"/>
-  <text x="126" y="1179" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
-  <polyline points="200,1175 222,1175 222,1024 93,1024 93,1002" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <text x="232" y="1178" font-size="8.5" fill="#7c3aed" text-anchor="start">cfg 写事务 → RouterTable / CSR、Credit Bypass Route、各 Station 的静态配置</text>
-  <text x="20" y="1218" font-size="10.5" fill="#374151">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；stream credit管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
-  <text x="20" y="1240" font-size="10.5" fill="#374151">Reduce credit 管下游 ReduceModule 的上下文（DTE 管本级，ReduceModule 管相邻下游，Router 不维护）。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2240 1150" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Router 第 0 层">
+<title>Router 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="2240" height="1150" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">Router · 第 0 层（八个独立打拍的模块；每 Core 一份，坏核也有。方位照 MAS 框图：core 侧模块在上，left / right 在两侧，mid 朝另一排在下）</text>
+<text x="884" y="26" font-size="9.5" fill="#6b7280">灰线 = flit 数据面　橙线 = 三类 credit 与 release　绿线 = 与 TS 的控制通路　紫虚线 = ctrl_noc 配置</text>
+<rect x="40" y="120" width="330" height="195.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="52" y="141" font-size="11" fill="#111827" font-weight="600">RouterTable / CSR</text>
+<text x="52.0" y="158.0" font-size="8.5" fill="#475569">64 条表项，索引 path_id</text>
+<text x="52.0" y="171.5" font-size="8.5" fill="#475569">字段：cur_vc · flow_dir · nxt_vc · stream_table_enable</text>
+<text x="52.0" y="185.0" font-size="8.5" fill="#475569">　　　operation · stall_way · reduce_outdata_type</text>
+<text x="52.0" y="198.5" font-size="8.5" fill="#475569">只描述静态路由与资源需求，不保存包的动态状态</text>
+<text x="52.0" y="212.0" font-size="8.5" fill="#475569">内部多副本：所有需并行查询的位置各一份</text>
+<text x="52.0" y="225.5" font-size="8.5" fill="#475569">更新状态机把同一笔写依次写入全部副本并记完成</text>
+<text x="52.0" y="239.0" font-size="8.5" fill="#475569">全部副本写完才向软件返回完成，禁止部分新部分旧</text>
+<text x="52.0" y="252.5" font-size="8.5" fill="#475569">外部两份（DTE、ReduceModule）由软件写，硬件不同步</text>
+<text x="52.0" y="266.0" font-size="8.5" fill="#475569">Credit Bypass Route：每个业务 credit 输入端口一张</text>
+<text x="52.0" y="279.5" font-size="8.5" fill="#475569">　静态输出方向 Mask，坏核场景靠改它切换 credit 路径</text>
+<text x="358" y="306.0" font-size="8.5" fill="#9ca3af" text-anchor="end">软件经 R2CU 接口配置</text>
+<rect x="400" y="120" width="330" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="412" y="141" font-size="11" fill="#111827" font-weight="600">CoreMem 重发</text>
+<text x="412.0" y="158.0" font-size="8.5" fill="#475569">stall_way = 转存时：整包重定向到本地 Core Mem</text>
+<text x="412.0" y="171.5" font-size="8.5" fill="#475569">Bypass 被映射成“进 core + 出 core”两段</text>
+<text x="412.0" y="185.0" font-size="8.5" fill="#475569">CoreMem 中只保存包（含 UserID · PathID · size）</text>
+<text x="412.0" y="198.5" font-size="8.5" fill="#475569">重发时用 PathID 重查 RouterTable，不重复保存 VC 与路由</text>
+<text x="412.0" y="212.0" font-size="8.5" fill="#475569">同 VC 保序：该 VC 有未完成的重发包时后续包不得越过</text>
+<text x="412.0" y="225.5" font-size="8.5" fill="#475569">按 VC 粒度维护 pending_reinject 计数器防超车</text>
+<text x="412.0" y="239.0" font-size="8.5" fill="#475569">进 core 暂存时改写 overflow_reinject = 1</text>
+<text x="412.0" y="252.5" font-size="8.5" fill="#475569">出 core 重发时改回 0；Output Port 识别到该标记才扣 credit</text>
+<text x="412.0" y="266.0" font-size="8.5" fill="#475569">坏核不接收溢流，coremem credit 直接 bypass</text>
+<text x="412.0" y="279.5" font-size="8.5" fill="#475569">无论直接发还是重发，完成后都向 TS 回 UserID + PathID</text>
+<rect x="760" y="120" width="400" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="772" y="141" font-size="11" fill="#111827" font-weight="600">CoreStation</text>
+<text x="772.0" y="158.0" font-size="8.5" fill="#475569">HeaderFIFO：按接收顺序存包头，DTE 读完写 1 弹出</text>
+<text x="772.0" y="171.5" font-size="8.5" fill="#475569">OutputBuffer（in_core_fifo）：整包写入，不支持包间交织</text>
+<text x="772.0" y="185.0" font-size="8.5" fill="#475569">三态准入：UserID 已分配 → 直接收；未分配但有空项 → 记录占用；</text>
+<text x="772.0" y="198.5" font-size="8.5" fill="#475569">　无空项 → 该 VC 不能向 Core 发，但 VC 有空仍可继续收上游</text>
+<text x="772.0" y="212.0" font-size="8.5" fill="#475569">已过 Stream 检查，进 core 不再查 VC credit</text>
+<text x="772.0" y="225.5" font-size="8.5" fill="#475569">出 core：Core 方向输入 VC，与 DTE 之间按 VC credit 协议</text>
+<text x="772.0" y="239.0" font-size="8.5" fill="#475569">反压时 valid / Header / Payload / 首尾标志 / 有效字节保持不变</text>
+<text x="772.0" y="252.5" font-size="8.5" fill="#475569">收满一个包按顺序经 router2ts_trigger_ch 直接通知 TS</text>
+<text x="772.0" y="266.0" font-size="8.5" fill="#475569">判定收完：比较已接收数据量与包头里的 payload 大小</text>
+<text x="772.0" y="279.5" font-size="8.5" fill="#475569">进 core 与出 core 两条路完全并行，不共享仲裁状态</text>
+<rect x="1200" y="120" width="300" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1212" y="141" font-size="11" fill="#111827" font-weight="600">Retire</text>
+<text x="1212.0" y="158.0" font-size="8.5" fill="#475569">Core 判定任务链结束后向 Router 与 ReduceModule 广播</text>
+<text x="1212.0" y="171.5" font-size="8.5" fill="#475569">Core 的保证：该 UserID 全部进 core、出 core 搬运完成</text>
+<text x="1212.0" y="185.0" font-size="8.5" fill="#475569">　且不会再发起新搬运之后才发 Retire</text>
+<text x="1212.0" y="198.5" font-size="8.5" fill="#475569">Retire 发出后 Router 上不得再出现以该 Core 为源或</text>
+<text x="1212.0" y="212.0" font-size="8.5" fill="#475569">　目标的该用户包</text>
+<text x="1212.0" y="225.5" font-size="8.5" fill="#475569">Router 的动作：停止该 UserID 的新发送，删除其全部</text>
+<text x="1212.0" y="239.0" font-size="8.5" fill="#475569">　stream credit 授权表项</text>
+<text x="1212.0" y="252.5" font-size="8.5" fill="#475569">ReduceModule 的动作：延迟回收。先记录 Retire，待相邻</text>
+<text x="1212.0" y="266.0" font-size="8.5" fill="#475569">　下游各方向的 Reduce credit 全恢复到初值才删映射</text>
+<text x="1212.0" y="279.5" font-size="8.5" fill="#475569">本级 core 与所有下级出口的 release 经 core credit crossbar</text>
+<text x="1212.0" y="293.0" font-size="8.5" fill="#475569">　汇总，发往除来向外的另两个 R2R port，逐跳传到上游</text>
+<rect x="1560" y="120" width="400" height="195.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1572" y="141" font-size="11" fill="#111827" font-weight="600">CoreMemCreditMonitor</text>
+<text x="1572.0" y="158.0" font-size="8.5" fill="#475569">监听事件队列：16 项全相连</text>
+<text x="1572.0" y="171.5" font-size="8.5" fill="#475569">TS 注册时带 UserID · StreamID · TaskID · PathID</text>
+<text x="1572.0" y="185.0" font-size="8.5" fill="#475569">Router 按 PathID 查出要发的下游方向、VC 与 stream 需求</text>
+<text x="1572.0" y="198.5" font-size="8.5" fill="#475569">申请到 → 经反向控制通路通知 TS</text>
+<text x="1572.0" y="212.0" font-size="8.5" fill="#475569">　（回 StreamID · TaskID · PathID）</text>
+<text x="1572.0" y="225.5" font-size="8.5" fill="#475569">申请不到 → 需求记进队列监听，资源满足再通知</text>
+<text x="1572.0" y="239.0" font-size="8.5" fill="#475569">多个事件同时满足时按 StreamID 仲裁，选最老的通知 TS</text>
+<text x="1572.0" y="252.5" font-size="8.5" fill="#475569">进 core 重发的任务也注册到该队列</text>
+<text x="1572.0" y="266.0" font-size="8.5" fill="#475569">同一 VC 有未重发完的包时后续包不能提前发</text>
+<text x="1572.0" y="279.5" font-size="8.5" fill="#475569">另输出 per-port 的 stream_credit 给 core 与 DTE</text>
+<text x="1948" y="306.0" font-size="8.5" fill="#9ca3af" text-anchor="end">出核前的资源监听在 Router，不在 TS</text>
+<rect x="170" y="395.0" width="340" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="182" y="416.0" font-size="11" fill="#111827" font-weight="600">RouterStation[left]</text>
+<text x="182.0" y="433.0" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
+<text x="182.0" y="446.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
+<text x="182.0" y="460.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
+<text x="182.0" y="473.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
+<text x="182.0" y="487.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
+<text x="182.0" y="500.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
+<text x="182.0" y="514.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
+<text x="182.0" y="527.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
+<text x="182.0" y="541.0" font-size="8.5" fill="#475569">坏核：只透传，不查 credit、不支持阻塞重发</text>
+<rect x="760" y="395.0" width="400" height="221.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="772" y="416.0" font-size="11" fill="#111827" font-weight="600">Xbar</text>
+<text x="772.0" y="433.0" font-size="8.5" fill="#475569">5 入 7 出</text>
+<text x="772.0" y="446.5" font-size="8.5" fill="#475569"></text>
+<text x="772.0" y="460.0" font-size="8.5" fill="#475569">入：left · right</text>
+<text x="772.0" y="473.5" font-size="8.5" fill="#475569">　　mid · local</text>
+<text x="772.0" y="487.0" font-size="8.5" fill="#475569">　　reduce 回注</text>
+<text x="772.0" y="500.5" font-size="8.5" fill="#475569"></text>
+<text x="772.0" y="514.0" font-size="8.5" fill="#475569">出：left · right</text>
+<text x="772.0" y="527.5" font-size="8.5" fill="#475569">　　mid · core</text>
+<text x="772.0" y="541.0" font-size="8.5" fill="#475569">　　reduce_0/1/2</text>
+<text x="772.0" y="554.5" font-size="8.5" fill="#475569"></text>
+<text x="772.0" y="568.0" font-size="8.5" fill="#475569">按输出独立</text>
+<text x="772.0" y="581.5" font-size="8.5" fill="#475569">RoundRobin</text>
+<text x="772.0" y="595.0" font-size="8.5" fill="#475569"></text>
+<text x="960.0" y="433.0" font-size="8.5" fill="#475569">贪婪整包：</text>
+<text x="960.0" y="446.5" font-size="8.5" fill="#475569">整包 &gt; 上包 body</text>
+<text x="960.0" y="460.0" font-size="8.5" fill="#475569">&gt; 轮询</text>
+<text x="960.0" y="473.5" font-size="8.5" fill="#475569"></text>
+<text x="960.0" y="487.0" font-size="8.5" fill="#475569">多播同拍复制</text>
+<text x="960.0" y="500.5" font-size="8.5" fill="#475569">全有或全无</text>
+<text x="960.0" y="514.0" font-size="8.5" fill="#475569"></text>
+<text x="960.0" y="527.5" font-size="8.5" fill="#475569">入口锁定到尾 flit</text>
+<text x="960.0" y="541.0" font-size="8.5" fill="#475569">（进 core 或</text>
+<text x="960.0" y="554.5" font-size="8.5" fill="#475569">ReduceModule）</text>
+<text x="960.0" y="568.0" font-size="8.5" fill="#475569"></text>
+<text x="960.0" y="581.5" font-size="8.5" fill="#475569">R2R 可在 flit</text>
+<text x="960.0" y="595.0" font-size="8.5" fill="#475569">边界切换包</text>
+<rect x="1300" y="395.0" width="400" height="249.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1312" y="416.0" font-size="11" fill="#111827" font-weight="600">ReduceModule</text>
+<text x="1312.0" y="433.0" font-size="8.5" fill="#475569">三路输入仲裁（Data ×3）：仲裁 SRAM / Bank / 计算资源</text>
+<text x="1312.0" y="446.5" font-size="8.5" fill="#475569">　进入后锁定当前包直至尾 flit；资源不足对输入反压</text>
+<text x="1312.0" y="460.0" font-size="8.5" fill="#475569">输入精度处理：BF16 扩展为 FP32，数据面统一 FP32</text>
+<text x="1312.0" y="473.5" font-size="8.5" fill="#475569">Reduce Context SRAM：16 用户 × 16 KiB，FP32 中间结果</text>
+<text x="1312.0" y="487.0" font-size="8.5" fill="#475569">RMW 管线：首份输入建上下文，后续输入原位累加，80 GFLOPS</text>
+<text x="1312.0" y="500.5" font-size="8.5" fill="#475569">User Context Table：UserID · 包状态 · 输入完成 · 输出状态 · Retire</text>
+<text x="1312.0" y="514.0" font-size="8.5" fill="#475569">RouterTable Copy：输出方向 · 下一跳 VC · operation · 输出精度</text>
+<text x="1312.0" y="527.5" font-size="8.5" fill="#475569">结果生成与发送：全部输入完成 → 输出队列 → 转 FP32 / BF16</text>
+<text x="1312.0" y="541.0" font-size="8.5" fill="#475569">　发送前查目标 VC credit 与该方向的下游 Reduce credit</text>
+<text x="1312.0" y="554.5" font-size="8.5" fill="#475569">Downstream Reduce Credit Map：按 UserID 加方向，逐 flit 扣、</text>
+<text x="1312.0" y="568.0" font-size="8.5" fill="#475569">　按 release 恢复</text>
+<text x="1312.0" y="581.5" font-size="8.5" fill="#475569">三条硬约束：必须执行 Reduce 不许降级 · 上下文保护 ·</text>
+<text x="1312.0" y="595.0" font-size="8.5" fill="#475569">　中间累加固定 FP32</text>
+<text x="1312.0" y="608.5" font-size="8.5" fill="#475569">整包发出后向 core 返回 UserID</text>
+<text x="1688" y="635.0" font-size="8.5" fill="#9ca3af" text-anchor="end">输入三路各 160 GB/s，输出 160 GB/s</text>
+<rect x="1760" y="395.0" width="340" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1772" y="416.0" font-size="11" fill="#111827" font-weight="600">RouterStation[right]</text>
+<text x="1772.0" y="433.0" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
+<text x="1772.0" y="446.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
+<text x="1772.0" y="460.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
+<text x="1772.0" y="473.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
+<text x="1772.0" y="487.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
+<text x="1772.0" y="500.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
+<text x="1772.0" y="514.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
+<text x="1772.0" y="527.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
+<text x="1772.0" y="541.0" font-size="8.5" fill="#475569">坏核：只透传，不查 credit、不支持阻塞重发</text>
+<rect x="790" y="734.0" width="340" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="802" y="755.0" font-size="11" fill="#111827" font-weight="600">RouterStation[mid]</text>
+<text x="802.0" y="772.0" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
+<text x="802.0" y="785.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
+<text x="802.0" y="799.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
+<text x="802.0" y="812.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
+<text x="802.0" y="826.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
+<text x="802.0" y="839.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
+<text x="802.0" y="853.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
+<text x="802.0" y="866.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
+<text x="802.0" y="880.0" font-size="8.5" fill="#475569">坏核：只透传，不查 credit、不支持阻塞重发</text>
+<polygon points="49,44 160,44 151,74 40,74" fill="#f8fafc" stroke="#374151"/>
+<text x="100.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
+<polygon points="779,44 890,44 881,74 770,74" fill="#f8fafc" stroke="#374151"/>
+<text x="830.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">in_core_data_ch</text>
+<polygon points="909,44 1020,44 1011,74 900,74" fill="#f8fafc" stroke="#374151"/>
+<text x="960.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">out_core_data_ch</text>
+<polygon points="1039,44 1150,44 1141,74 1030,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1090.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">router2ts_trigger_ch</text>
+<polygon points="1209,44 1350,44 1341,74 1200,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1275.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">ts2router retire / credit 返还</text>
+<polygon points="1469,44 1590,44 1581,74 1460,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1525.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">rmem2ts_done_ch</text>
+<polygon points="1619,44 1760,44 1751,74 1610,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1685.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">router2ts_credit_ch</text>
+<polygon points="1799,44 1940,44 1931,74 1790,74" fill="#f8fafc" stroke="#374151"/>
+<text x="1865.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">ts2router 资源注册</text>
+<polygon points="29,462.75 140,462.75 131,494.75 20,494.75" fill="#f8fafc" stroke="#374151"/>
+<text x="80.0" y="482.2" font-size="9" fill="#374151" text-anchor="middle">left_data_ch</text>
+<polygon points="2109,462.75 2220,462.75 2211,494.75 2100,494.75" fill="#f8fafc" stroke="#374151"/>
+<text x="2160.0" y="482.2" font-size="9" fill="#374151" text-anchor="middle">right_data_ch</text>
+<polygon points="909,941.5 1020,941.5 1011,973.5 900,973.5" fill="#f8fafc" stroke="#374151"/>
+<text x="960.0" y="961.0" font-size="9" fill="#374151" text-anchor="middle">mid_data_ch</text>
+<path d="M136.5 478.8 L169.0 478.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M2101.0 478.8 L2103.5 478.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M960.1 902.5 L964.4 940.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M510.0 445.2 L759.0 461.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="615.4" y="431.8" width="38.3" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="634.5010464655378" y="439.25" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">flit 入</text>
+<path d="M760.0 550.0 L511.0 512.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="585.9" y="498.8" width="99.2" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="635.4943808056712" y="506.25" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">出口 → output buffer</text>
+<path d="M1828.0 562.5 L1828.0 674.0 L1120.0 674.0 L1120.0 617.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1498.0" y="661.5" width="103.9" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1550" y="669.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">right 的 flit 入 Xbar</text>
+<path d="M1060.0 616.5 L1060.0 692.0 L1930.0 692.0 L1930.0 563.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1507.6" y="695.5" width="84.9" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1550" y="703.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">Xbar → right 出口</text>
+<path d="M892.0 734.0 L840.4 617.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="878.8" y="678.5" width="10.5" height="33.5" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 884 695.25)" x="884" y="698.2" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">mid 入</text>
+<path d="M940.0 616.5 L1027.4 733.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="942.8" y="669.5" width="10.5" height="51.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 948 695.25)" x="948" y="698.2" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">→ mid 出口</text>
+<path d="M880.0 395.0 L880.0 302.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="866.8" y="295.2" width="10.5" height="105.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 872 348.0)" x="872" y="351.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">→ core（进 core 整包）</text>
+<path d="M1040.0 301.0 L1040.0 394.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1042.8" y="303.7" width="10.5" height="88.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1048 348.0)" x="1048" y="351.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">local ←（出 core）</text>
+<path d="M1160.0 461.4 L1299.0 469.6" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1189.4" y="447.9" width="80.1" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1229.5008658896331" y="455.45" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">→ reduce 输入 ×3</text>
+<path d="M1300.0 569.3 L1161.0 550.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1177.9" y="536.5" width="105.3" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1230.4953394199226" y="544.05" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">结果回注（第 5 路输入）</text>
+<path d="M830.0 120.0 L825.6 75.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M955.5 74.0 L959.9 119.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1090.0 120.0 L1085.6 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<path d="M1270.5 74.0 L1274.9 119.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<path d="M1525.0 395.0 L1520.5 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<path d="M1685.0 120.0 L1680.6 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<path d="M1860.5 74.0 L1864.9 119.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<path d="M731.0 210.5 L759.0 210.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1200.0 217.2 L1161.0 210.7" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<path d="M1400.1 314.5 L1400.0 394.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
+<rect x="1402.8" y="302.4" width="10.5" height="104.6" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1408 354.75)" x="1408" y="357.7" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#b45309" text-anchor="middle">Retire 广播 → 延迟回收</text>
+<text x="20" y="1074" font-size="10.5" fill="#374151" text-anchor="start">通路载荷：in / out_core_data_ch 是 AXI-Stream-Like，对本 core 的 DTE DSA 走 VC credit 协议；router2ts_trigger_ch = user_id · path_id · 重发标记；router2ts_credit_ch = stream_id · task_id · path_id；rmem2ts_done_ch = UserID（reduce 整包完成）；ts2router 资源注册 = UserID · StreamID · TaskID · PathID。</text>
+<text x="20" y="1094" font-size="10.5" fill="#374151" text-anchor="start">CoreMem 重发 ↔ CoreStation：stall_way = 转存时整包重定向到本地 Core Mem；Retire → CoreStation：停发该 UserID。</text>
+<path d="M271.0 315.0 L272.0 394.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<rect x="440.7" y="377.5" width="238.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="560" y="385.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">查表结果 → 各 RouterStation 与 ReduceModule（副本）</text>
+<path d="M95.5 74.0 L105.8 119.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<rect x="230.7" y="88.5" width="338.5" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="400" y="96" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">cfg 写事务 → RouterTable / CSR、Credit Bypass Route、各 Station 静态配置</text>
+<text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；stream credit 管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
+<text x="20" y="1134" font-size="10.5" fill="#374151" text-anchor="start">Reduce credit 管下游 ReduceModule 的上下文（DTE 管本级，ReduceModule 管相邻下游，Router 不维护）。ReduceModule 输入三路各 160 GB/s，输出 160 GB/s。</text>
 </svg>
 ```
 
@@ -587,12 +594,27 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
 
   <text x="20" y="26" font-size="12" fill="#111827">Router · 第 1 层流水线总览（数据面六级每级 1 拍，单跳 ≤ 6 拍）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
-  <line x1="150" y1="52" x2="150" y2="500" stroke="#e5e7eb"/>
-  <line x1="316" y1="52" x2="316" y2="500" stroke="#e5e7eb"/>
-  <line x1="482" y1="52" x2="482" y2="500" stroke="#e5e7eb"/>
-  <line x1="648" y1="52" x2="648" y2="500" stroke="#e5e7eb"/>
-  <line x1="814" y1="52" x2="814" y2="500" stroke="#e5e7eb"/>
-  <line x1="980" y1="52" x2="980" y2="500" stroke="#e5e7eb"/>
+  <path d="M150 52 L150 70" stroke="#e5e7eb" fill="none"/>
+<path d="M150 126 L150 156" stroke="#e5e7eb" fill="none"/>
+<path d="M150 212 L150 242" stroke="#e5e7eb" fill="none"/>
+<path d="M150 298 L150 414" stroke="#e5e7eb" fill="none"/>
+<path d="M150 470 L150 500" stroke="#e5e7eb" fill="none"/>
+  <path d="M316 52 L316 70" stroke="#e5e7eb" fill="none"/>
+<path d="M316 126 L316 156" stroke="#e5e7eb" fill="none"/>
+<path d="M316 212 L316 242" stroke="#e5e7eb" fill="none"/>
+<path d="M316 298 L316 414" stroke="#e5e7eb" fill="none"/>
+<path d="M316 470 L316 500" stroke="#e5e7eb" fill="none"/>
+  <path d="M482 52 L482 70" stroke="#e5e7eb" fill="none"/>
+<path d="M482 126 L482 156" stroke="#e5e7eb" fill="none"/>
+<path d="M482 212 L482 242" stroke="#e5e7eb" fill="none"/>
+<path d="M482 298 L482 414" stroke="#e5e7eb" fill="none"/>
+<path d="M482 470 L482 500" stroke="#e5e7eb" fill="none"/>
+  <path d="M648 52 L648 70" stroke="#e5e7eb" fill="none"/>
+<path d="M648 126 L648 500" stroke="#e5e7eb" fill="none"/>
+  <path d="M814 52 L814 70" stroke="#e5e7eb" fill="none"/>
+<path d="M814 126 L814 500" stroke="#e5e7eb" fill="none"/>
+  <path d="M980 52 L980 70" stroke="#e5e7eb" fill="none"/>
+<path d="M980 126 L980 500" stroke="#e5e7eb" fill="none"/>
   <text x="20" y="102" font-size="10.5" fill="#6b7280">数据面</text>
   <rect x="150" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="84" font-size="8.5" fill="#6b7280">M1</text>
@@ -602,27 +624,27 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="326" y="84" font-size="8.5" fill="#6b7280">M2</text>
   <text x="458" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="104" font-size="11" fill="#111827">RC 查表</text>
-  <line x1="300" y1="98" x2="314" y2="98" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M300 98 L315 98" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="482" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="84" font-size="8.5" fill="#6b7280">M3</text>
   <text x="624" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="104" font-size="11" fill="#111827">VA 拿资源</text>
-  <line x1="466" y1="98" x2="480" y2="98" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M466 98 L481 98" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="648" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="658" y="84" font-size="8.5" fill="#6b7280">M4</text>
   <text x="790" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="658" y="104" font-size="11" fill="#111827">SA 抢通路</text>
-  <line x1="632" y1="98" x2="646" y2="98" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M632 98 L647 98" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="814" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="824" y="84" font-size="8.5" fill="#6b7280">M5</text>
   <text x="956" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="824" y="104" font-size="11" fill="#111827">ST 交换</text>
-  <line x1="798" y1="98" x2="812" y2="98" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M798 98 L813 98" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="980" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="990" y="84" font-size="8.5" fill="#6b7280">M6</text>
   <text x="1122" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="990" y="104" font-size="11" fill="#111827">Output Pipe</text>
-  <line x1="964" y1="98" x2="978" y2="98" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M964 98 L979 98" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <text x="20" y="188" font-size="10.5" fill="#6b7280">进出 core</text>
   <rect x="150" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="170" font-size="8.5" fill="#6b7280">M7</text>
@@ -632,12 +654,12 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="326" y="170" font-size="8.5" fill="#6b7280">M8</text>
   <text x="458" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="190" font-size="11" fill="#111827">收满通知 TS</text>
-  <line x1="300" y1="184" x2="314" y2="184" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M300 184 L315 184" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="482" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="170" font-size="8.5" fill="#6b7280">M9</text>
   <text x="624" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="190" font-size="11" fill="#111827">出 core 拆包</text>
-  <line x1="466" y1="184" x2="480" y2="184" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M466 184 L481 184" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <text x="20" y="274" font-size="10.5" fill="#6b7280">Reduce</text>
   <rect x="150" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="256" font-size="8.5" fill="#6b7280">M10</text>
@@ -647,12 +669,12 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="326" y="256" font-size="8.5" fill="#6b7280">M11</text>
   <text x="458" y="256" font-size="8.5" fill="#6b7280" text-anchor="end">D2</text>
   <text x="326" y="276" font-size="11" fill="#111827">RMW 累加</text>
-  <line x1="300" y1="270" x2="314" y2="270" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M300 270 L315 270" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="482" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="256" font-size="8.5" fill="#6b7280">M12</text>
   <text x="624" y="256" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="276" font-size="11" fill="#111827">输出准入与发送</text>
-  <line x1="466" y1="270" x2="480" y2="270" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M466 270 L481 270" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <text x="20" y="360" font-size="10.5" fill="#6b7280">溢流重发</text>
   <rect x="150" y="328" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="160" y="342" font-size="8.5" fill="#92400e">M13</text>
@@ -662,7 +684,7 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="326" y="342" font-size="8.5" fill="#92400e">M14</text>
   <text x="458" y="342" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="326" y="362" font-size="11" fill="#7c2d12">取出重发</text>
-  <line x1="300" y1="356" x2="314" y2="356" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <text x="20" y="446" font-size="10.5" fill="#6b7280">控制</text>
   <rect x="150" y="414" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="428" font-size="8.5" fill="#6b7280">M15</text>
@@ -672,12 +694,12 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="326" y="428" font-size="8.5" fill="#6b7280">M16</text>
   <text x="458" y="428" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="448" font-size="11" fill="#111827">Retire 广播</text>
-  <line x1="300" y1="442" x2="314" y2="442" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M300 442 L315 442" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <rect x="482" y="414" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="428" font-size="8.5" fill="#6b7280">M17</text>
   <text x="624" y="428" font-size="8.5" fill="#6b7280" text-anchor="end">D5</text>
   <text x="492" y="448" font-size="11" fill="#111827">RouterTable 提交</text>
-  <line x1="466" y1="442" x2="480" y2="442" stroke="#475569" marker-end="url(#arrov)"/>
+  <path d="M466 442 L481 442" stroke="#475569" marker-end="url(#arrov)" fill="none"/>
   <text x="20" y="524" font-size="10.5" fill="#374151">M3 的准入对多播是全有全无：任一目标方向的资源不足，本拍所有分支都不推进。</text>
   <text x="20" y="552" font-size="10.5" fill="#374151">M4 每拍重新仲裁，不跨拍锁定；M5 起进 core 与进 ReduceModule 的包锁定到尾 flit，R2R 方向仍可在 flit 边界换包。</text>
   <text x="20" y="580" font-size="10.5" fill="#374151">M13 / M14 的拍数由 Core Mem 的访问延迟与该 VC 前面还压着几个未重发的包决定，不计入单跳延迟。</text>
@@ -721,10 +743,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="132" font-size="10.5" fill="#475569">3. head ? hdr_field = Parse(flit_msg) : 追加到该 VC 队尾</text>
   <text x="250" y="152" font-size="10.5" fill="#475569">4. 上游按同一条规则记 credit，因此这里不会出现两边都满还收到 flit</text>
   <text x="250" y="176" font-size="10" fill="#9ca3af">private 20 flit 只归本 VC，shared 先到先得</text>
-  <line x1="188" y1="58" x2="228" y2="58" stroke="#475569" marker-end="url(#arr1)"/>
-  <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#arr1)"/>
-  <line x1="188" y1="183" x2="228" y2="183" stroke="#475569" marker-end="url(#arr1)"/>
-  <line x1="637" y1="113" x2="677" y2="113" stroke="#475569" marker-end="url(#arr1)"/>
+  <path d="M188 58 L231 58" stroke="#475569" marker-end="url(#arr1)" fill="none"/>
+  <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arr1)" fill="none"/>
+  <path d="M188 183 L231 183" stroke="#475569" marker-end="url(#arr1)" fill="none"/>
+  <path d="M637 113 L680 113" stroke="#475569" marker-end="url(#arr1)" fill="none"/>
 </svg>
 ```
 
@@ -760,9 +782,9 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. need_stream = e.stream_table_enable；enter_core = e.path_core_mask_enable ? core_mask[e.path_core_mask_idx] : !e.path_core_bypass</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. pkt_ctx[d][vc] = {nxt_vc, out_mask, enter_core, e.operation, e.stall_way, remain_len}</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">坏核只置转发位，need_stream 与 enter_core 恒为 0</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arr2)"/>
-  <line x1="188" y1="151" x2="228" y2="151" stroke="#475569" marker-end="url(#arr2)"/>
-  <line x1="705" y1="99" x2="745" y2="99" stroke="#475569" marker-end="url(#arr2)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arr2)" fill="none"/>
+  <path d="M188 151 L231 151" stroke="#475569" marker-end="url(#arr2)" fill="none"/>
+  <path d="M705 99 L748 99" stroke="#475569" marker-end="url(#arr2)" fill="none"/>
 </svg>
 ```
 
@@ -804,10 +826,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="186" font-size="10.5" fill="#475569">4. grant = vc_ok &amp;&amp; st_ok &amp;&amp; rd_ok；!grant → stall_way ? 走 M13 : 留在本 VC</text>
   <text x="250" y="210" font-size="10" fill="#9ca3af">多播全有全无：grant 为假时所有分支一起等</text>
   <line x1="188" y1="66" x2="228" y2="66" stroke="#475569" marker-end="url(#arr3)"/>
-  <line x1="188" y1="145" x2="228" y2="145" stroke="#475569" marker-end="url(#arr3)"/>
-  <line x1="188" y1="199" x2="228" y2="199" stroke="#475569" marker-end="url(#arr3)"/>
+  <path d="M188 145 L231 145" stroke="#475569" marker-end="url(#arr3)" fill="none"/>
+  <path d="M188 199 L231 199" stroke="#475569" marker-end="url(#arr3)" fill="none"/>
   <line x1="188" y1="253" x2="228" y2="253" stroke="#475569" marker-end="url(#arr3)"/>
-  <line x1="694" y1="147" x2="734" y2="147" stroke="#475569" marker-end="url(#arr3)"/>
+  <path d="M694 147 L737 147" stroke="#475569" marker-end="url(#arr3)" fill="none"/>
 </svg>
 ```
 
@@ -840,9 +862,9 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. win[o] = ArgMax(req[o], pri)</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. rr_ptr[o] = win[o] + 1</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">每拍重新仲裁，不跨拍锁定</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arr4)"/>
-  <line x1="188" y1="140" x2="228" y2="140" stroke="#475569" marker-end="url(#arr4)"/>
-  <line x1="640" y1="99" x2="680" y2="99" stroke="#475569" marker-end="url(#arr4)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arr4)" fill="none"/>
+  <path d="M188 140 L231 140" stroke="#475569" marker-end="url(#arr4)" fill="none"/>
+  <path d="M640 99 L683 99" stroke="#475569" marker-end="url(#arr4)" fill="none"/>
 </svg>
 ```
 
@@ -882,10 +904,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="175" font-size="10.5" fill="#475569">4. tail ? 解锁 pkt_ctx : locked = 1</text>
   <text x="250" y="199" font-size="10" fill="#9ca3af">进 core 与进 ReduceModule 的包锁定到尾 flit</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arr5)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arr5)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arr5)"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arr5)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arr5)" fill="none"/>
   <line x1="188" y1="231" x2="228" y2="231" stroke="#475569" marker-end="url(#arr5)"/>
-  <line x1="658" y1="136" x2="698" y2="136" stroke="#475569" marker-end="url(#arr5)"/>
+  <path d="M658 136 L701 136" stroke="#475569" marker-end="url(#arr5)" fill="none"/>
 </svg>
 ```
 
@@ -928,11 +950,11 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="202" font-size="10.5" fill="#475569">4. release 按 credit_bypass[in_port].out_mask 复制转发，不进仲裁</text>
   <text x="250" y="226" font-size="10" fill="#9ca3af">一个 input port 一拍最多归还一个 VC 的 credit</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arr6)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arr6)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arr6)"/>
-  <line x1="188" y1="231" x2="228" y2="231" stroke="#475569" marker-end="url(#arr6)"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arr6)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arr6)" fill="none"/>
+  <path d="M188 231 L231 231" stroke="#475569" marker-end="url(#arr6)" fill="none"/>
   <line x1="188" y1="285" x2="228" y2="285" stroke="#475569" marker-end="url(#arr6)"/>
-  <line x1="710" y1="162" x2="750" y2="162" stroke="#475569" marker-end="url(#arr6)"/>
+  <path d="M710 162 L758 162" stroke="#475569" marker-end="url(#arr6)" fill="none"/>
 </svg>
 ```
 
@@ -965,10 +987,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. admit = hit || free；free &amp;&amp; !hit → stream_tab[core] 写入 user_id</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. admit ? {hdr_fifo.push(header); out_buf.push(payload)} : 该 VC 不向 Core 发</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">进 core 不再查 VC credit，Stream 已保证有 Core Mem 空间</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arr7)"/>
-  <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#arr7)"/>
-  <line x1="718" y1="72" x2="758" y2="72" stroke="#475569" marker-end="url(#arr7)"/>
-  <line x1="718" y1="126" x2="758" y2="126" stroke="#475569" marker-end="url(#arr7)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arr7)" fill="none"/>
+  <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arr7)" fill="none"/>
+  <path d="M718 72 L761 72" stroke="#475569" marker-end="url(#arr7)" fill="none"/>
+  <path d="M718 126 L761 126" stroke="#475569" marker-end="url(#arr7)" fill="none"/>
 </svg>
 ```
 
@@ -1000,9 +1022,9 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. router2ts_trigger_ch.valid = trigger 有效</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. !ready → 保持 trigger 与 hdr_fifo 队头，不发下一笔</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">trigger 与 token 一一对应，只许反压不许丢</text>
-  <line x1="188" y1="69" x2="228" y2="69" stroke="#475569" marker-end="url(#arr8)"/>
-  <line x1="188" y1="126" x2="228" y2="126" stroke="#475569" marker-end="url(#arr8)"/>
-  <line x1="663" y1="98" x2="703" y2="98" stroke="#475569" marker-end="url(#arr8)"/>
+  <path d="M188 69 L231 69" stroke="#475569" marker-end="url(#arr8)" fill="none"/>
+  <path d="M188 126 L231 126" stroke="#475569" marker-end="url(#arr8)" fill="none"/>
+  <path d="M663 98 L711 98" stroke="#475569" marker-end="url(#arr8)" fill="none"/>
 </svg>
 ```
 
@@ -1030,8 +1052,8 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. vc_buf[core][vc_id].push(hdr 首 flit 加后续 payload flit)</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 之后与其他方向一样走 M2 到 M6</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">进 core 与出 core 不共享仲裁状态，两条通路并行</text>
-  <line x1="188" y1="98" x2="228" y2="98" stroke="#475569" marker-end="url(#arr9)"/>
-  <line x1="616" y1="99" x2="656" y2="99" stroke="#475569" marker-end="url(#arr9)"/>
+  <path d="M188 98 L231 98" stroke="#475569" marker-end="url(#arr9)" fill="none"/>
+  <path d="M616 99 L659 99" stroke="#475569" marker-end="url(#arr9)" fill="none"/>
 </svg>
 ```
 
@@ -1069,10 +1091,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="138" font-size="10.5" fill="#475569">4. first_in → expect_mask = rdc_rtab[path_id].reduce_in_mask 一并记进上下文</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">locked = !tail，进入后锁定当前包直至尾 flit</text>
   <text x="250" y="180" font-size="10" fill="#9ca3af">必须执行 Reduce，不允许绕过降级为直接转发</text>
-  <line x1="188" y1="53" x2="228" y2="53" stroke="#475569" marker-end="url(#arra)"/>
-  <line x1="188" y1="115" x2="228" y2="115" stroke="#475569" marker-end="url(#arra)"/>
-  <line x1="188" y1="169" x2="228" y2="169" stroke="#475569" marker-end="url(#arra)"/>
-  <line x1="686" y1="108" x2="726" y2="108" stroke="#475569" marker-end="url(#arra)"/>
+  <path d="M188 53 L231 53" stroke="#475569" marker-end="url(#arra)" fill="none"/>
+  <path d="M188 115 L231 115" stroke="#475569" marker-end="url(#arra)" fill="none"/>
+  <path d="M188 169 L231 169" stroke="#475569" marker-end="url(#arra)" fill="none"/>
+  <path d="M686 108 L729 108" stroke="#475569" marker-end="url(#arra)" fill="none"/>
 </svg>
 ```
 
@@ -1111,10 +1133,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="138" font-size="10.5" fill="#475569">3. in_done_mask |= 1&lt;&lt;src</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">4. all_in = (in_done_mask == expect_mask)</text>
   <text x="250" y="182" font-size="10" fill="#9ca3af">同一 User 的下一个包在 all_in 输出前不得覆盖该上下文</text>
-  <line x1="188" y1="82" x2="228" y2="82" stroke="#475569" marker-end="url(#arrb)"/>
-  <line x1="188" y1="172" x2="228" y2="172" stroke="#475569" marker-end="url(#arrb)"/>
-  <line x1="610" y1="82" x2="650" y2="82" stroke="#475569" marker-end="url(#arrb)"/>
-  <line x1="610" y1="150" x2="650" y2="150" stroke="#475569" marker-end="url(#arrb)"/>
+  <path d="M188 82 L231 82" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
+  <path d="M188 172 L231 172" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
+  <path d="M610 82 L653 82" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
+  <path d="M610 150 L653 150" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
 </svg>
 ```
 
@@ -1148,10 +1170,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. send_ok → {rdc_out_q.push(out); rdc_down_credit[user][o] −= 1}</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 整包发完 → rmem2ts_done_ch.valid = 1, user_id = user</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">输出队列满时停止 RMW 输出，回压到 M10</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arrc)"/>
-  <line x1="188" y1="140" x2="228" y2="140" stroke="#475569" marker-end="url(#arrc)"/>
-  <line x1="710" y1="72" x2="750" y2="72" stroke="#475569" marker-end="url(#arrc)"/>
-  <line x1="710" y1="125" x2="750" y2="125" stroke="#475569" marker-end="url(#arrc)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
+  <path d="M188 140 L231 140" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
+  <path d="M710 72 L753 72" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
+  <path d="M710 125 L758 125" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
 </svg>
 ```
 
@@ -1184,9 +1206,9 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. cmem_reissue.req = {we=1, addr=预留区基址+槽号, wdata=整包}</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. overflow_reinject = 1；reissue_tab[vc].pending_reinject += 1</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">拍数由 Core Mem 写延迟决定，不计入单跳延迟</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arrd)"/>
-  <line x1="188" y1="140" x2="228" y2="140" stroke="#475569" marker-end="url(#arrd)"/>
-  <line x1="654" y1="98" x2="694" y2="98" stroke="#475569" marker-end="url(#arrd)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arrd)" fill="none"/>
+  <path d="M188 140 L231 140" stroke="#475569" marker-end="url(#arrd)" fill="none"/>
+  <path d="M654 98 L702 98" stroke="#475569" marker-end="url(#arrd)" fill="none"/>
 </svg>
 ```
 
@@ -1219,9 +1241,9 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. e = rtab[包头.path_id]（不复用暂存前的 VC 与路由）</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. overflow_reinject = 0；reissue_tab[vc].pending_reinject −= 1</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">同 VC 有未重发完的包时后续包不得越过</text>
-  <line x1="188" y1="63" x2="228" y2="63" stroke="#475569" marker-end="url(#arre)"/>
-  <line x1="188" y1="125" x2="228" y2="125" stroke="#475569" marker-end="url(#arre)"/>
-  <line x1="634" y1="99" x2="674" y2="99" stroke="#475569" marker-end="url(#arre)"/>
+  <path d="M188 63 L231 63" stroke="#475569" marker-end="url(#arre)" fill="none"/>
+  <path d="M188 125 L231 125" stroke="#475569" marker-end="url(#arre)" fill="none"/>
+  <path d="M634 99 L677 99" stroke="#475569" marker-end="url(#arre)" fill="none"/>
 </svg>
 ```
 
@@ -1253,9 +1275,9 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. hit = {q | ∀o∈q.need_mask: 资源已满足}</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 多个 hit 时按 stream_id 选最老，发 router2ts_credit_ch</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">进 core 重发的任务也注册在这里</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arrf)"/>
-  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#arrf)"/>
-  <line x1="725" y1="98" x2="765" y2="98" stroke="#475569" marker-end="url(#arrf)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arrf)" fill="none"/>
+  <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arrf)" fill="none"/>
+  <path d="M725 98 L773 98" stroke="#475569" marker-end="url(#arrf)" fill="none"/>
 </svg>
 ```
 
@@ -1288,10 +1310,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 记录 retire_pend[user].to_rdc = 1，不立即删 ReduceModule 映射</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. rdc_down_credit[user][*] 全部回到分配值 → 删 rdc_user_tab[user]</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Core 保证发 Retire 前该 user 不再有进出 core 的搬运</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arrg)"/>
-  <line x1="188" y1="133" x2="228" y2="133" stroke="#475569" marker-end="url(#arrg)"/>
-  <line x1="644" y1="72" x2="684" y2="72" stroke="#475569" marker-end="url(#arrg)"/>
-  <line x1="644" y1="126" x2="684" y2="126" stroke="#475569" marker-end="url(#arrg)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
+  <path d="M188 133 L231 133" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
+  <path d="M644 72 L687 72" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
+  <path d="M644 126 L687 126" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
 </svg>
 ```
 
@@ -1324,10 +1346,10 @@ chip 内 2×5 里 C6、C7 是坏核，三条 path 都经过它们。这套表项
   <text x="250" y="118" font-size="10.5" fill="#475569">3. cursor == 副本数 → {busy=0, commit_done=1}</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. busy 期间不向软件返回完成，禁止暴露部分新部分旧的状态</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">DTE 与 ReduceModule 的两份外部副本由软件在 commit_done 之后再写</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#arrh)"/>
-  <line x1="188" y1="133" x2="228" y2="133" stroke="#475569" marker-end="url(#arrh)"/>
-  <line x1="622" y1="72" x2="662" y2="72" stroke="#475569" marker-end="url(#arrh)"/>
-  <line x1="622" y1="125" x2="662" y2="125" stroke="#475569" marker-end="url(#arrh)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arrh)" fill="none"/>
+  <path d="M188 133 L231 133" stroke="#475569" marker-end="url(#arrh)" fill="none"/>
+  <path d="M622 72 L665 72" stroke="#475569" marker-end="url(#arrh)" fill="none"/>
+  <path d="M622 125 L670 125" stroke="#475569" marker-end="url(#arrh)" fill="none"/>
 </svg>
 ```
 

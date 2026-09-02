@@ -78,23 +78,23 @@ LPU 之外的全部硬件（GPU、SmartNIC 里的 DPU、ETH 交换机、tray 上
   <text x="452" y="164" font-size="10" fill="#475569">本地口 + 一个 RouterStation</text>
   <text x="452" y="180" font-size="10" fill="#475569">链路模型：带宽、延迟</text>
   <text x="452" y="196" font-size="10" fill="#475569">回包落地重组</text>
-  <line x1="362" y1="150" x2="438" y2="170" stroke="#475569" marker-end="url(#a0)"/>
+  <path d="M362 150 L439.03 170.27" stroke="#475569" marker-end="url(#a0)" fill="none"/>
   <text x="380" y="146" font-size="9" fill="#6b7280">tx（MSG）</text>
-  <line x1="438" y1="240" x2="362" y2="320" stroke="#475569" marker-end="url(#a0)"/>
+  <path d="M438 240 L360.69 321.38" stroke="#475569" marker-end="url(#a0)" fill="none"/>
   <text x="380" y="300" font-size="9" fill="#6b7280">rx（结果包）</text>
 
   <polygon points="680,170 790,170 780,206 670,206" fill="#f8fafc" stroke="#374151"/>
   <text x="730" y="192" font-size="10.5" fill="#374151" text-anchor="middle">link（ETH / PCIe）</text>
-  <line x1="622" y1="188" x2="670" y2="188" stroke="#475569" marker-start="url(#a0s)" marker-end="url(#a0)"/>
+  <path d="M621 188 L674 188" stroke="#475569" marker-start="url(#a0s)" marker-end="url(#a0)" fill="none"/>
   <rect x="840" y="150" width="200" height="80" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="852" y="174" font-size="12" fill="#111827">PCIe Switch</text>
   <text x="852" y="194" font-size="10" fill="#475569">双路 x16 · 组播复制</text>
   <text x="852" y="210" font-size="10" fill="#475569">→ chip 阵列</text>
-  <line x1="792" y1="188" x2="838" y2="188" stroke="#475569" marker-start="url(#a0s)" marker-end="url(#a0)"/>
+  <path d="M786 188 L839 188" stroke="#475569" marker-start="url(#a0s)" marker-end="url(#a0)" fill="none"/>
 
-  <polyline points="360,340 700,340 700,232 730,232 730,208" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a0)"/>
+  <path d="M360 340 L700 340 L700 232 L730 232 L730 207" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a0)"/>
   <text x="420" y="336" font-size="9" fill="#6b7280">retired（反向数据通路）</text>
-  <line x1="200" y1="270" x2="200" y2="232" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a0)"/>
+  <path d="M200 270 L200 231" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a0)" fill="none"/>
   <text x="206" y="256" font-size="9" fill="#6b7280">done 集合 / retired 汇总</text>
 
   <text x="20" y="400" font-size="10.5" fill="#374151">桩是模块（tick=true），坐标登记在片外节点表里，挂在 PCIe Switch 上；链路与 Switch 各有一份文档。</text>

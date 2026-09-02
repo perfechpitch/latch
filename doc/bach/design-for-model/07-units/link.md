@@ -45,11 +45,11 @@
   <text x="242" y="94" font-size="12" fill="#111827">Link（单向）</text>
   <text x="242" y="114" font-size="10" fill="#475569">in_flight · FIFO · {item, arrive_cycle}</text>
   <text x="242" y="130" font-size="10" fill="#475569">last_busy_until · bw · latency</text>
-  <line x1="132" y1="108" x2="228" y2="108" stroke="#475569" marker-end="url(#l0)"/>
+  <path d="M132 108 L229 108" stroke="#475569" marker-end="url(#l0)" fill="none"/>
   <polygon points="600,90 700,90 690,126 590,126" fill="#f8fafc" stroke="#374151"/>
   <text x="645" y="112" font-size="10.5" fill="#374151" text-anchor="middle">link.out</text>
   <text x="645" y="80" font-size="9" fill="#6b7280" text-anchor="middle">接收侧端口</text>
-  <line x1="532" y1="108" x2="588" y2="108" stroke="#475569" marker-end="url(#l0)"/>
+  <path d="M532 108 L594 108" stroke="#475569" marker-end="url(#l0)" fill="none"/>
 
   <text x="760" y="98" font-size="10" fill="#374151">一条物理链路 = 两个实例，方向相反</text>
   <text x="760" y="118" font-size="10" fill="#374151">三种 release 各走自己的实例</text>

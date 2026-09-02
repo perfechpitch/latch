@@ -27,195 +27,201 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 一条宏指令怎么跑起来：VU-Core 写动态参数，再写 `macro_inst_trigger` → 硬件锁存并与静态配置的指针打包压入 ISQ → pipe_ctrl 展开成各单元的微指令，Scoreboard 管 VRF / MRF / SRF 依赖 → 最多两条相邻宏指令重叠。从 CM 读入、多级流水计算、写回 CM 的全过程由硬件自己走完，VU-Core 不感知周期级的控制细节。
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 980" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1600" height="980" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">VU DSA · 第 0 层（十一个独立打拍的模块）</text>
-  <text x="306" y="26" font-size="9.5" fill="#6b7280">一条宏指令 = 1 组静态配置（计算图通路的模板）+ 1 组动态参数（地址、索引、向量长度 / 精度）</text>
-  <polygon points="36,116 202,116 193,146 27,146" fill="#f8fafc" stroke="#374151"/>
-  <text x="115" y="135" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
-  <rect x="252" y="84" width="350" height="188" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="264" y="105" font-size="11" fill="#111827">config_register</text>
-  <text x="264" y="122" font-size="8.5" fill="#475569">8 组静态配置模板（默认全 0）+ 12 个动态参数寄存器</text>
-  <text x="264" y="135.5" font-size="8.5" fill="#475569">macro_inst_trigger 是唯一的启动寄存器，写一次执行一次</text>
-  <text x="264" y="149.0" font-size="8.5" fill="#475569">　字段：CONFIG_IDX · STATIC_DYNAMIC_MASK · EVENT_EN</text>
-  <text x="264" y="162.5" font-size="8.5" fill="#475569">　· STREAM_ID_OVERRIDE · DATA_BROADCAST · MACRO_INST_FENCE</text>
-  <text x="264" y="176.0" font-size="8.5" fill="#475569">TYPE_VL 一个寄存器含 VL、DATA_TYPE、ROUND_MODE 三个字段</text>
-  <text x="264" y="189.5" font-size="8.5" fill="#475569">静态配置改写：目标组正被未完成的宏指令引用时，硬件把这次</text>
-  <text x="264" y="203.0" font-size="8.5" fill="#475569">　配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效</text>
-  <text x="264" y="216.5" font-size="8.5" fill="#475569">in-flight 的宏指令始终按改写前的配置执行完毕</text>
-  <text x="264" y="230.0" font-size="8.5" fill="#475569">三条配置通路（VU-Core / Ctrl-NOC / Debug Module）共享同一份</text>
-  <text x="264" y="243.5" font-size="8.5" fill="#475569">　寄存器视图、权限一致，流控彼此独立</text>
-  <rect x="648" y="84" width="300" height="188" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="660" y="105" font-size="11" fill="#111827">ISQ</text>
-  <text x="660" y="122" font-size="8.5" fill="#475569">VU-Core 写完动态参数后写 macro_inst_trigger</text>
-  <text x="660" y="135.5" font-size="8.5" fill="#475569">硬件锁存当前动态参数，与对应静态配置的</text>
-  <text x="660" y="149.0" font-size="8.5" fill="#475569">　指针打包压入内部执行队列</text>
-  <text x="660" y="162.5" font-size="8.5" fill="#475569">深度 8（待定）</text>
-  <text x="660" y="176.0" font-size="8.5" fill="#475569">status 实时回传 BUSY · ISQ_FULL · ISQ_EMPTY</text>
-  <text x="660" y="189.5" font-size="8.5" fill="#475569">　· ERROR_FLAG</text>
-  <text x="660" y="203.0" font-size="8.5" fill="#475569">判断全部宏指令是否完成用 macro_inst_left 或 BUSY</text>
-  <text x="660" y="216.5" font-size="8.5" fill="#475569">从 CM 读入、多级流水计算、写回 CM 的全过程</text>
-  <text x="660" y="230.0" font-size="8.5" fill="#475569">　由硬件自己走完，VU-Core 不感知周期级细节</text>
-  <rect x="994" y="84" width="420" height="188" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1006" y="105" font-size="11" fill="#111827">pipe_ctrl 与 Scoreboard</text>
-  <text x="1006" y="122" font-size="8.5" fill="#475569">把宏指令展开成各执行单元的微指令</text>
-  <text x="1006" y="135.5" font-size="8.5" fill="#475569">Scoreboard 对 VRF / MRF / SRF 实时读写状态追踪，</text>
-  <text x="1006" y="149.0" font-size="8.5" fill="#475569">　检测 RAW / WAR / WAW</text>
-  <text x="1006" y="162.5" font-size="8.5" fill="#475569">重叠执行：前后宏指令无数据依赖、无执行资源冲突时，</text>
-  <text x="1006" y="176.0" font-size="8.5" fill="#475569">　后续宏指令无需等前一条完全结束即可重叠发射微操作</text>
-  <text x="1006" y="189.5" font-size="8.5" fill="#475569">　最多两条相邻宏指令重叠</text>
-  <text x="1006" y="203.0" font-size="8.5" fill="#475569">CM 访存依赖不追踪：存在冲突的宏指令之间须由软件置</text>
-  <text x="1006" y="216.5" font-size="8.5" fill="#475569">　MACRO_INST_FENCE = 1，等此前全部宏指令完成后才派发</text>
-  <text x="1006" y="230.0" font-size="8.5" fill="#475569">含 Vector 数据广播的宏指令须置 DATA_BROADCAST，它不参与</text>
-  <text x="1006" y="243.5" font-size="8.5" fill="#475569">　Scoreboard 乱序调度，等除 CM-Load 外的前序宏指令全完成才派发</text>
-  <text x="1006" y="257.0" font-size="8.5" fill="#475569">配平计算依赖树是软件的责任：硬件只提供 bypass 与广播，</text>
-  <text x="1006" y="270.5" font-size="8.5" fill="#475569">　不提供软件可见的缓冲队列</text>
-  <polyline points="202,131 227,131 227,137 252,137" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="602,159 648,159" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="948,159 994,159" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polygon points="36,436 156,436 147,466 27,466" fill="#f8fafc" stroke="#374151"/>
-  <text x="92" y="455" font-size="9" fill="#374151" text-anchor="middle">cmem_ld</text>
-  <polygon points="36,724 156,724 147,754 27,754" fill="#f8fafc" stroke="#374151"/>
-  <text x="92" y="743" font-size="9" fill="#374151" text-anchor="middle">cmem_st</text>
-  <rect x="210" y="364" width="250" height="208" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="222" y="385" font-size="11" fill="#111827">LU（6 条指令）</text>
-  <text x="222" y="402" font-size="8.5" fill="#475569">从 CM 读向量 / Mask / 标量</text>
-  <text x="222" y="415.5" font-size="8.5" fill="#475569">格式转换 FP8_e4m3 / MXFP8 / BF16</text>
-  <text x="222" y="429.0" font-size="8.5" fill="#475569">　→ BF16 / FP32，精确扩宽</text>
-  <text x="222" y="442.5" font-size="8.5" fill="#475569">ld.fp32.vm 在 DATA_TYPE=BF16 下按</text>
-  <text x="222" y="456.0" font-size="8.5" fill="#475569">　TYPE_VL.ROUND_MODE 把 FP32 窄化为</text>
-  <text x="222" y="469.5" font-size="8.5" fill="#475569">　BF16，结果为 NaN 时置 DATA_CVT_ERROR</text>
-  <text x="222" y="483.0" font-size="8.5" fill="#475569">CM 侧数据格式：FP8_e4m3 / MXFP8 /</text>
-  <text x="222" y="496.5" font-size="8.5" fill="#475569">　BF16 / FP32</text>
-  <text x="222" y="510.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 LU 完成</text>
-  <rect x="210" y="652" width="250" height="208" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="222" y="673" font-size="11" fill="#111827">SU（6 条指令）</text>
-  <text x="222" y="690" font-size="8.5" fill="#475569">向 CM 写回</text>
-  <text x="222" y="703.5" font-size="8.5" fill="#475569">格式转换 BF16 / FP32 →</text>
-  <text x="222" y="717.0" font-size="8.5" fill="#475569">　FP8_e4m3 / MXFP8 / BF16 / FP32</text>
-  <text x="222" y="730.5" font-size="8.5" fill="#475569">高转低按 TYPE_VL.ROUND_MODE 舍入</text>
-  <text x="222" y="744.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 SU 完成</text>
-  <text x="222" y="757.5" font-size="8.5" fill="#475569">CM 端口每周期 1 次 Load + 1 次 Store，</text>
-  <text x="222" y="771.0" font-size="8.5" fill="#475569">　各 128 B，与访问格式无关</text>
-  <text x="222" y="784.5" font-size="8.5" fill="#475569">一次请求固定 1024 bit，不支持 burst</text>
-  <text x="222" y="798.0" font-size="8.5" fill="#475569">数据信号 1056 bit = 128 B data + 4 B scale</text>
-  <rect x="506" y="364" width="170" height="208" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="518" y="385" font-size="11" fill="#111827">SMUX</text>
-  <text x="518" y="402" font-size="8.5" fill="#475569">源路由</text>
-  <text x="518" y="415.5" font-size="8.5" fill="#475569">执行单元之间允许</text>
-  <text x="518" y="429.0" font-size="8.5" fill="#475569">　bypass 与广播，</text>
-  <text x="518" y="442.5" font-size="8.5" fill="#475569">　且不消耗 RF 端口</text>
-  <text x="518" y="456.0" font-size="8.5" fill="#475569">一条宏指令内多条</text>
-  <text x="518" y="469.5" font-size="8.5" fill="#475569">　并行通路经过的</text>
-  <text x="518" y="483.0" font-size="8.5" fill="#475569">　执行分组级数不同时，</text>
-  <text x="518" y="496.5" font-size="8.5" fill="#475569">　合并点的两个源操作数</text>
-  <text x="518" y="510.0" font-size="8.5" fill="#475569">　会不同拍到达</text>
-  <rect x="506" y="652" width="170" height="208" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="518" y="673" font-size="11" fill="#111827">VRF / MRF / SRF</text>
-  <text x="518" y="690" font-size="8.5" fill="#475569">VRF 64 KB</text>
-  <text x="518" y="703.5" font-size="8.5" fill="#475569">　128 B/entry × 512 entry</text>
-  <text x="518" y="717.0" font-size="8.5" fill="#475569">　2R + 2W，读写索引连续</text>
-  <text x="518" y="730.5" font-size="8.5" fill="#475569">　允许完全重叠或完全不</text>
-  <text x="518" y="744.0" font-size="8.5" fill="#475569">　重叠，不允许部分重叠</text>
-  <text x="518" y="757.5" font-size="8.5" fill="#475569">MRF 4 KB，2R + 1W</text>
-  <text x="518" y="771.0" font-size="8.5" fill="#475569">　Mask 不能广播，一条宏</text>
-  <text x="518" y="784.5" font-size="8.5" fill="#475569">　指令内最多两处用 Mask</text>
-  <text x="518" y="798.0" font-size="8.5" fill="#475569">SRF 256 B（4 B × 64 entry）</text>
-  <text x="518" y="811.5" font-size="8.5" fill="#475569">　8 逻辑读 / 6 逻辑写，</text>
-  <text x="518" y="825.0" font-size="8.5" fill="#475569">　虚拟端口时分复用</text>
-  <rect x="722" y="364" width="300" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="734" y="385" font-size="11" fill="#111827">VALU0（29 条独有）</text>
-  <text x="734" y="402" font-size="8.5" fill="#475569">加减乘 · 最值 · MACC · 除法（非全吞吐）</text>
-  <text x="734" y="415.5" font-size="8.5" fill="#475569">符号注入 · 比较生成 Mask · vfclass</text>
-  <text x="734" y="429.0" font-size="8.5" fill="#475569">vfmerge · 标量广播 / 搬入</text>
-  <rect x="722" y="484" width="300" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="734" y="505" font-size="11" fill="#111827">VALU1（6 条独有）</text>
-  <text x="734" y="522" font-size="8.5" fill="#475569">加减乘 · 最值 · 标量广播 / 搬出</text>
-  <text x="734" y="535.5" font-size="8.5" fill="#475569">跨元素归约（求和 / 最大 / 最小）</text>
-  <text x="734" y="549.0" font-size="8.5" fill="#475569">Top-16 排序，同时输出 16 个 INT16 索引</text>
-  <rect x="722" y="604" width="300" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="734" y="625" font-size="11" fill="#111827">VALU2（1 条独有）</text>
-  <text x="734" y="642" font-size="8.5" fill="#475569">加减乘 · 最值 · 标量广播</text>
-  <text x="734" y="655.5" font-size="8.5" fill="#475569">vmv.v.v 向量直通缓冲，可当延迟对齐用</text>
-  <text x="734" y="669.0" font-size="8.5" fill="#475569">代价是这条宏指令不能再用 VALU2 计算</text>
-  <rect x="722" y="724" width="300" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="734" y="745" font-size="11" fill="#111827">VSFU0 / VSFU1（12 条）</text>
-  <text x="734" y="762" font-size="8.5" fill="#475569">sin / cos / tanh / exp / exp2 / ln / log2</text>
-  <text x="734" y="775.5" font-size="8.5" fill="#475569">rcp / rsqrt / sqrt / sigmoid</text>
-  <text x="734" y="789.0" font-size="8.5" fill="#475569">源不能取自身的输出</text>
-  <rect x="1064" y="364" width="320" height="104" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1076" y="385" font-size="11" fill="#111827">MEXE（15 条）</text>
-  <text x="1076" y="402" font-size="8.5" fill="#475569">Mask 逻辑运算 and/nand/andn/xor/or/nor/orn/xnor</text>
-  <text x="1076" y="415.5" font-size="8.5" fill="#475569">vcpop.m · vfirst.m · vmsbf/vmsif/vmsof.m</text>
-  <text x="1076" y="429.0" font-size="8.5" fill="#475569">vmiuset.mv / vmiset.mv：按 16 个索引清 / 置 Mask 位</text>
-  <rect x="1064" y="500" width="320" height="124" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1076" y="521" font-size="11" fill="#111827">SEXE（7 条）</text>
-  <text x="1076" y="538" font-size="8.5" fill="#475569">fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）</text>
-  <text x="1076" y="551.5" font-size="8.5" fill="#475569">物理上只有一组，SEXE0/1/2 是同一物理单元在一条</text>
-  <text x="1076" y="565.0" font-size="8.5" fill="#475569">　宏指令内的 3 次串行迭代，迭代之间天然链式依赖</text>
-  <text x="1076" y="578.5" font-size="8.5" fill="#475569">操作数只有三处来源：SRF 读端口、VALU1 的归约输出、</text>
-  <text x="1076" y="592.0" font-size="8.5" fill="#475569">　前一次 SEXE 迭代的结果；不支持立即数，不能取 MEXE</text>
-  <rect x="1064" y="656" width="320" height="204" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="1076" y="677" font-size="11" fill="#111827">DMUX</text>
-  <text x="1076" y="694" font-size="8.5" fill="#475569">结果路由：写回 VRF / MRF / SRF 或交给 SU</text>
-  <text x="1076" y="707.5" font-size="8.5" fill="#475569">两个 VRF 写口须指向不同执行单元，同时使能时</text>
-  <text x="1076" y="721.0" font-size="8.5" fill="#475569">　写区间不重叠；来源只能是 LU 或 VALU0/1/2/VSFU0/1，</text>
-  <text x="1076" y="734.5" font-size="8.5" fill="#475569">　其余置 CFG_ERROR</text>
-  <text x="1076" y="748.0" font-size="8.5" fill="#475569">VALU1 的归约标量结果走 SRF 虚拟写口</text>
-  <text x="1076" y="761.5" font-size="8.5" fill="#475569">MRF 唯一写口的来源是 LU 的 ld.vm_mask、VALU0 的</text>
-  <text x="1076" y="775.0" font-size="8.5" fill="#475569">　比较类与 vfclass.mv、MEXE 三者之一，同一宏指令内</text>
-  <text x="1076" y="788.5" font-size="8.5" fill="#475569">　不能同时写回</text>
-  <text x="1076" y="802.0" font-size="8.5" fill="#475569">SRF 6 个写口按 PRF_op.SRF_WT_EN 位图使能：</text>
-  <text x="1076" y="815.5" font-size="8.5" fill="#475569">　bit0 LU · bit1 VALU1 · bit2 MEXE · bit3～5 SEXE0/1/2</text>
-  <polyline points="156,451 183,451 183,437 210,437" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="210,725 183,725 183,739 156,739" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="460,437 506,437" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="676,406 722,406" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="676,447 699,447 699,526 722,526" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="676,489 699,489 699,646 722,646" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="676,530 699,530 699,766 722,766" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1022,395 1043,395 1043,406 1064,406" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1022,515 1043,515 1043,537 1064,537" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1022,442 1030,442 1030,685 1064,685" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1022,562 1030,562 1030,713 1064,713" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1022,682 1030,682 1030,742 1064,742" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1022,802 1030,802 1030,770 1064,770" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1384,442 1404,442 1404,697 1384,697" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1384,593 1414,593 1414,738 1384,738" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <polyline points="1160,860 390,860" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <text x="760" y="916" font-size="8.5" fill="#6b7280" text-anchor="middle">DMUX → SU：写回通路</text>
-  <polyline points="591,572 591,652" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="1064,848 1000,848 1000,831 676,831" fill="none" stroke="#475569" marker-end="url(#a)"/>
-  <rect x="1430" y="364" width="150" height="150" fill="#f5f3ff" stroke="#7c3aed" rx="4"/>
-  <text x="1442" y="385" font-size="11" fill="#111827">Profile</text>
-  <text x="1442" y="402" font-size="8.5" fill="#475569">profile_ctrl 在 0x4000</text>
-  <text x="1442" y="415.5" font-size="8.5" fill="#475569">计数器从 0x4008 起</text>
-  <text x="1442" y="429.0" font-size="8.5" fill="#475569">只能用 profile_ctrl.CLEAR</text>
-  <text x="1442" y="442.5" font-size="8.5" fill="#475569">　清零</text>
-  <text x="1442" y="456.0" font-size="8.5" fill="#475569">软件写 macro_inst_left、</text>
-  <text x="1442" y="469.5" font-size="8.5" fill="#475569">　status 与 Profile</text>
-  <text x="1442" y="483.0" font-size="8.5" fill="#475569">　计数器无效，不报错</text>
-  <polygon points="1430,727 1580,727 1571,757 1421,757" fill="#f8fafc" stroke="#374151"/>
-  <text x="1501" y="746" font-size="8.5" fill="#374151" text-anchor="middle">dsa_done / Event</text>
-  <polyline points="1384,742 1421,742" fill="none" stroke="#0f766e" marker-end="url(#g)"/>
-  <text x="1580" y="790" font-size="8.5" fill="#0f766e" text-anchor="end">EVENT_EN 置位时另向 TS 发 Event 同步信号</text>
-  <polygon points="1440,300 1580,300 1571,330 1431,330" fill="#f8fafc" stroke="#374151"/>
-  <text x="1506" y="319" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
-  <polyline points="1431,315 638,315 638,253 602,253" fill="none" stroke="#7c3aed" stroke-dasharray="2 3" marker-end="url(#p)"/>
-  <text x="20" y="930" font-size="10.5" fill="#374151">单条宏指令的容量上限：CM 端口 1 Load + 1 Store · VRF 2R+2W · MRF 2R+1W · SRF 8 逻辑读 / 6 逻辑写 · 每个执行单元各 1 次（SEXE 例外，同一物理单元 3 次串行迭代）。</text>
-  <text x="20" y="954" font-size="10.5" fill="#374151">向量位宽 1024 bit/cycle（32 个 FP32 或 64 个 BF16）；向量长度 1～16384 element，单条宏指令内完成；内部计算精度 FP32 或 BF16，单条宏指令内不支持混合精度。</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1700 1200" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="VU DSA 第 0 层">
+<title>VU DSA 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="1700" height="1200" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">VU DSA · 第 0 层（十一个独立打拍的模块。方位：RV core 与 TS 在上，Core Mem 在下，cfg 从上进）</text>
+<text x="627" y="26" font-size="9.5" fill="#6b7280">一条宏指令 = 1 组静态配置（计算图通路的模板）+ 1 组动态参数（地址、索引、向量长度 / 精度）</text>
+<rect x="160" y="110" width="350" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="172" y="131" font-size="11" fill="#111827" font-weight="600">config_register</text>
+<text x="172.0" y="148.0" font-size="8.5" fill="#475569">8 组静态配置模板（默认全 0）+ 12 个动态参数寄存器</text>
+<text x="172.0" y="161.5" font-size="8.5" fill="#475569">macro_inst_trigger 是唯一的启动寄存器，写一次执行一次</text>
+<text x="172.0" y="175.0" font-size="8.5" fill="#475569">　字段：CONFIG_IDX · STATIC_DYNAMIC_MASK · EVENT_EN</text>
+<text x="172.0" y="188.5" font-size="8.5" fill="#475569">　· STREAM_ID_OVERRIDE · DATA_BROADCAST · MACRO_INST_FENCE</text>
+<text x="172.0" y="202.0" font-size="8.5" fill="#475569">TYPE_VL 一个寄存器含 VL、DATA_TYPE、ROUND_MODE 三个字段</text>
+<text x="172.0" y="215.5" font-size="8.5" fill="#475569">静态配置改写：目标组正被未完成的宏指令引用时，硬件把这次</text>
+<text x="172.0" y="229.0" font-size="8.5" fill="#475569">　配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效</text>
+<text x="172.0" y="242.5" font-size="8.5" fill="#475569">in-flight 的宏指令始终按改写前的配置执行完毕</text>
+<text x="172.0" y="256.0" font-size="8.5" fill="#475569">三条配置通路（VU-Core / Ctrl-NOC / Debug Module）共享同一份</text>
+<text x="172.0" y="269.5" font-size="8.5" fill="#475569">　寄存器视图、权限一致，流控彼此独立</text>
+<rect x="560" y="110" width="300" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="572" y="131" font-size="11" fill="#111827" font-weight="600">ISQ</text>
+<text x="572.0" y="148.0" font-size="8.5" fill="#475569">VU-Core 写完动态参数后写 macro_inst_trigger</text>
+<text x="572.0" y="161.5" font-size="8.5" fill="#475569">硬件锁存当前动态参数，与对应静态配置的</text>
+<text x="572.0" y="175.0" font-size="8.5" fill="#475569">　指针打包压入内部执行队列</text>
+<text x="572.0" y="188.5" font-size="8.5" fill="#475569">深度 8（待定）</text>
+<text x="572.0" y="202.0" font-size="8.5" fill="#475569">status 实时回传 BUSY · ISQ_FULL · ISQ_EMPTY</text>
+<text x="572.0" y="215.5" font-size="8.5" fill="#475569">　· ERROR_FLAG</text>
+<text x="572.0" y="229.0" font-size="8.5" fill="#475569">判断全部宏指令是否完成用 macro_inst_left 或 BUSY</text>
+<text x="572.0" y="242.5" font-size="8.5" fill="#475569">从 CM 读入、多级流水计算、写回 CM 的全过程</text>
+<text x="572.0" y="256.0" font-size="8.5" fill="#475569">　由硬件自己走完，VU-Core 不感知周期级细节</text>
+<rect x="910" y="110" width="420" height="208.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="922" y="131" font-size="11" fill="#111827" font-weight="600">pipe_ctrl 与 Scoreboard</text>
+<text x="922.0" y="148.0" font-size="8.5" fill="#475569">把宏指令展开成各执行单元的微指令</text>
+<text x="922.0" y="161.5" font-size="8.5" fill="#475569">Scoreboard 对 VRF / MRF / SRF 实时读写状态追踪，</text>
+<text x="922.0" y="175.0" font-size="8.5" fill="#475569">　检测 RAW / WAR / WAW</text>
+<text x="922.0" y="188.5" font-size="8.5" fill="#475569">重叠执行：前后宏指令无数据依赖、无执行资源冲突时，</text>
+<text x="922.0" y="202.0" font-size="8.5" fill="#475569">　后续宏指令无需等前一条完全结束即可重叠发射微操作</text>
+<text x="922.0" y="215.5" font-size="8.5" fill="#475569">　最多两条相邻宏指令重叠</text>
+<text x="922.0" y="229.0" font-size="8.5" fill="#475569">CM 访存依赖不追踪：存在冲突的宏指令之间须由软件置</text>
+<text x="922.0" y="242.5" font-size="8.5" fill="#475569">　MACRO_INST_FENCE = 1，等此前全部宏指令完成后才派发</text>
+<text x="922.0" y="256.0" font-size="8.5" fill="#475569">含 Vector 数据广播的宏指令须置 DATA_BROADCAST，它不参与</text>
+<text x="922.0" y="269.5" font-size="8.5" fill="#475569">　Scoreboard 乱序调度，等除 CM-Load 外的前序宏指令全完成才派发</text>
+<text x="922.0" y="283.0" font-size="8.5" fill="#475569">配平计算依赖树是软件的责任：硬件只提供 bypass 与广播，</text>
+<text x="922.0" y="296.5" font-size="8.5" fill="#475569">　不提供软件可见的缓冲队列</text>
+<polygon points="189,44 300,44 291,74 180,74" fill="#f8fafc" stroke="#374151"/>
+<text x="240.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
+<polygon points="339,44 480,44 471,74 330,74" fill="#f8fafc" stroke="#374151"/>
+<text x="405.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
+<polygon points="649,44 780,44 771,74 640,74" fill="#f8fafc" stroke="#374151"/>
+<text x="710.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_done / Event → TS</text>
+<rect x="160" y="380" width="150" height="140.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
+<text x="172" y="401" font-size="11" fill="#111827" font-weight="600">Profile</text>
+<text x="172.0" y="418.0" font-size="8.5" fill="#475569">profile_ctrl 在 0x4000</text>
+<text x="172.0" y="431.5" font-size="8.5" fill="#475569">计数器从 0x4008 起</text>
+<text x="172.0" y="445.0" font-size="8.5" fill="#475569">只能用 profile_ctrl.CLEAR</text>
+<text x="172.0" y="458.5" font-size="8.5" fill="#475569">　清零</text>
+<text x="172.0" y="472.0" font-size="8.5" fill="#475569">软件写 macro_inst_left、</text>
+<text x="172.0" y="485.5" font-size="8.5" fill="#475569">　status 与 Profile</text>
+<text x="172.0" y="499.0" font-size="8.5" fill="#475569">　计数器无效，不报错</text>
+<rect x="410" y="380" width="320" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="422" y="401" font-size="11" fill="#111827" font-weight="600">MEXE（15 条）</text>
+<text x="422.0" y="418.0" font-size="8.5" fill="#475569">Mask 逻辑运算 and/nand/andn/xor/or/nor/orn/xnor</text>
+<text x="422.0" y="431.5" font-size="8.5" fill="#475569">vcpop.m · vfirst.m · vmsbf/vmsif/vmsof.m</text>
+<text x="422.0" y="445.0" font-size="8.5" fill="#475569">vmiuset.mv / vmiset.mv：按 16 个索引清 / 置 Mask 位</text>
+<rect x="410" y="498.5" width="320" height="113.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="422" y="519.5" font-size="11" fill="#111827" font-weight="600">SEXE（7 条）</text>
+<text x="422.0" y="536.5" font-size="8.5" fill="#475569">fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）</text>
+<text x="422.0" y="550.0" font-size="8.5" fill="#475569">物理上只有一组，SEXE0/1/2 是同一物理单元在一条</text>
+<text x="422.0" y="563.5" font-size="8.5" fill="#475569">　宏指令内的 3 次串行迭代，迭代之间天然链式依赖</text>
+<text x="422.0" y="577.0" font-size="8.5" fill="#475569">操作数只有三处来源：SRF 读端口、VALU1 的归约输出、</text>
+<text x="422.0" y="590.5" font-size="8.5" fill="#475569">　前一次 SEXE 迭代的结果；不支持立即数，不能取 MEXE</text>
+<rect x="410" y="644.0" width="320" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="422" y="665.0" font-size="11" fill="#111827" font-weight="600">DMUX</text>
+<text x="422.0" y="682.0" font-size="8.5" fill="#475569">结果路由：写回 VRF / MRF / SRF 或交给 SU</text>
+<text x="422.0" y="695.5" font-size="8.5" fill="#475569">两个 VRF 写口须指向不同执行单元，同时使能时</text>
+<text x="422.0" y="709.0" font-size="8.5" fill="#475569">　写区间不重叠；来源只能是 LU 或 VALU0/1/2/VSFU0/1，</text>
+<text x="422.0" y="722.5" font-size="8.5" fill="#475569">　其余置 CFG_ERROR</text>
+<text x="422.0" y="736.0" font-size="8.5" fill="#475569">VALU1 的归约标量结果走 SRF 虚拟写口</text>
+<text x="422.0" y="749.5" font-size="8.5" fill="#475569">MRF 唯一写口的来源是 LU 的 ld.vm_mask、VALU0 的</text>
+<text x="422.0" y="763.0" font-size="8.5" fill="#475569">　比较类与 vfclass.mv、MEXE 三者之一，同一宏指令内</text>
+<text x="422.0" y="776.5" font-size="8.5" fill="#475569">　不能同时写回</text>
+<text x="422.0" y="790.0" font-size="8.5" fill="#475569">SRF 6 个写口按 PRF_op.SRF_WT_EN 位图使能：</text>
+<text x="422.0" y="803.5" font-size="8.5" fill="#475569">　bit0 LU · bit1 VALU1 · bit2 MEXE · bit3～5 SEXE0/1/2</text>
+<rect x="760" y="380" width="300" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="772" y="401" font-size="11" fill="#111827" font-weight="600">VALU0（29 条独有）</text>
+<text x="772.0" y="418.0" font-size="8.5" fill="#475569">加减乘 · 最值 · MACC · 除法（非全吞吐）</text>
+<text x="772.0" y="431.5" font-size="8.5" fill="#475569">符号注入 · 比较生成 Mask · vfclass</text>
+<text x="772.0" y="445.0" font-size="8.5" fill="#475569">vfmerge · 标量广播 / 搬入</text>
+<rect x="760" y="500" width="300" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="772" y="521" font-size="11" fill="#111827" font-weight="600">VALU1（6 条独有）</text>
+<text x="772.0" y="538.0" font-size="8.5" fill="#475569">加减乘 · 最值 · 标量广播 / 搬出</text>
+<text x="772.0" y="551.5" font-size="8.5" fill="#475569">跨元素归约（求和 / 最大 / 最小）</text>
+<text x="772.0" y="565.0" font-size="8.5" fill="#475569">Top-16 排序，同时输出 16 个 INT16 索引</text>
+<rect x="760" y="620" width="300" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="772" y="641" font-size="11" fill="#111827" font-weight="600">VALU2（1 条独有）</text>
+<text x="772.0" y="658.0" font-size="8.5" fill="#475569">加减乘 · 最值 · 标量广播</text>
+<text x="772.0" y="671.5" font-size="8.5" fill="#475569">vmv.v.v 向量直通缓冲，可当延迟对齐用</text>
+<text x="772.0" y="685.0" font-size="8.5" fill="#475569">代价是这条宏指令不能再用 VALU2 计算</text>
+<rect x="760" y="740" width="300" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="772" y="761" font-size="11" fill="#111827" font-weight="600">VSFU0 / VSFU1（12 条）</text>
+<text x="772.0" y="778.0" font-size="8.5" fill="#475569">sin / cos / tanh / exp / exp2 / ln / log2</text>
+<text x="772.0" y="791.5" font-size="8.5" fill="#475569">rcp / rsqrt / sqrt / sigmoid</text>
+<text x="772.0" y="805.0" font-size="8.5" fill="#475569">源不能取自身的输出</text>
+<rect x="1110" y="380" width="170" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1122" y="401" font-size="11" fill="#111827" font-weight="600">SMUX</text>
+<text x="1122.0" y="418.0" font-size="8.5" fill="#475569">源路由</text>
+<text x="1122.0" y="431.5" font-size="8.5" fill="#475569">执行单元之间允许</text>
+<text x="1122.0" y="445.0" font-size="8.5" fill="#475569">　bypass 与广播，</text>
+<text x="1122.0" y="458.5" font-size="8.5" fill="#475569">　且不消耗 RF 端口</text>
+<text x="1122.0" y="472.0" font-size="8.5" fill="#475569">一条宏指令内多条</text>
+<text x="1122.0" y="485.5" font-size="8.5" fill="#475569">　并行通路经过的</text>
+<text x="1122.0" y="499.0" font-size="8.5" fill="#475569">　执行分组级数不同时，</text>
+<text x="1122.0" y="512.5" font-size="8.5" fill="#475569">　合并点的两个源操作数</text>
+<text x="1122.0" y="526.0" font-size="8.5" fill="#475569">　会不同拍到达</text>
+<rect x="1330" y="380" width="300" height="127.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1342" y="401" font-size="11" fill="#111827" font-weight="600">VRF / MRF / SRF</text>
+<text x="1342.0" y="418.0" font-size="8.5" fill="#475569">VRF 64 KB</text>
+<text x="1342.0" y="431.5" font-size="8.5" fill="#475569">　128 B/entry × 512 entry</text>
+<text x="1342.0" y="445.0" font-size="8.5" fill="#475569">　2R + 2W，读写索引连续</text>
+<text x="1342.0" y="458.5" font-size="8.5" fill="#475569">　允许完全重叠或完全不</text>
+<text x="1342.0" y="472.0" font-size="8.5" fill="#475569">　重叠，不允许部分重叠</text>
+<text x="1342.0" y="485.5" font-size="8.5" fill="#475569">MRF 4 KB，2R + 1W</text>
+<text x="1480.0" y="418.0" font-size="8.5" fill="#475569">　Mask 不能广播，一条宏</text>
+<text x="1480.0" y="431.5" font-size="8.5" fill="#475569">　指令内最多两处用 Mask</text>
+<text x="1480.0" y="445.0" font-size="8.5" fill="#475569">SRF 256 B（4 B × 64 entry）</text>
+<text x="1480.0" y="458.5" font-size="8.5" fill="#475569">　8 逻辑读 / 6 逻辑写，</text>
+<text x="1480.0" y="472.0" font-size="8.5" fill="#475569">　虚拟端口时分复用</text>
+<rect x="1110" y="865.0" width="250" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1122" y="886.0" font-size="11" fill="#111827" font-weight="600">LU（6 条指令）</text>
+<text x="1122.0" y="903.0" font-size="8.5" fill="#475569">从 CM 读向量 / Mask / 标量</text>
+<text x="1122.0" y="916.5" font-size="8.5" fill="#475569">格式转换 FP8_e4m3 / MXFP8 / BF16</text>
+<text x="1122.0" y="930.0" font-size="8.5" fill="#475569">　→ BF16 / FP32，精确扩宽</text>
+<text x="1122.0" y="943.5" font-size="8.5" fill="#475569">ld.fp32.vm 在 DATA_TYPE=BF16 下按</text>
+<text x="1122.0" y="957.0" font-size="8.5" fill="#475569">　TYPE_VL.ROUND_MODE 把 FP32 窄化为</text>
+<text x="1122.0" y="970.5" font-size="8.5" fill="#475569">　BF16，结果为 NaN 时置 DATA_CVT_ERROR</text>
+<text x="1122.0" y="984.0" font-size="8.5" fill="#475569">CM 侧数据格式：FP8_e4m3 / MXFP8 /</text>
+<text x="1122.0" y="997.5" font-size="8.5" fill="#475569">　BF16 / FP32</text>
+<text x="1122.0" y="1011.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 LU 完成</text>
+<rect x="410" y="865.0" width="250" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="422" y="886.0" font-size="11" fill="#111827" font-weight="600">SU（6 条指令）</text>
+<text x="422.0" y="903.0" font-size="8.5" fill="#475569">向 CM 写回</text>
+<text x="422.0" y="916.5" font-size="8.5" fill="#475569">格式转换 BF16 / FP32 →</text>
+<text x="422.0" y="930.0" font-size="8.5" fill="#475569">　FP8_e4m3 / MXFP8 / BF16 / FP32</text>
+<text x="422.0" y="943.5" font-size="8.5" fill="#475569">高转低按 TYPE_VL.ROUND_MODE 舍入</text>
+<text x="422.0" y="957.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 SU 完成</text>
+<text x="422.0" y="970.5" font-size="8.5" fill="#475569">CM 端口每周期 1 次 Load + 1 次 Store，</text>
+<text x="422.0" y="984.0" font-size="8.5" fill="#475569">　各 128 B，与访问格式无关</text>
+<text x="422.0" y="997.5" font-size="8.5" fill="#475569">一次请求固定 1024 bit，不支持 burst</text>
+<text x="422.0" y="1011.0" font-size="8.5" fill="#475569">数据信号 1056 bit = 128 B data + 4 B scale</text>
+<polygon points="1184,1072.5 1295,1072.5 1286,1102.5 1175,1102.5" fill="#f8fafc" stroke="#374151"/>
+<text x="1235.0" y="1091.0" font-size="9" fill="#374151" text-anchor="middle">cmem_ld</text>
+<polygon points="484,1072.5 595,1072.5 586,1102.5 475,1102.5" fill="#f8fafc" stroke="#374151"/>
+<text x="535.0" y="1091.0" font-size="9" fill="#374151" text-anchor="middle">cmem_st</text>
+<path d="M235.5 74.0 L239.9 109.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<path d="M400.6 75.0 L404.9 109.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M510.0 200.5 L559.0 193.9" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="489.2" y="84.5" width="91.7" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="535" y="92" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">macro_inst_trigger</text>
+<path d="M860.0 193.8 L909.1 213.6" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="868.8" y="200.5" width="31.5" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="884.5365649781239" y="208.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">宏指令</text>
+<path d="M710.0 110.0 L705.6 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
+<rect x="806.4" y="84.5" width="267.1" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="940" y="92" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#0f766e" text-anchor="middle">ISQ 空且 store 落地 → dsa_done；EVENT_EN 置位时另发 Event</text>
+<path d="M1195.6 318.0 L1195.0 379.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
+<rect x="1197.8" y="309.1" width="10.5" height="79.8" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1203 349.0)" x="1203" y="352.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">微指令 / 依赖检查</text>
+<path d="M1254.0 865.0 L1254.5 548.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1256.8" y="683.4" width="10.5" height="45.8" fill="#ffffff" opacity="0.92"/>
+<text transform="rotate(-90 1262 706.25)" x="1262" y="709.2" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">CM 读向量</text>
+<path d="M1239.5 1072.5 L1235.1 1033.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1330.0 418.1 L1281.0 430.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1285.5" y="416.8" width="40.0" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1305.4858609299645" y="424.25" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">寄存器源</text>
+<path d="M1110.0 423.2 L1061.0 423.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1110.0 543.2 L1061.0 543.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1152.5 547.5 L1152.0 663.2 L1061.0 663.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1212.0 547.5 L1212.0 783.2 L1061.0 783.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M1135.5 380.0 L1135.0 352.0 L714.0 352.0 L714.0 379.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="829.7" y="340.5" width="140.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="900" y="348" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">源操作数（SMUX 广播 / bypass）</text>
+<path d="M760.0 423.2 L740.0 423.2 L740.0 671.1 L731.0 671.1" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M760.0 543.2 L748.0 543.2 L748.0 707.4 L731.0 707.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M760.0 663.2 L756.0 663.2 L756.0 743.5 L731.0 743.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M760.0 783.2 L752.0 783.2 L752.0 779.8 L731.0 779.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M410.0 423.2 L380.0 423.2 L380.0 788.8 L409.0 788.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M410.0 555.2 L390.0 555.2 L390.0 752.6 L409.0 752.6" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="372" y="636.0" font-size="8.5" fill="#6b7280" text-anchor="end">结果 → DMUX</text>
+<path d="M506.0 825.0 L534.4 864.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<text x="547" y="848.0" font-size="8.5" fill="#6b7280" text-anchor="start">DMUX → SU：写回通路</text>
+<path d="M535.0 1032.5 L539.4 1071.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<path d="M442.0 825.0 L442.0 849.0 L360.0 849.0 L360.0 336.0 L1480.0 336.0 L1480.0 379.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="850.4" y="324.5" width="99.2" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="900" y="332" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">写回 VRF / MRF / SRF</text>
+<text x="20" y="1162" font-size="10.5" fill="#374151" text-anchor="start">单条宏指令的容量上限：CM 端口 1 Load + 1 Store · VRF 2R+2W · MRF 2R+1W · SRF 8 逻辑读 / 6 逻辑写 · 每个执行单元各 1 次（SEXE 例外，同一物理单元 3 次串行迭代）。SEXE 的操作数来自 SRF、VALU1 归约结果或前一次迭代（图中省略连线）。</text>
+<text x="20" y="1184" font-size="10.5" fill="#374151" text-anchor="start">向量位宽 1024 bit/cycle（32 个 FP32 或 64 个 BF16）；向量长度 1～16384 element，单条宏指令内完成；内部计算精度 FP32 或 BF16，单条宏指令内不支持混合精度。</text>
 </svg>
 ```
 
@@ -372,9 +378,15 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
 
   <text x="20" y="26" font-size="12" fill="#111827">VU · 第 1 层流水线总览（一条宏指令展开成各单元的微指令，最多两条相邻宏指令重叠）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
-  <line x1="150" y1="52" x2="150" y2="414" stroke="#e5e7eb"/>
-  <line x1="316" y1="52" x2="316" y2="414" stroke="#e5e7eb"/>
-  <line x1="482" y1="52" x2="482" y2="414" stroke="#e5e7eb"/>
+  <path d="M150 52 L150 70" stroke="#e5e7eb" fill="none"/>
+<path d="M150 126 L150 242" stroke="#e5e7eb" fill="none"/>
+<path d="M150 298 L150 414" stroke="#e5e7eb" fill="none"/>
+  <path d="M316 52 L316 70" stroke="#e5e7eb" fill="none"/>
+<path d="M316 126 L316 328" stroke="#e5e7eb" fill="none"/>
+<path d="M316 384 L316 414" stroke="#e5e7eb" fill="none"/>
+  <path d="M482 52 L482 70" stroke="#e5e7eb" fill="none"/>
+<path d="M482 126 L482 242" stroke="#e5e7eb" fill="none"/>
+<path d="M482 298 L482 414" stroke="#e5e7eb" fill="none"/>
   <text x="20" y="102" font-size="10.5" fill="#6b7280">发射</text>
   <rect x="150" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="84" font-size="8.5" fill="#6b7280">M1</text>
@@ -385,13 +397,13 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="326" y="84" font-size="8.5" fill="#6b7280">M2</text>
   <text x="458" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="104" font-size="11" fill="#111827">ISQ 压入出队</text>
-  <line x1="300" y1="98" x2="314" y2="98" stroke="#475569" marker-end="url(#arqov)"/>
+  <path d="M300 98 L315 98" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
   <rect x="482" y="70" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="84" font-size="8.5" fill="#6b7280">M3</text>
   <text x="624" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="104" font-size="11" fill="#111827">pipe_ctrl 展开</text>
   <text x="492" y="118" font-size="11" fill="#111827">与 Scoreboard</text>
-  <line x1="466" y1="98" x2="480" y2="98" stroke="#475569" marker-end="url(#arqov)"/>
+  <path d="M466 98 L481 98" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
   <text x="20" y="188" font-size="10.5" fill="#6b7280">取数</text>
   <rect x="150" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="160" y="170" font-size="8.5" fill="#92400e">M4</text>
@@ -406,12 +418,12 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="326" y="256" font-size="8.5" fill="#92400e">M6</text>
   <text x="458" y="256" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="326" y="276" font-size="11" fill="#7c2d12">执行单元</text>
-  <line x1="300" y1="270" x2="314" y2="270" stroke="#475569" marker-end="url(#arqov)"/>
+  <path d="M300 270 L315 270" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
   <rect x="482" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="492" y="256" font-size="8.5" fill="#6b7280">M7</text>
   <text x="624" y="256" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="492" y="276" font-size="11" fill="#111827">DMUX 结果路由</text>
-  <line x1="466" y1="270" x2="480" y2="270" stroke="#475569" marker-end="url(#arqov)"/>
+  <path d="M466 270 L481 270" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
   <text x="20" y="360" font-size="10.5" fill="#6b7280">写回</text>
   <rect x="150" y="328" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="160" y="342" font-size="8.5" fill="#92400e">M8</text>
@@ -421,7 +433,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="326" y="342" font-size="8.5" fill="#6b7280">M9</text>
   <text x="458" y="342" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="362" font-size="11" fill="#111827">退休与 dsa_done</text>
-  <line x1="300" y1="356" x2="314" y2="356" stroke="#475569" marker-end="url(#arqov)"/>
+  <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
   <text x="20" y="438" font-size="10.5" fill="#374151">M6 里 VALU0 / VALU1 / VALU2 / VSFU / MEXE / SEXE 的级数各不相同，设计未给值，本轮各取 4 拍（待定）；SEXE0/1/2 是同一物理单元的三次串行迭代，因此是 3 倍。</text>
   <text x="20" y="466" font-size="10.5" fill="#374151">一条宏指令内多条并行通路经过的执行分组级数不同，合并点的两个源操作数会不同拍到达，配平是软件的责任：差一级用 VALU2 的 vmv.v.v 对齐，差得多就拆成多条宏指令。</text>
   <text x="20" y="494" font-size="10.5" fill="#374151">CM 访存依赖硬件不追踪，靠 MACRO_INST_FENCE；建模时若默认硬件会挡，结果会偏乐观。</text>
@@ -462,10 +474,10 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="132" font-size="10.5" fill="#475569">3. 写 macro_inst_trigger → 锁存当前 12 个动态参数为一份快照</text>
   <text x="250" y="152" font-size="10.5" fill="#475569">4. inst = {快照, CONFIG_IDX 指针, STATIC_DYNAMIC_MASK, 六个字段}</text>
   <text x="250" y="176" font-size="10" fill="#9ca3af">在飞宏指令按改写前的配置执行完毕</text>
-  <line x1="188" y1="58" x2="228" y2="58" stroke="#475569" marker-end="url(#arq1)"/>
-  <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#arq1)"/>
-  <line x1="188" y1="183" x2="228" y2="183" stroke="#475569" marker-end="url(#arq1)"/>
-  <line x1="633" y1="113" x2="673" y2="113" stroke="#475569" marker-end="url(#arq1)"/>
+  <path d="M188 58 L231 58" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
+  <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
+  <path d="M188 183 L231 183" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
+  <path d="M633 113 L676 113" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
 </svg>
 ```
 
@@ -498,9 +510,9 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 在飞宏指令数 &lt; 2 → cur = isq.pop()</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. stream_id = STREAM_ID_OVERRIDE ? 显式给定值 : 动态参数寄存器值</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">判全部宏指令是否完成用 macro_inst_left 或 BUSY</text>
-  <line x1="188" y1="63" x2="228" y2="63" stroke="#475569" marker-end="url(#arq2)"/>
-  <line x1="188" y1="125" x2="228" y2="125" stroke="#475569" marker-end="url(#arq2)"/>
-  <line x1="676" y1="99" x2="716" y2="99" stroke="#475569" marker-end="url(#arq2)"/>
+  <path d="M188 63 L231 63" stroke="#475569" marker-end="url(#arq2)" fill="none"/>
+  <path d="M188 125 L231 125" stroke="#475569" marker-end="url(#arq2)" fill="none"/>
+  <path d="M676 99 L719 99" stroke="#475569" marker-end="url(#arq2)" fill="none"/>
 </svg>
 ```
 
@@ -538,10 +550,10 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="128" font-size="10.5" fill="#475569">3. MACRO_INST_FENCE → 等此前全部宏指令完成才派发</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. DATA_BROADCAST → 等除 CM-Load 外的前序宏指令全部完成才派发</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">最多两条相邻宏指令重叠</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arq3)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arq3)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arq3)"/>
-  <line x1="607" y1="109" x2="647" y2="109" stroke="#475569" marker-end="url(#arq3)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arq3)" fill="none"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arq3)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arq3)" fill="none"/>
+  <path d="M607 109 L650 109" stroke="#475569" marker-end="url(#arq3)" fill="none"/>
 </svg>
 ```
 
@@ -579,11 +591,11 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. v = Widen(rsp_rdata, FP8_e4m3 / MXFP8 / BF16 → BF16 / FP32)，精确扩宽</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. ld.fp32.vm 且 DATA_TYPE=BF16 → 按 ROUND_MODE 窄化，NaN 置 DATA_CVT_ERROR</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">14 拍是 Cmem 侧的 VU 访问延迟</text>
-  <line x1="188" y1="54" x2="228" y2="54" stroke="#475569" marker-end="url(#arq4)"/>
-  <line x1="188" y1="128" x2="228" y2="128" stroke="#475569" marker-end="url(#arq4)"/>
-  <line x1="698" y1="45" x2="738" y2="45" stroke="#475569" marker-end="url(#arq4)"/>
-  <line x1="698" y1="99" x2="738" y2="99" stroke="#475569" marker-end="url(#arq4)"/>
-  <line x1="698" y1="153" x2="738" y2="153" stroke="#475569" marker-end="url(#arq4)"/>
+  <path d="M188 54 L231 54" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
+  <path d="M188 128 L231 128" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
+  <path d="M698 45 L741 45" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
+  <path d="M698 99 L741 99" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
+  <path d="M698 153 L741 153" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
 </svg>
 ```
 
@@ -624,10 +636,10 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="175" font-size="10.5" fill="#475569">4. SEXE 的源只有三处：SRF 读口、VALU1 的归约输出、前一次 SEXE 的结果</text>
   <text x="250" y="199" font-size="10" fill="#9ca3af">Mask 不能广播，一条宏指令内最多两处使用</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arq5)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arq5)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arq5)"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arq5)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arq5)" fill="none"/>
   <line x1="188" y1="231" x2="228" y2="231" stroke="#475569" marker-end="url(#arq5)"/>
-  <line x1="641" y1="136" x2="681" y2="136" stroke="#475569" marker-end="url(#arq5)"/>
+  <path d="M641 136 L684 136" stroke="#475569" marker-end="url(#arq5)" fill="none"/>
 </svg>
 ```
 
@@ -660,8 +672,8 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="138" font-size="10.5" fill="#475569">4. SEXE：同一物理单元串行迭代三次，第 2、3 次的源可取前一次结果</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">归约顺序：LANES 内归约再 ⌈log2 SEG⌉ 级累加，与参考实现同序</text>
   <text x="250" y="180" font-size="10" fill="#9ca3af">未分配与本单元不支持的 OPCODE 按无操作处理，不置异常</text>
-  <line x1="188" y1="108" x2="228" y2="108" stroke="#475569" marker-end="url(#arq6)"/>
-  <line x1="707" y1="108" x2="747" y2="108" stroke="#475569" marker-end="url(#arq6)"/>
+  <path d="M188 108 L231 108" stroke="#475569" marker-end="url(#arq6)" fill="none"/>
+  <path d="M707 108 L750 108" stroke="#475569" marker-end="url(#arq6)" fill="none"/>
 </svg>
 ```
 
@@ -696,10 +708,10 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SRF 六个写口按 PRF_op.SRF_WT_EN 位图使能，虚拟端口时分复用无争用</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 目标是 SU → 直接交给 M8，不经 RF</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">VRF 允许读写完全重叠或完全不重叠，不允许部分重叠</text>
-  <line x1="188" y1="99" x2="228" y2="99" stroke="#475569" marker-end="url(#arq7)"/>
-  <line x1="636" y1="45" x2="676" y2="45" stroke="#475569" marker-end="url(#arq7)"/>
-  <line x1="636" y1="99" x2="676" y2="99" stroke="#475569" marker-end="url(#arq7)"/>
-  <line x1="636" y1="153" x2="676" y2="153" stroke="#475569" marker-end="url(#arq7)"/>
+  <path d="M188 99 L231 99" stroke="#475569" marker-end="url(#arq7)" fill="none"/>
+  <path d="M636 45 L679 45" stroke="#475569" marker-end="url(#arq7)" fill="none"/>
+  <path d="M636 99 L679 99" stroke="#475569" marker-end="url(#arq7)" fill="none"/>
+  <path d="M636 153 L679 153" stroke="#475569" marker-end="url(#arq7)" fill="none"/>
 </svg>
 ```
 
@@ -731,9 +743,9 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="118" font-size="10.5" fill="#475569">3. cmem_st.req = {addr, wdata 1024 b, scale 32 b}，一次固定 1024 bit</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 跨 128 B 边界的写由本级拆分</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">MXFP8 的 scale 地址由硬件按一一映射推断，不参与软件编址</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#arq8)"/>
-  <line x1="188" y1="129" x2="228" y2="129" stroke="#475569" marker-end="url(#arq8)"/>
-  <line x1="659" y1="98" x2="699" y2="98" stroke="#475569" marker-end="url(#arq8)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arq8)" fill="none"/>
+  <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arq8)" fill="none"/>
+  <path d="M659 98 L707 98" stroke="#475569" marker-end="url(#arq8)" fill="none"/>
 </svg>
 ```
 
@@ -771,11 +783,11 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="128" font-size="10.5" fill="#475569">3. dsa_done = {valid=1, stream_id, task_id}，取自 M2 锁存的那一组</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. EVENT_EN → event = 1，与完成同拍发给 TS</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">退休后被阻塞的静态配置写入生效并解除阻塞</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arq9)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#arq9)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#arq9)"/>
-  <line x1="637" y1="81" x2="677" y2="81" stroke="#475569" marker-end="url(#arq9)"/>
-  <line x1="637" y1="143" x2="677" y2="143" stroke="#475569" marker-end="url(#arq9)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
+  <path d="M637 81 L685 81" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
+  <path d="M637 143 L680 143" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
 </svg>
 ```
 

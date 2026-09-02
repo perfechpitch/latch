@@ -32,261 +32,291 @@
 * `stream_id` 分片（`base(stream_id) = 分片大小 × stream_id`）在 master 侧的地址计算里做，存储模块只看物理地址
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 980" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs>
-    <marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker>
-    <marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker>
-    <marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker>
-    <marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker>
-    <marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker>
-    <marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker>
-    <marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker>
-    <marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker>
-    <marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker>
-    <marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker>
-  </defs>
-  <rect x="0" y="0" width="1500" height="980" fill="#ffffff"/>
-  <text x="20" y="26" font-size="12" fill="#111827">存储子系统 · 第 0 层</text>
-  <text x="163" y="26" font-size="9.5" fill="#6b7280">每个模块内部是 bank 阵列加每 bank 一个仲裁器；stream_id 分片在 master 侧的地址计算里做，存储模块只看物理地址</text>
-  <rect x="300" y="60" width="420" height="410" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="304" y="64" width="412" height="402" fill="none" stroke="#374151"/>
-  <text x="312" y="81" font-size="11" fill="#111827">Core Mem（Cmem）</text>
-  <text x="312" y="98" font-size="8.5" fill="#475569">容量 (128 KB + 4 KB) × 8 bank = 1 MB + 32 KB，其中 32 KB 是寄存器</text>
-  <text x="312" y="111.5" font-size="8.5" fill="#475569">每 bank：深度 1024、位宽 128 B 的 SRAM，另有 4 KB 寄存器存 scale</text>
-  <text x="312" y="125.0" font-size="8.5" fill="#475569">　（地址深度 1024 × 4 B，与 SRAM 地址一一映射，128 B : 4 B）</text>
-  <text x="312" y="138.5" font-size="8.5" fill="#475569">SRAM 单元 1024 × 139 bit = 128 data + 10 ecc + 1 mask 标志</text>
-  <text x="312" y="152.0" font-size="8.5" fill="#475569">最大访存带宽 (128 + 4) B × 8 bank = (1 KB + 32 B)/T</text>
-  <text x="312" y="165.5" font-size="8.5" fill="#475569">访问延迟：请求进 CM 到读出或返回 bvalid，15T 以内</text>
-  <text x="312" y="179.0" font-size="8.5" fill="#475569">地址粒度 128 B + 4 B，支持按 Byte mask 读写；时钟域 1 GHz</text>
-  <rect x="314" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="335" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank0</text>
-  <text x="335" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="335" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="335" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="335" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="335" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="335" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="335" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="364" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="385" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank1</text>
-  <text x="385" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="385" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="385" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="385" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="385" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="385" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="385" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="414" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="435" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank2</text>
-  <text x="435" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="435" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="435" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="435" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="435" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="435" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="435" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="464" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="485" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank3</text>
-  <text x="485" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="485" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="485" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="485" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="485" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="485" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="485" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="514" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="535" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank4</text>
-  <text x="535" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="535" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="535" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="535" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="535" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="535" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="535" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="564" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="585" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank5</text>
-  <text x="585" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="585" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="585" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="585" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="585" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="585" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="585" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="614" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="635" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank6</text>
-  <text x="635" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="635" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="635" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="635" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="635" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="635" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="635" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="664" y="300" width="42" height="150" fill="#eef2ff" stroke="#4338ca" rx="3"/>
-  <text x="685" y="318" font-size="8" fill="#312e81" text-anchor="middle">bank7</text>
-  <text x="685" y="338" font-size="7.5" fill="#4338ca" text-anchor="middle">SRAM</text>
-  <text x="685" y="350" font-size="7.5" fill="#4338ca" text-anchor="middle">1024</text>
-  <text x="685" y="362" font-size="7.5" fill="#4338ca" text-anchor="middle">×128B</text>
-  <text x="685" y="382" font-size="7.5" fill="#4338ca" text-anchor="middle">scale</text>
-  <text x="685" y="394" font-size="7.5" fill="#4338ca" text-anchor="middle">4 KB</text>
-  <text x="685" y="416" font-size="7.5" fill="#818cf8" text-anchor="middle">arb</text>
-  <text x="685" y="432" font-size="7.5" fill="#818cf8" text-anchor="middle">二选一</text>
-  <rect x="1020" y="60" width="460" height="410" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="1024" y="64" width="452" height="402" fill="none" stroke="#374151"/>
-  <text x="1032" y="81" font-size="11" fill="#111827">Matrix Mem（Mmem）</text>
-  <text x="1032" y="98" font-size="8.5" fill="#475569">容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8），</text>
-  <text x="1032" y="111.5" font-size="8.5" fill="#475569">　32 MB 存正常数据；非 scale 模式下 36 MB 全存数据</text>
-  <text x="1032" y="125.0" font-size="8.5" fill="#475569">按 64 个 lane 分成 64 bank，每 bank 0.5625 MB</text>
-  <text x="1032" y="138.5" font-size="8.5" fill="#475569">每 bank 与 MU 的 lane 匹配，顶层拉齐不同 lane 的延迟</text>
-  <text x="1032" y="152.0" font-size="8.5" fill="#475569">SRAM 单元 2048 × 128 bit，ECC 按 128 bit 一组</text>
-  <text x="1032" y="165.5" font-size="8.5" fill="#475569">最大访存带宽 (8 + 1) KB/T（非 scale 模式 8 KB/T）</text>
-  <text x="1032" y="179.0" font-size="8.5" fill="#475569">访问延迟：master 请求进 MM 到读出或 bvalid，50T 以内</text>
-  <text x="1032" y="192.5" font-size="8.5" fill="#475569">地址粒度 128 B，不支持按 Byte mask 读写；时钟域 1 GHz</text>
-  <rect x="1034" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1057" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank0</text>
-  <text x="1057" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1057" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1057" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1057" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1057" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1057" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1057" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1089" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1112" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank1</text>
-  <text x="1112" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1112" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1112" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1112" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1112" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1112" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1112" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1144" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1167" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank2</text>
-  <text x="1167" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1167" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1167" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1167" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1167" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1167" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1167" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1199" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1222" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank3</text>
-  <text x="1222" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1222" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1222" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1222" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1222" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1222" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1222" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1254" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1277" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank4</text>
-  <text x="1277" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1277" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1277" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1277" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1277" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1277" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1277" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1309" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1332" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank5</text>
-  <text x="1332" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1332" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1332" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1332" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1332" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1332" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1332" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1364" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1387" y="318" font-size="8" fill="#064e3b" text-anchor="middle">bank6</text>
-  <text x="1387" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1387" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1387" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1387" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1387" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1387" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1387" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <rect x="1419" y="300" width="46" height="150" fill="#ecfdf5" stroke="#047857" rx="3"/>
-  <text x="1442" y="318" font-size="8" fill="#064e3b" text-anchor="middle">… bank63</text>
-  <text x="1442" y="338" font-size="7.5" fill="#047857" text-anchor="middle">SRAM</text>
-  <text x="1442" y="350" font-size="7.5" fill="#047857" text-anchor="middle">2048</text>
-  <text x="1442" y="362" font-size="7.5" fill="#047857" text-anchor="middle">×128bit</text>
-  <text x="1442" y="382" font-size="7.5" fill="#047857" text-anchor="middle">0.5625</text>
-  <text x="1442" y="394" font-size="7.5" fill="#047857" text-anchor="middle">MB</text>
-  <text x="1442" y="416" font-size="7.5" fill="#34d399" text-anchor="middle">与 lane</text>
-  <text x="1442" y="432" font-size="7.5" fill="#34d399" text-anchor="middle">一对一</text>
-  <polygon points="56,96 226,96 217,126 47,126" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="115" font-size="8.5" fill="#374151" text-anchor="middle">cmem_dte_rd / wr</text>
-  <text x="60" y="90" font-size="8.5" fill="#6b7280" text-anchor="start">256 B/T，13T</text>
-  <polygon points="56,148 226,148 217,178 47,178" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="167" font-size="8.5" fill="#374151" text-anchor="middle">cmem_mu_rd / wr</text>
-  <text x="60" y="142" font-size="8.5" fill="#6b7280" text-anchor="start">132 B/T，11T</text>
-  <polygon points="56,200 226,200 217,230 47,230" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="219" font-size="8.5" fill="#374151" text-anchor="middle">cmem_vu_ld / st</text>
-  <text x="60" y="194" font-size="8.5" fill="#6b7280" text-anchor="start">132 B/T，14T</text>
-  <polygon points="56,252 226,252 217,282 47,282" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="271" font-size="8.5" fill="#374151" text-anchor="middle">cmem_rv</text>
-  <text x="60" y="246" font-size="8.5" fill="#6b7280" text-anchor="start">128 B / 16 B / 2 B</text>
-  <polygon points="56,304 226,304 217,334 47,334" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="323" font-size="8.5" fill="#374151" text-anchor="middle">cmem_reissue</text>
-  <text x="60" y="298" font-size="8.5" fill="#6b7280" text-anchor="start">Router 重发，256 B</text>
-  <polygon points="56,356 226,356 217,386 47,386" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="375" font-size="8.5" fill="#374151" text-anchor="middle">cmem_cfg</text>
-  <text x="60" y="350" font-size="8.5" fill="#6b7280" text-anchor="start">ctrl_noc 4 B/T</text>
-  <polyline points="226,111 300,111" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="226,163 300,163" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="226,215 300,215" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="226,267 300,267" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="226,319 300,319" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="226,371 300,371" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="790,150 960,150 951,180 781,180" fill="#f8fafc" stroke="#374151"/>
-  <text x="871" y="169" font-size="8.5" fill="#374151" text-anchor="middle">mmem_dte_rd / wr</text>
-  <text x="794" y="144" font-size="8.5" fill="#6b7280" text-anchor="start">256 B/T，读 8T / 写 9T</text>
-  <polygon points="790,240 960,240 951,270 781,270" fill="#f8fafc" stroke="#374151"/>
-  <text x="871" y="259" font-size="8.5" fill="#374151" text-anchor="middle">mmem_mu_rd</text>
-  <text x="794" y="234" font-size="8.5" fill="#6b7280" text-anchor="start">只读 (8+1) KB/T，8T</text>
-  <polygon points="790,330 960,330 951,360 781,360" fill="#f8fafc" stroke="#374151"/>
-  <text x="871" y="349" font-size="8.5" fill="#374151" text-anchor="middle">mmem_cfg</text>
-  <text x="794" y="324" font-size="8.5" fill="#6b7280" text-anchor="start">ctrl_noc 4 B/T，128 B 对齐，burst ≤ 32</text>
-  <polyline points="960,165 1020,165" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="960,255 1020,255" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polyline points="960,345 1020,345" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <rect x="300" y="530" width="420" height="190" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <rect x="304" y="534" width="412" height="182" fill="none" stroke="#374151"/>
-  <text x="312" y="551" font-size="11" fill="#111827">Share Mem</text>
-  <text x="312" y="568" font-size="8.5" fill="#475569">容量 32 KB，访问延迟 5～10 拍，远短于 Core Mem 的 15～25 拍</text>
-  <text x="312" y="581.5" font-size="8.5" fill="#475569">不需要初始化</text>
-  <text x="312" y="595.0" font-size="8.5" fill="#475569">三种用途：task 之间的共享数据；B core / R core 的用户数据</text>
-  <text x="312" y="608.5" font-size="8.5" fill="#475569">　映射表的更新与查询；标量数据</text>
-  <text x="312" y="622.0" font-size="8.5" fill="#475569">master：三个 RV core 的 sm_lsq（32 bit）加 DTE DSA 的 shareMem 写</text>
-  <text x="312" y="635.5" font-size="8.5" fill="#475569">四个 master 的仲裁规则原文未给，建模按轮询（待定）</text>
-  <polygon points="56,552 226,552 217,582 47,582" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="571" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq［DTE］</text>
-  <polyline points="226,567 300,567" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="56,592 226,592 217,622 47,622" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="611" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq［MU］</text>
-  <polyline points="226,607 300,607" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="56,632 226,632 217,662 47,662" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="651" font-size="8.5" fill="#374151" text-anchor="middle">sm_lsq［VU］</text>
-  <polyline points="226,647 300,647" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <polygon points="56,672 226,672 217,702 47,702" fill="#f8fafc" stroke="#374151"/>
-  <text x="137" y="691" font-size="8.5" fill="#374151" text-anchor="middle">smem_dte_wr</text>
-  <polyline points="226,687 300,687" fill="none" stroke="#475569" marker-start="url(#as)" marker-end="url(#a)"/>
-  <rect x="790" y="530" width="690" height="190" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="802" y="551" font-size="11" fill="#111827">仲裁规则</text>
-  <text x="802" y="568" font-size="8.5" fill="#475569">Core Mem：每组读写端口有 bank 冲突时 arb 二选一，无冲突可同时访问</text>
-  <text x="802" y="581.5" font-size="8.5" fill="#475569">　　　　　DTE 端口部分 bank 冲突时只反压冲突的那个 bank</text>
-  <text x="802" y="595.0" font-size="8.5" fill="#475569">　　　　　同组内相同优先级：DTE 端口先做读写各自的 bank 冲突判断，再做 wr 与 rd 之间的冲突判断</text>
-  <text x="802" y="608.5" font-size="8.5" fill="#475569">　　　　　非同组的优先级：MU &gt; VU = DTE；不增加 bank 冲突计数器</text>
-  <text x="802" y="622.0" font-size="8.5" fill="#475569">Matrix Mem：DTE、ctrl_noc、MU 三者不能出现两个 master 同时访问相同 bank</text>
-  <text x="802" y="635.5" font-size="8.5" fill="#475569">　　　　　　同时访问时只执行 MU 请求，并通过计数器记录报错。这是建模仲裁逻辑时必须体现的硬约束</text>
-  <rect x="300" y="760" width="1180" height="180" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="312" y="781" font-size="11" fill="#111827">scale 与 ECC</text>
-  <text x="312" y="798" font-size="8.5" fill="#475569">Core Mem 的 scale : data 比例最大 1 : 32；MU / VU 访问 CM 按 132 B 读写，只访问 SRAM 部分时有效带宽 128 B；scale 读写使能拉高时同时读写对应地址的 scale 寄存器</text>
-  <text x="312" y="811.5" font-size="8.5" fill="#475569">byte_mask 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 ECC 机制</text>
-  <text x="312" y="825.0" font-size="8.5" fill="#475569">Core Mem 的 ECC 按 128 bit 一组，编解码在 SRAM 接口处处理（而非随数据到各访问源端口），能减少 8% 数据传输功耗，代价是面积增加</text>
-  <text x="312" y="838.5" font-size="8.5" fill="#475569">Core Mem 的 ECC 1 bit 错用计数器计数（每读端口 1 个、DTE / MU / VU 读写各 1 个），可经 NOC 读取；2 bit 错报错</text>
-  <text x="312" y="852.0" font-size="8.5" fill="#475569">Matrix Mem 的 SRAM 内部支持单 bit 自纠错：读出时检测到单 bit 错，纠错后在 SRAM 空闲时写回对应地址覆盖原有错误数据</text>
-  <text x="312" y="865.5" font-size="8.5" fill="#475569">Matrix Mem 按 core 角色扮演三种角色：普通计算 core 存 weight 供 MU 做 MoE 计算；reduction core 存 reduction 数据不存权重；</text>
-  <text x="312" y="879.0" font-size="8.5" fill="#475569">　broadcast core 存 token 数据，防止专家不均衡影响其他 EP group 的 token 广播</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1150" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="存储子系统 第 0 层">
+<title>存储子系统 第 0 层</title>
+<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
+<rect x="0" y="0" width="1800" height="1150" fill="#ffffff"/>
+<text x="20" y="26" font-size="12" fill="#111827">存储子系统 · 第 0 层（方位照 core 框图：MU / VU 的 DSA 在上方接 Matrix Mem 与 Core Mem，Share Mem 在右上靠 TS，DTE xbar 在下方，Router 在最下）</text>
+<text x="954" y="26" font-size="9.5" fill="#6b7280">每个模块内部是 bank 阵列加每 bank 一个仲裁器；stream_id 分片在 master 侧的地址计算里做，存储模块只看物理地址</text>
+<rect x="300" y="140" width="480" height="410" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="312" y="161" font-size="11" fill="#111827" font-weight="600">Matrix Mem（Mmem）</text>
+<text x="312.0" y="178.0" font-size="8.5" fill="#475569">容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8），</text>
+<text x="312.0" y="191.5" font-size="8.5" fill="#475569">　32 MB 存正常数据；非 scale 模式下 36 MB 全存数据</text>
+<text x="312.0" y="205.0" font-size="8.5" fill="#475569">按 64 个 lane 分成 64 bank，每 bank 0.5625 MB</text>
+<text x="312.0" y="218.5" font-size="8.5" fill="#475569">每 bank 与 MU 的 lane 匹配，顶层拉齐不同 lane 的延迟</text>
+<text x="312.0" y="232.0" font-size="8.5" fill="#475569">SRAM 单元 2048 × 128 bit，ECC 按 128 bit 一组</text>
+<text x="312.0" y="245.5" font-size="8.5" fill="#475569">最大访存带宽 (8 + 1) KB/T（非 scale 模式 8 KB/T）</text>
+<text x="312.0" y="259.0" font-size="8.5" fill="#475569">访问延迟：master 请求进 MM 到读出或 bvalid，50T 以内</text>
+<text x="312.0" y="272.5" font-size="8.5" fill="#475569">地址粒度 128 B，不支持按 Byte mask 读写；时钟域 1 GHz</text>
+<rect x="310" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="333.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank0</text>
+<text x="333.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="333.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="333.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="333.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="333.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="333.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="333.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="333.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="333.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="365" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="388.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank1</text>
+<text x="388.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="388.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="388.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="388.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="388.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="388.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="388.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="388.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="388.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="420" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="443.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank2</text>
+<text x="443.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="443.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="443.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="443.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="443.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="443.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="443.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="443.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="443.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="475" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="498.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank3</text>
+<text x="498.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="498.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="498.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="498.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="498.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="498.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="498.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="498.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="498.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="530" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="553.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank4</text>
+<text x="553.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="553.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="553.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="553.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="553.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="553.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="553.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="553.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="553.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="585" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="608.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank5</text>
+<text x="608.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="608.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="608.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="608.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="608.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="608.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="608.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="608.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="608.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="640" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="663.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank6</text>
+<text x="663.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="663.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="663.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="663.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="663.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="663.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="663.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="663.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="663.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="695" y="390" width="46" height="150" rx="3" fill="#ecfdf5" stroke="#0d9488"/>
+<text x="718.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">… bank63</text>
+<text x="718.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="718.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">2048</text>
+<text x="718.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128bit</text>
+<text x="718.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="718.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">0.5625</text>
+<text x="718.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">MB</text>
+<text x="718.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="718.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">与 lane</text>
+<text x="718.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">一对一</text>
+<rect x="820" y="140" width="480" height="410" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="832" y="161" font-size="11" fill="#111827" font-weight="600">Core Mem（Cmem）</text>
+<text x="832.0" y="178.0" font-size="8.5" fill="#475569">容量 (128 KB + 4 KB) × 8 bank = 1 MB + 32 KB，其中 32 KB 是寄存器</text>
+<text x="832.0" y="191.5" font-size="8.5" fill="#475569">每 bank：深度 1024、位宽 128 B 的 SRAM，另有 4 KB 寄存器存 scale</text>
+<text x="832.0" y="205.0" font-size="8.5" fill="#475569">　（地址深度 1024 × 4 B，与 SRAM 地址一一映射，128 B : 4 B）</text>
+<text x="832.0" y="218.5" font-size="8.5" fill="#475569">SRAM 单元 1024 × 139 bit = 128 data + 10 ecc + 1 mask 标志</text>
+<text x="832.0" y="232.0" font-size="8.5" fill="#475569">最大访存带宽 (128 + 4) B × 8 bank = (1 KB + 32 B)/T</text>
+<text x="832.0" y="245.5" font-size="8.5" fill="#475569">访问延迟：请求进 CM 到读出或返回 bvalid，15T 以内</text>
+<text x="832.0" y="259.0" font-size="8.5" fill="#475569">地址粒度 128 B + 4 B，支持按 Byte mask 读写；时钟域 1 GHz</text>
+<rect x="830" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="855.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank0</text>
+<text x="855.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="855.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="855.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="855.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="855.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="855.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="855.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="855.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="855.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="888" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="913.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank1</text>
+<text x="913.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="913.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="913.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="913.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="913.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="913.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="913.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="913.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="913.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="946" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="971.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank2</text>
+<text x="971.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="971.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="971.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="971.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="971.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="971.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="971.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="971.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="971.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="1004" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1029.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank3</text>
+<text x="1029.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="1029.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="1029.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="1029.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1029.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="1029.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="1029.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1029.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="1029.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="1062" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1087.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank4</text>
+<text x="1087.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="1087.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="1087.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="1087.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1087.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="1087.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="1087.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1087.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="1087.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="1120" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1145.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank5</text>
+<text x="1145.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="1145.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="1145.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="1145.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1145.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="1145.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="1145.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1145.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="1145.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="1178" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1203.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank6</text>
+<text x="1203.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="1203.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="1203.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="1203.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1203.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="1203.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="1203.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1203.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="1203.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="1236" y="390" width="50" height="150" rx="3" fill="#eef2ff" stroke="#4338ca"/>
+<text x="1261.0" y="406" font-size="7.5" fill="#374151" text-anchor="middle">bank7</text>
+<text x="1261.0" y="419" font-size="7.5" fill="#374151" text-anchor="middle">SRAM</text>
+<text x="1261.0" y="432" font-size="7.5" fill="#374151" text-anchor="middle">1024</text>
+<text x="1261.0" y="445" font-size="7.5" fill="#374151" text-anchor="middle">×128B</text>
+<text x="1261.0" y="458" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1261.0" y="471" font-size="7.5" fill="#374151" text-anchor="middle">scale</text>
+<text x="1261.0" y="484" font-size="7.5" fill="#374151" text-anchor="middle">4 KB</text>
+<text x="1261.0" y="497" font-size="7.5" fill="#374151" text-anchor="middle"></text>
+<text x="1261.0" y="510" font-size="7.5" fill="#374151" text-anchor="middle">arb</text>
+<text x="1261.0" y="523" font-size="7.5" fill="#374151" text-anchor="middle">二选一</text>
+<rect x="1340" y="140" width="300" height="190" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="1352" y="161" font-size="11" fill="#111827" font-weight="600">Share Mem</text>
+<text x="1352.0" y="178.0" font-size="8.5" fill="#475569">容量 32 KB，访问延迟 5～10 拍，远短于 Core Mem 的 15～25 拍</text>
+<text x="1352.0" y="191.5" font-size="8.5" fill="#475569">不需要初始化</text>
+<text x="1352.0" y="205.0" font-size="8.5" fill="#475569">三种用途：task 之间的共享数据；B core / R core 的用户数据</text>
+<text x="1352.0" y="218.5" font-size="8.5" fill="#475569">　映射表的更新与查询；标量数据</text>
+<text x="1352.0" y="232.0" font-size="8.5" fill="#475569">master：三个 RV core 的 sm_lsq（32 bit）加 DTE DSA 的 shareMem 写</text>
+<text x="1352.0" y="245.5" font-size="8.5" fill="#475569">四个 master 的仲裁规则原文未给，建模按轮询（待定）</text>
+<polygon points="339,60 480,60 471,90 330,90" fill="#f8fafc" stroke="#374151"/>
+<text x="405.0" y="78.5" font-size="9" fill="#374151" text-anchor="middle">mmem_mu_rd</text>
+<path d="M400.6 91.0 L404.9 139.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="330" y="52" font-size="8" fill="#6b7280" text-anchor="start">只读 (8+1) KB/T，8T</text>
+<polygon points="599,60 740,60 731,90 590,90" fill="#f8fafc" stroke="#374151"/>
+<text x="665.0" y="78.5" font-size="9" fill="#374151" text-anchor="middle">mmem_cfg</text>
+<path d="M660.5 90.0 L664.9 139.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<text x="590" y="52" font-size="8" fill="#6b7280" text-anchor="start">ctrl_noc 4 B/T，128 B 对齐，burst ≤ 32</text>
+<polygon points="839,60 940,60 931,90 830,90" fill="#f8fafc" stroke="#374151"/>
+<text x="885.0" y="78.5" font-size="9" fill="#374151" text-anchor="middle">cmem_mu_rd / wr</text>
+<path d="M880.6 91.0 L884.9 139.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="830" y="52" font-size="8" fill="#6b7280" text-anchor="start">132 B/T，11T</text>
+<polygon points="959,60 1060,60 1051,90 950,90" fill="#f8fafc" stroke="#374151"/>
+<text x="1005.0" y="78.5" font-size="9" fill="#374151" text-anchor="middle">cmem_vu_ld / st</text>
+<path d="M1000.6 91.0 L1004.9 139.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="950" y="52" font-size="8" fill="#6b7280" text-anchor="start">132 B/T，14T</text>
+<polygon points="1079,60 1180,60 1171,90 1070,90" fill="#f8fafc" stroke="#374151"/>
+<text x="1125.0" y="78.5" font-size="9" fill="#374151" text-anchor="middle">cmem_rv</text>
+<path d="M1120.6 91.0 L1124.9 139.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="1070" y="52" font-size="8" fill="#6b7280" text-anchor="start">128 B / 16 B / 2 B</text>
+<polygon points="1194,60 1295,60 1286,90 1185,90" fill="#f8fafc" stroke="#374151"/>
+<text x="1240.0" y="78.5" font-size="9" fill="#374151" text-anchor="middle">cmem_cfg</text>
+<path d="M1235.5 90.0 L1239.9 139.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
+<text x="1185" y="52" font-size="8" fill="#6b7280" text-anchor="start">ctrl_noc 4 B/T</text>
+<polygon points="1689,144 1800,144 1791,176 1680,176" fill="#f8fafc" stroke="#374151"/>
+<text x="1740.0" y="163.5" font-size="9" fill="#374151" text-anchor="middle">sm_lsq［DTE］</text>
+<path d="M1683.5 160.0 L1641.0 160.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<polygon points="1689,189 1800,189 1791,221 1680,221" fill="#f8fafc" stroke="#374151"/>
+<text x="1740.0" y="208.5" font-size="9" fill="#374151" text-anchor="middle">sm_lsq［MU］</text>
+<path d="M1683.5 205.0 L1641.0 205.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<polygon points="1689,234 1800,234 1791,266 1680,266" fill="#f8fafc" stroke="#374151"/>
+<text x="1740.0" y="253.5" font-size="9" fill="#374151" text-anchor="middle">sm_lsq［VU］</text>
+<path d="M1683.5 250.0 L1641.0 250.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<polygon points="1689,279 1800,279 1791,311 1680,311" fill="#f8fafc" stroke="#374151"/>
+<text x="1740.0" y="298.5" font-size="9" fill="#374151" text-anchor="middle">smem_dte_wr</text>
+<path d="M1683.5 295.0 L1641.0 295.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<text x="1340" y="348" font-size="8" fill="#6b7280" text-anchor="start">三个 RV core 与 DTE DSA 在左上方</text>
+<text x="1340" y="361" font-size="8" fill="#6b7280" text-anchor="start">（core 的 RV 行 / DSA 行）</text>
+<rect x="300" y="620" width="1000" height="59.5" rx="4" fill="#ecfeff" stroke="#0e7490"/>
+<text x="312" y="641" font-size="11" fill="#111827" font-weight="600">DTE xbar（DMA_XBAR）</text>
+<text x="312.0" y="658.0" font-size="8.5" fill="#475569">到 Core Mem 与 Matrix Mem 各 256 B/T；命中冲突就排队；MM → CM 的搬移也走这里</text>
+<path d="M540.0 619.0 L540.0 551.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="472.8" y="577.5" width="150.5" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="548.0" y="585.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">mmem_dte 256 B/T，读 8T / 写 9T</text>
+<path d="M1060.0 619.0 L1060.0 551.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<rect x="1008.9" y="577.5" width="118.2" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1068.0" y="585.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">cmem_dte 256 B/T，读 13T</text>
+<polygon points="429,719.5 570,719.5 561,749.5 420,749.5" fill="#f8fafc" stroke="#374151"/>
+<text x="495.0" y="738.0" font-size="9" fill="#374151" text-anchor="middle">mmem_dte_rd / wr</text>
+<polygon points="929,719.5 1070,719.5 1061,749.5 920,749.5" fill="#f8fafc" stroke="#374151"/>
+<text x="995.0" y="738.0" font-size="9" fill="#374151" text-anchor="middle">cmem_dte_rd / wr</text>
+<polygon points="1369,574 1510,574 1501,606 1360,606" fill="#f8fafc" stroke="#374151"/>
+<text x="1435.0" y="593.5" font-size="9" fill="#374151" text-anchor="middle">cmem_reissue</text>
+<path d="M499.4 718.5 L495.1 680.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M999.4 718.5 L995.1 680.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
+<path d="M1364.5 590.0 L1261.6 590.0 L1261.6 551.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
+<rect x="1390.7" y="608.5" width="88.6" height="10.5" fill="#ffffff" opacity="0.92"/>
+<text x="1435" y="616" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">Router 重发，256 B</text>
+<text x="300" y="769.5" font-size="8.5" fill="#6b7280" text-anchor="start">DTE DSA 的 RD / WR Lane 与 Router 都在下方，经 xbar 上来；Router 重发写 Core Mem</text>
+<rect x="300" y="799.5" width="1000" height="127.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="312" y="820.5" font-size="11" fill="#111827" font-weight="600">仲裁规则</text>
+<text x="312.0" y="837.5" font-size="8.5" fill="#475569">Core Mem：每组读写端口有 bank 冲突时 arb 二选一，无冲突可同时访问</text>
+<text x="312.0" y="851.0" font-size="8.5" fill="#475569">　　　　　DTE 端口部分 bank 冲突时只反压冲突的那个 bank</text>
+<text x="312.0" y="864.5" font-size="8.5" fill="#475569">　　　　　同组内相同优先级：DTE 端口先做读写各自的 bank 冲突判断，再做 wr 与 rd 之间的冲突判断</text>
+<text x="312.0" y="878.0" font-size="8.5" fill="#475569">　　　　　非同组的优先级：MU &gt; VU = DTE；不增加 bank 冲突计数器</text>
+<text x="312.0" y="891.5" font-size="8.5" fill="#475569">Matrix Mem：DTE、ctrl_noc、MU 三者不能出现两个 master 同时访问相同 bank</text>
+<text x="312.0" y="905.0" font-size="8.5" fill="#475569">　　　　　　同时访问时只执行 MU 请求，并通过计数器记录报错。这是建模仲裁逻辑时必须体现的硬约束</text>
+<rect x="300" y="956.5" width="1000" height="140.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<text x="312" y="977.5" font-size="11" fill="#111827" font-weight="600">scale 与 ECC</text>
+<text x="312.0" y="994.5" font-size="8.5" fill="#475569">Core Mem 的 scale : data 比例最大 1 : 32；MU / VU 访问 CM 按 132 B 读写，只访问 SRAM 部分时有效带宽 128 B；scale 读写使能拉高时同时读写对应地址的 scale 寄存器</text>
+<text x="312.0" y="1008.0" font-size="8.5" fill="#475569">byte_mask 非全 1 时 SRAM 内部留存记录，读取时不做 ECC 检测；全 1 时做 ECC 检测。4 B 的 scale 部分由寄存器搭建，不参与 ECC 机制</text>
+<text x="312.0" y="1021.5" font-size="8.5" fill="#475569">Core Mem 的 ECC 按 128 bit 一组，编解码在 SRAM 接口处处理（而非随数据到各访问源端口），能减少 8% 数据传输功耗，代价是面积增加</text>
+<text x="312.0" y="1035.0" font-size="8.5" fill="#475569">Core Mem 的 ECC 1 bit 错用计数器计数（每读端口 1 个、DTE / MU / VU 读写各 1 个），可经 NOC 读取；2 bit 错报错</text>
+<text x="312.0" y="1048.5" font-size="8.5" fill="#475569">Matrix Mem 的 SRAM 内部支持单 bit 自纠错：读出时检测到单 bit 错，纠错后在 SRAM 空闲时写回对应地址覆盖原有错误数据</text>
+<text x="312.0" y="1062.0" font-size="8.5" fill="#475569">Matrix Mem 按 core 角色扮演三种角色：普通计算 core 存 weight 供 MU 做 MoE 计算；reduction core 存 reduction 数据不存权重；</text>
+<text x="312.0" y="1075.5" font-size="8.5" fill="#475569">　broadcast core 存 token 数据，防止专家不均衡影响其他 EP group 的 token 广播</text>
 </svg>
 ```
 
@@ -444,8 +474,14 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
 
   <text x="20" y="26" font-size="12" fill="#111827">存储子系统 · 第 1 层流水线总览（三块存储同一套四级，差别在 SRAM 段的拍数）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
-  <line x1="150" y1="52" x2="150" y2="328" stroke="#e5e7eb"/>
-  <line x1="316" y1="52" x2="316" y2="328" stroke="#e5e7eb"/>
+  <path d="M150 52 L150 70" stroke="#e5e7eb" fill="none"/>
+<path d="M150 126 L150 156" stroke="#e5e7eb" fill="none"/>
+<path d="M150 212 L150 242" stroke="#e5e7eb" fill="none"/>
+<path d="M150 298 L150 328" stroke="#e5e7eb" fill="none"/>
+  <path d="M316 52 L316 70" stroke="#e5e7eb" fill="none"/>
+<path d="M316 126 L316 156" stroke="#e5e7eb" fill="none"/>
+<path d="M316 212 L316 242" stroke="#e5e7eb" fill="none"/>
+<path d="M316 298 L316 328" stroke="#e5e7eb" fill="none"/>
   <line x1="482" y1="52" x2="482" y2="328" stroke="#e5e7eb"/>
   <line x1="648" y1="52" x2="648" y2="328" stroke="#e5e7eb"/>
   <text x="20" y="102" font-size="10.5" fill="#6b7280">Core Mem</text>
@@ -457,17 +493,17 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="326" y="84" font-size="8.5" fill="#6b7280">M2</text>
   <text x="458" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="104" font-size="11" fill="#111827">bank 仲裁</text>
-  <line x1="300" y1="98" x2="314" y2="98" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M300 98 L315 98" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <rect x="482" y="70" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="492" y="84" font-size="8.5" fill="#92400e">M3</text>
   <text x="624" y="84" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="492" y="104" font-size="11" fill="#7c2d12">SRAM 读写</text>
-  <line x1="466" y1="98" x2="480" y2="98" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M466 98 L481 98" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <rect x="648" y="70" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="658" y="84" font-size="8.5" fill="#92400e">M4</text>
   <text x="790" y="84" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="658" y="104" font-size="11" fill="#7c2d12">延迟线与响应</text>
-  <line x1="632" y1="98" x2="646" y2="98" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M632 98 L647 98" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <text x="20" y="188" font-size="10.5" fill="#6b7280">Matrix Mem</text>
   <rect x="150" y="156" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="170" font-size="8.5" fill="#6b7280">M1</text>
@@ -477,17 +513,17 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="326" y="170" font-size="8.5" fill="#6b7280">M2</text>
   <text x="458" y="170" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="190" font-size="11" fill="#111827">bank 仲裁</text>
-  <line x1="300" y1="184" x2="314" y2="184" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M300 184 L315 184" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <rect x="482" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="492" y="170" font-size="8.5" fill="#92400e">M3</text>
   <text x="624" y="170" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="492" y="190" font-size="11" fill="#7c2d12">SRAM 读写</text>
-  <line x1="466" y1="184" x2="480" y2="184" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M466 184 L481 184" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <rect x="648" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="658" y="170" font-size="8.5" fill="#92400e">M4</text>
   <text x="790" y="170" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="658" y="190" font-size="11" fill="#7c2d12">延迟线与响应</text>
-  <line x1="632" y1="184" x2="646" y2="184" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M632 184 L647 184" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <text x="20" y="274" font-size="10.5" fill="#6b7280">Share Mem</text>
   <rect x="150" y="242" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="256" font-size="8.5" fill="#6b7280">M1</text>
@@ -497,17 +533,17 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="326" y="256" font-size="8.5" fill="#6b7280">M2</text>
   <text x="458" y="256" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="276" font-size="11" fill="#111827">bank 仲裁</text>
-  <line x1="300" y1="270" x2="314" y2="270" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M300 270 L315 270" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <rect x="482" y="242" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="492" y="256" font-size="8.5" fill="#92400e">M3</text>
   <text x="624" y="256" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="492" y="276" font-size="11" fill="#7c2d12">SRAM 读写</text>
-  <line x1="466" y1="270" x2="480" y2="270" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M466 270 L481 270" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <rect x="648" y="242" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="658" y="256" font-size="8.5" fill="#92400e">M4</text>
   <text x="790" y="256" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="658" y="276" font-size="11" fill="#7c2d12">延迟线与响应</text>
-  <line x1="632" y1="270" x2="646" y2="270" stroke="#475569" marker-end="url(#arsov)"/>
+  <path d="M632 270 L647 270" stroke="#475569" marker-end="url(#arsov)" fill="none"/>
   <text x="20" y="352" font-size="10.5" fill="#374151">M3 与 M4 合起来的拍数按 master 定，四级之和等于该 master 的端到端延迟：Core Mem 的 DTE 13、MU 11、VU 14；Matrix Mem 的 DTE 写 9 读 8、MU 读 8；Share Mem 5～10。</text>
   <text x="20" y="380" font-size="10.5" fill="#374151">M2 每拍 TryGrant 一次，被拒的请求原地保持，下一拍重来，本模块不丢请求。</text>
   <text x="20" y="408" font-size="10.5" fill="#374151">Matrix Mem 同 bank 冲突时只执行 MU，被让路的 master 在 M2 停一拍，不丢那一笔。</text>
@@ -549,9 +585,9 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 分区由 cmem_part 定，基址由 master 侧算好，本模块只看物理地址</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. req_ready = 该 master 在 M2 没有被拒的请求压着</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">地址粒度：Core Mem 128 B + 4 B，Matrix Mem 128 B</text>
-  <line x1="188" y1="71" x2="228" y2="71" stroke="#475569" marker-end="url(#ars1)"/>
-  <line x1="188" y1="142" x2="228" y2="142" stroke="#475569" marker-end="url(#ars1)"/>
-  <line x1="639" y1="99" x2="679" y2="99" stroke="#475569" marker-end="url(#ars1)"/>
+  <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#ars1)" fill="none"/>
+  <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#ars1)" fill="none"/>
+  <path d="M639 99 L682 99" stroke="#475569" marker-end="url(#ars1)" fill="none"/>
 </svg>
 ```
 
@@ -588,10 +624,10 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="250" y="128" font-size="10.5" fill="#475569">3. Matrix Mem：同 bank 有两个 master → 只授 MU，mmem_err_cnt += 1</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. 未获授权 → 该 master 的 req_ready = 0，请求原地保持下拍重试</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">同优先级按先到先得排队，不允许长期饿死</text>
-  <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#ars2)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#ars2)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#ars2)"/>
-  <line x1="641" y1="109" x2="681" y2="109" stroke="#475569" marker-end="url(#ars2)"/>
+  <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#ars2)" fill="none"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#ars2)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#ars2)" fill="none"/>
+  <path d="M641 109 L684 109" stroke="#475569" marker-end="url(#ars2)" fill="none"/>
 </svg>
 ```
 
@@ -635,11 +671,11 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="250" y="202" font-size="10.5" fill="#475569">4. Matrix Mem 读出单 bit 错 → 纠错，并在 SRAM 空闲时写回覆盖</text>
   <text x="250" y="226" font-size="10" fill="#9ca3af">ECC 按 128 bit 一组，编解码在 SRAM 接口处</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#ars3)"/>
-  <line x1="188" y1="123" x2="228" y2="123" stroke="#475569" marker-end="url(#ars3)"/>
-  <line x1="188" y1="177" x2="228" y2="177" stroke="#475569" marker-end="url(#ars3)"/>
-  <line x1="188" y1="231" x2="228" y2="231" stroke="#475569" marker-end="url(#ars3)"/>
+  <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#ars3)" fill="none"/>
+  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#ars3)" fill="none"/>
+  <path d="M188 231 L231 231" stroke="#475569" marker-end="url(#ars3)" fill="none"/>
   <line x1="188" y1="285" x2="228" y2="285" stroke="#475569" marker-end="url(#ars3)"/>
-  <line x1="647" y1="163" x2="687" y2="163" stroke="#475569" marker-end="url(#ars3)"/>
+  <path d="M647 163 L690 163" stroke="#475569" marker-end="url(#ars3)" fill="none"/>
 </svg>
 ```
 
@@ -671,9 +707,9 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 写请求到点 → bvalid 回该端口</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. Matrix Mem 顶层拉齐 64 个 lane 的延迟，各 lane 同拍回数</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Core Mem DTE 13 / MU 11 / VU 14；Matrix Mem DTE 写 9 读 8 / MU 8</text>
-  <line x1="188" y1="72" x2="228" y2="72" stroke="#475569" marker-end="url(#ars4)"/>
-  <line x1="188" y1="140" x2="228" y2="140" stroke="#475569" marker-end="url(#ars4)"/>
-  <line x1="636" y1="98" x2="676" y2="98" stroke="#475569" marker-end="url(#ars4)"/>
+  <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#ars4)" fill="none"/>
+  <path d="M188 140 L231 140" stroke="#475569" marker-end="url(#ars4)" fill="none"/>
+  <path d="M636 98 L684 98" stroke="#475569" marker-end="url(#ars4)" fill="none"/>
 </svg>
 ```
 

@@ -196,160 +196,160 @@ LPU 只做构造与接线，不打拍，五件事：
   <rect x="704" y="716" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="733" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,11)</text>
   <text x="748" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
-  <line x1="468" y1="119" x2="488" y2="119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="119" x2="596" y2="119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="119" x2="704" y2="119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="175" x2="488" y2="175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="175" x2="596" y2="175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="175" x2="704" y2="175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="231" x2="488" y2="231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="231" x2="596" y2="231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="231" x2="704" y2="231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="287" x2="488" y2="287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="287" x2="596" y2="287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="287" x2="704" y2="287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="343" x2="488" y2="343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="343" x2="596" y2="343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="343" x2="704" y2="343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="399" x2="488" y2="399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="399" x2="596" y2="399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="399" x2="704" y2="399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="455" x2="488" y2="455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="455" x2="596" y2="455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="455" x2="704" y2="455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="511" x2="488" y2="511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="511" x2="596" y2="511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="511" x2="704" y2="511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="567" x2="488" y2="567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="567" x2="596" y2="567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="567" x2="704" y2="567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="623" x2="488" y2="623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="623" x2="596" y2="623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="623" x2="704" y2="623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="679" x2="488" y2="679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="679" x2="596" y2="679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="679" x2="704" y2="679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="468" y1="735" x2="488" y2="735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="576" y1="735" x2="596" y2="735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="684" y1="735" x2="704" y2="735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="138" x2="424" y2="156" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="194" x2="424" y2="212" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="250" x2="424" y2="268" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="306" x2="424" y2="324" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="424" y1="362" x2="424" y2="380" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="418" x2="424" y2="436" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="474" x2="424" y2="492" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="530" x2="424" y2="548" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="424" y1="586" x2="424" y2="604" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="642" x2="424" y2="660" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="424" y1="698" x2="424" y2="716" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="138" x2="532" y2="156" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="194" x2="532" y2="212" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="250" x2="532" y2="268" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="306" x2="532" y2="324" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="532" y1="362" x2="532" y2="380" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="418" x2="532" y2="436" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="474" x2="532" y2="492" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="530" x2="532" y2="548" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="532" y1="586" x2="532" y2="604" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="642" x2="532" y2="660" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="532" y1="698" x2="532" y2="716" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="138" x2="640" y2="156" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="194" x2="640" y2="212" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="250" x2="640" y2="268" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="306" x2="640" y2="324" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="640" y1="362" x2="640" y2="380" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="418" x2="640" y2="436" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="474" x2="640" y2="492" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="530" x2="640" y2="548" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="640" y1="586" x2="640" y2="604" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="642" x2="640" y2="660" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="640" y1="698" x2="640" y2="716" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="138" x2="748" y2="156" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="194" x2="748" y2="212" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="250" x2="748" y2="268" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="306" x2="748" y2="324" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="748" y1="362" x2="748" y2="380" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="418" x2="748" y2="436" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="474" x2="748" y2="492" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="530" x2="748" y2="548" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)"/>
-  <line x1="748" y1="586" x2="748" y2="604" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="642" x2="748" y2="660" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="748" y1="698" x2="748" y2="716" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M469 119 L487 119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 119 L595 119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 119 L703 119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 175 L487 175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 175 L595 175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 175 L703 175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 231 L487 231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 231 L595 231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 231 L703 231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 287 L487 287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 287 L595 287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 287 L703 287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 343 L487 343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 343 L595 343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 343 L703 343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 399 L487 399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 399 L595 399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 399 L703 399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 455 L487 455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 455 L595 455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 455 L703 455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 511 L487 511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 511 L595 511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 511 L703 511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 567 L487 567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 567 L595 567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 567 L703 567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 623 L487 623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 623 L595 623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 623 L703 623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 679 L487 679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 679 L595 679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 679 L703 679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M469 735 L487 735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M577 735 L595 735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M685 735 L703 735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 139 L424 155" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 195 L424 211" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 251 L424 267" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 307 L424 323" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M424 363 L424 379" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 419 L424 435" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 475 L424 491" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 531 L424 547" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M424 587 L424 603" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 643 L424 659" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M424 699 L424 715" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 139 L532 155" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 195 L532 211" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 251 L532 267" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 307 L532 323" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M532 363 L532 379" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 419 L532 435" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 475 L532 491" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 531 L532 547" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M532 587 L532 603" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 643 L532 659" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M532 699 L532 715" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 139 L640 155" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 195 L640 211" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 251 L640 267" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 307 L640 323" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M640 363 L640 379" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 419 L640 435" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 475 L640 491" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 531 L640 547" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M640 587 L640 603" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 643 L640 659" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M640 699 L640 715" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 139 L748 155" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 195 L748 211" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 251 L748 267" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 307 L748 323" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M748 363 L748 379" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 419 L748 435" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 475 L748 491" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 531 L748 547" stroke="#b45309" marker-start="url(#p1s)" marker-end="url(#p1)" fill="none"/>
+  <path d="M748 587 L748 603" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 643 L748 659" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M748 699 L748 715" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="228" y="102" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="266" y="130" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="266" y="145" font-size="8.5" fill="#94a3b8" text-anchor="middle">层0 / 层1</text>
-  <line x1="306" y1="119" x2="378" y2="119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="306" y1="175" x2="378" y2="175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M305 119 L379 119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M305 175 L379 175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="866" y="102" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="904" y="130" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="904" y="145" font-size="8.5" fill="#94a3b8" text-anchor="middle">层0 / 层1</text>
-  <line x1="794" y1="119" x2="864" y2="119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="794" y1="175" x2="864" y2="175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M793 119 L865 119" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M793 175 L865 175" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="228" y="214" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="266" y="242" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="266" y="257" font-size="8.5" fill="#94a3b8" text-anchor="middle">层2 / 层3</text>
-  <line x1="306" y1="231" x2="378" y2="231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="306" y1="287" x2="378" y2="287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M305 231 L379 231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M305 287 L379 287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="866" y="214" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="904" y="242" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="904" y="257" font-size="8.5" fill="#94a3b8" text-anchor="middle">层2 / 层3</text>
-  <line x1="794" y1="231" x2="864" y2="231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="794" y1="287" x2="864" y2="287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M793 231 L865 231" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M793 287 L865 287" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="228" y="326" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="266" y="354" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="266" y="369" font-size="8.5" fill="#94a3b8" text-anchor="middle">层4 / 层5</text>
-  <line x1="306" y1="343" x2="378" y2="343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="306" y1="399" x2="378" y2="399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M305 343 L379 343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M305 399 L379 399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="866" y="326" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="904" y="354" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="904" y="369" font-size="8.5" fill="#94a3b8" text-anchor="middle">层4 / 层5</text>
-  <line x1="794" y1="343" x2="864" y2="343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="794" y1="399" x2="864" y2="399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M793 343 L865 343" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M793 399 L865 399" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="228" y="438" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="266" y="466" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="266" y="481" font-size="8.5" fill="#94a3b8" text-anchor="middle">层6 / 层7</text>
-  <line x1="306" y1="455" x2="378" y2="455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="306" y1="511" x2="378" y2="511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M305 455 L379 455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M305 511 L379 511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="866" y="438" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="904" y="466" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="904" y="481" font-size="8.5" fill="#94a3b8" text-anchor="middle">层6 / 层7</text>
-  <line x1="794" y1="455" x2="864" y2="455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="794" y1="511" x2="864" y2="511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M793 455 L865 455" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M793 511 L865 511" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="228" y="550" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="266" y="578" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="266" y="593" font-size="8.5" fill="#94a3b8" text-anchor="middle">层8 / 层9</text>
-  <line x1="306" y1="567" x2="378" y2="567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="306" y1="623" x2="378" y2="623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M305 567 L379 567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M305 623 L379 623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="866" y="550" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="904" y="578" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="904" y="593" font-size="8.5" fill="#94a3b8" text-anchor="middle">层8 / 层9</text>
-  <line x1="794" y1="567" x2="864" y2="567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="794" y1="623" x2="864" y2="623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M793 567 L865 567" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M793 623 L865 623" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="228" y="662" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="266" y="690" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="266" y="705" font-size="8.5" fill="#94a3b8" text-anchor="middle">层10 / 层11</text>
-  <line x1="306" y1="679" x2="378" y2="679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="306" y1="735" x2="378" y2="735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M305 679 L379 679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M305 735 L379 735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="866" y="662" width="76" height="92" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="904" y="690" font-size="9" fill="#111827" text-anchor="middle">PCIe SW</text>
   <text x="904" y="705" font-size="8.5" fill="#94a3b8" text-anchor="middle">层10 / 层11</text>
-  <line x1="794" y1="679" x2="864" y2="679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
-  <line x1="794" y1="735" x2="864" y2="735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)"/>
+  <path d="M793 679 L865 679" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
+  <path d="M793 735 L865 735" stroke="#475569" marker-start="url(#p0s)" marker-end="url(#p0)" fill="none"/>
   <rect x="40" y="100" width="160" height="86" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="54" y="124" font-size="11" fill="#7c2d12">入口桩（每 GPU 一个）</text>
   <text x="54" y="144" font-size="9" fill="#92400e">注入表 · 两层 credit</text>
   <text x="54" y="160" font-size="9" fill="#92400e">GPU / DPU / ETH / CPU</text>
   <text x="54" y="176" font-size="9" fill="#92400e">的行为都收在这里</text>
-  <line x1="202" y1="128" x2="226" y2="128" stroke="#475569" marker-end="url(#p0)"/>
+  <path d="M202 128 L227 128" stroke="#475569" marker-end="url(#p0)" fill="none"/>
   <text x="212" y="122" font-size="9" fill="#6b7280">ETH 链路</text>
   <rect x="976" y="660" width="160" height="86" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="990" y="684" font-size="11" fill="#7c2d12">出口桩</text>
   <text x="990" y="704" font-size="9" fill="#92400e">按 (gpu_id, token_id) 重组</text>
   <text x="990" y="720" font-size="9" fill="#92400e">逐 bit 比对 · 完成集合</text>
   <text x="990" y="736" font-size="9" fill="#92400e">retired 回报入口桩</text>
-  <line x1="942" y1="688" x2="974" y2="688" stroke="#475569" marker-end="url(#p0)"/>
-  <polyline points="1056,748 1056,780 120,780 120,188" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#p0)"/>
+  <path d="M942 688 L975 688" stroke="#475569" marker-end="url(#p0)" fill="none"/>
+  <path d="M1056 748 L1056 780 L120 780 L120 187" fill="none" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#p0)"/>
   <text x="300" y="794" font-size="9" fill="#6b7280">retired（回入口桩记 credit）</text>
   <text x="424" y="82" font-size="9.5" fill="#b45309" text-anchor="middle">global_top_left：外部数据从西侧进</text>
   <text x="748" y="794" font-size="9.5" fill="#b45309" text-anchor="middle">global_bottom_right：最终结果从东侧出</text>

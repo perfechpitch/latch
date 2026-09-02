@@ -93,15 +93,15 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <rect x="215" y="458" width="90" height="46" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="223" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Debug ctrl</text>
 <text x="223" y="487" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">调试通路</text>
-<path d="M160 163 L215 163" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M160 269 L215 269" stroke="#2563eb" stroke-width="1.6" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M160 163 L214.3 163" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M160 269 L214.3 269" stroke="#2563eb" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <path d="M160 375 L200 375 L200 300 L215 300" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M200 375 L200 190 L215 190" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M160 481 L215 481" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M200 300 L200 190 L215 190" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kka)"/>
+<path d="M160 481 L214.3 481" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kka)"/>
 <path d="M305 163 L330 163" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M305 269 L330 269" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M352 222 L380 222" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M305 481 L420 481 L420 254" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M352 222 L379.3 222" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M305 481 L420 481 L420 254.7" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kka)"/>
 <rect x="470" y="140" width="440" height="200" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
 <text x="690" y="156" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="700" text-anchor="middle">inbound_ch / ch0　Router → MM / CM</text>
 <rect x="485" y="170" width="80" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
@@ -118,13 +118,13 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <text x="645.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">wr_ch0_agcu</text>
 <rect x="720" y="280" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
 <text x="765.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_wr_ctrl</text>
-<path d="M565 186 L600 186" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M690 186 L720 186" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M525 202 L525 280" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M565 296 L600 296" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M690 296 L720 296" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M765 202 L765 226" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M765 254 L765 280" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M565 186 L599.3 186" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M690 186 L719.3 186" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M525 202 L525 279.3" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M565 296 L599.3 296" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M690 296 L719.3 296" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M765 202 L765 225.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
+<path d="M765 254 L765 279.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <rect x="470" y="380" width="440" height="200" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.2"/>
 <text x="690" y="396" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#0d9488" font-weight="700" text-anchor="middle">outbound_ch / ch1　MM / CM → Router，MM → CM</text>
 <rect x="485" y="410" width="80" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
@@ -141,58 +141,58 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <text x="645.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">wr_ch1_agcu</text>
 <rect x="720" y="520" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
 <text x="765.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_wr_ctrl</text>
-<path d="M565 426 L600 426" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M690 426 L720 426" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M525 442 L525 520" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M565 536 L600 536" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M690 536 L720 536" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M765 442 L765 466" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M765 494 L765 520" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M565 426 L599.3 426" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M690 426 L719.3 426" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M525 442 L525 519.3" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M565 536 L599.3 536" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M690 536 L719.3 536" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M765 442 L765 465.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
+<path d="M765 494 L765 519.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <text x="690" y="348" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">RD 可领先 WR，领先量由 buffer credit 约束；buffer 满经 TREADY 向 Router 反压</text>
 <text x="690" y="588" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">出口由 Route 固化：Router TX 或 CoreMem（CH1 write 只允许 CoreMem，所以不支持 CM → MM）</text>
-<path d="M460 222 L470 222 L470 186 L485 186" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M470 222 L470 426 L485 426" stroke="#16181d" stroke-width="1.6" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M460 222 L470 222 L470 186 L484.3 186" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
+<path d="M470 222 L470 426 L484.3 426" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
 <rect x="800" y="108" width="180" height="24" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
 <text x="890.0" y="124.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="middle">Hmem 16 KB + 32 B</text>
 <text x="890" y="142" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="middle">sw_harder_table 16×64 项 · core_mask_table</text>
-<path d="M780 170 L780 150 L820 150 L820 132" stroke="#d97706" stroke-width="1.4" fill="none" marker-end="url(#kkar)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M780 170 L780 150 L820 150 L820 132.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
 <text x="826" y="154" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="start">2 B / 16 B 包头写入</text>
-<path d="M990 132 L1000 132 L1000 576 L765 576 L765 552" stroke="#dc2626" stroke-width="1.2" fill="none" marker-end="url(#kkar)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M990 132 L1000 132 L1000 576 L775 576 L775 552.7" stroke="#dc2626" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
 <text transform="translate(1009 360) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#dc2626" text-anchor="middle">出核时读包头（sw / hw 包头）</text>
 <rect x="1030" y="200" width="44" height="380" rx="6" fill="#eceef1" stroke="#3f4451" stroke-width="1.3"/>
 <text transform="translate(1052 390) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#16181d" text-anchor="middle">DMA XBar</text>
-<path d="M810 296 L1030 296" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M810 296 L1029.3 296" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <text x="920" y="290" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2xbar_ch0_wr　256 B</text>
-<path d="M1030 426 L810 426" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1030 426 L810.7 426" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <text x="920" y="420" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">xbar2dsa_ch　256 B</text>
 <path d="M840 526 L862 536 L862 556 L840 566 Z" fill="#ffffff" stroke="#3f4451" stroke-width="1.2"/>
 <path d="M810 536 L840 536" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M862 546 L900 546 L900 536 L1030 536" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M862 546 L900 546 L900 536 L1029.3 536" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <text x="965" y="530" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2xbar_ch1_wr　CoreMem Only</text>
-<path d="M900 546 L900 700 L1120 700 L1120 606" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M900 546 L900 700 L1120 700 L1120 606.7" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <text x="1010" y="694" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2router_ch　256 B</text>
 <rect x="1110" y="108" width="110" height="40" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="1118" y="123" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#0d9488" font-weight="700" text-anchor="start">MU</text>
 <text x="1118" y="137" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">local_ep_table</text>
 <text x="1118" y="149" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">128 B / 256 B</text>
-<path d="M810 178 L1090 178 L1090 138 L1110 138" stroke="#0d9488" stroke-width="1.4" fill="none" marker-end="url(#kkac)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M810 178 L1090 178 L1090 138 L1109.3 138" stroke="#0d9488" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkac)"/>
 <text x="950" y="174" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#0d9488" font-weight="400" text-anchor="middle">topK 复制给 MU　128 B / 256 B</text>
 <rect x="1110" y="170" width="110" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="1118" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router RX</text>
 <text x="1118" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">router2dsa_ch</text>
 <text x="1118" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">read_ch0 · 256 B</text>
-<path d="M1110 196 L810 196" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1110 196 L810.7 196" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
 <text x="960" y="210" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#2563eb" font-weight="400" text-anchor="middle">AXI-Stream：首拍 Header，Header Parser 在 ch0_rd_ctrl 解析</text>
 <rect x="1110" y="276" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="1118" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#d97706" font-weight="700" text-anchor="start">MatrixMem</text>
 <text x="1118" y="305" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">to_mm_ch CH0</text>
 <text x="1118" y="317" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">mm_out_ch</text>
-<path d="M1074 296 L1110 296" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kkar)" marker-start="url(#kkars)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1074.7 296 L1109.3 296" stroke="#d97706" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kkars)" marker-end="url(#kkar)"/>
 <rect x="1110" y="406" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="1118" y="421" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#d97706" font-weight="700" text-anchor="start">CoreMem</text>
 <text x="1118" y="435" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">to_cm_ch CH0 / CH1</text>
 <text x="1118" y="447" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">cm_out_ch</text>
-<path d="M1074 426 L1110 426" stroke="#d97706" stroke-width="1.8" fill="none" marker-end="url(#kkar)" marker-start="url(#kkars)" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1074.7 426 L1109.3 426" stroke="#d97706" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kkars)" marker-end="url(#kkar)"/>
 <rect x="1110" y="566" width="110" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="1118" y="581" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router TX</text>
 <text x="1118" y="595" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">write_ch1 · 256 B</text>
@@ -200,8 +200,10 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <rect x="485" y="620" width="325" height="40" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
 <text x="493" y="635" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#2563eb" font-weight="700" text-anchor="start">Completion</text>
 <text x="493" y="649" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">RD 与 WR 两侧按 task_id Join，buffer 排空后才生成一次 task_done；同一任务只报一次</text>
-<path d="M765 552 L765 620" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kkar)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M830 312 L830 366 L680 366 L680 620" stroke="#d97706" stroke-width="1.2" fill="none" marker-end="url(#kkar)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M765 552 L765 619.3" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
+<path d="M830 312 L830 366 L680 366 L680 410" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M680 442 L680 520" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M680 552 L680 619.3" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
 <path d="M485 640 L175 640 L175 292" stroke="#d97706" stroke-width="1.6" fill="none" marker-end="url(#kkar)" stroke-linejoin="round" stroke-linecap="round"/>
 <text x="330" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">done → TS（dte2ts_done_ch）</text>
 <rect x="30" y="770" width="1180" height="40" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
@@ -282,31 +284,31 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <rect x="980" y="510" width="170" height="60" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
 <text x="991" y="532" font-size="12" fill="#111827" font-weight="600">Done Pending</text>
 <text x="991" y="548" font-size="9.5" fill="#475569">串行化后报 TS</text>
-<path d="M192 255 L206 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M382 255 L396 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M542 255 L556 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M732 255 L746 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M192 405 L206 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M382 405 L396 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M542 405 L556 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M732 405 L746 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M192 255 L209.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M382 255 L399.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M542 255 L559.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M732 255 L749.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M192 405 L209.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M382 405 L399.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M542 405 L559.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
+<path d="M732 405 L749.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
 <rect x="36.32000000000001" y="181.5" width="147.35999999999999" height="15.5" fill="#ffffff" opacity="0.95"/>
 <text x="110" y="192" font-size="9.5" fill="#2563eb" text-anchor="middle">inbound：Router → MM / CM</text>
 <rect x="18.650000000000006" y="331.5" width="182.7" height="15.5" fill="#ffffff" opacity="0.95"/>
 <text x="110" y="342" font-size="9.5" fill="#2563eb" text-anchor="middle">outbound：MM / CM → Router / CM</text>
-<path d="M295 158 L295 198" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<path d="M645 158 L645 198" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<path d="M390 158 L390 405 L384 405" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<path d="M740 158 L740 405 L734 405" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
+<path d="M295 158 L295 199.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
+<path d="M645 158 L645 199.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
+<path d="M390 158 L390 395 L380.5 395" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
+<path d="M740 158 L740 395 L730.5 395" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
 <rect x="368.98" y="166" width="218.04" height="15" fill="#ffffff" opacity="0.95"/>
 <text x="478" y="176" font-size="9" fill="#d97706" text-anchor="middle">四条 Lane 各自的 TaskQueue 与 Active Context</text>
-<path d="M922 255 L960 255 L960 508" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
-<path d="M922 405 L930 405 L930 508" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
+<path d="M922 255 L960 255 L960 524 L941 524" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
+<path d="M922 405 L930 405 L930 509.5" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
 <rect x="965" y="320" width="61.8" height="15" fill="#ffffff" opacity="0.95"/>
 <text x="968" y="330" font-size="9" fill="#0d9488" text-anchor="start">RD / WR 两侧</text>
 <rect x="965" y="334" width="61.8" height="15" fill="#ffffff" opacity="0.95"/>
 <text x="968" y="344" font-size="9" fill="#0d9488" text-anchor="start">各自 drained</text>
-<path d="M942 540 L976 540" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
+<path d="M942 540 L979.5 540" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
 <path d="M1065 572 L1065 606" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
 <rect x="979.54" y="613.5" width="170.92" height="15.5" fill="#ffffff" opacity="0.95"/>
 <text x="1065" y="624" font-size="9.5" fill="#0d9488" text-anchor="middle">task_done → TS（exactly-once）</text>
@@ -314,23 +316,23 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <rect x="160" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
 <text x="247" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">queued</text>
 <text x="247" y="705" font-size="9" fill="#475569" text-anchor="middle">进 TaskQueue</text>
-<path d="M337 694 L353 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
+<path d="M337 694 L354.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
 <rect x="355" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
 <text x="442" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">active</text>
 <text x="442" y="705" font-size="9" fill="#475569" text-anchor="middle">装载为 Active Context</text>
-<path d="M532 694 L548 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
+<path d="M532 694 L549.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
 <rect x="550" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
 <text x="637" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">issue_done</text>
 <text x="637" y="705" font-size="9" fill="#475569" text-anchor="middle">最后一个请求已 Fire</text>
-<path d="M727 694 L743 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
+<path d="M727 694 L744.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
 <rect x="745" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
 <text x="832" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">drained</text>
 <text x="832" y="705" font-size="9" fill="#475569" text-anchor="middle">响应与 Buffer 收敛</text>
-<path d="M922 694 L938 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
+<path d="M922 694 L939.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
 <rect x="940" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
 <text x="1027" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">join_done</text>
 <text x="1027" y="705" font-size="9" fill="#475569" text-anchor="middle">RD 与 WR 都满足</text>
-<path d="M1117 694 L1133 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
+<path d="M1117 694 L1134.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
 <rect x="1135" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
 <text x="1222" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">task_done</text>
 <text x="1222" y="705" font-size="9" fill="#475569" text-anchor="middle">与 TS 握手成功</text>
@@ -505,16 +507,16 @@ RD Lane 允许领先 WR Lane，领先量由三件事共同约束：
 <path d="M44 148 L544 148" stroke="#6b7280" stroke-width="1"/>
 <text x="294" y="161" font-size="8.5" fill="#6b7280" text-anchor="middle">前三段合起来是包头，24 B 封顶</text>
 <text x="1140" y="161" font-size="8.5" fill="#6b7280" text-anchor="middle">单个 DTE 任务的搬运量上限 32 KB = 256 B × 128 拍</text>
-<path d="M680 170 L680 194" fill="none" stroke="#6b7280" stroke-width="1.8" marker-end="url(#g)"/>
+<path d="M680 170 L680 195.5" fill="none" stroke="#6b7280" stroke-width="1.8" marker-end="url(#g)"/>
 <rect x="500" y="196" width="360" height="62" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
 <text x="510" y="215" font-size="11.5" fill="#111827" font-weight="600">DTE：按内容拆成四份</text>
 <text x="510" y="231.0" font-size="9" fill="#475569">每份的目的地址各算各的，规则见下面两栏</text>
 <rect x="248" y="206" width="228" height="42" rx="4" fill="#ffffff" stroke="#c9bade" stroke-width="1.2"/>
 <text x="362" y="223" font-size="10" fill="#111827" text-anchor="middle">TS 给的 stream_id / task_id</text>
 <text x="362" y="238" font-size="8.5" fill="#6b7280" text-anchor="middle">五类地址的 stream 偏移都用它算</text>
-<path d="M476 227 L498 227" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#d)"/>
-<path d="M560 258 L560 278" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#c)"/>
-<path d="M800 258 L800 278" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#c)"/>
+<path d="M476 227 L499.5 227" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#d)"/>
+<path d="M560 258 L560 279.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#c)"/>
+<path d="M800 258 L800 279.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#c)"/>
 <rect x="24" y="280" width="656" height="398" rx="6" fill="#fdf6ec" stroke="#e4c99b" stroke-width="1.1"/>
 <text x="36" y="298" font-size="10.5" fill="#6b7280" font-weight="600">计算 core：包头进 Hmem，data 与 scale 进 Core Mem，topK 进 MU</text>
 <rect x="40" y="306" width="624" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
