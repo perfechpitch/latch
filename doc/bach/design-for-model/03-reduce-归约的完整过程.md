@@ -547,6 +547,50 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 ```svg
 <svg viewBox="0 0 1200 1500" width="1200" height="1500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="EP 组间的 reduction 链：落本组就累加，不落就透传，链尾才出核">
 <title>EP 组间的 reduction 链</title>
+<path d="M844 441 L844 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 460 L844 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 441 L874 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 460 L874 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 1225 L844 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 1244 L844 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1225 L874 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1244 L874 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 649 L844 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 668 L844 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 649 L874 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 668 L874 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 257 L844 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 257 L874 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 276 L874 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 1041 L844 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 1060 L844 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1041 L874 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1060 L874 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 741 L844 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 760 L844 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 741 L874 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 760 L874 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 349 L844 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 368 L844 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 349 L874 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 368 L874 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 1133 L844 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 1152 L844 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1133 L874 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1152 L874 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 949 L844 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 968 L844 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 949 L874 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 968 L874 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 557 L844 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 576 L844 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 557 L874 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 576 L874 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 833 L844 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 852 L844 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 833 L874 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 852 L874 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect width="1200" height="1500" fill="#ffffff"/>
 <defs><marker id="rca" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="rcas" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="rcai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="rcais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="rcab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="rcabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="rcar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="rcars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="rcac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="rcacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="rcap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="rcaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
 <text x="600.0" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="middle">EP 组间的 reduction 链：落本组就累加，不落就透传，链尾才出核</text>
@@ -579,110 +623,94 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="177" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 0</text>
-<rect x="165.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="156.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="168.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="187.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="178.0" y="199.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
+<text x="298" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="187.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="140" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M370 165 L387 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 165 L417 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 165 L447 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 165 L490 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 196 L387 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 196 L417 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 196 L447 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 196 L490 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 165 L370 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 184 L370 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 165 L400 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 184 L400 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 165 L430 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 184 L430 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 165 L460 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 184 L460 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 165 L490 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 184 L490 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="177" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 165 L 402 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 165 L 432 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 165 L 462 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 196 L 402 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 196 L 432 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 196 L 462 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 165 L 385 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 184 L 385 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 165 L 415 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 184 L 415 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 165 L 445 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 184 L 445 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 165 L 475 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 184 L 475 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="177" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 1</text>
-<rect x="357.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="140" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M562 165 L579 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 165 L609 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 165 L639 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 165 L682 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 196 L579 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 196 L609 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 196 L639 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 196 L682 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 165 L562 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 184 L562 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 165 L592 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 184 L592 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 165 L622 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 184 L622 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 165 L652 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 184 L652 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 165 L682 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 184 L682 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="177" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 165 L 594 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 165 L 624 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 165 L 654 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 196 L 594 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 196 L 624 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 196 L 654 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 165 L 577 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 184 L 577 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 165 L 607 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 184 L 607 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 165 L 637 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 184 L 637 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 165 L 667 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 184 L 667 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="177" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 2</text>
-<rect x="549.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="140" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M754 165 L771 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 165 L801 165" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -698,33 +726,33 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 184 L784 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 165 L814 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 184 L814 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 165 L844 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 184 L844 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874 165 L874 177" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874 184 L874 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="177" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="183" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 3</text>
 <rect x="741.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="814" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="831.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="861.0" y="156.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="844" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="156.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="168" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="187.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="187.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="199.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="232" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M178 257 L195 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 257 L225 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -747,115 +775,99 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="269" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 4</text>
-<rect x="165.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="248.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="260.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="298" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="279.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="232" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M370 257 L387 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 257 L417 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 257 L447 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 257 L490 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 288 L387 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 288 L417 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 288 L447 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 288 L490 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 257 L370 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 276 L370 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 257 L400 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 276 L400 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 257 L430 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 276 L430 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 257 L460 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 276 L460 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 257 L490 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 276 L490 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="269" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 257 L 402 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 257 L 432 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 257 L 462 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 288 L 402 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 288 L 432 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 288 L 462 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 257 L 385 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 276 L 385 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 257 L 415 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 276 L 415 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 257 L 445 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 276 L 445 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 257 L 475 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 276 L 475 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="269" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 5</text>
-<rect x="357.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="232" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M562 257 L579 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 257 L609 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 257 L639 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 257 L682 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 288 L579 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 288 L609 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 288 L639 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 288 L682 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 257 L562 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 276 L562 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 257 L592 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 276 L592 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 257 L622 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 276 L622 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 257 L652 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 276 L652 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 257 L682 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 276 L682 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="269" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 257 L 594 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 257 L 624 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 257 L 654 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 288 L 594 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 288 L 624 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 288 L 654 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 257 L 577 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 276 L 577 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 257 L 607 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 276 L 607 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 257 L 637 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 276 L 637 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 257 L 667 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 276 L 667 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="269" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 6</text>
-<rect x="549.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="232" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M754 257 L771 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 257 L801 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 257 L831 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 257 L874 257" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 257 L874 257" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 288 L771 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 288 L801 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 288 L831 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -865,32 +877,29 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 276 L784 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 257 L814 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 276 L814 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 279 L844 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 257 L874 269" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 276 L874 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="269" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 7</text>
 <rect x="741.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="831.0" y="248.0" width="26" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2"/>
-<text x="844.0" y="260.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#dc2626" font-weight="700" text-anchor="middle">R</text>
-<rect x="861.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="814" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="831.0" y="248.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="844" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="248.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="260" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="279.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="279.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="291.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="324" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
 <path d="M178 349 L195 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 349 L225 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -913,112 +922,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="361" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 8</text>
-<rect x="165.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="340.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="352.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="371.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="178.0" y="383.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
+<text x="298" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="371.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="324" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M370 349 L387 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 349 L417 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 349 L447 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 349 L490 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 380 L387 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 380 L417 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 380 L447 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 380 L490 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 349 L370 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 368 L370 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 349 L400 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 368 L400 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 349 L430 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 368 L430 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 349 L460 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 368 L460 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 349 L490 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 368 L490 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="361" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 349 L 402 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 349 L 432 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 349 L 462 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 380 L 402 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 380 L 432 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 380 L 462 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 349 L 385 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 368 L 385 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 349 L 415 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 368 L 415 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 349 L 445 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 368 L 445 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 349 L 475 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 368 L 475 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="361" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 9</text>
-<rect x="357.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="324" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M562 349 L579 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 349 L609 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 349 L639 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 349 L682 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 380 L579 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 380 L609 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 380 L639 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 380 L682 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 349 L562 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 368 L562 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 349 L592 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 368 L592 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 349 L622 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 368 L622 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 349 L652 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 368 L652 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 349 L682 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 368 L682 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="361" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 349 L 594 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 349 L 624 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 349 L 654 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 380 L 594 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 380 L 624 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 380 L 654 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 349 L 577 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 368 L 577 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 349 L 607 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 368 L 607 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 349 L 637 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 368 L 637 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 349 L 667 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 368 L 667 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="361" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 10</text>
-<rect x="549.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="324" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M857 349 L874 349" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 349 L874 349" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 380 L771 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 380 L801 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 380 L831 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1028,33 +1021,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 368 L784 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 349 L814 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 368 L814 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 349 L844 358" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 371 L844 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 349 L874 361" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 368 L874 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 358" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="361" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 11</text>
 <rect x="741.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="814" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="831.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="861.0" y="340.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="844" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="340.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="352" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="371.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="383" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="371.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="383.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="416" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
 <path d="M178 441 L195 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 441 L225 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1077,112 +1068,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="453" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 12</text>
-<rect x="165.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="432.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="444.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="298" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="463.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="416" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M370 441 L387 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 441 L417 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 441 L447 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 441 L490 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 472 L387 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 472 L417 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 472 L447 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 472 L490 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 441 L370 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 460 L370 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 441 L400 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 460 L400 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 441 L430 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 460 L430 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 441 L460 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 460 L460 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 441 L490 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 460 L490 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="453" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 441 L 402 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 441 L 432 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 441 L 462 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 472 L 402 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 472 L 432 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 472 L 462 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 441 L 385 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 460 L 385 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 441 L 415 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 460 L 415 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 441 L 445 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 460 L 445 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 441 L 475 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 460 L 475 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="453" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 13</text>
-<rect x="357.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="416" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M562 441 L579 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 441 L609 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 441 L639 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 441 L682 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 472 L579 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 472 L609 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 472 L639 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 472 L682 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 441 L562 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 460 L562 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 441 L592 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 460 L592 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 441 L622 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 460 L622 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 441 L652 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 460 L652 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 441 L682 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 460 L682 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="453" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 441 L 594 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 441 L 624 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 441 L 654 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 472 L 594 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 472 L 624 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 472 L 654 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 441 L 577 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 460 L 577 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 441 L 607 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 460 L 607 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 441 L 637 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 460 L 637 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 441 L 667 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 460 L 667 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="453" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 14</text>
-<rect x="549.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="416" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M857 441 L874 441" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 441 L874 441" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 472 L771 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 472 L801 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 472 L831 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1192,33 +1167,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 460 L784 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 441 L814 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 460 L814 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 441 L844 450" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 463 L844 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 441 L874 453" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 460 L874 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 450" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="453" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="459" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 15</text>
 <rect x="741.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="831.0" y="432.0" width="26" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2"/>
-<text x="844.0" y="444.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#dc2626" font-weight="700" text-anchor="middle">R</text>
-<rect x="861.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="814" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="831.0" y="432.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="844" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="432.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="444" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="463.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="475" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="463.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="475.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="532" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M178 557 L195 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 557 L225 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1241,112 +1214,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="569" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 0</text>
-<rect x="165.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="548.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="560.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="579.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="178.0" y="591.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
+<text x="298" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="579.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="532" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M370 557 L387 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 557 L417 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 557 L447 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 557 L490 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 588 L387 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 588 L417 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 588 L447 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 588 L490 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 557 L370 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 576 L370 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 557 L400 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 576 L400 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 557 L430 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 576 L430 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 557 L460 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 576 L460 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 557 L490 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 576 L490 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="569" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 557 L 402 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 557 L 432 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 557 L 462 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 588 L 402 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 588 L 432 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 588 L 462 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 557 L 385 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 576 L 385 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 557 L 415 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 576 L 415 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 557 L 445 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 576 L 445 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 557 L 475 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 576 L 475 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="569" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 1</text>
-<rect x="357.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="532" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M562 557 L579 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 557 L609 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 557 L639 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 557 L682 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 588 L579 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 588 L609 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 588 L639 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 588 L682 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 557 L562 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 576 L562 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 557 L592 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 576 L592 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 557 L622 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 576 L622 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 557 L652 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 576 L652 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 557 L682 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 576 L682 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="569" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 557 L 594 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 557 L 624 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 557 L 654 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 588 L 594 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 588 L 624 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 588 L 654 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 557 L 577 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 576 L 577 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 557 L 607 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 576 L 607 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 557 L 637 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 576 L 637 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 557 L 667 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 576 L 667 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="569" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 2</text>
-<rect x="549.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="532" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M857 557 L874 557" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 557 L874 557" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 588 L771 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 588 L801 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 588 L831 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1356,33 +1313,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 576 L784 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 557 L814 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 576 L814 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 557 L844 566" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 579 L844 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 557 L874 569" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 576 L874 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 566" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="569" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="575" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 3</text>
 <rect x="741.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="814" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="831.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="861.0" y="548.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="844" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="548.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="560" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="579.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="591" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="579.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="591.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="624" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M178 649 L195 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 649 L225 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1405,112 +1360,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="661" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 4</text>
-<rect x="165.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="640.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="652.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="298" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="671.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="624" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M370 649 L387 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 649 L417 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 649 L447 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 649 L490 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 680 L387 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 680 L417 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 680 L447 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 680 L490 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 649 L370 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 668 L370 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 649 L400 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 668 L400 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 649 L430 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 668 L430 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 649 L460 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 668 L460 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 649 L490 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 668 L490 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="661" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 649 L 402 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 649 L 432 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 649 L 462 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 680 L 402 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 680 L 432 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 680 L 462 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 649 L 385 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 668 L 385 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 649 L 415 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 668 L 415 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 649 L 445 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 668 L 445 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 649 L 475 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 668 L 475 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="661" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 5</text>
-<rect x="357.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="624" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M562 649 L579 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 649 L609 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 649 L639 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 649 L682 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 680 L579 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 680 L609 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 680 L639 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 680 L682 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 649 L562 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 668 L562 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 649 L592 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 668 L592 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 649 L622 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 668 L622 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 649 L652 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 668 L652 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 649 L682 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 668 L682 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="661" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 649 L 594 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 649 L 624 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 649 L 654 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 680 L 594 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 680 L 624 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 680 L 654 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 649 L 577 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 668 L 577 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 649 L 607 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 668 L 607 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 649 L 637 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 668 L 637 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 649 L 667 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 668 L 667 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="661" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 6</text>
-<rect x="549.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="624" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M857 649 L874 649" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 649 L874 649" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 680 L771 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 680 L801 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 680 L831 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1520,33 +1459,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 668 L784 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 649 L814 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 668 L814 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 649 L844 658" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 671 L844 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 649 L874 661" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 668 L874 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 658" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="661" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 7</text>
 <rect x="741.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="831.0" y="640.0" width="26" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2"/>
-<text x="844.0" y="652.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#dc2626" font-weight="700" text-anchor="middle">R</text>
-<rect x="861.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="814" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="831.0" y="640.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="844" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="640.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="652" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="671.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="683" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="671.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="683.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="716" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
 <path d="M178 741 L195 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 741 L225 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1569,112 +1506,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="753" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 8</text>
-<rect x="165.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="732.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="744.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="763.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="178.0" y="775.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
+<text x="298" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="763.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="716" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M370 741 L387 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 741 L417 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 741 L447 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 741 L490 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 772 L387 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 772 L417 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 772 L447 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 772 L490 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 741 L370 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 760 L370 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 741 L400 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 760 L400 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 741 L430 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 760 L430 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 741 L460 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 760 L460 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 741 L490 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 760 L490 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="753" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 741 L 402 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 741 L 432 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 741 L 462 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 772 L 402 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 772 L 432 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 772 L 462 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 741 L 385 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 760 L 385 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 741 L 415 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 760 L 415 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 741 L 445 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 760 L 445 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 741 L 475 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 760 L 475 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="753" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 9</text>
-<rect x="357.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="716" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M562 741 L579 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 741 L609 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 741 L639 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 741 L682 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 772 L579 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 772 L609 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 772 L639 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 772 L682 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 741 L562 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 760 L562 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 741 L592 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 760 L592 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 741 L622 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 760 L622 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 741 L652 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 760 L652 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 741 L682 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 760 L682 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="753" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 741 L 594 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 741 L 624 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 741 L 654 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 772 L 594 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 772 L 624 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 772 L 654 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 741 L 577 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 760 L 577 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 741 L 607 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 760 L 607 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 741 L 637 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 760 L 637 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 741 L 667 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 760 L 667 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="753" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 10</text>
-<rect x="549.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="716" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M857 741 L874 741" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 741 L874 741" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 772 L771 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 772 L801 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 772 L831 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1684,33 +1605,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 760 L784 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 741 L814 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 760 L814 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 741 L844 750" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 763 L844 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 741 L874 753" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 760 L874 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 750" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="753" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="759" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 11</text>
 <rect x="741.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="814" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="831.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="861.0" y="732.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="844" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="732.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="763.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="775" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="763.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="775.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="808" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
 <path d="M178 833 L195 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 833 L225 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1733,112 +1652,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="845" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 12</text>
-<rect x="165.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="824.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="836.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="298" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="855.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="808" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M370 833 L387 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 833 L417 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 833 L447 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 833 L490 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 864 L387 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 864 L417 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 864 L447 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 864 L490 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 833 L370 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 852 L370 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 833 L400 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 852 L400 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 833 L430 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 852 L430 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 833 L460 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 852 L460 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 833 L490 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 852 L490 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="845" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 833 L 402 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 833 L 432 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 833 L 462 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 864 L 402 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 864 L 432 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 864 L 462 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 833 L 385 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 852 L 385 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 833 L 415 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 852 L 415 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 833 L 445 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 852 L 445 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 833 L 475 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 852 L 475 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="845" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 13</text>
-<rect x="357.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="808" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M562 833 L579 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 833 L609 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 833 L639 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 833 L682 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 864 L579 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 864 L609 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 864 L639 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 864 L682 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 833 L562 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 852 L562 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 833 L592 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 852 L592 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 833 L622 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 852 L622 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 833 L652 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 852 L652 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 833 L682 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 852 L682 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="845" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 833 L 594 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 833 L 624 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 833 L 654 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 864 L 594 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 864 L 624 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 864 L 654 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 833 L 577 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 852 L 577 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 833 L 607 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 852 L 607 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 833 L 637 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 852 L 637 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 833 L 667 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 852 L 667 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="845" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 14</text>
-<rect x="549.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="808" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M857 833 L874 833" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 833 L874 833" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 864 L771 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 864 L801 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 864 L831 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1848,33 +1751,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 852 L784 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 833 L814 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 852 L814 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 833 L844 842" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 855 L844 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 833 L874 845" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 852 L874 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 842" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="845" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="851" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 15</text>
 <rect x="741.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="831.0" y="824.0" width="26" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2"/>
-<text x="844.0" y="836.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#dc2626" font-weight="700" text-anchor="middle">R</text>
-<rect x="861.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="814" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="831.0" y="824.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="844" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="824.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="836" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="855.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="867" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="855.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="867.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="924" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
 <path d="M178 949 L195 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 949 L225 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1897,112 +1798,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="961" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 0</text>
-<rect x="165.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="940.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="952.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="971.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="178.0" y="983.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
+<text x="298" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="971.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="924" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M370 949 L387 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 949 L417 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 949 L447 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 949 L490 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 980 L387 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 980 L417 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 980 L447 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 980 L490 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 949 L370 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 968 L370 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 949 L400 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 968 L400 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 949 L430 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 968 L430 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 949 L460 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 968 L460 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 949 L490 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 968 L490 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="961" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 949 L 402 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 949 L 432 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 949 L 462 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 980 L 402 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 980 L 432 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 980 L 462 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 949 L 385 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 968 L 385 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 949 L 415 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 968 L 415 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 949 L 445 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 968 L 445 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 949 L 475 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 968 L 475 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="961" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 1</text>
-<rect x="357.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="924" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M562 949 L579 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 949 L609 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 949 L639 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 949 L682 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 980 L579 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 980 L609 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 980 L639 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 980 L682 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 949 L562 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 968 L562 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 949 L592 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 968 L592 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 949 L622 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 968 L622 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 949 L652 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 968 L652 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 949 L682 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 968 L682 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="961" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 949 L 594 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 949 L 624 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 949 L 654 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 980 L 594 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 980 L 624 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 980 L 654 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 949 L 577 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 968 L 577 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 949 L 607 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 968 L 607 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 949 L 637 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 968 L 637 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 949 L 667 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 968 L 667 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="961" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 2</text>
-<rect x="549.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="924" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M857 949 L874 949" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 949 L874 949" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 980 L771 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 980 L801 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 980 L831 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2012,33 +1897,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 968 L784 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 949 L814 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 968 L814 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 949 L844 958" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 971 L844 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 949 L874 961" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 968 L874 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 958" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="961" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="967" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 3</text>
 <rect x="741.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="814" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="831.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="861.0" y="940.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="844" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="940.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="952" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="971.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="983" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="971.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="983.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="1016" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
 <path d="M178 1041 L195 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 1041 L225 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2061,112 +1944,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="1053" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 4</text>
-<rect x="165.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="1032.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="1044.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="298" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="1063.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="1016" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M370 1041 L387 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 1041 L417 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 1041 L447 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 1041 L490 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1072 L387 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 1072 L417 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 1072 L447 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 1072 L490 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1041 L370 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1060 L370 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 1041 L400 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 1060 L400 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 1041 L430 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 1060 L430 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 1041 L460 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 1060 L460 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 1041 L490 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 1060 L490 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="1053" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 1041 L 402 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 1041 L 432 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 1041 L 462 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1072 L 402 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 1072 L 432 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 1072 L 462 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1041 L 385 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1060 L 385 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 1041 L 415 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 1060 L 415 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 1041 L 445 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 1060 L 445 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 1041 L 475 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 1060 L 475 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="1053" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 5</text>
-<rect x="357.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="1016" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M562 1041 L579 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 1041 L609 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 1041 L639 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 1041 L682 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1072 L579 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 1072 L609 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 1072 L639 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 1072 L682 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1041 L562 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1060 L562 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 1041 L592 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 1060 L592 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 1041 L622 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 1060 L622 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 1041 L652 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 1060 L652 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 1041 L682 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 1060 L682 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="1053" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 1041 L 594 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 1041 L 624 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 1041 L 654 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1072 L 594 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 1072 L 624 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 1072 L 654 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1041 L 577 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1060 L 577 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 1041 L 607 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 1060 L 607 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 1041 L 637 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 1060 L 637 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 1041 L 667 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 1060 L 667 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="1053" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 6</text>
-<rect x="549.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="1016" width="176" height="78" rx="5" fill="#f3f4f6" stroke="#9aa1ad" stroke-width="1.1"/>
-<path d="M857 1041 L874 1041" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 1041 L874 1041" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 1072 L771 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 1072 L801 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 1072 L831 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2176,33 +2043,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 1060 L784 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 1041 L814 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 1060 L814 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1041 L844 1050" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1063 L844 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 1041 L874 1053" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 1060 L874 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 1050" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="1053" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="1059" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 7</text>
 <rect x="741.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="831.0" y="1032.0" width="26" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2"/>
-<text x="844.0" y="1044.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#dc2626" font-weight="700" text-anchor="middle">R</text>
-<rect x="861.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="814" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="831.0" y="1032.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="844" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="1032.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="1044" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="1063.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="1075" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="1063.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="1075.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="1108" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M178 1133 L195 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 1133 L225 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2225,112 +2090,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="1145" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 8</text>
-<rect x="165.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="1124.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="1136.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="1155.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="178.0" y="1167.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
+<text x="298" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="1155.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="1108" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M370 1133 L387 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 1133 L417 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 1133 L447 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 1133 L490 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1164 L387 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 1164 L417 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 1164 L447 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 1164 L490 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1133 L370 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1152 L370 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 1133 L400 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 1152 L400 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 1133 L430 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 1152 L430 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 1133 L460 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 1152 L460 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 1133 L490 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 1152 L490 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="1145" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 1133 L 402 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 1133 L 432 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 1133 L 462 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1164 L 402 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 1164 L 432 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 1164 L 462 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1133 L 385 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1152 L 385 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 1133 L 415 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 1152 L 415 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 1133 L 445 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 1152 L 445 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 1133 L 475 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 1152 L 475 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="1145" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 9</text>
-<rect x="357.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="1108" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M562 1133 L579 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 1133 L609 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 1133 L639 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 1133 L682 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1164 L579 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 1164 L609 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 1164 L639 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 1164 L682 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1133 L562 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1152 L562 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 1133 L592 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 1152 L592 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 1133 L622 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 1152 L622 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 1133 L652 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 1152 L652 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 1133 L682 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 1152 L682 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="1145" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 1133 L 594 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 1133 L 624 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 1133 L 654 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1164 L 594 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 1164 L 624 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 1164 L 654 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1133 L 577 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1152 L 577 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 1133 L 607 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 1152 L 607 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 1133 L 637 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 1152 L 637 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 1133 L 667 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 1152 L 667 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="1145" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 10</text>
-<rect x="549.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="1108" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M857 1133 L874 1133" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 1133 L874 1133" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 1164 L771 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 1164 L801 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 1164 L831 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2340,33 +2189,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 1152 L784 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 1133 L814 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 1152 L814 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1133 L844 1142" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1155 L844 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 1133 L874 1145" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 1152 L874 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 1142" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="1145" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="1151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 11</text>
 <rect x="741.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="814" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="831.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="861.0" y="1124.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="844" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="1124.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="1136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="1155.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="1167" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="1155.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="1167.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <rect x="150" y="1200" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
 <path d="M178 1225 L195 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M221 1225 L225 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2389,112 +2236,96 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="165" y="1237" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="320" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="168" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 12</text>
-<rect x="165.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="165.0" y="1216.0" width="26" height="18" rx="3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
+<text x="178" y="1228.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">B</text>
 <rect x="195.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="208" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="225.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<text x="238" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
 <rect x="255.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<text x="268" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
 <rect x="285.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="165.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="178.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="298" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="165.0" y="1247.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="178" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">5</text>
 <rect x="195.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="208.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="208" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="225.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="238.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="238" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="255.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="268.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<text x="268" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
 <rect x="285.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="298.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="298" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
 <rect x="342" y="1200" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M370 1225 L387 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 1225 L417 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 1225 L447 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 1225 L490 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1256 L387 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M413 1256 L417 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M443 1256 L447 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M473 1256 L490 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1225 L370 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M370 1244 L370 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 1225 L400 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M400 1244 L400 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 1225 L430 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M430 1244 L430 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 1225 L460 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 1244 L460 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 1225 L490 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M490 1244 L490 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="357" y="1237" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="512" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 385 1225 L 402 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 1225 L 432 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 1225 L 462 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1256 L 402 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 428 1256 L 432 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 458 1256 L 462 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1225 L 385 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 385 1244 L 385 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 1225 L 415 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 415 1244 L 415 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 1225 L 445 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 445 1244 L 445 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 1225 L 475 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 475 1244 L 475 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="372" y="1237" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="527" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="360" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 13</text>
-<rect x="357.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="387.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="417.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="447.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="477.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="357.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="370.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="387.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="400.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="417.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="430.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="447.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="460.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="477.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="490.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="372" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="402" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="432" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="462" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="372" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="385" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="402" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="415" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="432" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="445" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="462" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="475" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="534" y="1200" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M562 1225 L579 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 1225 L609 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 1225 L639 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 1225 L682 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1256 L579 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M605 1256 L609 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M635 1256 L639 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M665 1256 L682 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1225 L562 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M562 1244 L562 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 1225 L592 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M592 1244 L592 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 1225 L622 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M622 1244 L622 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 1225 L652 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M652 1244 L652 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 1225 L682 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M682 1244 L682 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<rect x="549" y="1237" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
-<text x="704" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
+<path d="M 577 1225 L 594 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 1225 L 624 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 1225 L 654 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1256 L 594 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 620 1256 L 624 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 650 1256 L 654 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1225 L 577 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 577 1244 L 577 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 1225 L 607 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 607 1244 L 607 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 1225 L 637 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 637 1244 L 637 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 1225 L 667 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 667 1244 L 667 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="564" y="1237" width="116" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
+<text x="719" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="552" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 14</text>
-<rect x="549.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
-<rect x="579.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
-<rect x="609.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="639.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
-<rect x="669.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
-<rect x="549.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="562.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
-<rect x="579.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="592.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
-<rect x="609.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="622.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
-<rect x="639.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="652.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="669.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="682.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<rect x="564" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<rect x="594" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<rect x="624" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="654" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="564" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="577" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<rect x="594" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="607" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<rect x="624" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="637" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<rect x="654" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="667" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="726" y="1200" width="176" height="78" rx="5" fill="#fdf6e3" stroke="#d97706" stroke-width="1.1"/>
-<path d="M857 1225 L874 1225" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 1225 L874 1225" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M754 1256 L771 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 1256 L801 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 1256 L831 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2505,33 +2336,31 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <path d="M784 1244 L784 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 1225 L814 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M814 1244 L814 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1225 L844 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1244 L844 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 1225 L874 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M874 1244 L874 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 1237" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M844 276 L844 1256" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="741" y="1237" width="146" height="7" rx="2" fill="#ede9fe" stroke="#7c3aed" stroke-width="0.8"/>
 <text x="896" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6" fill="#7c3aed" font-weight="400" text-anchor="end">Router</text>
 <text x="744" y="1243" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#16181d" font-weight="700" text-anchor="start">chip 15</text>
 <rect x="741.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
+<text x="754" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">0</text>
 <rect x="771.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
+<text x="784" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">1</text>
 <rect x="801.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
-<rect x="831.0" y="1216.0" width="26" height="18" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.2"/>
-<text x="844.0" y="1228.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#dc2626" font-weight="700" text-anchor="middle">R</text>
-<rect x="861.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">4</text>
+<text x="814" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">2</text>
+<rect x="831.0" y="1216.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
+<text x="844" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">3</text>
+<rect x="861.0" y="1216.0" width="26" height="18" rx="3" fill="#f1f2f4" stroke="#9aa1ad" stroke-width="0.9" stroke-dasharray="2 2"/>
+<text x="874" y="1228" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#9aa1ad" font-weight="400" text-anchor="middle">4</text>
 <rect x="741.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="754.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
+<text x="754" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">5</text>
 <rect x="771.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="784.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
+<text x="784" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">6</text>
 <rect x="801.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="814.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
+<text x="814" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">7</text>
 <rect x="831.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="844.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
-<rect x="861.0" y="1247.0" width="26" height="18" rx="3" fill="#ffffff" stroke="#9aa1ad" stroke-width="0.9"/>
-<text x="874.0" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">9</text>
+<text x="844" y="1259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">8</text>
+<rect x="861.0" y="1247.0" width="26" height="18" rx="3" fill="#fdebd0" stroke="#d97706" stroke-width="1.2"/>
+<text x="874" y="1259.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">R</text>
 <path d="M311.0 165 L334.0 165 L334.0 196 L357.0 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="1.0" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M503.0 165 L526.0 165 L526.0 196 L549.0 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="1.0" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M695.0 165 L718.0 165 L718.0 196 L741.0 196" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="1.0" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2636,81 +2465,61 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="146" y="1104" width="760" height="178" rx="5" fill="none" stroke="#d97706" stroke-width="0.9" stroke-dasharray="2 3"/>
 <path d="M165 1116 L887 1116" stroke="#0d9488" stroke-width="1.3" fill="none" stroke-opacity="1.0" stroke-dasharray="3 2" marker-end="url(#rcac)" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M165 1208 L887 1208" stroke="#0d9488" stroke-width="1.3" fill="none" stroke-opacity="1.0" stroke-dasharray="3 2" marker-end="url(#rcac)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 257 L844 269" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 276 L844 279" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 288 L874 288" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 288 L874 288" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 297.0 L874.0 317.0 L754.0 317.0 L754.0 340.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 333.0 L757.5 333.0 L754.0 339.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 349 L771 349" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 349 L801 349" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 349 L831 349" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 358 L844 361" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 368 L844 371" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 380 L874 380" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 380 L874 380" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 389.0 L874.0 409.0 L754.0 409.0 L754.0 432.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 425.0 L757.5 425.0 L754.0 431.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 441 L771 441" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 441 L801 441" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 441 L831 441" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 450 L844 453" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 460 L844 463" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 472 L874 472" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 472 L874 472" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 481.0 L874.0 513.0 L754.0 513.0 L754.0 548.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 541.0 L757.5 541.0 L754.0 547.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 557 L771 557" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 557 L801 557" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 557 L831 557" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 566 L844 569" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 576 L844 579" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 588 L874 588" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 588 L874 588" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 597.0 L874.0 617.0 L754.0 617.0 L754.0 640.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 633.0 L757.5 633.0 L754.0 639.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 649 L771 649" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 649 L801 649" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 649 L831 649" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 658 L844 661" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 668 L844 671" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 680 L874 680" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 680 L874 680" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 689.0 L874.0 709.0 L754.0 709.0 L754.0 732.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 725.0 L757.5 725.0 L754.0 731.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 741 L771 741" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 741 L801 741" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 741 L831 741" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 750 L844 753" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 760 L844 763" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 772 L874 772" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 772 L874 772" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 781.0 L874.0 801.0 L754.0 801.0 L754.0 824.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 817.0 L757.5 817.0 L754.0 823.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 833 L771 833" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 833 L801 833" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 833 L831 833" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 842 L844 845" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 852 L844 855" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 864 L874 864" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 864 L874 864" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 873.0 L874.0 905.0 L754.0 905.0 L754.0 940.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 933.0 L757.5 933.0 L754.0 939.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 949 L771 949" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 949 L801 949" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 949 L831 949" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 958 L844 961" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 968 L844 971" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 980 L874 980" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 980 L874 980" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 989.0 L874.0 1009.0 L754.0 1009.0 L754.0 1032.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 1025.0 L757.5 1025.0 L754.0 1031.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 1041 L771 1041" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 1041 L801 1041" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 1041 L831 1041" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1050 L844 1053" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1060 L844 1063" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 1072 L874 1072" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 1072 L874 1072" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 1081.0 L874.0 1101.0 L754.0 1101.0 L754.0 1124.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 1117.0 L757.5 1117.0 L754.0 1123.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 1133 L771 1133" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M797 1133 L801 1133" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M827 1133 L831 1133" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1142 L844 1145" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M844 1152 L844 1155" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M857 1164 L874 1164" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M857 1164 L874 1164" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M874.0 1173.0 L874.0 1193.0 L754.0 1193.0 L754.0 1216.0" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M750.5 1209.0 L757.5 1209.0 L754.0 1215.0 z" fill="#7c3aed" stroke="none"/>
 <path d="M754 1225 L771 1225" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
@@ -2749,11 +2558,11 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <rect x="930" y="568" width="250" height="128" rx="6" fill="#ffffff" stroke="#5c6370" stroke-width="1.3"/>
 <text x="942" y="587" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#5c6370" font-weight="700" text-anchor="start">路线</text>
 <text x="942" y="606" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">紫粗线：reduction 数据沿最后一列走：</text>
-<text x="942" y="621" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">　北口 core0 进 → 上排到 R core（core3）</text>
-<text x="942" y="636" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">　→ core8 → 南口 core9 出 → 下一颗 chip</text>
+<text x="942" y="621" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">　北口 core0 进 → 沿上排到 core4</text>
+<text x="942" y="636" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">　→ 经 mid 落到 R core（core9，也是南口）</text>
 <text x="942" y="651" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">　不落本组的组，R core 过而不加</text>
 <text x="942" y="666" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">青虚线：组内 reduce 数据汇到 R core</text>
-<text x="942" y="681" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">B：B core（core5），token 由此进各组</text>
+<text x="942" y="681" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">B：B core（core0），token 由此进各组</text>
 <path d="M902 1256 L916 1256 L916 208 L929 208" stroke="#d97706" stroke-width="1.4" fill="none" stroke-opacity="1.0" stroke-dasharray="5 3" marker-end="url(#rcar)" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="480" y="1318" width="140" height="40" rx="7" fill="#eceef1" stroke="#6b7280" stroke-width="1.4"/>
 <text x="550" y="1343" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#6b7280" font-weight="600" text-anchor="middle">DPU DDR</text>
@@ -2768,14 +2577,36 @@ DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC 与 Reduc
 <text x="370" y="1372" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="middle">链尾只此一处出核：60 GB/s、2 个 ETH 口</text>
 <rect x="30" y="1386" width="1140" height="94" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="1403" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">全图 3 tray × 4 层 × 4 chip = 48 chip；黄底是该用户有激活专家的组，灰底是不落的组。紫字是每一跳的动作：第一组直接发出、落本组加后发出、不落透传。</text>
-<text x="46" y="1419" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">chip 内 2×5 core 按 row-major 编号，Router 居中，相邻 core 之间有链路；chip 之间经边界 core 相连：core0 = 北口、core4 = 东口、core5 = 西口、core9 = 南口。坏核未画。</text>
+<text x="46" y="1419" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">chip 内 core 按 row-major 编号，Router 居中：中间两列 chip 是 2×4，第一列与最后一列多一列（虚线格不派角色，只作转发）。四个 chip 口是行 0 左端 = 北口、行 0 右端 = 东口、行 1 左端 = 西口、行 1 右端 = 南口。</text>
 <text x="46" y="1435" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">串成链换来的是出口带宽与 EP 组数解耦：各组各自出核要 60 GB/s × 6 = 360 GB/s、9 个 ETH 口；串成链只有链尾一处 60 GB/s、2 个口。每一跳搬的都是同一份累加中间结果，加 EP 组不会让任何一跳变宽。</text>
 <text x="46" y="1451" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">代价是整条链成了一个整体：任何一组把 reduce-buffer 占满，链上游全部停住，所以派遣必须保守，用户不落的组也要确认余量。</text>
-<text x="46" y="1467" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">与第二层的差别：这里每一跳要等两笔齐了再加（用户之间乱序），不是流着加；缓冲是 32 MB 的 Matrix Mem，不是 ReduceModule 的 16 × 16 KiB。R 借 core 3 是《系统与部署》的暂定（Core3 / Core7）。</text>
+<text x="46" y="1467" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">与第二层的差别：这里每一跳要等两笔齐了再加（用户之间乱序），不是流着加；缓冲是 32 MB 的 Matrix Mem，不是 ReduceModule 的 16 × 16 KiB。R core 坐在最后一列 chip 的 core9，也就是 chip 的南口。</text>
+<path d="M874 441 L874 453" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 460 L874 463" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1225 L874 1237" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1244 L874 1247" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 649 L874 661" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 668 L874 671" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 257 L874 269" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 276 L874 279" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1041 L874 1053" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1060 L874 1063" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 741 L874 753" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 760 L874 763" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 349 L874 361" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 368 L874 371" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1133 L874 1145" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 1152 L874 1155" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 949 L874 961" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 968 L874 971" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 557 L874 569" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 576 L874 579" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 833 L874 845" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M874 852 L874 855" stroke="#7c3aed" stroke-width="2.6" fill="none" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>
 ```
 
-每个 EP 组借出口处的一个 Bach core 作 R core（暂定 Core3 / Core7，图上画在组内最后一列下层 chip 的 core 3）。R core 不分配权重，不参与 TP 与 FFN 计算。各 EP 组的 R core 串成一条链，一个用户的结果沿链逐组累加，只在链尾出核一次。
+每个 EP 组的 R core 在组内最后一列下层 chip 的 `core9`，也就是那颗 chip 的南口，正好坐在出口上。R core 不分配权重，不参与 TP 与 FFN 计算。各 EP 组的 R core 串成一条链，一个用户的结果沿链逐组累加，只在链尾出核一次。
 
 这条通路上有两种数据，名字相近但不是一回事：
 
@@ -3137,7 +2968,7 @@ bit 级一致性：Router reduce 按到达顺序 FP32 累加，MU 的 CSA 树按
 | Reduce credit 谁维护 | DTE 维护本级，ReduceModule 维护相邻下游，Router 不维护（MAS） | HAS：core 与 reduce 之间按用户粒度、reduce 之间按 flit 加用户双粒度，单独的流控网络，user stream 的释放由 core 集中管理 |
 | 第一层做在哪 | MU 的 `C = C + (A × B) × W_ep`（建模默认） | 《软件栈》示例链里是一个 VU task；MAS 的备注是把它挪进 MU 以省 Core Mem |
 | R core 求和做在哪 | 链二的 VU task | 备选：DTE 把第二笔搬进 Router 的 ReduceModule 加完直接送出 |
-| R core 借哪个 core | 出口处的 Core3 / Core7，每行一个 | 暂定；借行尾是否导致 EP 组切分不均衡未定 |
+| R core 在哪个 core | 最后一列 chip 的 `core9`，也就是 chip 的南口 | 它是那颗 chip 多出来一列带进来的，不占 8 个计算 core，EP 组切分不受影响 |
 | RouterTable `operation` 的 Reduce0 / Reduce1 / Reduce2 | 建模按源分量 / 中继累加 / 最终汇聚 | 原文未定义 |
 | reduce 任务的拆分 | 一个 32 KB 的 reduce 任务拆成多笔 8 KB 由 TS 并行发射 | 方案可能改到 DTE 内做多笔，届时 TS 不再需要 `TASK_REDUCE_ISS` |
 | dispatcher 是谁 | Bach core，顺序调度 | slave CPU 做 dispatcher 可乱序，需 CPU 管理每组 reduction 资源 |

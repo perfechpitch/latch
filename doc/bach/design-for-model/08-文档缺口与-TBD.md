@@ -39,7 +39,7 @@
 | 包头与 topK 的存放位置 | DTE MAS：包头可写 DTE 内 Header mem 或 Cmem 独立空间；topK 可写 MU 的 `topK_ep_table` 或 Cmem 独立空间 | 软件计算流程详细评估：计算 core 的包头存 DTE 内独立 mem，B core / R core 存 Core Mem；topK 由 DTE 复制到单独的 mem 供 MU 读 | 按软件计算流程详细评估 |
 | B core 查询 ready 的 task 由谁执行 | 软件计算流程详细评估 GLM5 章：VU 做 check flag | 同文档 TS 章的 B core 示例：task0 为 MU | 按 GLM5 章（VU），待确认 |
 | `SELF_START` 的适用范围 | TS MAS：仅 B core 才会有 | 软件计算流程详细评估 R core 示例：task0 `self_start=1` | 按软件计算流程详细评估，B core 与 R core 都有 |
-| Router 的 R2R 方向端口 | Router MAS：五方向互连，上、下、左、右及 Core | DATA_NOC HAS：left / right / mid 三个方向端口，加 local 与 reduce_0/1/2，5 入 7 出 Crossbar | 按 HAS 的三方向。2×5 拓扑里邻居就是同行左右加另一行对称位，且与第 3 章顶层节的 data_L / data_UD / data_R 三通道一致 |
+| Router 的 R2R 方向端口 | Router MAS：五方向互连，上、下、左、右及 Core | DATA_NOC HAS：left / right / mid 三个方向端口，加 local 与 reduce_0/1/2，5 入 7 出 Crossbar | 按 HAS 的三方向。两行的拓扑里邻居就是同行左右加另一行对称位，且与第 3 章顶层节的 data_L / data_UD / data_R 三通道一致 |
 | Reduce 的累加做在哪 | Router MAS：ReduceModule 在 Router 内，16 用户 × 16 KiB 上下文，RMW 原位累加，自己维护下游 Reduce Credit | DATA_NOC HAS：Router 内不设 Reduce Buffer，累加由独立的 Rmem 子系统完成，reduce credit 是单独的流控网络 | 按 MAS：ReduceModule 在 Router 内 |
 | stream credit 表谁是唯一有效状态 | Router MAS：Router 维护的 User Resource Allocation Table 是唯一有效状态，DTE 持 cache | DATA_NOC HAS：Router 输出单元与 core 内各持一份 credit table，靠 credit release 接口同步 | 按 MAS：Router 唯一有效 |
 | 出核前查资源的监听队列在谁那里 | Router MAS 一处：功能已转移到 DTE 中 | 同一份 MAS 另一处：详写 Router 上 16 项全相连监听事件队列与完整申请流程 | 按后者：在 Router |
@@ -53,8 +53,8 @@
 | loop_bp 项数 | Key features：最多 4 项 | 参数列表：4/8 | 未定 |
 | `STALL_COMPUTE_ON_CREDIT_MISS` | Top 模拟器详设正文：默认 `true`（credit 不足时本核停算） | 同文档仿真参数表：默认 `false` | **未解**，影响 credit 阻塞时的吞吐建模，两种模式文档建议做对比仿真 |
 | VU 读 CoreMem 带宽 | Top 模拟器：`vu 读/写 core mem = 256 B/T` | 一体化模拟器：`VU_Dsa 访存端口 CoreMem bw=64B`；VU MAS：128 B | 三处不一致，**建模取 VU MAS 的 128 B** |
-| chip 内 core 网格 | 硬件 MAS / 需求分析：2×4（Harvest 后 2×5） | 两套模拟器一律按 **2×5** 建模 | 模拟器口径已含 Harvest，按 2×5 |
-| map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | 示例 map 是旧的 2×4 版本 |
+| chip 内 core 网格 | 硬件 MAS / 需求分析：2×4（Harvest 后 2×5） | 两套模拟器一律按 **2×5** 建模 | **已定：按列位置分两种形状**。中间列 chip 2×4 共 8 个 core，第一列与最后一列 chip 2×5 共 10 个，多出的一列放 B core / R core 与一个不派角色的 core。Harvest 方案作废，没有坏核余量，每颗 chip 一律 8 个计算 core |
+| map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | 两个都对，只是各说一种 chip：中间列是 4 列，两侧是 5 列。这一项要按 chip 逐颗给，不能配成全局常数 |
 | VC 数 | DATA_NOC HAS 正文与 VC Buffer 表：每 Input Port V = 4 | 同一份 HAS 的 VC 使能 mask 20-bit、`vc_id` 5-bit、Area 预算按 VC0–19（4×20 + 16×2 + shared 20 = 132 flits/port） | V = 20 是 2026/08/19 缩减 VC 之前的残留，但 Area 与 Architectural Guidelines 两节没同步。按 V = 4 建 |
 | VC private 深度 | HAS 3.2.2 与 REQ-ARCH-025：Private per-VC 深度 = 2（防死锁），软件可配 | 同一份 HAS 的 VC Buffer 结构表：Private ~20 flits/VC（覆盖 RTT），总量 4×20 + shared 20 = 100 flits/port = 25 KB | **已定：按 20**。HAS 的 VC Buffer 规格表是缩减到 V=4 之后的正式口径（`V=4`、`Private(VC0–3) ~20 flits/VC`、`总 4×20+20=100 flits/port=25 KB`）；`2` 是 REQ-ARCH-025 的软件可配下限，也是已删除的 VC4–19 那一档的深度，HAS 正文写作「极限情况……保证每 VC 基本传输需求」 |
 | R2R 单跳延迟 | DATA_NOC HAS 性能预算：internal 6 ns + wire 10 ns = **16 ns/hop**，mid 无走线延迟 | 第 5 章延迟表与性能需求规格：T_R2R = **40 T** | **倾向 16 ns**。HAS 新版新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300ns」，单跳约 10 cycle 以内，与 16 ns @1GHz 一档相符；40 T 对不上这条约束。待与设计者确认 40 T 是不是含 core 侧往返的端到端值 |
@@ -64,7 +64,7 @@
 | `stream_credit`（HAS 旧版叫 `coremem_credit`）初值 | HAS Boot 流程：上电 `stream_credit[port] = 0`，由正常 Core 上电发初始化脉冲逐步初始化 | HAS 4.3.2：`stream_credit` 为 16 个用户的状态表，**默认为全部使能状态** | 按 Boot 流程那一套（上电 0），另一处是描述稳态 |
 | Router 与 core 的接口协议 | HAS 正文：五类端口统一 Credit-based，local 也是 credit 流控 | HAS 遗留 action：“目前 router 和 core 通信采用 axi stream，如果可以也建议使用同样的 hflit 和 pflit 协议” | 当前实现是 AXI-Stream-Like，credit-based 是建议方向。按当前实现建，DTE-local 桥接做两侧协议转换 |
 | `TASK_EXE_MASK` 的极性 | TS MAS 寄存器表 bit 44：**0 = 按照用户执行，1 = 不按照用户执行**，一位一档 | 同一份 MAS 的 DP+P2P 场景描述：“有些用户只有 P2P 无计算 task、有些是计算无 P2P”，要分出两组就需要两个方向，一位不够 | 按寄存器表的极性建模，`compute = 0` 的用户跳过所有 `TASK_EXE_MASK = 0` 的 task。场景描述那一半的“计算无 P2P”这一支落不下来，**未解** |
-| chip 内 mid 接口 | 第 2 章与我们的 Chip 装配：`core[i]` 与 `core[i+5]` 的 mid 端口全部对接 | HAS 旧版 ASM-01 括号：“中间 router mid 接口不连接” | **已定：连接**。HAS 新版正文改成「2 行 × 5 列简化二维 Mesh（**中间三列连接作为备份通路**）」，并新增 REQ-ARCH-037「Harvest 场景下增加 2×5 mesh 中间三列连接需求，用于提供多路径选择」 |
+| chip 内 mid 接口 | 第 2 章与我们的 Chip 装配：`core[i]` 与另一行对称位置的 core 的 mid 端口全部对接（2×4 是 `core[i+4]`，2×5 是 `core[i+5]`） | HAS 旧版 ASM-01 括号：“中间 router mid 接口不连接” | **已定：连接**。HAS 新版正文改成「简化二维 Mesh（**中间各列连接作为备份通路**）」，并新增 REQ-ARCH-037，用于提供多路径选择 |
 | VC Buffer 容量 | 《通信机制（分析过程）》按容量记：reduce 专用 VC3 16 KB、三个共享 VC 各 8 KB、三方向各一套，合计 **120 KB** | DATA_NOC HAS 按 flit 记：private 20 flit/VC × 4 加 shared 20，一个方向 100 flit ≈ **25 KB**，三方向 75 KB | 未解。前者按 reduce 要整包缓冲反推，后者按覆盖 credit 往返反推 |
 | ReduceBuffer 容量的第三种口径 | 《通信机制（分析过程）》另一处：Core 必须一次性整包发进 ReduceBuffer，一个 Token 8192 × 2 B = **16 KB** | 同一份文档前文记 64 KB；Router MAS 记 256 KB | 三个数在同一条链上：16 KB 是单包下界，64 KB 是正反双份，256 KB 是 16 用户并发。**未解**，取决于 ReduceBuffer 要同时装几个用户 |
 | `TASK_DSA_EN` 位域 | TS MAS 寄存器表 bit 38:37 曾定义 `TASK_DSA_EN`，`0` 只调用 RV core 不调 DSA、`1` 调用 | 同一份 MAS 已把这一整行划上删除线，且没有给替代方案 | **未解**。本套文档的 `task_dsa_en` 下发字段与「`task_dsa_en = 0` 的 Generated 任务下发给 DTE Local RV core，不配 DSA」这条机制都建立在它上面，删掉就没有依据。位域本身的 `38:37` 与「宽度 1」也自相矛盾。先按保留建模，标注待确认 |
@@ -104,7 +104,7 @@
 **Router**
 
 * 整包传输方案下“长包阻塞可能有死锁场景，需要在架构层考虑不会出现死锁”，死锁避免的具体论证未写
-* 双坏核示例里一处表项原文未定：C0 在 Path2 上要不要查输出端的 stream credit table。`operation` 列的 Reduce0 / Reduce1 / Reduce2 含义原文未定义。原文另一处“C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位”已不成立：出方向掩码里没有 Core 位，进不进本 core 由 `path_core_bypass` 单独判定
+* Router 表项示例里一处原文未定：C0 在 Path2 上要不要查输出端的 stream credit table。`operation` 列的 Reduce0 / Reduce1 / Reduce2 含义原文未定义。原文另一处“C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位”已不成立：出方向掩码里没有 Core 位，进不进本 core 由 `path_core_bypass` 单独判定
 * **VC 机制到底实不实现**。原文的原话是“实现 VC 机制需要很大的额外面积、设计复杂度和验证空间，成本极高。具体是否实现需要模拟器介入，综合判断开发复杂度和效果收益”。这是本次建模要回答的问题之一，不是文档缺口
 * “Broadcast 过快引起空泡”这一档的定量结论，原文明确写了“需要模拟器介入协助确认”。前提是同一个用户在 core0 与 core2 上的处理速度不同，而计算量分布均匀时差距主要来自逐级 Reduce
 * P2P 流量控制的“流量控制使能”配在哪一张表，原文只写“在一个 Core 配置了流量控制使能”，没有指明是 TS 的 CFG_REG 还是 RouterTable。本套文档按配在 TS 建模
@@ -160,7 +160,7 @@
 **Data_NOC（DATA_NOC HAS 的 Open Issues）**
 
 * OPEN-04 Routing Table 在线更新机制：是否需要额外的数据通路模式支持运行时在线更新而不中断数据流
-* OPEN-05 拓扑可扩展性：当前默认 2×5 Mesh 需要 mid 接口，若后续采用 1×10 结构 mid 将删除，Router 是否预留 mid 接口的可配置删除能力
+* OPEN-05 拓扑可扩展性：当前的两行 Mesh 需要 mid 接口，若后续采用单行结构 mid 将删除，Router 是否预留 mid 接口的可配置删除能力
 * OPEN-06 Chip to chip 是否支持 VC：支持则两侧要单独例化 SRAM 吸收 600 ns 往返；不支持则要靠软件在业务上单独实现跨 chip 的进 core 流控
 * hflit 与 pflit 并行传输的协议多约 10% 信号线，是否改成统一协议
 * Router 与 core 之间是否从 AXI-Stream 改成同一套 hflit / pflit 协议

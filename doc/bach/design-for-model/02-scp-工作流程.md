@@ -74,7 +74,7 @@
 <rect x="320" y="118" width="560" height="222" rx="8" fill="none" stroke="#9aa1ad" stroke-width="1" stroke-dasharray="5 4"/>
 <rect x="160" y="30" width="740" height="320" rx="8" fill="none" stroke="#9aa1ad" stroke-width="1" stroke-dasharray="5 4"/>
 <text x="170" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#9aa1ad" font-weight="600" text-anchor="start">一颗 chip</text>
-<text x="870" y="134" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#9aa1ad" font-weight="600" text-anchor="end">Bach core ×10（坏核只构造 Router）</text>
+<text x="870" y="134" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#9aa1ad" font-weight="600" text-anchor="end">Bach core（不派角色的只构造 Router）</text>
 <rect x="20" y="150" width="120" height="60" rx="7" fill="#eceef1" stroke="#6b7280" stroke-width="1.4"/>
 <text x="80.0" y="170.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#6b7280" font-weight="600" text-anchor="middle">上位 CPU</text>
 <text x="80.0" y="184.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" text-anchor="middle">tray 的 CPU</text>
@@ -327,8 +327,8 @@
 * ③ 解复位前配置（此时 core 内模块全部未解复位，`ctrl_noc` 已连通）
   * 初始化 ITCM：RV core 有分支预测、无预取，只扫 ITCM，避免预测取到未初始化内容触发异常
   * 写固件：RV firmware 写到三个 RV core 的 ITCM reset pc 位置（固定位置）；DTE 的 ITCM 另写 weights loader（软件指定位置）；DTCM 写静态参数
-  * 配全部 10 个 core 的 Router：按 fuse 的 `core_bad_mask` 写 RouterTable、Skip Mask、Credit Bypass Route；坏核也写这几项，其他不配
-    * Router 上电顺序：PMU 释放 core 时钟域复位 → 读 fuse，`stream_credit` 置 0 → RouterTable 全 bypass / no-op → 等 SCP 配表与 VC 使能 → 好核发初始化脉冲 → 就绪
+  * 配本 chip 全部 core 的 Router：写 RouterTable、Skip Mask、Credit Bypass Route；不派角色的 core 也写这几项，其他不配
+    * Router 上电顺序：PMU 释放 core 时钟域复位 → `stream_credit` 置 0 → RouterTable 全 bypass / no-op → 等 SCP 配表与 VC 使能 → 各 core 发初始化脉冲 → 就绪
     * RouterTable 多副本全部写完 Router 才回完成；SCP 拿到完成后再写 DTE 与 ReduceModule 各自的那一份，硬件不代为同步
 * ④ 解复位：SCP 写 clk / reset 模块
   * RV core 从 `boot_pc` 跑 firmware：配 CSR、初始化 gp / sp，执行 **WFT 指令**进 wait
@@ -340,7 +340,7 @@
   * SCP 轮询状态寄存器，或收 IPI 中断
   * 三个 RV core 的 ready 全高 → SCP 开放该 core 的业务接收权限，Router 才收业务
 * ⑥ 通知上位 CPU：SCP 经 PCIe 报 boot 完成；此时路由表里还没有业务路径，TS 也没有任务链
-* 好核的初始化六步：RV firmware 进 ITCM → DTE bootloader 进 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化；TS 与 kernel 两步在装模型时做
+* 每个 core 的初始化六步：RV firmware 进 ITCM → DTE bootloader 进 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化；TS 与 kernel 两步在装模型时做
 
 ***
 
@@ -446,7 +446,7 @@ weights 加载模式的三处配置：
 
 | 配置对象 | 配什么 |
 | - | - |
-| Router | 路由表只用 1 条 path，是 weights 专用的 P2P 路径；path 与物理 core id 解耦，软件在 path 里指定 core index、在 msg 里标记落在哪些 core；坏核数据不进核，仍按位置转发 |
+| Router | 路由表只用 1 条 path，是 weights 专用的 P2P 路径；path 与物理 core id 解耦，软件在 path 里指定 core index、在 msg 里标记落在哪些 core；不派角色的 core 数据不进核，仍按位置转发 |
 | TS | `WEIGHTS_MODE = 1`；`datain_task` 的 pc 指向 weights loader，`trigger_task_chain_en = 0`，搬完不启动任务链 |
 | DTE | SCP 复位 DTE → 全局静态寄存器 → task LUT → stream 表 → header / topK 参数 → 使能 TS 直接触发；DTE 回 `init_done` |
 
@@ -651,7 +651,7 @@ weights 加载模式的三处配置：
 ```
 
 * SCP 桩每 chip 一个，只接 `ctrl_noc`；`ctrl_noc` 端点每 core 一个；都是独立打拍的模块，归属 Chip
-* 事务顺序：先给全部 10 个 core 的 Router 配表，再顺序解复位并配置 8 个好核；每笔一拍
+* 事务顺序：先给本 chip 全部 core 的 Router 配表，再顺序解复位并配置各个 core；每笔一拍
 * 编译侧的 `core_cfg`、`credit_init`、`kernel_img` 在 boot 期变成 `scp_img`；`scp_fsm` 记当前 core 与步骤
 * 三份 RouterTable 一致不在输入自洽检查里查，由 SCP 桩的写入顺序保证
 * 本轮不建：`async_int` 与 IPI 的行为（留接口名与状态位）；Debug Module、DTM、GDB；Host / Node / tray CPU 的流控与退出；RV core 异常与 TS Except Check 的行为
@@ -678,7 +678,7 @@ weights 加载模式的三处配置：
 * RV core 的 reset PC：硬件固定值，还是软件可配且不受复位影响
 * Boot 完成通知用的 mailbox 在 core 内还是 core 外
 * 广播的实现位置：SoC 级文档放在 SCP 侧的 BCB，core 级文档写的是 core0 转发；建模按 chip.md 的开关
-* Router 初始化在六步里的位置：MAS_TOP 排在 TS 之后，《latch 建模计划》提前到解复位前并覆盖坏核
+* Router 初始化在六步里的位置：MAS_TOP 排在 TS 之后，《latch 建模计划》提前到解复位前并覆盖不派角色的 core
 * SCP 的初始化程序来自 flash 还是经 PCIe 搬入；SCP 与哪个 PCIe 相连
 * ITCM 溢出：通知 SCP 重搬 kernel，还是调 DTE DSA 重搬
 * kernel 是否也支持经 msg 流搬运
@@ -693,7 +693,7 @@ weights 加载模式的三处配置：
 ## 取舍
 
 * **kernel 走 SCP，weights 走 msg 流**：kernel 重复、KB 级，配置总线够用且能广播；weights 每 core 不同、MB 级，配置总线带宽不够
-* **坏核的 Router 先配，一个不落**：漏配会让经过它的 path 全断
+* **不派角色的 core 的 Router 先配，一个不落**：漏配会让经过它的 path 全断
 * **解复位前先初始化 ITCM**：分支预测会取到未初始化内容；没有预取，所以只扫 ITCM
 * **运行期 SCP 不碰调度**：TS 写完 `TS_INIT_FINISH` 后按固定逻辑跑，计算与通信的推进不依赖 SCP 的响应时间
 * **调试经 SCP，停机停整核**：core 不跑 GDB server；现场分布在多个模块又没有快照，只停一部分会不一致

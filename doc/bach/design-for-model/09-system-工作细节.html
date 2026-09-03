@@ -266,7 +266,7 @@ document.addEventListener('keydown',e=>{
    公共布局：三张平面并排，四个场景里位置一格不动
    平面一（左）：一个 LPU Node —— 3 tray × 4 层 × 4 chip 的 12 × 4 网格，
                 左右各一列 PCIe Switch；上方是入口（GPU → SNIC/DPU），下方是出口（DPU DDR → GPU）
-   平面二（右上）：一颗 chip 放大，2×5 core，边界 core 就是四个对外口
+   平面二（右上）：一颗 chip 放大，边界 core 就是四个对外口
    平面三（右下）：一个 core 放大，TS → RV core → DSA → 存储 → Router
    ================================================================ */
 
@@ -279,8 +279,8 @@ function gridNodes(){
   for(let gy=0;gy<12;gy++)for(let gx=0;gx<4;gx++){
     const ep=Math.floor(gy/2);
     let role='EP'+ep;
-    if(gx===0&&gy%2===0)role='EP'+ep+' · B@core5';
-    if(gx===3&&gy%2===1)role='EP'+ep+' · R@core3';
+    if(gx===0&&gy%2===0)role='EP'+ep+' · B@core0';
+    if(gx===3&&gy%2===1)role='EP'+ep+' · R@core9';
     ns.push({id:chipId(gy,gx),x:GX[gx],y:rowY(gy),w:CW,h:CH,r:4,fs:10,
       t:'chip '+((gy%4)*4+gx),s:[role]});
   }
@@ -313,7 +313,7 @@ const TRAY_GROUPS=[0,1,2].map(t=>({x:68,y:rowY(4*t)-18,w:424,h:196,
 
 /* ---- 平面二：一颗 chip ---- */
 const QX=[566,658,750,842,934], QY=[98,160];
-const Q_PORT={0:'北口 N',4:'东口 E',5:'西口 W',9:'南口 S'};
+const Q_PORT={0:'北口 N · 第一列 chip 的 B core',4:'东口 E · 最后一列 chip 不派角色',5:'西口 W · 第一列 chip 不派角色',9:'南口 S · 最后一列 chip 的 R core'};
 function chipCoreNodes(){
   const ns=[];
   for(let r=0;r<2;r++)for(let c=0;c<5;c++){const i=r*5+c;
@@ -371,7 +371,7 @@ const CORE_EDGES=[
  {id:'e_mid',   pts:[[789,548],[789,532]],label:'mid',lx:789,ly:560},
  {id:'e_right', pts:[[940,548],[940,532]],label:'right',lx:940,ly:560}];
 const PLANE_GROUPS=TRAY_GROUPS.concat([
-  {x:558,y:70, w:462,h:150,label:'一颗 chip 放大：2×5 core，Router 居中，边界 core 就是四个对外口'},
+  {x:558,y:70, w:462,h:150,label:'一颗 chip 放大：中间列 2×4、两侧 2×5，Router 居中，边界 core 就是四个对外口'},
   {x:558,y:232,w:462,h:392,label:'一个 core 放大：TS 派活，三条 RV core + DSA 执行链，Router 收发'}]);
 function allNodes(){return gridNodes().concat(chipCoreNodes(),CORE_NODES.map(n=>Object.assign({},n)));}
 function allEdges(){return gridEdges().concat(chipCoreEdges(),CORE_EDGES.map(e=>Object.assign({},e)));}
@@ -393,10 +393,10 @@ const S_TOPO={id:'topo',name:'① 硬件拓扑',vb:VB,
  groups:PLANE_GROUPS,nodes:allNodes(),edges:allEdges(),
  table:{label:'建模对象（07 章）',cols:['层','对象','形态'],
   rows:[['LPU 之外','入口桩 · 出口桩（GPU、DPU、ETH、tray CPU 都折在这里）','桩 ×2'],
-        ['LPU','48 chip 的构造与接线、全局坐标、Harvest 与逻辑 core 映射','装配'],
+        ['LPU','48 chip 的构造与接线、全局坐标、chip 形状与逻辑 core 映射','装配'],
         ['LPU','链路：R2R · C2C · 跨 tray 纵向 · PCIe↔Router · ETH','模块，每方向一个实例'],
         ['LPU','PCIe Switch，每 tray 4 个','模块 ×12'],
-        ['chip','2×5 阵列 · SCP 桩 · ctrl_noc 端点 ×10 · C2C Bridge ×4','装配 + 模块 ×3 类'],
+        ['chip','中间列 2×4、两侧 2×5 · SCP 桩 · ctrl_noc 端点每 core 一个 · C2C Bridge ×4','装配 + 模块 ×3 类'],
         ['core','Router ×8 模块 · TS ×9 模块 · RV core ×3','模块'],
         ['core','DTE ×8 · MU ×7 · VU ×11 · 存储 ×3','模块']]},
  steps:[
@@ -417,12 +417,12 @@ const S_TOPO={id:'topo',name:'① 硬件拓扑',vb:VB,
   d:['当前部署的 Node 就是一个机柜，三个 tray 纵向相接，合起来是 <b>12 × 4 的 chip 网格</b>。',
      'tray 是最小物理部署单元：4 层 × 4 chip，加 4 个 PCIe Switch、一个 CPU 带 DDR、4 个 SmartNIC。',
      '一层是排成一行的 4 颗 chip，与模型的层无关。',
-     '每颗 chip 2×5 个 core，Harvest 后保证 8 个可用，全 Node <b>384 个可用 core</b>，每 core 拿 27 MiB 权重。'],
+     '中间列 chip 8 个 core、两侧 chip 10 个，每颗都是 8 个计算 core，全 Node <b>384 个计算 core</b>，每 core 拿 27 MiB 权重。'],
   act:ALL_CHIPS,
   lt:LT,
   logic:[
           ['编译侧→LPU', 'grid', 'gy = tray × 4 + 层号（0～11）· gx = 列号（0～3）'],
-          ['编译侧→LPU', 'harvest', '48 × 10 b 坏核位图，每 chip 至多 2 个坏核'],
+          ['编译侧→LPU', 'chip_shape', '48 项：gx ∈ {0, 3} 的 chip 是 2×5，其余是 2×4'],
           ['编译侧→LPU', 'logical_map', '逻辑 0～7 是 compute，逻辑 8 是 special（B / R core）']],
   ref:'02「集群与 Node」　lpu.md L1、L2'},
 
@@ -454,23 +454,23 @@ const S_TOPO={id:'topo',name:'① 硬件拓扑',vb:VB,
           ['出口桩→入口桩', 'retired', 'valid · gpu_id[7:0] · retired_token[15:0] · src[7:0]']],
   ref:'02「tray 组成」　pcie-switch.md W1、W2　external-stub.md G1～X2'},
 
- {t:'一颗 chip：2×5 core，边界 core 就是四个口',
+ {t:'一颗 chip：中间列 2×4、两侧 2×5，边界 core 就是四个口',
   d:['同行相邻 core 的 Router 用 left / right 对接，core[i] 与 core[i+5] 用 mid 直连，<b>没有对角线</b>。',
-     '每行左右两端接 C2C Bridge：core0 引到北口、core4 引到东口、core5 引到西口、core9 引到南口。',
-     'Harvest 标为坏的 core 只构造 Router，数据通路照常转发，credit 跨过它直接给两侧好核。',
-     '坏核位置不同会让每颗 chip 的路由表不同，所以路由表按 chip 读入，不写死。'],
+     '每行左右两端接 C2C Bridge：行 0 左端引到北口、行 0 右端引到东口、行 1 左端引到西口、行 1 右端引到南口。2×4 chip 是 core0 / core3 / core4 / core7，2×5 chip 是 core0 / core4 / core5 / core9。',
+     '不派角色的 core 只构造 Router，数据通路照常转发，credit 跨过它直接给两侧落地的 core。',
+     '不派角色的 core位置不同会让每颗 chip 的路由表不同，所以路由表按 chip 读入，不写死。'],
   act:Q_IDS,eact:Q_EIDS,
   lt:LT,
   logic:[
           ['core→core', 'link[d]', 'd ∈ {left, right, mid}，R2R 256 B/T · 40T'],
           ['C2C Bridge→边界 core', 'bridge2core[d]', '同 flit 字段；TX 按 4 KB 拆包加 seq_id，RX 按 seq_id 拼包'],
-          ['SCP→Router', 'cfg', 'RouterTable 64 项 · Skip Mask · Credit Bypass Route，全 10 个 core 一个不落']],
-  ref:'chip.md F1～F8　03-router「坏核与跨 chip」'},
+          ['SCP→Router', 'cfg', 'RouterTable 64 项 · Skip Mask · Credit Bypass Route，本 chip 全部 core 一个不落']],
+  ref:'chip.md F1～F8　03-router「不派角色的 core与跨 chip」'},
 
  {t:'EP6+TP8 下的角色：每组借两个 core 做 B core 与 R core',
   d:['一个 EP 组是<b>相邻两层 8 颗 chip</b>，组内 8 路 TP，64 个计算 core 各持本组 48 个专家的一片。',
-     '<b>B core</b> 借组内 chip 0 的物理 core5（西口那一个），是广播的发起者与守门人，不参与计算。',
-     '<b>R core</b> 借组内 chip 7 的物理 core3（暂定 Core3 / Core7），六个 R core 沿最后一列串成 reduction 链。',
+     '<b>B core</b> 是组内 chip 0 多出来那一列的物理 core0（北口那一个），是广播的发起者与守门人，不参与计算。',
+     '<b>R core</b> 是组内 chip 7 多出来那一列的物理 core9（南口那一个），六个 R core 沿最后一列串成 reduction 链。',
      '两种专用 core 都不部署权重，各拿自己 32 MB 的 Matrix Mem 当缓冲。'],
   act:B_CHIPS.concat(R_CHIPS),eact:B_CHAIN.concat(R_CHAIN),
   lt:LT,
@@ -569,9 +569,9 @@ const TASK_EDGES=[
  {id:'r8',pts:[[700,466],[700,490],[335,490],[335,500]],label:'读出两笔',lx:520,ly:498},
  {id:'r5',pts:[[234,530],[250,530]]},{id:'r6',pts:[[420,530],[436,530]]},{id:'r7',pts:[[586,530],[602,530]]}];
 const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,640],
- groups:[{x:30,y:48, w:980,h:150,label:'B core（每个 EP 组 chip 0 的 core5）：两条链，一对指针耦合'},
+ groups:[{x:30,y:48, w:980,h:150,label:'B core（每个 EP 组 chip 0 的 core0）：两条链，一对指针耦合'},
          {x:30,y:214,w:980,h:150,label:'计算 core（每组 64 个，逻辑 core 0～7）：单链，一个用户从收到发占一个 stream 项'},
-         {x:30,y:380,w:980,h:200,label:'R core（每个 EP 组 chip 7 的 core3）：两条链，软件映射表按 (gpu_id, token_id) 乱序对齐'}],
+         {x:30,y:380,w:980,h:200,label:'R core（每个 EP 组 chip 7 的 core9）：两条链，软件映射表按 (gpu_id, token_id) 乱序对齐'}],
  nodes:TASK_NODES,edges:TASK_EDGES,
  table:{label:'TS 的四种工作模式（上电配好，运行期不变）',
   cols:['模式','CORE_TYPE / WEIGHTS_MODE','datain_task','task_chain'],
@@ -597,7 +597,7 @@ const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,640],
   lt:LT,
   logic:[
           ['SCP→RV Core ITCM', 'ctrl_noc', 'firmware · DTE bootloader · 任务链程序，六步按序'],
-          ['Host→Router→DTE core→Matrix Mem', 'msg 流 P2P', '每 core 27 MiB，路由表只用 1 条 path，坏核数据不进核但按位置转发'],
+          ['Host→Router→DTE core→Matrix Mem', 'msg 流 P2P', '每 core 27 MiB，路由表只用 1 条 path，不派角色的 core数据不进核但按位置转发'],
           ['SCP→TS', 'cfg', 'datain_task.pc：weights loader → token 搬移；trigger_task_chain_en：0 → 1']],
   ref:'01「上电到能跑」　06「部署阶段」　chip.md F14、F19～F21'},
 
@@ -710,7 +710,7 @@ const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,640],
  {t:'本场景跟的这个 token',
   d:['第 ③ 场跟一个 token 从 GPU 出发走到回 GPU：包头 <code>gpu_id = 0 · token_id = 7</code>，下文记作 (g0, t7)。',
      '它的 8 个激活专家落在 <b>EP0、EP2、EP5</b> 三个组；EP1、EP3、EP4 对它没有活干，只透传。',
-     '数值以 GLM5 fp8、48 chip、5 MTPS 为口径；图上 B core 画在物理 core5、R core 画在物理 core3。',
+     '数值以 GLM5 fp8、48 chip、5 MTPS 为口径；图上 B core 画在物理 core0、R core 画在物理 core9。',
      '源文档没写的两处按 01 章的取法：往下传给下一个 B core 是同一次广播搬运的目的之一；tray 内 chip 按行优先编号。'],
   act:['b_bc','c6','r_out'],
   ref:'01 章末尾的口径说明　08「口径冲突」'}
@@ -730,21 +730,21 @@ const RUN_A=[
 /* ---------- 上电与装载 ---------- */
  {t:'上电 ①　SCP 自启动，PCIe 链路训练，顺序启动 core',
   d:['48 个 chip、384 个 core 都是空的。每颗 chip 的 SCP 自启动，先完成 PCIe 链路训练。',
-     '然后按 harvest mask 顺序配置启动 chip 内的 core：ctrl_noc 可开广播，一次发给 core0 由它依次广播；默认关。',
+     '然后顺序配置启动 chip 内的 core：ctrl_noc 可开广播，一次发给 core0 由它依次广播；默认关。',
      'TS 没有控制核，只有寄存器，复位清 0 后等外部启动，不需要装载程序。',
      '这一阶段有三处直接影响建模：任务链关着、先发最远的数据、core id 是硬件身份。'],
   act:['cnoc','swL0','swL1','swL2','swL3','swL4','swL5','swR0','swR1','swR2','swR3','swR4','swR5'],
   set:{ph:'上电装载',at:'—'},
   lt:LT,
   logic:[
-          ['SCP', '', '自启动 → PCIe 链路训练 → 按 harvest_mask 配 10 个 Router → 解复位并配 8 个好核'],
+          ['SCP', '', '自启动 → PCIe 链路训练 → 配本 chip 全部 Router → 解复位并逐个配 core'],
           ['SCP→ctrl_noc 端点', 'scp_ctrl', 'cfg_valid · cfg_core · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0] · cfg_bcast'],
           ['Router', '上电顺序', 'fuse core_bad_mask → stream_credit 置 0 → RouterTable 全部 bypass / no-op → 等 SCP 配表']],
   ref:'02「Boot 流程」　chip.md F9～F13、F17'},
 
- {t:'上电 ②　先配全部 10 个 core 的 Router，再配 8 个好核',
-  d:['坏核只配 Router 那两样：RouterTable 与 Skip Mask、Credit Bypass Route。漏掉一个，经过它的 path 全断，所以排在好核之前。',
-     '好核的初始化六步按序：RV core firmware 写 ITCM → DTE bootloader 写 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化。',
+ {t:'上电 ②　先配本 chip 全部 core 的 Router，再逐个配 core',
+  d:['不派角色的 core 只配 Router 那两样：RouterTable 与 Skip Mask、Credit Bypass Route。漏掉一个，经过它的 path 全断，所以排在其余 core 之前。',
+     '每个 core 的初始化六步按序：RV core firmware 写 ITCM → DTE bootloader 写 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化。',
      'RouterTable 有三份副本：Router 内部多副本提交完成后，软件才写 DTE 与 ReduceModule 那两份，硬件不代为同步。',
      '三个 RV core 进 wait、<code>ready</code> 全高后，SCP 才开放业务接收权限，Router 开始收业务。'],
   act:['cnoc','rt','ts','mrv','vrv','drv'],
@@ -770,7 +770,7 @@ const RUN_A=[
 
  {t:'装 weights　Host → msg 流 → Router → DTE core → Matrix Mem，每 core 27 MiB',
   d:['weights 每个 core 都不同、MB 级，走不了配置总线：Host 发 msg 流，经 PCIe Switch 进 chip，Router 用 P2P 按 core id 送到各 core。',
-     'weights 加载模式下路由表只用 <b>1 条 path</b>，软件在 msg 里标记这笔数据落在哪些 core；Harvest 掉的坏核数据不进核但仍按位置转发。',
+     'weights 加载模式下路由表只用 <b>1 条 path</b>，软件在 msg 里标记这笔数据落在哪些 core；不派角色的 core 数据不进核但仍按位置转发。',
      '每笔四步：Router 收到数据通知 TS → TS 派 DTE core 跑 weights loader → 标量指令算出落 Matrix Mem 的地址再发 DTE 指令 → 完成通知 TS 释放，<b>不触发任务链</b>。',
      '<b>先发最远路径的数据</b>：先发近的，那些不进本核的 weights 会卡在 Router 里，要等 DTE 把当前数据搬走才能继续收。'],
   act:['gpu','dpu','swL0','k0_0','k0_1','k0_2','k0_3','rt','ts','drv','dte','mm'],
@@ -849,17 +849,17 @@ const RUN_A=[
           ['PCIe Switch→chip 0', 'port[p] → c2c[W]', 'PCIe ↔ Router 128 B/T，10T + 25T']],
   ref:'06「自定义包头」　02「机柜内多 tray 互联与 token 派遣」　pcie-switch.md W1、W2'},
 
- {t:'进 Node ④　从西口 core5 进 chip：这就是第一个 B core',
-  d:['chip 的西口引到 core5。C2C Bridge 的 RX Engine 按 <code>seq_id</code> 拼包、位宽 1024 转 2048，交给 core5 的 Router。',
+ {t:'进 Node ④　从西口 core5 进 chip，一跳转给 B core（core0）',
+  d:['chip 的西口引到 core5，它不派角色、只作转发。C2C Bridge 的 RX Engine 按 <code>seq_id</code> 拼包、位宽 1024 转 2048，交给 core5 的 Router，再一跳转给 core0 的 B core。',
      'RouterStation 按包头 <code>path_id</code> 查 RouterTable：这是 path 0，目的是本 core，落 Matrix Mem。',
-     'core5 的 CoreStation 按“已接收数据量 vs 包头 payload 大小”判定一个 token 收完。',
+     'B core（core0）的 CoreStation 按“已接收数据量 vs 包头 payload 大小”判定一个 token 收完。',
      '对着 PCIe Switch 那一侧没有对端 Bridge，硬件 bypass 掉 Bridge 的业务层逻辑，只保留位宽转换与拆包合包。'],
   act:['k0_0','q5','rt'],eact:['e_left'],
   tok:[{ed:'e_left',lbl:'token',c:'var(--warn)'}],
-  set:{ph:'B core（EP0）',at:'chip 0 · core5 的 Router'},
+  set:{ph:'B core（EP0）',at:'chip 0 · core0 的 Router'},
   lt:LT,
   logic:[
-          ['C2C Bridge→core5.Router', 'bridge2core[W]', 'flit 字段同链路；RX 按 seq_id 拼包，tail 到齐还原原始包'],
+          ['C2C Bridge→core5.Router→core0.Router', 'bridge2core[W]', 'flit 字段同链路；RX 按 seq_id 拼包，tail 到齐还原原始包；core5 只转发'],
           ['Router.RouterStation', 'RC', 'path_id 0 → RouterTable：进本 core，flow_dir 不再往外'],
           ['Router.CoreStation', '', '已收字节数 == 包头 payload 大小 → 收完']],
   ref:'chip.md F28～F30、F41　03-router「进 core」　09-router-corein-工作细节.html'},
@@ -948,12 +948,12 @@ const RUN_A=[
   d:['每一跳的 RouterStation 按 path_id 查 RouterTable：<code>flow_dir</code> 多位有效是多播，<code>path_core_mask</code> 决定这个包进不进本 core。',
      'Xbar 在 ST 阶段同拍复制到全部目标方向，<b>准入全有或全无</b>：任一方向没握手则整体不推进。',
      '包每经过一个 core，Router 同时做两件事：落一份进本核的 Core Mem，再往下一跳转发；行尾的 core 只落不转。',
-     '从 core5 出发：经 mid 到上排 core0，沿两排向右到 core4 / core9；出东口 core4 到同层下一颗 chip 的西口，出南口 core9 到下一层 chip 的北口。'],
+     '从 core0 出发：经 mid 到下排 core5，沿两排向右到 core4 / core9；出东口 core4 到同层下一颗 chip 的西口，出南口 core9 到下一层 chip 的北口。'],
   act:Q_IDS,eact:Q_EIDS,
   tok:[{ed:'qh10',lbl:'复制',c:'var(--warn)'},{ed:'qv0',rev:1,c:'var(--warn)'},{ed:'qh00',c:'var(--warn)',delay:1},
        {ed:'qh11',c:'var(--warn)',delay:1},{ed:'qh01',c:'var(--warn)',delay:2},{ed:'qh12',c:'var(--warn)',delay:2},
        {ed:'qh02',c:'var(--warn)',delay:3},{ed:'qh13',c:'var(--warn)',delay:3},{ed:'qh03',c:'var(--warn)',delay:4}],
-  set:{ph:'广播',at:'chip 0 的 10 个 core'},
+  set:{ph:'广播',at:'chip 0 的 8 个计算 core'},
   lt:LT,
   logic:[
           ['Router.RouterStation', 'RC', 'path_id 1 → flow_dir 多位 · nxt_vc · path_core_mask_idx → 进不进本 core'],
@@ -983,7 +983,7 @@ const RUN_A=[
  {t:'广播 ③　同一次搬运的另一个目的：下一个 B core',
   d:['<code>path_core_mask</code> 一位对应一个 EP 组的 B core，下一个 B core 也是这条 path 的目的之一，落它的 Matrix Mem，由它的链一接收。',
      '这一份<b>不查 credit</b>，反压由 GPU 侧的两层 credit 兜底。',
-     '之后每颗 chip 从北口 core0 进，core5 留一份，沿下排到南口 core9 出给下一颗 chip；跨 tray 也是南口接北口，走纵向链路。',
+     '之后每颗 chip 从北口 core0 进，那就是它的 B core，留一份后沿下排到南口 core9 出给下一颗 chip；跨 tray 也是南口接北口，走纵向链路。',
      'EP1 的 B core 重复链一、链二：留一份、查本组 64 个 core 的 credit、广播、再下传，直到六个 B core 都拿到。'],
   act:['k0_0','k2_0','k4_0','k6_0','k8_0','k10_0'],eact:B_CHAIN,
   tok:[{ed:'v0_0',lbl:'下传',c:'var(--warn)'},{ed:'v1_0',c:'var(--warn)',delay:1},{ed:'v2_0',c:'var(--warn)',delay:2},{ed:'v3_0',c:'var(--warn)',delay:3},{ed:'v4_0',c:'var(--warn)',delay:4}],
@@ -991,7 +991,7 @@ const RUN_A=[
   set:{at:'沿第一列的六个 B core'},
   lt:LT,
   logic:[
-          ['B core(EP0).Router→chip 4.core0', 'c2c[S] → c2c[N]', '北口进；下一个 B core 的 path_core_mask 位有效 → 进 core5，落 Matrix Mem'],
+          ['B core(EP0).Router→chip 4.core0', 'c2c[S] → c2c[N]', '北口进，落的就是下一个 B core；path_core_mask 位有效 → 进 core0，落 Matrix Mem'],
           ['B core(EP1)', '链一 → 链二', 'head+1 → check_flag → 查 64 个目的 credit → 广播 + 下传'],
           ['tray 0→tray 1', '纵向链路', '南口 core9 → 北口 core0，120 GB/s（试算）']],
   ref:'03-router「path_core_mask」　02「机柜内多 tray 互联与 token 派遣」　lpu.md lpu_broadcast'}
@@ -1137,14 +1137,14 @@ const RUN_B=[
 
 /* ---------- R core 与 EP 组间 reduction 链 ---------- */
  {t:'第三层 ①　EP0 的 R core 链一：本组结果作为 reduce 数据进 Matrix Mem，arrive_num++',
-  d:['本组结果沿链走到 chip 7 的 core3，这就是 EP0 的 R core。它的 Router 收下后 trigger TS，本组方向对应一个固定的 stream。',
+  d:['本组结果沿链走到 chip 7 的 core9，这就是 EP0 的 R core。它的 Router 收下后 trigger TS，本组方向对应一个固定的 stream。',
      '链一 task 0 的 DTE kernel 读 <code>arrive_num[g0][t7]</code> = 0：这是该用户的第一笔，新分配 Matrix Mem 空间并建映射表项，记下 <code>tmp_info0</code>。',
      'DTE DSA 把 12 KiB 搬进 Matrix Mem；task 1 把 <code>arrive_num</code> 加一。',
      'Router 侧要求<b>搬运原子化</b>：某个方向的用户数据全部搬进 Matrix Mem 后才能搬别的方向或别的用户。这与第二层“每方向进来 128 B 就往后传”正好相反。'],
   act:['k1_3','q3','rt','ts','drv','dte','mm','sm'],eact:['qh02','e_rt_ts','e_cmd_dte','e_data_in','e_dte_xb','e_xb_mm','e_sm'],
   tok:[{ed:'qh02',lbl:'reduce 数据',c:'var(--violet)'},{ed:'e_data_in',lbl:'12 KiB',c:'var(--violet)',delay:2},{ed:'e_xb_mm',c:'var(--violet)',delay:3}],
   rows:[[4,['EP0 R core','arrive_num[g0][t7] 1','第一笔，建映射表项']]],
-  set:{ph:'第三层归约（R core 链）',at:'EP0 的 R core（chip 7 · core3）'},
+  set:{ph:'第三层归约（R core 链）',at:'EP0 的 R core（chip 7 · core9）'},
   lt:LT,
   logic:[
           ['Router.CoreStation→TS', 'trigger_ch', '本组方向的 stream；R core 的 TS 不建表，派 datain'],
@@ -1157,7 +1157,7 @@ const RUN_B=[
   d:['EP 组间的 reduction 链上每一跳只有两种动作：该用户在本组有激活专家就与本组结果累加，没有就原样透传。',
      'EP0 是 (g0, t7) 的第一组，没有上游 reduction 数据要等：本组结果就是当前累加值，链二把它从 Matrix Mem 搬出，经 reduction 通路发往下一组 R core。',
      '走的是 P2P，落点是下一组 R core 的 Matrix Mem，<b>P2P 落 Matrix Mem 的搬运不查 stream credit</b>。',
-     '出核路线：core3 → core8（mid）→ 南口 core9 → 下一层 chip 的北口 core0。'],
+     '出核路线：R core 就是 core9，也就是南口，由它直接发给下一层 chip 的北口 core0。'],
   act:['k1_3','k2_3','q3','q8','q9','mrv','drv','dte','mm','rt'],eact:['qv3','qh13','v1_3','e_xb_mm','e_data_out'],
   tok:[{ed:'e_xb_mm',lbl:'取出',c:'var(--ok)',rev:1},{ed:'qv3',c:'var(--ok)',delay:1},{ed:'qh13',c:'var(--ok)',delay:2},{ed:'v1_3',lbl:'reduction',c:'var(--ok)',delay:3}],
   rows:[[4,['EP0 R core','arrive_num[g0][t7] 0','已送出，Matrix Mem 空间释放']]],
@@ -1172,7 +1172,7 @@ const RUN_B=[
 
  {t:'第三层 ③　EP1 没有它的激活专家：R core 判断不落本组，沿链透传',
   d:['reduction 数据到达 EP1 的 R core，判断该用户是否落在当前组：不落，就跳过，沿通路继续向下游透传。',
-     '透传在 chip 内的走法：北口 core0 进，沿上排到 core3，再经 core8 到南口 core9 出。',
+     '透传在 chip 内的走法：北口 core0 进，沿上排到 core4，再经 mid 落到 core9，由它的南口出。',
      '所以链尾以前，一个用户的累加中间结果每一跳搬的都是同一份 12 KiB，<b>加 EP 组不会让任何一跳变宽</b>。',
      'EP1 的 64 个计算 core 之前也收到了广播来的 token，但 trigger 里的 compute 位为 0：任务链里按用户区分的计算 task 全部跳过，只走 datain 与链尾退休。'],
   act:['k2_3','k3_3','k4_3','q0','q1','q2','q3','q8','q9'],eact:['v2_3','v3_3','qh00','qh01','qh02','qv3','qh13'],
@@ -1237,7 +1237,7 @@ const RUN_B=[
 
  {t:'出核　链尾 EP5 求和完，从东口 core4 出，经 PCIe Switch 进 DPU DDR，回 GPU',
   d:['EP5 的 R core 链二 task 3：这是链尾组，结果经 PCIe Switch 送进 SNIC DPU 的 DDR，目的地址由 <code>(gpu_id, token_id)</code> 算出。',
-     'chip 内从 core3 沿上排到东口 core4，C2C Bridge 的 TX Engine 拆包，走 PCIe x32（108.8 GB/s）到右侧 Switch。',
+     'chip 内从 R core（core9）经 mid 上到东口 core4，C2C Bridge 的 TX Engine 拆包，走 PCIe x32（108.8 GB/s）到右侧 Switch。',
      '回程只有激活数据 <code>[B, 6144] @BF16</code>，12 KiB。一个用户的结果<b>只出核一次</b>。',
      '出口桩按 <code>(gpu_id, token_id)</code> 重组，与参考实现按同一套累加顺序逐 bit 比对，记进完成集合。'],
   act:['k11_3','swR5','ddr','gpu2','q3','q4'],eact:['qh03','e_c113_sw','e_sw_ddr','e_ddr_gpu2'],
@@ -1434,7 +1434,7 @@ const S_MODS={id:'mods',name:'④ 每个模块的运行逻辑',vb:[1040,600],
   ref:'chip.md F28～F42　03-router「C2C Bridge」'},
 
  {t:'SCP 桩与 ctrl_noc　上电配表，运行期不再插手',
-  d:['boot 序列：自启动 → PCIe 链路训练 → 按 harvest_mask 给全部 10 个 core 的 Router 配表 → 顺序解复位并配 8 个好核的 TS、三个 RV core 与三个 DSA。',
+  d:['boot 序列：自启动 → PCIe 链路训练 → 给本 chip 全部 core 的 Router 配表 → 顺序解复位并配各个 core 的 TS、三个 RV core 与三个 DSA。',
      'ctrl_noc 端点收 scp_ctrl 事务，命中本 core 或带广播标记时锁存，按 addr_map 查出目的模块，下一拍写到它的 cfg 口。',
      '地址空间视野检查：三个 RV core 各自看到 ITCM、DTCM、Share Mem、Core Mem 与对应 DSA 的 IO reg；SCP 看到 core 内全部地址空间。',
      '<code>core_id</code> 是只读寄存器，软件不可修改。'],
@@ -1448,7 +1448,7 @@ const S_MODS={id:'mods',name:'④ 每个模块的运行逻辑',vb:[1040,600],
   rows:[[0,['scp_img','配置事务序列：firmware · bootloader · 任务链 · 路由表 · kernel · DSA 静态配置','编译侧读入']],
         [1,['scp_fsm','{state, core_idx, step, cursor}','boot 序列推进']],
         [2,['addr_map','N × {base, size, target_module, target_core}','静态']],
-        [3,['core_id_reg[10] · harvest_mask','只读 core id；10 b 坏核位图','SCP 经 ctrl_noc 读']]],
+        [3,['core_id_reg[N] · chip_shape','只读 core id；本 chip 的 core 阵列形状','SCP 经 ctrl_noc 读']]],
   ref:'chip.md F9～F27'},
 
  {t:'B core　广播的发起者与守门人，不是复制器',

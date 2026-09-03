@@ -13,7 +13,7 @@
 
 ## Router：片上交换与归约中心
 
-Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，物理上位于 chip 中部，每个 core 一个。
+Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理上位于 chip 中部，每个 core 一个。
 
 * Crossbar 五路输入：三个 R2R 方向端口 `left` / `right` / `mid`，接本 core 的 `local` 端口，ReduceModule
 * 同时承担三件事：包的路由转发、Stream 与 VC 两级流控、Reduce 计算
@@ -24,7 +24,7 @@ Router 是 chip 内 2×5 core 阵列的数据交换与**片上归约**中心，�
 * **stream credit**：目标 core 的 Core Mem 空间
 * **Reduce Credit**：下游 ReduceModule 的上下文
 
-展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、按任务类型分的走法、三类 credit 的管理方式、ReduceModule 与用户退休、坏核与 C2C Bridge。
+展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、按任务类型分的走法、三类 credit 的管理方式、ReduceModule 与用户退休、跳过与 C2C Bridge。
 
 ***
 

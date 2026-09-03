@@ -14,10 +14,10 @@
 | 章 | 模式 | 内容 |
 | - | - | - |
 | [完整工作流程](01-完整工作流程.md) | tutorial | 从一个模型输入讲到 token 回到 GPU，含 7 张流程图。不定义规则，只把后面各章按执行顺序串起来。 |
-| [系统与部署](02-系统与部署.md) | design | 产品边界、集群与 Node 形态、业务流控与退出的分层职责、模型切到 chip 与 core 的规则、Harvest 良率方案。定阵列规模、core 角色与每 core 权重份额。 |
+| [系统与部署](02-系统与部署.md) | design | 产品边界、集群与 Node 形态、业务流控与退出的分层职责、模型切到 chip 与 core 的规则、chip 内的 core 阵列形状与 Boot 流程。定阵列规模、core 角色与每 core 权重份额。 |
 | [SCP 的工作流程](02-scp-工作流程.md) | design | SCP 专题：chip 内唯一的配置与控制入口。配置网络怎么把一笔写送到目的模块，上电到能收业务的每一步，装 kernel 与 weights 时 SCP 各做什么，运行期的状态查询、故障处理与调试。每节一张图加短句，是《系统与部署》里 SCP 部分的展开。 |
 | [Core 内硬件](03-core-内硬件.md) | design | Bach Core 顶层与 RV Core，以及 Router、TS 在 core 内的位置。core 内的控制通路，决定多用户如何在三条执行链上流水。 |
-| [Router 片上交换与归约](03-router-片上交换与归约.md) | design | Router 专题：一个包要过的查表、拿资源、抢通路三关，三层 credit 各管一段，按任务类型分的走法与三类 credit 的管理方式，归约与坏核。第 3 章的展开。 |
+| [Router 片上交换与归约](03-router-片上交换与归约.md) | design | Router 专题：一个包要过的查表、拿资源、抢通路三关，三层 credit 各管一段，按任务类型分的走法与三类 credit 的管理方式，归约与跳过。第 3 章的展开。 |
 | [归约的完整过程](03-reduce-归约的完整过程.md) | design | 归约专题：core 内专家间求和、chip 内切 K 部分和在 ReduceModule 的逐跳累加、EP 组间沿 R core 链的累加，三层各自的触发、等待、credit 与完成，以及死锁与派遣。第 3 章的展开。 |
 | [TS 任务调度器](03-ts-任务调度器.md) | design | TS 专题：两张表、四个动作，以及数据乱序到达、下游收不下、用户数超出表项这三处复杂性。第 3 章的展开。 |
 | [执行单元与存储](04-执行单元与存储.md) | design | MU / VU 两个 DSA 的能力、参数与时序约束，三级存储的容量、带宽与仲裁规则，以及 DTE 在 core 内的位置。 |
@@ -37,7 +37,7 @@
 
 **[系统与部署](02-系统与部署.md)**
 
-[产品定位与性能目标](<02-系统与部署.md#产品定位与性能目标>)　[集群与 Node](<02-系统与部署.md#集群与-node>)　[业务流控与退出](<02-系统与部署.md#业务流控与退出>)　[模型切分与映射](<02-系统与部署.md#模型切分与映射>)　[Chip 与 Harvest](<02-系统与部署.md#chip-与-harvest>)
+[产品定位与性能目标](<02-系统与部署.md#产品定位与性能目标>)　[集群与 Node](<02-系统与部署.md#集群与-node>)　[业务流控与退出](<02-系统与部署.md#业务流控与退出>)　[模型切分与映射](<02-系统与部署.md#模型切分与映射>)　[Chip 内结构与 Boot](<02-系统与部署.md#chip-内结构与-boot>)
 
 **[SCP 的工作流程](02-scp-工作流程.md)**
 
@@ -49,7 +49,7 @@
 
 **[Router 片上交换与归约](03-router-片上交换与归约.md)**
 
-[Router 解决的问题](<03-router-片上交换与归约.md#router-解决的问题>)　[一个包要过的三关](<03-router-片上交换与归约.md#一个包要过的三关>)　[一个包穿过 Router 的工作过程](<03-router-片上交换与归约.md#一个包穿过-router-的工作过程>)　[死锁](<03-router-片上交换与归约.md#死锁>)　[归约](<03-router-片上交换与归约.md#归约>)　[坏核与跨 chip](<03-router-片上交换与归约.md#坏核与跨-chip>)
+[Router 解决的问题](<03-router-片上交换与归约.md#router-解决的问题>)　[一个包要过的三关](<03-router-片上交换与归约.md#一个包要过的三关>)　[一个包穿过 Router 的工作过程](<03-router-片上交换与归约.md#一个包穿过-router-的工作过程>)　[死锁](<03-router-片上交换与归约.md#死锁>)　[归约](<03-router-片上交换与归约.md#归约>)　[跳过与跨 chip](<03-router-片上交换与归约.md#跳过与跨-chip>)
 
 **[归约的完整过程](03-reduce-归约的完整过程.md)**
 
@@ -85,7 +85,7 @@
 
 **先看动画**：浏览器直接打开，每份四个场景 —— ① 硬件拓扑、② 场景与任务、③ 逐步执行、④ 每个模块的运行逻辑。右侧先用有序列表说清这一步做什么，再用统一的「收到 → 输出」列出信息传递：`源→目的　通道名　字段`，模块名与左图一一对应，内部模块写成 `TS.Stream_table`、`Router.ReduceModule` 这样的形式。
 
-* [`09-system-工作细节.html`](09-system-工作细节.html) —— 72 步，一个 token 从 GPU 出发再回到 GPU 的完整系统流程：上电装 kernel 与 weights、切业务模式、进 Node、B core 沿第一列下传并向组内广播、64 个 core 算 FFN、三层归约、沿 R core 链逐组累加、链尾出核、credit 回收。三张平面并排：12 × 4 的 chip 网格、一颗 chip 的 2×5 core、一个 core 的四层。第 ② 场画三类 core 的任务链形态与四种 TS 工作模式，第 ④ 场按第 7 章的对象清单逐个模块讲。结构照 `01-完整工作流程.md` 的流程图与 `07-units/` 的单元文档。
+* [`09-system-工作细节.html`](09-system-工作细节.html) —— 72 步，一个 token 从 GPU 出发再回到 GPU 的完整系统流程：上电装 kernel 与 weights、切业务模式、进 Node、B core 沿第一列下传并向组内广播、64 个 core 算 FFN、三层归约、沿 R core 链逐组累加、链尾出核、credit 回收。三张平面并排：12 × 4 的 chip 网格、一颗 chip 的 core 阵列、一个 core 的四层。第 ② 场画三类 core 的任务链形态与四种 TS 工作模式，第 ④ 场按第 7 章的对象清单逐个模块讲。结构照 `01-完整工作流程.md` 的流程图与 `07-units/` 的单元文档。
 * [`09-ts-工作细节.html`](09-ts-工作细节.html) —— 57 步，跟 `tp_nk` 切分下一个用户的 11 步任务链从建表走到退休，涵盖异步 datain、逐级 reduce 的两半完成、SKIP_MASK 一拍跳过、END task 与 head-only 退休。结构图照 `03-core-内硬件.md` 的 core 顶层结构与 `03-ts-任务调度器.md` 的 TS 模块组成图。
 
 Router 一个走法一份，图与逐步执行各自独立，八个模块的拓扑与运行逻辑五份共用同一套画法：
@@ -94,7 +94,7 @@ Router 一个走法一份，图与逐步执行各自独立，八个模块的拓�
 * [`09-router-broadcast-工作细节.html`](09-router-broadcast-工作细节.html) —— 38 步。一次搬运逐跳复制：`flow_dir` 多位有效、`path_core_mask` 决定进不进本 core、全有或全无的准入、ST 阶段 1 到 N 复制、阻塞重传。
 * [`09-router-corein-工作细节.html`](09-router-corein-工作细节.html) —— 37 步。进 core 与出 core 两条并行通路：三态准入、HeaderFIFO 与 in_core_fifo、收满通知 TS、DTE 先申请资源再发整包。
 * [`09-router-reissue-工作细节.html`](09-router-reissue-工作细节.html) —— 36 步。`stall_way` 转存：RC 阶段按包判断、Bypass 拆成进 core 加出 core 两段、`overflow_reinject` 标记、同 VC 保序、重注入时才结账。
-* [`09-router-bypass-工作细节.html`](09-router-bypass-工作细节.html) —— 34 步。直通与 credit 旁路：VC credit 两级记账、坏核 Skip 直通、release 不查表不进 Xbar 只按 CSR 的静态方向 Mask 转发。
+* [`09-router-bypass-工作细节.html`](09-router-bypass-工作细节.html) —— 34 步。直通与 credit 旁路：VC credit 两级记账、Skip 直通、release 不查表不进 Xbar 只按 CSR 的静态方向 Mask 转发。
 
 **[文档缺口与 TBD](08-文档缺口与-TBD.md)**
 

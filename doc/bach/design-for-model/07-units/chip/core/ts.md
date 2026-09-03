@@ -378,7 +378,7 @@ MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_upd
 | F71 | 退休顺序：先向 Router 持续发 credit 返还请求，Router 接收后才清除该槽位的 `valid` 并推进 `head_ptr`；返还的 credit 经本 core 的 Router 通知上游 core，让上游的 TS credit 加一 |
 | F72 | B core 的搬出 task 按 `B_CORE_DIRECTION` 查下游 core 的 TS credit；落 Matrix Mem 的那一侧不查 TS credit，反压由 GPU 到 Bach 的两层 credit 兜底 |
 | F73 | 广播任务的 `CreditCounter[path_id][stream_id]` 初值等于目的 core 数量，P2P 任务初值为 1；够则一次扣掉全部目的数再下发，不够就等 credit 释放 |
-| F74 | 坏核只按路由表透传，不检查 credit、不支持阻塞重发；上游要查的 credit 对应坏核之后那个好核 |
+| F74 | 不派角色的 core 只按路由表透传，不检查 credit、不支持阻塞重发；上游要查的 credit 对应它之后那个落地的 core |
 
 ### task_done（`task_state_update` 子模块）
 

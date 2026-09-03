@@ -18,7 +18,7 @@
 
 ## Router 解决的问题
 
-* 一个 chip 上是 2 行 × 5 列共 10 个 Bach core，Harvest 后保证 8 个可用
+* 一个 chip 上是两行 Bach core：中间列 chip 4 列共 8 个，第一列与最后一列 chip 5 列共 10 个，都是 8 个计算 core
 * core 之间要互相传业务数据，还要与相邻 chip 交换数据
 * Router 是这张片上网络的节点，每个 core 一个，物理上位于 chip 中部
 
@@ -521,7 +521,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
 
-坏核上的 Router 只走直通：数据走完整流水线但不投递本 core，credit 也跨过它直接给两侧的好核，见“坏核与跨 chip”。
+不派角色的 core 上的 Router 只走直通：数据走完整流水线但不投递本 core，credit 也跨过它直接给两侧落地的 core，见“跳过与跨 chip”。
 
 包落进哪块存储由数据类型决定，不由路由决定：Router 解析包头把数据类型交给 TS，TS 据此配置 DTE 的 `dst_sel`。**残差数据、EP 间的 reduction 数据、EP 间的 broadcast 数据都是 P2P 传输，落点都是 core 的 Matrix Mem**；业务流的 token 落 Core Mem。kernel 与 weight 走的是另一档，`op_type = 0` 时跳过 TS 直接唤醒 DTE，落 Matrix Mem。
 
@@ -598,7 +598,7 @@ Reduce 包从 core 出发这一段由 DTE 管 credit，进了 ReduceModule 之�
 ```
 if need_buffer && !core_bad_mask[本 core] &&
    (stream_credit[目标方向] 不可用 || pending_reinject[vc][目标方向] > 0):
-       目标端口改为 local          // 重定向，坏核不接收溢流
+       目标端口改为 local          // 重定向，不派角色的 core 不接收溢流
        overflow_reinject = 1
        pending_reinject[vc][原方向] += 1
        // 此时暂不更新 stream_credit
@@ -630,7 +630,7 @@ if need_buffer && !core_bad_mask[本 core] &&
   * 包进 core 暂存时改写 `overflow_reinject=1`，出 core 重发时 Router 改回 0
   * Output Port 识别到重注入标记才扣减 credit
 * 无论直接发送还是经 CoreMem 重发，完成后都向 core 内 TS 返回至少含 UserID 加 PathID 的完成信息
-* **坏核不接收溢流**：Router 对坏核不发起进 core 缓存处理，此时 coremem credit 直接 bypass
+* **不派角色的 core 不接收溢流**：Router 对它不发起进 core 缓存处理，此时 coremem credit 直接 bypass
 
 #### 业务 credit 的旁路
 
@@ -639,7 +639,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 * 软件通过 CSR 为每个业务 credit 输入端口配置**静态输出方向 Mask**，可指定一个或多个 R2R 方向与 Core 方向
 * 转发时不查 RouterTable，也不做动态路径选择，不进 CrossBar 的仲裁
 * Mask 含多个方向时，同一笔 release 复制到所有指定方向，UserID 与 credit 类型保持不变
-* 坏核场景下切换 credit 路径，靠的就是改这组静态配置
+* 跨过不落地的 core 时切换 credit 路径，靠的就是改这组静态配置
 
 ### 三类 credit 的管理方式
 
@@ -1180,18 +1180,20 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 
 ***
 
-## 坏核与跨 chip
+## 跳过与跨 chip
 
-### Skip 与 Partially Good
+### Skip
 
-* 每 chip 至多 2 个坏 core，由 fuse `core_bad_mask[9:0]` 标记
-* **Router 数据通路不坏，正常 R2R 转发**
-* 坏 core 上：local 侧禁用，不接收溢流，credit pulse 无效，`stream_credit` 上电默认 0
-* credit 跨过坏核走：
-  * 上游要检查的 credit 对应的是坏核之后那个好核
-  * 下游返还 credit 也跨过坏核直接给上游好核
-  * 坏核只按路由表透传，不检查 credit、不支持阻塞重发
-* 坏点位置不同会导致每颗 chip 的路由表不同，**路由表必须作为建模输入参数，不能写死**
+边界 chip 多出来的那一列里有一个 core 不派角色：第一列 chip 的 `core5`、最后一列 chip 的 `core4`。它坐在 chip 接 PCIe Switch 的那个口上，只构造 Router，永远不作端点。Router 对它按 Skip 处理：
+
+* 由 Skip Mask 寄存器标记，per-core 一位
+* **Router 数据通路照常工作，正常 R2R 转发**
+* 它的 local 侧禁用，不接收溢流，credit pulse 无效，`stream_credit` 上电默认 0
+* credit 跨过它走：
+  * 上游要检查的 credit 对应的是它之后那个落地的 core
+  * 下游返还 credit 也跨过它直接给上游
+  * 它只按路由表透传，不检查 credit、不支持阻塞重发
+* 三种 chip 形状的路由表不同，**路由表必须作为建模输入参数，不能写死**
 
 ### C2C Bridge
 
@@ -1268,7 +1270,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | flit 存储位宽 | 2048 bit payload + 256 bit header = 2304 bit = 288 B |
 | R2R 往返 | ≤ 20 cycle（shared pool 深度的依据） |
 | Crossbar | 5 入 7 出，每 cycle 最多 7 组 input → output 交换 |
-| 拓扑 | 2×5 简化二维 Mesh。left / right 连同行相邻 Router，mid 连另一行对称位置那一个；**中间三列的 mid 也连**，作为备份通路（HAS REQ-ARCH-037：Harvest 场景下提供多路径选择） |
+| 拓扑 | 两行的简化二维 Mesh。left / right 连同行相邻 Router，mid 连另一行对称位置那一个；**中间各列的 mid 也连**，作为备份通路（HAS REQ-ARCH-037：提供多路径选择） |
 | 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。HAS 新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300 ns」，单跳约 10 cycle 以内，与这一档相符；第 5 章的 T_R2R = 40 T 对不上，待确认是不是含 core 侧往返的端到端值 |
 | 全 chip 广播延迟 | 82 ns（两行并行，Row 0 七跳 82 ns 是关键路径） |
 | 单 VC 传输效率 | 每包额外开销 2 cycles（RC 与 VA 不传 flit）：8 KB 包 94%、16 KB 97%、32 KB 98.5%；多输入竞争时按 80% 折算 |
@@ -1284,7 +1286,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | ReduceModule 上下文 | 16 用户 × 16 KiB |
 | 监听事件队列 | 16 项全相连 |
 | C2C Bridge | 全 chip 4 个，VC Buffer 合计约 138.7 KB |
-| 坏核上限 | 每 chip 至多 2 个 |
+| 不派角色的 core | 边界 chip 各 1 个，中间列没有 |
 
 包结构：
 

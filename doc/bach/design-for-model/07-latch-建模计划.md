@@ -39,10 +39,10 @@
 | 层 | 对象 | 对应设计 | 形态 | 文档 |
 | - | - | - | - | - |
 | LPU 之外 | 片外桩：入口桩、出口桩 | 第 6 章“GPU → Bach 的两层 credit 反压”“输出包格式”、第 2 章 Node 组成 | 桩 ×2 | [`external-stub.md`](07-units/external-stub.md) |
-| LPU | LPU：48 chip 的构造与接线、全局坐标换算、Harvest 与逻辑 core 映射的读入 | 第 2 章“集群与 Node”“机柜内多 tray 互联与 token 派遣”、第 6 章编译器的硬件抽象 | 装配 | [`lpu.md`](07-units/lpu.md) |
+| LPU | LPU：48 chip 的构造与接线、全局坐标换算、chip 形状与逻辑 core 映射的读入 | 第 2 章“集群与 Node”“机柜内多 tray 互联与 token 派遣”、第 6 章编译器的硬件抽象 | 装配 | [`lpu.md`](07-units/lpu.md) |
 | LPU | 链路：R2R、C2C、跨 tray 纵向、PCIe ↔ Router、ETH | 第 2 章互连参数、第 5 章延迟表 | 模块（带宽、延迟、到达时刻） | [`link.md`](07-units/link.md) |
 | LPU | PCIe Switch | 第 2 章“tray 组成”、第 6 章两层 credit | 模块 ×12 | [`pcie-switch.md`](07-units/pcie-switch.md) |
-| chip | Chip（2×5 阵列、Harvest mask、四个 C2C 端口）、SCP 桩、ctrl_noc 端点 ×10、C2C Bridge ×4 | 第 2 章“Chip 与 Harvest”“Boot 流程”、第 3 章 Router 的“坏核与跨 chip” | 装配 + 模块 ×3 类 | [`chip/chip.md`](07-units/chip/chip.md) |
+| chip | Chip（中间列 2×4、两侧 2×5、四个 C2C 端口）、SCP 桩、ctrl_noc 端点每 core 一个、C2C Bridge ×4 | 第 2 章“Chip 内结构与 Boot”、第 3 章 Router 的“跳过与跨 chip” | 装配 + 模块 ×3 类 | [`chip/chip.md`](07-units/chip/chip.md) |
 | core | Core | 第 3 章 Bach Core 顶层 | 装配 | [`chip/core/core.md`](07-units/chip/core/core.md) |
 | core | Router：RouterTable 与 CSR、RouterStation ×3、Xbar、CoreStation、CoreMem 重发、ReduceModule、Retire、CoreMemCreditMonitor | 第 3 章 Router | 模块 ×8 | [`chip/core/router.md`](07-units/chip/core/router.md) |
 | core | TS：User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check | 第 3 章 TS 任务调度器 | 模块 ×9 | [`chip/core/ts.md`](07-units/chip/core/ts.md) |
@@ -66,7 +66,7 @@
   <rect x="30" y="150" width="186" height="70" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="42" y="170" font-size="11.5" fill="#111827">LPU</text>
   <text x="42" y="186" font-size="9" fill="#475569">48 chip · 12 × 4 网格</text>
-  <text x="42" y="200" font-size="9" fill="#475569">坐标换算 · Harvest</text>
+  <text x="42" y="200" font-size="9" fill="#475569">坐标换算 · chip 形状</text>
   <text x="204" y="170" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
   <text x="204" y="211" font-size="8.5" fill="#9ca3af" text-anchor="end">lpu.md</text>
   <line x1="123" y1="122" x2="123" y2="148" stroke="#b45309" stroke-dasharray="4 3"/>
@@ -81,7 +81,7 @@
   <text x="424" y="241" font-size="8.5" fill="#9ca3af" text-anchor="end">pcie-switch.md</text>
   <rect x="230" y="284" width="206" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="242" y="304" font-size="11.5" fill="#111827">chip ×48</text>
-  <text x="242" y="320" font-size="9" fill="#475569">2×5 core · SCP · ctrl_noc</text>
+  <text x="242" y="320" font-size="9" fill="#475569">2×4 / 2×5 core · SCP · ctrl_noc</text>
   <text x="424" y="304" font-size="9" fill="#9ca3af" text-anchor="end">装配</text>
   <text x="424" y="331" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/chip.md</text>
   <polyline points="216,185 232,185 232,172 230,172" fill="none" stroke="#94a3b8"/>
@@ -255,7 +255,7 @@ src/bach/
       in_stub.h                    入口桩：注入表、两层 credit、自定义包头、LPU Dispatch 派遣
       out_stub.h                   出口桩：收结果、按 (gpu_id, token_id) 与参考实现比对
     chip/
-      chip.h                       2×5 阵列、Harvest mask、四个 C2C 端口、ctrl_noc
+      chip.h                       2×4 / 2×5 阵列、chip 形状、四个 C2C 端口、ctrl_noc
       scp.h                        SCP 桩：boot 序列、ctrl_noc 配置事务
       ctrl_noc_endpoint.h          ctrl_noc 在 core 内的落点：寄存器写入分发
       core/
@@ -322,7 +322,7 @@ src/bach/
 
 * Core 构造时创建各模块，Router 的八个模块是其中一组，每个 Core 一份
 * chip 内 mesh 的连线动作在 Chip 里做，但被连的端口长在 RouterStation 上
-* 坏核只构造 Router 的模块，不构造 TS、RV core、DSA 与存储
+* 不派角色的 core 只构造 Router 的模块，不构造 TS、RV core、DSA 与存储
 
 **链路与 PCIe Switch 属于 LPU。**
 
@@ -376,12 +376,12 @@ LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章
 
 | 类 | 内容 | 来源 |
 | - | - | - |
-| 拓扑与部署 | chip 数 48、tray 数 3（编译器叫 rack）、tray 形状 4 层 × 4 chip、chip 形状 2×5、全局进出口位置（`global_top_left` / `global_bottom_right`）、每 chip 的 Harvest mask、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、GPU 数与每 GPU 的 batch | 编译侧 |
+| 拓扑与部署 | chip 数 48、tray 数 3（编译器叫 rack）、tray 形状 4 层 × 4 chip、chip 形状（中间列 2×4、两侧 2×5）、全局进出口位置（`global_top_left` / `global_bottom_right`）、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、GPU 数与每 GPU 的 batch | 编译侧 |
 | 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项，含软件属性 `exe_dest` / `reduce_num`）、datain_task、`stream_num`、`CORE_TYPE`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 27 MiB 权重分片（含共享专家）与落 Matrix Mem 的地址；注入表（每 token 的 6368 B 级联包与注入拍）；参考实现的期望输出 | 编译侧 + `reference/` |
 
-编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、每 chip 的坏核 mask 与由它推出的 chip 类型、`CreditCounter[path_id][stream_id]` 初值（广播 = 目的 core 数，P2P = 1）。
+编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、每 chip 的形状与角色分配、`CreditCounter[path_id][stream_id]` 初值（广播 = 目的 core 数，P2P = 1）。
 
 参数表 `common/params.h` 是全部拍数、带宽、深度的唯一出处，每个值标注来历：MAS 给的、性能需求规格说明书给的、第 8 章冲突项按“建议”取的、本章“待定”默认值。
 
@@ -391,7 +391,7 @@ LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章
 
 ```
 grid          48 × {tray, layer, col, gx, gy}                                   LPU
-harvest       48 × 10 b 坏核位图                                                LPU
+chip_shape    48 × {中间列 2×4, 第一列 2×5, 最后一列 2×5}                        LPU
 logical_map   48 × 10 × {logical_core, role}                                    LPU
 split_param   {ep, tp, pp, dp, mode, gpu_num, batch}                            LPU
 core_cfg      48 × 10 × {rtab 64 项, skip_mask, credit_bypass, task_chain 64 项,
@@ -408,20 +408,20 @@ expect_out    N_token × 12 KiB                                                 
 
 这些断言在构造期做完，不逐拍。它们查的是**跨表**的一致性 —— 单张表内部的合规性由持有它的单元自己查（例如 `task_chain` 的四项检查在 TS 写 `TS_INIT_FINISH` 时做）。跨表这一层没有哪个单元能独自看到，因此收在这里：
 
-1. `grid` 覆盖 48 项且 `(gx, gy)` 无重复；每 chip 坏核数 ≤ 2；`gx ∈ {0, 3}` 的 chip 坏核数 ≤ 1
+1. `grid` 覆盖 48 项且 `(gx, gy)` 无重复；`gx ∈ {0, 3}` 的 chip 是 2×5、其余是 2×4；每 chip 都是 8 个计算 core
 2. 每 chip 的 `logical_map` 里逻辑 0～7 各出现一次，逻辑 8 只在 `gx ∈ {0, 3}` 出现，且 special 与 compute 的物理 core 集合不相交
 3. `cmem_part` 的各分区互不重叠，且都落在 Core Mem 的 1 MB 之内
 4. `task_chain` 里出现的每个 `path_id`，在本 core 的 `rtab` 与 `path_task_map` 里都有 valid 表项，且 `path_task_map[path_id].task_id` 指回配它的那一项
 5. `rtab` 里 `stall_way` 选转存的表项，本 core 的 `task_chain` 里必须有对应的 reissue 任务，且 `cmem_part` 里 `reissue_pkts_per_vc` 不为 0
-6. 坏核的 `rtab` 表项一律不置 Core 位、`stream_table_enable` 全不置位、`stall_way` 只能是留在 VC
+6. 不派角色的 core 的 `rtab` 表项一律不置 Core 位、`stream_table_enable` 全不置位、`stall_way` 只能是留在 VC
 
-第 4、5 两条是软件检查清单里“选进 Core Mem 重发的 path 必须预留空间并安排 reissue 任务”“坏核只能选留在 VC 等待”的机器化形式。三份 RouterTable 一致这一条不在这里查，由 SCP 桩的写入顺序保证。
+第 4、5 两条是软件检查清单里“选进 Core Mem 重发的 path 必须预留空间并安排 reissue 任务”“不派角色的 core 只能选留在 VC 等待”的机器化形式。三份 RouterTable 一致这一条不在这里查，由 SCP 桩的写入顺序保证。
 
 ### 表怎么分发
 
 | 阶段 | 做什么 |
 | - | - |
-| 构造期 | `grid` / `harvest` / `logical_map` / `split_param` 交给 LPU 与各 Chip，决定构造出什么 |
+| 构造期 | `grid` / `chip_shape` / `logical_map` / `split_param` 交给 LPU 与各 Chip，决定构造出什么 |
 | boot 期 | `core_cfg` / `credit_init` / `kernel_img` 变成 SCP 桩的配置事务序列，按初始化六步的顺序发出，每笔一拍 |
 | weights 加载模式 | `weight_shard` 由入口桩按“最远路径优先”的顺序注入，走 Router 的 weights path |
 | 业务模式 | `inject_tbl` 按 `inject_cycle` 注入，`expect_out` 交给出口桩 |
@@ -501,7 +501,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 11 | 端到端 | 注入一个 token 收到一个结果并逐 bit 相等，再放大到 N 个 |
 | 12 | 四种切分模式各跑一遍 | EPTP-NN 先通（每个 core 任务链相同），再 EPTP-NK 的三种角色，再 PPTP-NK 与 PPTP-NN 的三段 chip。四种模式的任务链见 TS 那一份文档 |
 
-第 4 步之前不碰 TS 与 DSA：Router 是唯一一个坏核上也要构造的单元，它先立住，后面每一步都能拿它当数据源与数据汇。
+第 4 步之前不碰 TS 与 DSA：Router 是唯一一个不派角色的 core 上也要构造的单元，它先立住，后面每一步都能拿它当数据源与数据汇。
 
 ***
 
@@ -518,7 +518,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 3 | credit 不足的 VC 被跳过，同一 input port 的其他 VC 不受影响 | RouterStation 的 VA |
 | 4 | 多播全有或全无。只发一半会让同一 User 的数据在不同分支上错位，已发方向占了资源却完不成整体传输 | RouterStation 与 Xbar |
 | 5 | Router 的进 core 表与 TS 内部的 Stream 表按完全一致的逻辑分配空项，因此“Router 通知 TS 的包一定能被 TS 接收” | Router 的 CoreMemCreditMonitor 与 TS 的 `task_state_update.credit` |
-| 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏核没有 Core Mem，只能留在 VC，因此 path 规划要保证坏核段不会长期阻塞 | `RouterTable.stall_way` 与 CoreMem 重发 |
+| 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；不派角色的 core 没有 Core Mem，只能留在 VC，因此 path 规划要保证这一段不会长期阻塞 | `RouterTable.stall_way` 与 CoreMem 重发 |
 | 7 | P2P 传输阻塞时把数据落进 Core Mem 的 P2P 阻塞缓冲，下游 credit 释放后再续传 | TS 的 P2P 阻塞缓冲映射表 |
 | 8 | DTE 的 Commit 配对接纳：RD、WR 两个 TaskQueue 项与 Completion RS 项同时拿到才收，不产生读已开始、写没有落脚点的半任务 | DTE 的 Commit |
 | 9 | DTE 的出核任务先在 `PendingTaskQ` 等到资源授权，再去 Commit 申请那三样，等资源的任务不占 Completion RS | DTE 的 PendingTaskQ |
@@ -571,7 +571,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | 类别 | 检查项举例 |
 | - | - |
-| 拓扑结构 | chip 数 = 48，摆成全局 12 × 4；core 数量 = chip 数 × 10，每 chip 可用 8 个；同层左右与同列上下直连，跨 tray 的两处换纵向链路参数；每层两端 chip 接 PCIe Switch；坏核集合与 mask 一致；`gx ∈ {0, 3}` 的 chip 只有 A / B 型；边界 core 的 C2C 连接与 2×5 规则一致；逻辑 ↔ 物理映射满足 special 优先四步 |
+| 拓扑结构 | chip 数 = 48，摆成全局 12 × 4；`gx ∈ {0, 3}` 的 chip 10 个 core、其余 8 个，每 chip 都是 8 个计算 core；同层左右与同列上下直连，跨 tray 的两处换纵向链路参数；每层两端 chip 接 PCIe Switch；边界 core 的 C2C 连接与各自形状的规则一致；第一列 chip 的 `core0` 是 B core、`core5` 不派角色，最后一列 chip 的 `core9` 是 R core、`core4` 不派角色 |
 | 数据流正确性 | **Credit 守恒**（初始 + 归还 = 消费 + 余额，无泄漏）；flit 组装正确；topK 正确传递；MU / VU 计算次数与预期一致；每 core 的 user init 数量符合预期 |
 | 边界与异常 | Stream 耗尽正确排队；Credit 耗尽正确阻塞上游；ready 拉低正确背压；无效 path_id / 重复 User ID 被拒 |
 | 时序行为 | 各启动延迟等于配置值；R2R 单跳 40T，跨 chip 400T；同一 user 的 task 之间先后与任务链一致；bank 冲突时按优先级授予；VU 两条宏指令重叠、MU 三段重叠可在波形上读出 |
@@ -590,7 +590,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | - | - |
 | A2 | bypass 中间核不占用户坑 |
 | A5 | 同用户二次发送余额不减 |
-| A15 / A16 | 单坏核与多坏核串联时的 credit 透传 |
+| A15 / A16 | 单个与多个只透传的 core 串联时的 credit 透传 |
 | A17 | reduce 完成 Ack 归 Router；缺 Ack 时任务链停在 reduce 处不前进 |
 
 ### 最容易实现错的几条
@@ -639,7 +639,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度 | 2 |
 | TS stream_table 六个写口的优先级 | retire > done > install > issue > wake > create |
-| `reduce_in_mask` 的逐核取值 | 按 path 图推导；C6、C7 双坏核例子里的值等 Reduce0 / 1 / 2 含义定下后回填 |
+| `reduce_in_mask` 的逐核取值 | 按 path 图推导；`core4` 不派角色那个例子里的值等 Reduce0 / 1 / 2 含义定下后回填 |
 | Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
 | trigger 请求里 `compute` 位在包头中的位置 | 等 Router 接口规范定下包头位域后回填 |
 | `dsar` 与 `dsari` 的区分位 | 《ISA 描述表》给了九条自定义指令的完整编码，逐条见 RV core 那一份文档。只有这两条的编码在表里完全相同，模型按其余四条的规律用 bit31 区分 |

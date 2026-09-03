@@ -163,7 +163,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 16 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
 <text x="1029.0" y="1105.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
 <text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
-<text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份，坏核也有</text>
+<text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份，不派角色的 core 也有</text>
 <polygon points="125.0,44 228.0,44 219.0,74 116.0,74" fill="#f8fafc" stroke="#374151"/>
 <text x="172.0" y="58.0" font-size="9" fill="#374151" text-anchor="middle">async_int → SCP</text>
 <text x="172.0" y="69.0" font-size="7.5" fill="#6b7280" text-anchor="middle">core 的中断异常信息</text>
@@ -267,7 +267,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1524" y="681.0" font-size="8.5" fill="#4b5563" text-anchor="start">三个 R2R 方向各 256 B/T 双向，接相邻 core 的 Router</text>
 <text x="1524" y="694.5" font-size="8.5" fill="#4b5563" text-anchor="start">　或 chip 边界的 C2C Bridge；线上跑 flit，另有</text>
 <text x="1524" y="708.0" font-size="8.5" fill="#4b5563" text-anchor="start">　vc_release / stream_release / reduce_release 回程</text>
-<text x="20" y="1298" font-size="10.5" fill="#374151" text-anchor="start">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接。坏核只构造 Router 的八个模块，其余一律不构造。Router 贴底边朝 chip 中部：data_L / data_R 走左右，data_UD 走底边。</text>
+<text x="20" y="1298" font-size="10.5" fill="#374151" text-anchor="start">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接。不派角色的 core 只构造 Router 的八个模块，其余一律不构造。Router 贴底边朝 chip 中部：data_L / data_R 走左右，data_UD 走底边。</text>
 </svg>
 ```
 
@@ -281,12 +281,12 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 
 | 编号 | 功能 |
 | - | - |
-| F1 | `good` 为真时构造七个单元的全部模块：Router 八个、TS 九个、三个 RV core、三个 DSA 的各模块、三块存储与 ctrl_noc 端点 |
-| F2 | `good` 为假时只构造 Router 的八个模块。CoreStation 永远不准入，ReduceModule 不累加，CoreMemCreditMonitor 空转，`stream_credit` 上电默认 0 |
+| F1 | `router_only` 为假时构造七个单元的全部模块：Router 八个、TS 九个、三个 RV core、三个 DSA 的各模块、三块存储与 ctrl_noc 端点 |
+| F2 | `router_only` 为真时只构造 Router 的八个模块，这一档只有边界 chip 里不派角色的那个 core 用。CoreStation 永远不准入，ReduceModule 不累加，CoreMemCreditMonitor 空转，`stream_credit` 上电默认 0 |
 | F3 | 按各单元文档声明的端口组把生产者的出口端口与消费者的入口端口对接；两侧只看到端口束的字段，不持有对方的类型，装配顺序不受构造顺序牵制 |
 | F4 | 把 Router 三个 RouterStation 的对外端口引到 `data_L` / `data_UD` / `data_R` |
 | F5 | 把 ctrl_noc 端点的入口引到 `cfg`，出口按 `addr_map` 接到各模块的 `cfg` 口 |
-| F6 | 建立只读的 `core_context`（`core_id`、全局坐标、角色、`good`），core 内各模块共用 |
+| F6 | 建立只读的 `core_context`（`core_id`、全局坐标、角色、`router_only`），core 内各模块共用 |
 
 ### 跨单元的约定
 
@@ -334,7 +334,7 @@ port ready (master, 电平, clk)                   // 三个 RV core 都进 wait
 Core 自己只有一份只读上下文，各单元的存储在各自文档的“存储器”一章。
 
 ```
-mem core_context   FF   {core_id[3:0], gx[1:0], gy[3:0], role[2:0], good}   1R   构造期写入   复位由输入给   // 各模块共用的只读上下文
+mem core_context   FF   {core_id[3:0], gx[1:0], gy[3:0], role[2:0], router_only}   1R   构造期写入   复位由输入给   // 各模块共用的只读上下文
 ```
 
 ***
@@ -355,7 +355,7 @@ Core 只有构造期的接线，没有逐级行为。各单元的第 2 层图待
 
 ```
 R2R 方向        3 个（left / right / mid），各 256 B/T 双向，进 core 与出 core 并行
-CORE_PER_CHIP   10（2×5，row-major）
+CORE_PER_CHIP   中间列 chip 8（2×4），第一列与最后一列 chip 10（2×5）；都按 row-major 编号
 stream_num      1～16，软件配；决定 Core Mem 的分片数
 core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← Matrix Mem 8 KB/T
                 MU ↔ Core Mem 132 B/T · VU ↔ Core Mem 132 B/T · DTE ↔ Core / Matrix Mem 各 256 B/T
@@ -372,7 +372,7 @@ core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← 
 | 机制 | 功能 | 用例 |
 | - | - | - |
 | core 的一切进出都过 Router，没有旁路 | F4 | `core_ports` |
-| 坏核只构造 Router 的八个模块 | F2 | `harvest_router_only` |
+| 不派角色的 core 只构造 Router 的八个模块 | F2 | `spare_core_router_only` |
 | 模块之间只通过端口相连，装配顺序不受构造顺序牵制 | F3 | `core_wiring` |
 | 一个 task 的共同形状：RV core 发完异步指令立刻交还自己 | F7 | `task_shape` |
 | 只做标量活的 task 不调 DSA，RV core 自己报完成 | F8 | `scalar_only_task` |
@@ -393,8 +393,8 @@ core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← 
 
 * **Core 为什么是装配容器而不是模块**
   * 它没有自己的一拍工作，全部逐拍行为在七个单元的模块里
-* **为什么坏核仍然构造 Router**
-  * 坏核要承担单向转发、router multicast、router-level reduce，以及三类 credit 的透传
+* **不派角色的 core 为什么仍然构造 Router**
+  * 它要承担单向转发、router multicast、router-level reduce，以及三类 credit 的透传，还坐在 chip 接 PCIe Switch 的那个口上
 * **为什么地址映射交给硬件而不是软件**
   * 多用户复用同一套 kernel 代码，软件只能用统一固定的虚拟偏移地址，没法为每个用户单独改地址、单独编译
   * 纯软件管理会让相同虚拟地址落到同一块物理内存，多用户互相覆盖
