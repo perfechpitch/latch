@@ -94,7 +94,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 <text x="750" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">DTE DSA</text>
 <text x="750" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">2 ch / 4 lane</text>
 <text x="750" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">Header Parser · TaskQueue ×4</text>
-<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">AGCU · Hmem 与 LUT</text>
+<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">AGCU · Hmem 与 Fast LUT</text>
 <rect x="260" y="478" width="340" height="80" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="270" y="495" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Matrix Mem</text>
 <text x="270" y="510" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">32 MB + 4 MB scale · 64 bank</text>
@@ -276,14 +276,14 @@ Bach 用**任务隔离**代替显式一致性维护，建模时这一块可以�
 2. MU、VU、DTE 的 RV core **在任意时刻不会执行同一个用户的 task**，不会访问同一地址空间，不需要维护一致性
 3. 同一用户在任务链不同 task 之间共享数据，默认靠 TS 把不同步骤的任务隔开来解决：
    * 同一用户的 task 按任务链顺序执行，前一个完成后才下发后一个
-   * task 间通过 share mem 传数据 / context，前一个 task 的 RV core 写完 share mem 后，用 `fence + task 完成通知 TS` 的方式隔离两个 task 的数据相关
+   * task 间通过 share mem 传数据 / context，两个 task 的数据相关就靠这条全序隔开：前一个 task 的 RV core 写完 share mem，再通知 TS 完成。RV Core MAS 这里写的是“fence + task 完成通知 TS”，但 `fence` 指令实现为 nop、`task_done` 的 FC 标志不建，所以真正起隔离作用的只有任务链的先后
 
 生产者与消费者按下面的顺序配对（每一步是一个 Release / Acquire 对）：
 
 | # | 生产者写什么 | 配对的事件 |
 | - | - | - |
 | 1 | Router 写内部 Buffer | Release + Data Ready |
-| 2 | RV 写 DMA Command | Release + Doorbell |
+| 2 | RV 写 DMA Command | Release + Trigger |
 | 3 | DMA 写目标 Memory | Release + DMA Task Done |
 | 4 | MU / VU 写 Task 输出 | Release + Task Done |
 | 5 | DSA 写输出 | Release + Chain Done |
@@ -342,15 +342,15 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 | 助记符 | funct3 | opcode | 作用 |
 | - | - | - | - |
 | `dsar` | 000 | custom-0 | 读 DSA 寄存器，地址来自 rs1 |
-| `dsari` | 000 | custom-0 | 读 DSA 寄存器，地址为立即数 `reg_addr1[4:0]` |
+| `dsari` | 000 | custom-0 | 读 DSA 寄存器，地址为立即数 |
 | `dsaw.s` | 001 | custom-0 | 写 1 个 DSA 寄存器 |
 | `dsaw.d` | 001 | custom-0 | 写 2 个 DSA 寄存器（rd2/rs2 + rd1/rs1） |
 | `dsawi.s` / `dsawi.d` | 001 | custom-0 | 同上，寄存器地址用立即数编码 |
 | `task_done` | 010 | custom-0 | 带 `TS` 标志位 |
 | `flag_check` | 010 | custom-0 | 映射表快速查找，rs1/rs2 给起止地址，rd1 返回偏移 |
-| `loop` | 110 | custom-0 | 自定义循环分支，rs1=最大循环次数，rs2=当前循环次数，rs2 ≥ rs1 时退出循环，imm 为分支偏移 |
+| `loop` | 110 | custom-0 | 自定义循环分支，rs1=最大循环次数，rs2=当前循环次数，rs2 ≥ rs1 时退出循环，imm 为分支偏移；它替代的是 `blt`，偏移量要按循环体的指令长度算 |
 
-`dsaw.d` / `dsawi.d` 一次写 2 个 DSA 寄存器，与 RV Core MAS 规定的每条指令最多配置 1 个 DSA 寄存器不一致，ISA 描述表尚未同步。
+**写指令按单寄存器写建模**：《软件计算流程详细评估》的指令表已经只剩 `dsaw` / `dsawi` 两条，一次写 1 个 DSA 寄存器，与 RV Core MAS 的“每条最多配置 1 个”一致；上表的 `.s` / `.d` 两档编码取自 ISA 描述表，那一侧尚未同步。**立即数是 16 bit 的字节地址，覆盖 0～64K**，超出这个范围的寄存器只能用 `dsar` / `dsaw` 走寄存器寻址。
 
 #### DSA 任务配置指令的语义
 

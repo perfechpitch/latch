@@ -826,7 +826,7 @@ stream credit这一类 credit 的单位是 **1 KB**。《通信机制（分析�
 
 | 场景 | 扣 | 什么时候还 |
 | - | - | - |
-| 广播进 core | 该方向的 credit 128 → 96，扣 32 —— 其中 8 KB 是广播数据本身的空间，24 KB 是**提前预留的输出结果空间** | 广播包计算完成、运算结果写到下游的同时，一次性还回上游 Monitor，96 → 128 |
+| 广播进 core | 该方向的 credit 128 → 96，扣 32（其中 8 KB 是广播数据本身的空间，24 KB 是**提前预留的输出结果空间**） | 广播包计算完成、运算结果写到下游的同时，一次性还回上游 Monitor，96 → 128 |
 | Core0 → Core1 的 bypass | Core0 的 Router 查表要 bypass 给 Core1，先查 Core1 的 credit 并扣掉，128 → 112 | Core1 算完释放空间后通知 Core0 的 CreditMonitor，112 → 128 |
 | Core2 → Core1 → Core0 的反向 bypass | 扣 Core1 的 credit，128 → 120 | Core1 把数据发给 Core0 后归还给 Core1，120 → 128 |
 
@@ -893,7 +893,7 @@ RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点�
 
 它解决的是 path 数爆炸：纯 `path_id` 编码要 2^K − 1 条，加上 mask 之后只要 K 条 `path_id` 配 2^K 种 mask。按 dp10 / ep16 / pp3 试算，MoE 优化后 47 条、kernel 与 weight 各 4 条，合计 55 条，64 项的表装得下。
 
-mask 还有第二种用法，与压 path 数无关：**DP 广播固定广播到每一个 core，靠 mask 判断这个 core 做不做计算**。好处是整条 DP 广播只占 1 项 RouterTable，代价是浪费总线带宽 —— 如果只有 core0 做计算，core0 之后那一段广播传输其实是多余的。用不用这一档由软件按场景权衡。
+mask 还有第二种用法，与压 path 数无关：**DP 广播固定广播到每一个 core，靠 mask 判断这个 core 做不做计算**。好处是整条 DP 广播只占 1 项 RouterTable，代价是浪费总线带宽。如果只有 core0 做计算，core0 之后那一段广播传输其实是多余的。用不用这一档由软件按场景权衡。
 
 #### 什么时候必须换一个新的 path_id
 
@@ -905,7 +905,7 @@ mask 还有第二种用法，与压 path 数无关：**DP 广播固定广播到�
 反过来，路径不冲突时可以共用同一个 `path_id`：
 
 * 分别在 core01 和 core23 上广播 —— 路径完全无关
-* 分别在 core03 和 core23 上做 P2P —— 路径重叠但后半部分完全一致（可以共用，但没必要，原文只作为辅助理解的例子）
+* 分别在 core03 和 core23 上做 P2P：路径重叠但后半部分完全一致（可以共用，但没必要，原文只作为辅助理解的例子）
 
 ### 第二关：拿资源才放行
 
@@ -1081,7 +1081,7 @@ VC 数取 4，是因为目前最复杂的场景里一个 Router 最多同时经�
 | 下一跳的 VC 编码在包头里，下一跳 Router 解包直接取 | **选中** | 本跳 Router 读到表里的“下一跳 VC”后改写包头里的这个字段，供下一跳读 |
 | 包里不带 VC，每个 Router 各查各的表 | 否决 | 表里要同时存“本跳 VC”与“下一跳 VC”，并强制上一跳的“下一跳 VC”等于本跳的“本跳 VC”，配错就死锁 |
 
-VC 机制本身的实现成本极高 —— 额外面积、设计复杂度、验证空间都很大。原始文档把“到底实不实现”留成待定，写明需要模拟器介入综合判断开发复杂度与效果收益。
+VC 机制本身的实现成本极高：额外面积、设计复杂度、验证空间都很大。原始文档把“到底实不实现”留成待定，写明需要模拟器介入综合判断开发复杂度与效果收益。
 
 
 ### 一个具体的死锁实例
@@ -1106,7 +1106,7 @@ EP 内 LPU 多播加 PPTP 切分的简化场景里，Path0 是“广播 + P2P + 
 
 只要每个 Core 的 Core Memory 能容纳的 User 数量一致，或者沿数据流方向前窄后宽，这个次序就永远成立，即不会死锁。
 
-这个场景仍然会出空泡，前提是同一个 User 在 core0 和 core2 上的处理速度不同。一个 TP 组内处理时间差距一般不大，计算量分布均匀时差距主要来自逐级 Reduce —— **原始文档在这里明确写了“需要模拟器介入协助确认”**，是本次建模要回答的问题之一。
+这个场景仍然会出空泡，前提是同一个 User 在 core0 和 core2 上的处理速度不同。一个 TP 组内处理时间差距一般不大，计算量分布均匀时差距主要来自逐级 Reduce。**原始文档在这里明确写了“需要模拟器介入协助确认”**，是本次建模要回答的问题之一。
 
 ### 队头阻塞（不是死锁，但影响性能）
 
@@ -1288,18 +1288,29 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | C2C Bridge | 全 chip 4 个，VC Buffer 合计约 138.7 KB |
 | 不派角色的 core | 边界 chip 各 1 个，中间列没有 |
 
-包结构：
+包结构。硬件包头 16 B、软件包头 16 B，合计 32 B：
 
-| 字段 | 宽度 |
-| - | - |
-| `path_id` | 8-bit（有效 6-bit），RouterTable 索引 |
-| `path_core_mask` | 16-bit，EP 广播时按 bit 选目标 core |
-| `user_id` 加 `task_id` | 10-bit |
-| `vc_id` | 目标 VC 标识 |
-| `overflow_reinject` | 1-bit，重注入标记 |
-| 包长度 | 16-bit |
-| 软件 payload | 0～16 B |
-| 业务数据 payload | 0 B～64 KB |
+| 字段 | 宽度 | 说明 |
+| - | - | - |
+| Reserved | 7 B | 保留 |
+| Hardware Used | 1 B | `Bypass` 1 bit：Router 为 reissue 做保序；`Bad packet` 1 bit：计算途中发现 ECC 之类的问题。**软件不可改** |
+| `UserID` | 2 B | 这个包属于哪个用户 |
+| Reserved | 1 B | 保留 |
+| `PathID` | 1 B | 每级 RouterTable 按它查路由信息，有效 6 bit |
+| `CoreMask` | 2 B | Router 按它决定进不进本 core |
+| `size` | 2 B | 包的大小，**含包头** |
+| 软件包头 | 16 B | 软件自己读写，硬件不解析也不修改 |
+| 业务数据 payload | 0 B～(64 KB − 32 B) | |
+
+包里没有 `task_id`，也没有 `vc_id`：
+
+* `task_id` 是 core 内的东西。出核时 `path_id` 由 TS 直连给 DTE、`size` 由 RV core 配寄存器，DTE 拿这两样改写包头；入核时异步 datain 任务由软件识别包头后把 `task_id` 写进 CSR
+* **每一级用哪个 VC 记在 RouterTable 里**，包按 `PathID` 索引到表项，从表项拿 VC，不靠包头带
+
+本文其余各节用到的两个包头位，落在上表的哪里：
+
+* `overflow_reinject` 就是 `Hardware Used` 里的 `Bypass` 位。包进 core 暂存时置 1，出 core 重发时改回 0，Router 靠它给 reissue 保序
+* `reduce_seq`（6 bit，逐包配对用）占 Reserved 那 8 B 里的位，源文档的字段表没有单列
 
 Header 与 Payload 走**两根独立并行总线**：
 

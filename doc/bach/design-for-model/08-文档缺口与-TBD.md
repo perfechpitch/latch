@@ -28,15 +28,15 @@
 | B / R core 的 datain 侧是几个 task | 软件流程梳理：两个 task，DTE 搬完再由另一个 task 置 flag / 更新 `arrive_num` | core 内调度机制与软件计算流程详细评估（GLM5 章 B core 伪代码）：一个 `DATAIN_TASK`，DTE DSA 搬完时顺带置标志并推进 head 指针 | 按一个 datain_task（两处较新的文档一致） |
 | Core Mem 容量 | MAS_TOP 内存结构表：512KB / 1MB | Cmem MAS：1MB + 32KB（8 bank） | 按 Cmem MAS |
 | DTE ↔ Cmem 接口宽度 | DTE MAS 旧版：256B + 8B（Data + scale） | Cmem MAS：256B/T | **已消除**。DTE MAS 现版改成「与 Cmem 接口宽度 256B/T \* 2（双向）」，两边一致 |
-| DSA 配置指令一次写几个寄存器 | ISA 描述表：`dsaw.d` / `dsawi.d` 写 2 个；软件计算流程详细评估的伪代码大量使用 `dsawi.d` | RV Core MAS：每条最多配置 1 个 DSA 寄存器 | 按 RV Core MAS，`dsawi.d` 先当两条 `dsawi.s` 建 |
-| `task_done` 的 FC 标志 | ISA 描述表与软件计算流程详细评估：`task_done ts, fc`，fc 带 fence 语义且需 ts 有效 | RV Core MAS：已删除 FC 标志 | 按 RV Core MAS，不建 FC |
+| DSA 配置指令一次写几个寄存器 | ISA 描述表：`dsaw.d` / `dsawi.d` 写 2 个；软件计算流程详细评估的伪代码仍在用 `dsawi.d` | RV Core MAS：每条最多配置 1 个 DSA 寄存器；软件计算流程详细评估的**指令表已改成只有 `dsaw` / `dsawi` 单寄存器写** | **已定：单寄存器写**。软件侧的指令表与 MAS 已经对齐，只剩 ISA 描述表的编码和同一篇里的伪代码没同步。模型把 `.d` 展开成两条单寄存器写 |
+| `task_done` 的 FC 标志 | ISA 描述表的编码里有 FC 位；RV Core MAS 的“task完成指令”一节仍写着 TS 与 FC 两个标记，FC 带 fence 语义 | 软件计算流程详细评估已改成 `task_done ts`，连同“后续 task 要读本 task 写进 shared_mem 的数据可用 fc 做 fence”那段用法一起删掉；RV Core MAS 的 Features 一节也只列 TS 标志 | 按软件侧与 Features，**不建 FC**。**冲突仍在**：MAS 正文那一节没跟着删，而 `fence` 指令本身实现为 nop，所以 MAS“内存一致性”一节里“用 fence + task 完成通知 TS 隔离两个 task 的数据相关”这句现在没有对应的硬件手段，跨 task 的隔离只剩任务链的全序 |
 | `flag_check` 指令 | ISA 描述表有编码；RV Core MAS 的 `user_id` CSR 描述仍提到“R core 执行 flag_check 对应的 task” | RV Core MAS 的 Features 已删除“内存 flag 查询指令” | 保留建模（B core / R core 轮询映射表靠它），待设计者确认 |
 | 取指 / 访存不对齐异常的归属 | RV Core MAS decode 优先级表：addr misalign 单列一类 | 同文档 ITCM 与 Exception 两节：不对齐归入 access fault | 按 decode 优先级表 |
-| RV core 的 C / A / F / D 扩展 | RV Core MAS Features：C 支持、A 考虑支持、F 与 D 不支持；MAS_TOP：RV32IMC | 同文档“标准指令集”小节仍以“是否支持 C？是否支持 AFD？”的问句形式 | 按 Features |
-| DTE 的软件接口 | DTE MAS：Task Descriptor（`TASK_CFG_ADDR` / `TD` / `PACK` / `TRG`）+ Doorbell 序列 | 软件计算流程详细评估：`transfer_mode` / 基地址与 `stream_stride` / `data_len` / 包头与 scale 地址 / `sharemem_*` 一套按字段命名的寄存器，与 Task Descriptor 字段无对应关系 | 软件接口按软件计算流程详细评估建，Lane 与完成机制按 DTE MAS |
-| 入站包头的字段清单 | DTE MAS Header Logical Fields：`version` / `header_len`、`packet_type` / `route`、`dst_addr`、`byte_count`、`task_id` / `stream_id`、`attributes` / `reserved` | 软件计算流程详细评估的 MSG 包结构：包头标记 2 B、Router 信息 4 B（`path_id` + `path_core_mask` + rsv）、包长度 2 B | 两份给的是同一个 Header 的两种写法，字段对不上。DTE MAS 自己声明“具体 Header 位域仍以 Router 接口规范为准”，等那一份 |
+| RV core 的 C / A / F / D 扩展 | RV Core MAS Features：C 支持、**A 考虑支持**、F 与 D 不支持；MAS_TOP：RV32IMC；同文档“标准指令集”小节仍是“是否支持 C？是否支持 AFD？”的问句 | 软件计算流程详细评估：**RV Core 目前支持的指令集为 RV32IMAC**，A 已经算进去 | 按 Features 建，**A 先不建**。这条影响 Share Mem 的多核一致性怎么做：三个 RV core 共享 Share Mem，A 一旦确定支持，task 之间的同步就有原子指令可用 |
+| DTE 的软件接口 | DTE MAS：Task Descriptor（`TASK_CFG_ADDR` / `TD` / `PACK` / `TRG`）+ Trigger 序列 | 软件计算流程详细评估：一套按字段命名的寄存器；《DTE 寄存器配置参数》：第三套，`DTE_BASE` 起三段地址空间加 `template[0..3]` 寄存器模板，字段名与第二套对得上并多出模板 / 动态的分档 | 软件接口按《DTE 寄存器配置参数》建（地址空间与模板已写进《DTE 数据搬运引擎》），完成机制按 DTE MAS。三套的字段仍未逐条对齐 |
+| 入站包头的字段清单 | DTE MAS Header Logical Fields：`version` / `header_len`、`packet_type` / `route`、`dst_addr`、`byte_count`、`task_id` / `stream_id`、`attributes` / `reserved`；软件计算流程详细评估的 MSG 包结构：硬件包头 8 B（包头标记 2 B + Router 信息 4 B + 包长度 2 B） | 《Core 间数据流通信机制》：**硬件包头 16 B + 软件包头 16 B = 32 B**，逐字节给全（Reserved 7 B、Hardware Used 1 B、UserID 2 B、Reserved 1 B、PathID 1 B、CoreMask 2 B、size 2 B），与 DATA_NOC HAS 的 Header 32 B 对上 | **按《Core 间数据流通信机制》建**，它是三份里唯一逐字节给全的，且总长与 HAS 的 32 B 一致。DTE MAS 自己声明“具体 Header 位域仍以 Router 接口规范为准” |
 | DTE 的启动方式 | DTE MAS 旧版：有“TS 快速启动流程”（TS 绕过 RV core 直接启动 DTE），标 P1 优先级 | 软件计算流程详细评估：只保留 DTE core 配置任务给 DSA 这一种 | **已定**。DTE MAS 现版把「TS 直接启动 DTE DSA」这一条整条删掉，启动方式只剩 DTE core 配置任务给 DSA |
-| 包头与 topK 的存放位置 | DTE MAS：包头可写 DTE 内 Header mem 或 Cmem 独立空间；topK 可写 MU 的 `topK_ep_table` 或 Cmem 独立空间 | 软件计算流程详细评估：计算 core 的包头存 DTE 内独立 mem，B core / R core 存 Core Mem；topK 由 DTE 复制到单独的 mem 供 MU 读 | 按软件计算流程详细评估 |
+| 包头与 topK 的存放位置 | DTE MAS：包头可写 DTE 内 Header mem 或 Cmem 独立空间；topK 可写 MU 的 `topK_ep_table` 或 Cmem 独立空间 | 软件计算流程详细评估：计算 core 的包头存 DTE 内独立 mem，B core / R core 存 Core Mem；topK 由 DTE 复制到单独的 mem 供 MU 读 | **已定**。《MU / DTE 需求整理和遗留问题分析》20260825：硬件包头与软件包头合并成一张 288 B 的表按 `stream_id` 索引，存 Hmem 还是存 Core Mem 由 `hw_header_addr` 这个地址本身选，普通计算 core 走 Hmem、B core / R core 走 Core Mem |
 | B core 查询 ready 的 task 由谁执行 | 软件计算流程详细评估 GLM5 章：VU 做 check flag | 同文档 TS 章的 B core 示例：task0 为 MU | 按 GLM5 章（VU），待确认 |
 | `SELF_START` 的适用范围 | TS MAS：仅 B core 才会有 | 软件计算流程详细评估 R core 示例：task0 `self_start=1` | 按软件计算流程详细评估，B core 与 R core 都有 |
 | Router 的 R2R 方向端口 | Router MAS：五方向互连，上、下、左、右及 Core | DATA_NOC HAS：left / right / mid 三个方向端口，加 local 与 reduce_0/1/2，5 入 7 出 Crossbar | 按 HAS 的三方向。两行的拓扑里邻居就是同行左右加另一行对称位，且与第 3 章顶层节的 data_L / data_UD / data_R 三通道一致 |
@@ -53,13 +53,13 @@
 | loop_bp 项数 | Key features：最多 4 项 | 参数列表：4/8 | 未定 |
 | `STALL_COMPUTE_ON_CREDIT_MISS` | Top 模拟器详设正文：默认 `true`（credit 不足时本核停算） | 同文档仿真参数表：默认 `false` | **未解**，影响 credit 阻塞时的吞吐建模，两种模式文档建议做对比仿真 |
 | VU 读 CoreMem 带宽 | Top 模拟器：`vu 读/写 core mem = 256 B/T` | 一体化模拟器：`VU_Dsa 访存端口 CoreMem bw=64B`；VU MAS：128 B | 三处不一致，**建模取 VU MAS 的 128 B** |
-| chip 内 core 网格 | 硬件 MAS / 需求分析：2×4（Harvest 后 2×5） | 两套模拟器一律按 **2×5** 建模 | **已定：按列位置分两种形状**。中间列 chip 2×4 共 8 个 core，第一列与最后一列 chip 2×5 共 10 个，多出的一列放 B core / R core 与一个不派角色的 core。Harvest 方案作废，没有坏核余量，每颗 chip 一律 8 个计算 core |
+| chip 内 core 网格 | HAS 汇总版“Harvest 规则”：每 HBU 内 **2×5** 个 Bach Core，按坏核数分 A / B / C 型，坏 >2 个废弃；保证至少 8 个可用，**多于 8 个的富余 core 作特殊功能用**；板级左右两列只能 A / B 型。硬件 MAS / 需求分析同口径 | 两套模拟器一律按 **2×5** 建模；《仿真评估工作》里 Pysim 的基准 map 是 **2×4** 的 chip、B core 与 R core 另加 | **已定：按列位置分两种形状**。中间列 chip 2×4 共 8 个 core，第一列与最后一列 chip 2×5 共 10 个，多出的一列放 B core / R core 与一个不派角色的 core。Harvest 方案作废，没有坏核余量，每颗 chip 一律 8 个计算 core |
 | map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | 两个都对，只是各说一种 chip：中间列是 4 列，两侧是 5 列。这一项要按 chip 逐颗给，不能配成全局常数 |
 | VC 数 | DATA_NOC HAS 正文与 VC Buffer 表：每 Input Port V = 4 | 同一份 HAS 的 VC 使能 mask 20-bit、`vc_id` 5-bit、Area 预算按 VC0–19（4×20 + 16×2 + shared 20 = 132 flits/port） | V = 20 是 2026/08/19 缩减 VC 之前的残留，但 Area 与 Architectural Guidelines 两节没同步。按 V = 4 建 |
 | VC private 深度 | HAS 3.2.2 与 REQ-ARCH-025：Private per-VC 深度 = 2（防死锁），软件可配 | 同一份 HAS 的 VC Buffer 结构表：Private ~20 flits/VC（覆盖 RTT），总量 4×20 + shared 20 = 100 flits/port = 25 KB | **已定：按 20**。HAS 的 VC Buffer 规格表是缩减到 V=4 之后的正式口径（`V=4`、`Private(VC0–3) ~20 flits/VC`、`总 4×20+20=100 flits/port=25 KB`）；`2` 是 REQ-ARCH-025 的软件可配下限，也是已删除的 VC4–19 那一档的深度，HAS 正文写作「极限情况……保证每 VC 基本传输需求」 |
 | R2R 单跳延迟 | DATA_NOC HAS 性能预算：internal 6 ns + wire 10 ns = **16 ns/hop**，mid 无走线延迟 | 第 5 章延迟表与性能需求规格：T_R2R = **40 T** | **倾向 16 ns**。HAS 新版新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300ns」，单跳约 10 cycle 以内，与 16 ns @1GHz 一档相符；40 T 对不上这条约束。待与设计者确认 40 T 是不是含 core 侧往返的端到端值 |
 | Rmem per-port buffer | HAS ASM-07：per-port **128 flits** | 同一份 HAS 的 Area 预算：Reduce 子系统 3 port × **32 flits** | 未解 |
-| ReduceBuffer 容量 | 《通信机制（分析过程）》：一个用户最大 reduce 数据量 8K × FP32 = 32 KB，正反双份 = **64 KB** | Router MAS：16 用户 × 16 KiB = **256 KB** | 未解。两者对在飞用户数的假设不同 |
+| ReduceBuffer 容量 | 《通信机制（分析过程）》：单用户最大 reduce 数据量 8K × FP32 = 32 KB，正反双份 = 64 KB；《Core 间数据流通信机制》：16 用户 × 32 KB = **512 KB** | Router MAS 与《TS_通信机制》：**16 用户 × 16 KiB = 256 KB** | **已定：16 KiB / 用户**。《TS_通信机制》给了取 16 KiB 的理由与代价：单用户 reduce 次数不定，Rmem 装不下全空间，所以硬件只给 16 KB，**要求软件把一笔 reduce task 拆成 4 笔 8 KB 的 reduce task** |
 | CoreMem credit 粒度 | 《通信机制（分析过程）》：按 **1 KB 粒度**划分，path 按自己需求申请 | DATA_NOC HAS：按 **user 粒度**的资源表格，16 项 | 未解。前者是容量记账，后者是表项记账 |
 | `stream_credit`（HAS 旧版叫 `coremem_credit`）初值 | HAS Boot 流程：上电 `stream_credit[port] = 0`，由正常 Core 上电发初始化脉冲逐步初始化 | HAS 4.3.2：`stream_credit` 为 16 个用户的状态表，**默认为全部使能状态** | 按 Boot 流程那一套（上电 0），另一处是描述稳态 |
 | Router 与 core 的接口协议 | HAS 正文：五类端口统一 Credit-based，local 也是 credit 流控 | HAS 遗留 action：“目前 router 和 core 通信采用 axi stream，如果可以也建议使用同样的 hflit 和 pflit 协议” | 当前实现是 AXI-Stream-Like，credit-based 是建议方向。按当前实现建，DTE-local 桥接做两侧协议转换 |
@@ -90,14 +90,11 @@
 
 正文里 `<cite>` 引用、但不在已拉取范围内的：
 
-* 《Harvest 下业务级 Credit 的路由机制》（Router“业务 Credit 的路由”一节的全部内容）
-* 《TS_通信机制》（TS 的 Programming Sequence 指向它的 5.3 节场景映射）
 * 《Rmem HAS 及 core 通信机制》（DATA_NOC HAS 指向它说明 Rmem 的内部架构：容量、算力、操作类型）
-* 《MU/DTE 寄存器配置参数》（DTE Programming Model、软件计算流程详细评估 Matrix 章）
-* 《MU/DTE 需求整理和遗留问题分析》（软件计算流程详细评估 DTE 章与 Matrix 章）
-* 《DTE DSA 副本》《DTE DSA》（3 Lane 评估的对比材料）
-* 《Mmem(Matrix Mem) 详细设计文档模板》
+* 《DTE DSA》正本（只有《DTE DSA 副本》在库里）
 * 各文档内嵌的 `<readonly-block type="diagram">` 绘图与 `type="isv"` 集成块，飞书没有开放读取接口。画板与内嵌表格已按 token 拉到 `perfechpitch/` 对应目录，索引见该库的 `FIGURES.md`
+
+以下几篇原先缺，现已拉进 `perfechpitch/_refs/`：《Harvest 下业务级 Credit 的路由机制》《TS_通信机制》《MU / DTE 寄存器配置参数》《MU / DTE 需求整理和遗留问题分析》《DTE DSA 副本》《Mmem(Matrix Mem) 详细设计文档模板》《BachCore 输出并行数据流需求分析》《多个上游竞争一个下游资源的需求分析》《不同业务场景下的拆包方式》《RV core 指令集与自定义指令讨论》《MU 评估》《Bach Pysim 技术文档 v0.5.0》《仿真评估工作》。
 
 ## 设计上仍未确定的问题
 
@@ -116,7 +113,7 @@
 * 哪些 task 该硬化进 TS，界线尚未定下
   * 原文的设想：“所有与用户和 core mem 分配无关的 task，都可以采用硬化 task 在 TS 的方式（包括 broadcast 重发），只有与用户强相关的任务链才会在 stream 表里创建和工作”
 * reduce 任务（32 KB）拆成多笔 8 KB 由 TS 并行发射，方案可能改到 DTE 内做多笔，届时 TS 不再需要 `TASK_REDUCE_ISS`
-* dataout 任务后续可能由 DTE 直接与 Router 交互检查 credit，不经 TS
+* ~~dataout 任务后续可能由 DTE 直接与 Router 交互检查 credit，不经 TS~~ 已定反向：TS 查 RouterTable 与 stream 资源、有资源才下发，DTE 只查 VC 通路上的 flit credit
 * TS 直接配置启动 DTE DSA 的方案待定
 * `TASK_DSA_EN` 位域在 MAS 里已划删除线，取消之后 TS 靠什么区分「只调 RV core」与「调 DSA」的 task，MAS 没写
 * Core Mem 里给 P2P 阻塞缓冲留多大、开哪几个方向（最多 3 个），与给 broadcast 留的空间怎么分
@@ -142,14 +139,15 @@
 **DTE**
 
 * CM → MM 方向后续是否要支持仍是遗留问题，当前倾向不支持
-* LUT 的字段展开与转换等软件仿真结果出来后再固化
+* Fast LUT 的字段展开与转换等软件仿真结果出来后再固化
 * 目的地址的生成是否全部交给 DTE core（B core 按指针循环累加，R core 的指针方案未定）
 * reissue 任务目前硬件只按 `path_id` 判断，是否合适
 * scale 与 data 在 Core Mem 里的存储形式
 * Matrix Mem → Core Mem 搬运的源与目的是否用同一个 `stream_id`
-* 软件包头在 Hmem 里的 task 级偏移
-  * 寄存器序列只给到 `header_base_addr + stream_id × 包头长度` 这一级
-  * `+ task_id × 16 B` 这一层是按 Hmem 的 16 KB 容量与包头存储图（16 stream × 64 task × 16 B）推出来的
+* Fast LUT 表项里的 `length` 与「`task_len` 由 RV core 配寄存器」这两条出自不同时间的源文档
+  * 《DTE DSA》给的 Fast LUT 表项是 `{valid, length, ctrl_flags}`
+  * 《MU / DTE 需求整理和遗留问题分析》20260825 的结论是去掉 `task_len_table`、`task_len` 改由 RV core 配寄存器
+  * 本文按「命中 Fast LUT 的常规任务用表里的 `length`，未命中才走 RV core 配寄存器」理解，未经源文档确认
 * R core 的 shareMem 怎么索引，原文留了问句未答
 
 **Core Mem**
@@ -187,7 +185,7 @@
   * ReduceModule 的 Entry credit 与 bank 数
   * CoreStation 的 HeaderFIFO 与 OutputBuffer 深度
   * `operation` 的 Reduce0 / Reduce1 / Reduce2 含义
-* **DTE**：TaskQueue、Buffer、Completion RS、Done Pending 四处深度
+* **DTE**：Buffer、Completion RS、Done Pending 三处深度（TaskQueue 已定「每通道每侧不少于 16」，具体值仍待评估）
 * **VU**：ISQ 深度
 * **RV core**：task_queue 深度
 * **寄存器地址映射**：MU 与 DTE 两处

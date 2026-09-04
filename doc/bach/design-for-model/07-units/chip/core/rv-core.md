@@ -60,7 +60,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <text x="172.0" y="358.0" font-size="8.5" fill="#475569">RV32IMC，只支持 M 态，实现 M 态 CSR，不支持 S / U / H；fence 实现为 nop</text>
 <text x="172.0" y="371.5" font-size="8.5" fill="#475569">覆盖 Decode 接入 custom-0 自定义指令：</text>
 <text x="172.0" y="385.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
-<text x="172.0" y="398.5" font-size="8.5" fill="#475569">　dsaw.s / dsaw.d / dsawi.s / dsawi.d 写 DSA 寄存器</text>
+<text x="172.0" y="398.5" font-size="8.5" fill="#475569">　dsaw / dsawi 写 DSA 寄存器，一条写一个</text>
 <text x="172.0" y="412.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· flag_check · loop</text>
 <text x="172.0" y="425.5" font-size="8.5" fill="#475569">每条指令 1 拍；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
 <text x="172.0" y="439.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch / 双发射 /</text>
@@ -177,7 +177,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F10 | 每条指令 1 拍。不建流水线：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突都折算进这 1 拍 |
 | F11 | 复位后按 io_reg 的 `boot_pc` 启动；收到 TS 下发的 task 后按 `task_pc` 起始执行 |
 | F12 | 自定义指令 `dsar` / `dsari`：读 DSA 寄存器，地址分别来自 rs1 与立即数 `reg_addr1[4:0]` |
-| F13 | 自定义指令 `dsaw.s` / `dsawi.s`：写 1 个 DSA 寄存器；`dsaw.d` / `dsawi.d` 一次写 2 个。按 RV Core MAS 的“每条最多配置 1 个 DSA 寄存器”建模，`dsawi.d` 先当两条 `dsawi.s` |
+| F13 | 自定义指令写 DSA 寄存器一次写 1 个：《软件计算流程详细评估》的指令表现在只有 `dsaw` / `dsawi`，与 RV Core MAS 的“每条最多配置 1 个 DSA 寄存器”一致。ISA 描述表里还留着 `.d` 两档编码，模型解码它但展开成两条单寄存器写。立即数是 16 bit 字节地址，覆盖 0～64K |
 | F14 | 自定义指令 `task_done`：通知当前 task 完成。队列有待执行 task 则跳转到队头 task 起始 PC，否则阻塞取指等待；带 `TS` 标志时通知 TS。firmware 程序结束时要执行一条不通知 TS 的 `task_done`，等待业务流 task |
 | F15 | 自定义指令 `flag_check`：从 Share Mem 的起始地址查到结束地址，找第一个 1 并把位置偏移量写回 rd，查到结束地址仍没找到则返回全 1。B core 与 R core 轮询软件映射表靠它 |
 | F16 | 这是唯一一条不止 1 拍的指令：它按 4 B 一步扫，复用 `sm_lsq` 每拍发一个 Share Mem 读，找到第一个 1 就停。拍数 = 实际扫过的步数 + Share Mem 的一次访问延迟，最坏是 `ceil(扫描长度 / 4 B) + 10`。扫描期间该 RV core 不取下一条指令，`gpr_ready[rd]` 保持为 0 |
@@ -300,7 +300,7 @@ kernel 清单按 RV core 分：
 | `check_flag` | B core 上是 VU core，R core 上是 MU core | B core 上循环比较 `head` 与 `tail`；R core 上循环扫 `arrive_num` 找等于 2 的项，找到就清零并写 `tmp_info1[stream_id]` | RV core 自己 |
 | `token_datain` | DTE core | 按包头判断这是任务链里哪一步的数据，把 Router buffer 里的数据配给 DTE DSA 搬进 Core Mem | DTE DSA |
 | `dataout` | DTE core | 按 `task_id` 查 `path_id` 与 `size` 改写硬件包头，把 Core Mem 里的结果配给 DTE DSA 搬到 Router | DTE DSA |
-| `mu_gemv` | MU core | 判断 8 个激活专家里哪些落在本 EP 组、挑出加权权重、配好 Mmem 与 Cmem 地址，写 `dsawi.d topk_stream_stride, trigger` 启动 | MU DSA |
+| `mu_gemv` | MU core | 判断 8 个激活专家里哪些落在本 EP 组、挑出加权权重、配好 Mmem 与 Cmem 地址，写两条 `dsawi`（先 `topk_stream_stride`，后 `trigger`）启动 | MU DSA |
 | `vu_macro` | VU core | 写 12 个动态参数寄存器，再写 `macro_inst_trigger` | VU DSA |
 
 指令预算按 RV core 主频 1 GHz、目标 5 MTPS 摊：一个 token 总共 200 T 指令，DTE 每 task 约 33 T、MU 约 100 T、VU 约 66 T。MU 那 100 T 是最紧的一格。
@@ -482,7 +482,7 @@ kernel 清单按 RV core 分：
   <text x="250" y="98" font-size="10.5" fill="#475569">2. req_ready=0 → 本条阻塞，pc 保持（DSA 配置通路满时反压）</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 指令是 dsar/dsari → dsa_cfg = {we=0, addr}，不阻塞</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. dsar 同时 dsa_rq.push(rd)，并把 gpr_ready[rd] 清零</text>
-  <text x="250" y="162" font-size="10" fill="#9ca3af">dsawi.d 按两条 dsawi.s 建</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">写 DSA 寄存器一条写一个</text>
   <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
   <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
   <path d="M589 71 L637 71" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
@@ -661,8 +661,9 @@ custom-0 字段布局   见下一节
 
 两处与本模型的建法有出入，按下面处理：
 
-* `task_done` 的 `FC` 位在编码里有，RV Core MAS 的 Features 已删除 FC 标志。模型解码这一位但不实现它的 fence 语义
-* `dsaw.d` / `dsawi.d` 一次配 2 个 DSA 寄存器，与 RV Core MAS 的“每条最多配置 1 个”不一致。模型按 MAS 把它们展开成两条 `.s` 执行，编码照上表解码
+* `task_done` 的 `FC` 位在编码里有。RV Core MAS 的 Features 一节只列 TS 标志，《软件计算流程详细评估》已经把它删成 `task_done ts`，但 MAS 的“task完成指令”一节仍写着 FC 带 fence 语义。模型解码这一位但不实现它的 fence 语义
+* `dsaw.d` / `dsawi.d` 一次配 2 个 DSA 寄存器，与 RV Core MAS 的“每条最多配置 1 个”不一致，《软件计算流程详细评估》的指令表也已经不再列这两条。模型把它们展开成两条单寄存器写，编码照上表解码
+* 表里的立即数写作 `reg_addr[4:0]`，《软件计算流程详细评估》已改成 **16 bit 字节地址**（0～64K）。模型按 16 bit 建，ISA 描述表这一侧未同步
 
 **待定**：`dsar` 与 `dsari` 在表里的编码完全相同，bit31 都是 0，没有区分两者的位。按其余四条的规律，`dsari` 应当是 bit31 为 1。模型先按这条规律解码，等设计方确认。
 
@@ -681,7 +682,7 @@ custom-0 字段布局   见下一节
 | RV32IMC + 只支持 M 态 + fence 为 nop | F8、F9 | `isa_scope` |
 | 每条指令 1 拍，流水线细节折算进这 1 拍 | F10 | `one_cycle_per_inst` |
 | 八条 custom-0 自定义指令 | F12～F17 | `custom0_insts` |
-| dsawi.d 按两条 dsawi.s 建 | F13 | `dsaw_double` |
+| 写 DSA 寄存器一次写 1 个，`.d` 展开成两条 | F13 | `dsaw_single` |
 | task_done 的三种行为：跳队头 / 阻塞等待 / 通知 TS | F14 | `task_done_inst` |
 | flag_check 查第一个 1，查不到返回全 1 | F15 | `flag_check` |
 | flag_check 是唯一的多拍指令，拍数按实际扫过的步数记 | F17 | `flag_check_cycles` |

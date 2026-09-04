@@ -283,7 +283,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F6 | VC credit 分两级记账，与下游 VC Buffer 的分配规则一一对应：每个下游方向的每个 VC 一个 private 计数器上电值 20，另有每个下游方向一个 shared 计数器上电值 20。发送时 `private[o][v] > 0` 就扣 private，否则扣 `shared[o]`；两者都为 0 时该 VC 不能发 |
 | F7 | 一个方向的 credit 总量 = 4 × 20 + 20 = 100，正好等于下游该方向的 VC Buffer 容量，任何时刻都不会超发。上游不需要第二道反压信号，链路上也没有 ready |
 | F8 | flit 离开下游 VC Buffer 就归还 VC credit，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 |
-| F9 | 归还按同一条规则回填：`private[o][v] < 2` 就补 private，否则补 `shared[o]`。下游也是先占 private 再借 shared、离开时对称释放，两边规则相同，计数因此不会漂移 |
+| F9 | 归还按同一条规则回填：`private[o][v] < 20` 就补 private，否则补 `shared[o]`。下游也是先占 private 再借 shared、离开时对称释放，两边规则相同，计数因此不会漂移 |
 | F10 | credit 不足的 VC 被跳过，同一个 input port 的其他 VC 不受影响 |
 | F11 | Stream Resource Table 维护所有下游方向的 UserID 占用；只有所有需求方向都满足才允许发送 |
 | F12 | 出口方向的 Output Buffer 与 Packet Shifter 按总线宽度移位拼接后从 `<方向>_data_out_ch` 发出 |
@@ -499,10 +499,10 @@ mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0
 mem skip_mask         FF        10 b，per-core 一位，按 chip 里最大的那种形状定宽             1R1W  与 RouterTable 分开配     复位 0
 mem rtab_commit       FF        {副本写入游标, 完成状态}                                    1RW   更新状态机                复位 空闲
 mem credit_bypass     FF 阵列   每个业务 credit 输入端口一个 {out_mask[6:0]}                1R1W  CSR 配置                  复位 0
-mem vc_buf[d][v]      FIFO      private 每 VC 2 flit                                        1W1R  满且 shared 也满 → 不再收上游  复位空    // d ∈ {left,right,mid,core}，v ∈ 0..3
+mem vc_buf[d][v]      FIFO      private 每 VC 20 flit                                       1W1R  满且 shared 也满 → 不再收上游  复位空    // d ∈ {left,right,mid,core}，v ∈ 0..3
 mem vc_shared[d]      FIFO      每方向 20 flit，四个 VC 先到先得                             1W1R  private 满时借用           复位空
 mem pkt_ctx[d][v]     FF 阵列   {vc[1:0], out_mask[6:0], remain_len[15:0], head, tail, locked}  1RW  队首上下文             复位空
-mem vc_credit[d][v]   FF        private 计数器，每下游方向每 VC 一个                          1RW   private > 0 时扣它；release 回来时优先补它  复位 2
+mem vc_credit[d][v]   FF        private 计数器，每下游方向每 VC 一个                          1RW   private > 0 时扣它；release 回来时优先补它  复位 20
 mem vc_shared_cr[d]   FF        shared 计数器，每下游方向一个                                1RW   private 为 0 时扣它；private 已满时 release 补它  复位 20
 mem stream_tab[d]     FF 阵列   每方向 16 项 × {valid, user_id[15:0]}                        1RW   建：新 UserID 首次到达；删：release 或 Retire  复位空
 mem hdr_fifo          FIFO      16 × 256 B 包头                                             1W1R  DTE 读完写 1 弹出          复位空
@@ -723,7 +723,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
   <text x="104" y="93" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_bytes[8:0] · flit_msg</text>
   <rect x="20" y="108" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="112" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="129" font-size="10" fill="#374151" text-anchor="middle">vc_buf[d][v] · FIFO 2 flit · 1W1R</text>
+  <text x="104" y="129" font-size="10" fill="#374151" text-anchor="middle">vc_buf[d][v] · FIFO 20 flit · 1W1R</text>
   <rect x="20" y="162" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="166" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="183" font-size="10" fill="#374151" text-anchor="middle">vc_shared[d] · FIFO 20 flit · 1W1R</text>
@@ -946,7 +946,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
   <text x="250" y="120" font-size="12" fill="#111827">Output Pipe · 拼接后发出</text>
   <text x="250" y="142" font-size="10.5" fill="#475569">1. out_buf[o].push(out_flit[o])</text>
   <text x="250" y="162" font-size="10.5" fill="#475569">2. link[o].flit_* = Shift(out_buf[o], 总线宽度 256 B)</text>
-  <text x="250" y="182" font-size="10.5" fill="#475569">3. credit_return_vld → private[d][vc] &lt; 2 ? private += 1 : shared_cr[d] += 1</text>
+  <text x="250" y="182" font-size="10.5" fill="#475569">3. credit_return_vld → private[d][vc] &lt; 20 ? private += 1 : shared_cr[d] += 1</text>
   <text x="250" y="202" font-size="10.5" fill="#475569">4. release 按 credit_bypass[in_port].out_mask 复制转发，不进仲裁</text>
   <text x="250" y="226" font-size="10" fill="#9ca3af">一个 input port 一拍最多归还一个 VC 的 credit</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#arr6)"/>
@@ -1366,11 +1366,11 @@ VC                  每输入方向 4 类（VC0～3），输出方向不设 VC B
                     VC3 专给逐级 reduce，VC0～2 支持除 reduce 外的操作、软件可配；4 这个数来自“最复杂场景下一个 Router 最多经过 4 条同向数据流”
 credit 记账单位      1 KB；广播一次扣的量含提前预留的输出结果空间（原文例：8 KB 广播 + 24 KB 输出 = 扣 32）
 VC Buffer           private 每 VC 深度 20（覆盖 RTT，软件可配，防死锁下限 2）加每方向一个 shared pool 20 flit（覆盖 credit 往返），一个方向合计 100 flit ≈ 25 KB
-                    private 那 2 flit 任何时候都只归本 VC，shared pool 先到先得。建模按这个结构建，不摊平成每 VC 一个独立深度
+                    private 那 20 flit 任何时候都只归本 VC，shared pool 先到先得。建模按这个结构建，不摊平成每 VC 一个独立深度
                     另一份口径：《通信机制（分析过程）》按容量记 —— reduce 专用 VC3 是 16 KB、三个共享 VC 各 8 KB、三方向各一套，
                     合计 (16 + 8×3) × 3 = 120 KB。两份口径未对齐，见第 8 章
 Stream Resource Table  每方向 16 项（待定）
-VC credit 初值      private 每 VC 2，shared 每方向 20；发送先扣 private 再扣 shared，归还先补 private 再补 shared
+VC credit 初值      private 每 VC 20，shared 每方向 20；发送先扣 private 再扣 shared，归还先补 private 再补 shared
                     一个方向的 credit 总量 4 × 20 + 20 = 100，等于下游该方向的 VC Buffer 容量，不超发，链路上不需要 ready
 Reduce 输入 / 输出   三路各 160 GB/s / 160 GB/s；算力 80 GFLOPS（FP32 / BF16）
 ReduceModule 上下文  16 用户 × 16 KiB；单个 Token 16 KB 这个下界来自“Core 必须一次性整包发进 ReduceBuffer，不能分段”
@@ -1379,7 +1379,10 @@ CoreStation HeaderFIFO / OutputBuffer 深度   16 / 32 flit（待定）
 监听事件队列        16 项全相连
 Xbar 与 ReduceModule 三路输入的仲裁算法      轮询（待定）
 operation 的 Reduce0 / Reduce1 / Reduce2     源分量 / 中继累加 / 最终汇聚（待定，原文未定义）
-包结构              path_id 8 bit（有效 6 bit）· path_core_mask 16 bit · user_id 加 task_id 10 bit · vc_id · overflow_reinject 1 bit · reduce_seq 6 bit · 包长 16 bit · 软件 payload 0～16 B · 业务数据 0 B～64 KB
+包结构              硬件包头 16 B：Reserved 7 B · Hardware Used 1 B（Bypass 即 overflow_reinject、Bad packet）· UserID 2 B · Reserved 1 B
+                  · PathID 1 B（有效 6 bit）· CoreMask 2 B · size 2 B（含包头）
+                  软件包头固定 16 B；业务数据 0 B～(64 KB − 32 B)；reduce_seq 6 bit 占 Reserved 位
+                  包里不带 task_id 与 vc_id：task_id 是 core 内的，VC 由 RouterTable 按 PathID 定
 包长范围            最短 16 B（只含包头与路由信息的空包），最长 64 KB、实际支持到 (16K + 32) B；不设包尾，结束靠包长度计数
 reduce 包           软件辅助信息固定 16 B，Router 做加法时固定跳过这 16 B
 总线                Header 与 Payload 走两根独立并行总线，hflit 256 bit 与 pflit 2048 bit，按同一包边界保持对应；进 core 拼接成完整包，出 core 自动拆分

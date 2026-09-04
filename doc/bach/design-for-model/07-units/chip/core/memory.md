@@ -299,7 +299,7 @@
 <path d="M1364.5 590.0 L1261.6 590.0 L1261.6 551.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
 <rect x="1390.7" y="608.5" width="88.6" height="10.5" fill="#ffffff" opacity="0.92"/>
 <text x="1435" y="616" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">Router 重发，256 B</text>
-<text x="300" y="769.5" font-size="8.5" fill="#6b7280" text-anchor="start">DTE DSA 的 RD / WR Lane 与 Router 都在下方，经 xbar 上来；Router 重发写 Core Mem</text>
+<text x="300" y="769.5" font-size="8.5" fill="#6b7280" text-anchor="start">DTE DSA 各通道的 RD / WR 两侧与 Router 都在下方，经 xbar 上来；Router 重发写 Core Mem</text>
 <rect x="300" y="799.5" width="1000" height="127.0" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="312" y="820.5" font-size="11" fill="#111827" font-weight="600">仲裁规则</text>
 <text x="312.0" y="837.5" font-size="8.5" fill="#475569">Core Mem：每组读写端口有 bank 冲突时 arb 二选一，无冲突可同时访问</text>

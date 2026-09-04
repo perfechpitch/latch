@@ -32,7 +32,7 @@ Core 内七个单元，各一份文档：
 | Router | RouterStation ×3、Xbar、CoreStation、ReduceModule、RouterTable / CSR、CoreMem 重发、Retire、CoreMemCreditMonitor | [`router.md`](router.md) |
 | TS | User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check（`Stream_table` 内再展开 user_LUT、ptr_ctrl、stream_id_map、task_state_update、task_rdy_check、retire、except_check） | [`ts.md`](ts.md) |
 | RV core ×3 | 每个一个模块：task_queue、指令执行器、dsa_iss、dsa_rq、lsq、CSR | [`rv-core.md`](rv-core.md) |
-| DTE DSA | Header Parser、Commit、TaskQueue ×4、Lane ×4、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | [`dte.md`](dte.md) |
+| DTE DSA | Header Parser、Commit、5 个物理通道（进核 1 + 出核 4，各拆读写两侧，各带 TaskQueue）、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | [`dte.md`](dte.md) |
 | MU DSA | regfile、issue_q、gen_ep_info、agu ×3 与 acu、ldq ×2、matrix exe、stq | [`mu.md`](mu.md) |
 | VU DSA | config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU ×3、VSFU ×2、MEXE、SEXE、寄存器堆与 Profile | [`vu.md`](vu.md) |
 | 存储 | Core Mem、Matrix Mem、Share Mem | [`memory.md`](memory.md) |
@@ -126,10 +126,10 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <rect x="1104" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（八个模块）</text>
 <text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头 Drop Frame）· Commit（双 Bank，Bank0 优先）</text>
-<text x="1116.0" y="581.5" font-size="8.5" fill="#475569">TaskQueue ×4 · Lane ×4（RD/WR × CH0/CH1，含 AGCU）</text>
+<text x="1116.0" y="581.5" font-size="8.5" fill="#475569">5 通道（进核 1 + 出核 4）· 每通道 RD/WR 两侧各一个 TaskQueue（含 AGCU）</text>
 <text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
 <text x="1116.0" y="608.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
-<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 16 KB + 32 B · LUT 192 B</text>
+<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 288 B（16 项 × {core_mask, sw_header}）· Fast LUT 64 项</text>
 <text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · 本级 Reduce credit 表 · PendingTaskQ</text>
 <text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
 <rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
@@ -300,7 +300,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 | F12 | Matrix Mem 不做这套分片，每个用户看到的是相同的权重 |
 | F13 | 内存一致性靠任务隔离，不做显式维护：不同用户之间地址空间独立；MU、VU、DTE 的 RV core 在任意时刻不执行同一个用户的 task；同一用户的 task 按任务链顺序执行，前一个完成后才下发后一个 |
 | F14 | 同一用户跨 task 的数据经 Share Mem 传，前一个 task 的 RV core 写完 Share Mem 后用 `fence` 加 task 完成通知 TS 的方式隔离两个 task 的数据相关 |
-| F15 | 生产者与消费者按五对 Release / Acquire 配对：Router 写内部 Buffer 配 Data Ready；RV 写 DMA Command 配 Doorbell；DMA 写目标 Memory 配 DMA Task Done；MU / VU 写 Task 输出配 Task Done；DSA 写输出配 Chain Done |
+| F15 | 生产者与消费者按五对 Release / Acquire 配对：Router 写内部 Buffer 配 Data Ready；RV 写 DMA Command 配 Trigger；DMA 写目标 Memory 配 DMA Task Done；MU / VU 写 Task 输出配 Task Done；DSA 写输出配 Chain Done |
 | F16 | VU 不能直接读 Matrix Mem。需要 Matrix Mem 里的数据时先由 DTE 搬到 Core Mem |
 | F17 | 特权级只支持 M 态，不实现 MMU，中断异常上报 SCP。本轮只留状态位与接口名 |
 | F18 | DTE RV core 的 `cm_lsq` 按地址范围分流到两个从端：Core Mem 的 `cmem_rv`，与 Router CoreStation 的 `hdr_rd`。包头只有这一条读取通路，DTE DSA 不另接一条 |

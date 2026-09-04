@@ -47,7 +47,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <text x="262.0" y="148.0" font-size="8.5" fill="#475569">静态配置：基本不随用户变化，</text>
 <text x="262.0" y="161.5" font-size="8.5" fill="#475569">　初始化阶段配好，业务流阶段快速调用</text>
 <text x="262.0" y="175.0" font-size="8.5" fill="#475569">动态配置：随用户变化，跟随任务下发</text>
-<text x="262.0" y="188.5" font-size="8.5" fill="#475569">启动：dsawi.d topk_stream_stride, trigger</text>
+<text x="262.0" y="188.5" font-size="8.5" fill="#475569">启动：dsawi 先写 topk_stream_stride，后写 trigger</text>
 <text x="262.0" y="202.0" font-size="8.5" fill="#475569">trigger 含 last 标志</text>
 <text x="262.0" y="215.5" font-size="8.5" fill="#475569">streamID / taskID / userID 由 DSA 自己读，</text>
 <text x="262.0" y="229.0" font-size="8.5" fill="#475569">　不需要软件配置</text>
@@ -199,9 +199,9 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | 编号 | 功能 |
 | - | - |
 | F1 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
-| F2 | 任务启动用 `dsawi.d topk_stream_stride, trigger`，trigger 寄存器含 last 标志 |
+| F2 | 任务启动写两条 `dsawi`：先 `topk_stream_stride`，最后 `trigger`；trigger 寄存器含 last 标志 |
 | F3 | `streamID` / `taskID` / `userID` 由**软件写进动态配置寄存器**，不来自硬件通路：MU RV core 从自定义 CSR 读出 TS 下发的这三个值，在写 trigger 之前用配置指令写给 MU。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是寄存器里的这一组 |
-| F4 | 寄存器地址映射本轮用临时映射（`regmap.h`），等《MU/DTE 寄存器配置参数》到手后改 |
+| F4 | 寄存器地址映射本轮用临时映射（`regmap.h`）。原来等的《MU/DTE 寄存器配置参数》已改名为《DTE 寄存器配置参数》，只剩 DTE 那一半（地址空间三段加寄存器模板，见《DTE 数据搬运引擎》），**MU 侧的寄存器地址映射仍无着落** |
 
 ### issue_q
 
@@ -422,7 +422,7 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="250" y="121" font-size="10.5" fill="#475569">2. req_ready = 配置通路未反压</text>
   <text x="250" y="141" font-size="10.5" fill="#475569">3. 写 trigger 寄存器 → 锁存当前动态参数为一个任务描述</text>
   <text x="250" y="161" font-size="10.5" fill="#475569">4. desc.last = trigger.last；desc.{stream_id, task_id, user_id} = 软件写入的寄存器值</text>
-  <text x="250" y="185" font-size="10" fill="#9ca3af">启动用 dsawi.d topk_stream_stride, trigger</text>
+  <text x="250" y="185" font-size="10" fill="#9ca3af">启动用两条 dsawi，最后写 trigger</text>
   <path d="M188 58 L231 58" stroke="#475569" marker-end="url(#aru1)" fill="none"/>
   <path d="M188 139 L231 139" stroke="#475569" marker-end="url(#aru1)" fill="none"/>
   <path d="M698 122 L741 122" stroke="#475569" marker-end="url(#aru1)" fill="none"/>

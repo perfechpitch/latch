@@ -236,7 +236,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | 编号 | 功能 |
 | - | - |
 | F1 | 8 组静态配置模板，默认全 0；软件需要的组数不超过 8 时运行中无需改写 |
-| F2 | 12 个动态参数寄存器；动态参数区 0x0000～0x002C 的寄存器编号都在 `dsawi` 的 5 bit 立即数范围内，可直接寻址；静态模板区从 `N×0x100 + 0x1000` 起，寄存器编号 ≥ 1024，须用 `dsaw.s` 按 byte 地址写 |
+| F2 | 12 个动态参数寄存器；动态参数区 0x0000～0x002C，静态模板区从 `N×0x100 + 0x1000` 起。`dsawi` 的立即数是 16 bit 字节地址、覆盖 0～64K，两个区都能直接用立即数寻址 |
 | F3 | `macro_inst_trigger` 是唯一的启动寄存器，写一次执行一次；两次写之间没有其他配置也启动两次 |
 | F4 | trigger 的六个字段：`CONFIG_IDX`（选静态配置组）、`STATIC_DYNAMIC_MASK`（逐参数选静态模板值还是动态寄存器值）、`EVENT_EN`、`STREAM_ID_OVERRIDE`、`DATA_BROADCAST`、`MACRO_INST_FENCE` |
 | F5 | 宏指令的 `stream_id` 与 `task_id` 都取自**动态参数寄存器**，由软件在写 `macro_inst_trigger` 之前配好：VU RV core 从自定义 CSR 读出 TS 下发的值再写给 VU。`STREAM_ID_OVERRIDE` 置位时 `stream_id` 改用另一个显式给定的值，用来访问不属于本 task 的 stream；`task_id` 不受它影响。`dsa_done` 回给 TS 的就是这一组 |
@@ -822,7 +822,7 @@ Top-K              K 固定为 16
 | - | - | - |
 | 8 组静态模板 + 12 个动态参数，trigger 写一次执行一次 | F1、F3 | `macro_inst_trigger` |
 | stream_id 与 task_id 取自动态参数寄存器，STREAM_ID_OVERRIDE 只改 stream_id | F5 | `vu_ids_by_software` |
-| 动态参数区可用 dsawi 直接寻址，静态区须用 dsaw.s 按 byte 地址写 | F2 | `reg_addressing` |
+| 动态参数区与静态模板区都能用 dsawi 的 16 bit 字节地址直接寻址 | F2 | `reg_addressing` |
 | TYPE_VL 三字段随 STATIC_DYNAMIC_MASK 切换 | F6 | `type_vl_switch` |
 | 静态配置组被引用时配置写阻塞，in-flight 按改写前执行完 | F7、F8 | `static_cfg_block` |
 | 三条配置通路共享寄存器视图，流控独立 | F9 | `three_cfg_paths` |

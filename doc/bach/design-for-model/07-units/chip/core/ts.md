@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **TS**
 
-给实现 TS 的人：各模块做哪些事、端口与存储怎么定。模块划分照 TS MAS，分两层——顶层九个，`Stream_table` 内再展开七个。
+给实现 TS 的人：各模块做哪些事、端口与存储怎么定。模块划分照 TS MAS，分两层，顶层九个，`Stream_table` 内再展开七个。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -97,7 +97,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 <text x="652" y="441" font-size="11" fill="#111827" font-weight="600">Task_done</text>
 <text x="652.0" y="458.0" font-size="8.5" fill="#475569">七路完成合流，直接写 stream_table，不设统一 Update 模块</text>
 <text x="652.0" y="471.5" font-size="8.5" fill="#475569">　DTE / MU / VU 各有 RV core ack 与 DSA ack，共六路</text>
-<text x="652.0" y="485.0" font-size="8.5" fill="#475569">　DTE 这条 Lane 额外接收 Router 的 Reduce Done</text>
+<text x="652.0" y="485.0" font-size="8.5" fill="#475569">　DTE 这一路额外接收 Router 的 Reduce Done</text>
 <text x="652.0" y="498.5" font-size="8.5" fill="#475569">按当前任务的 task_recv_type 判哪一路才算数：</text>
 <text x="652.0" y="512.0" font-size="8.5" fill="#475569">　00 = 只调 RV core / 01 = 调 DSA / 10 = DTE DSA + Rmem 两者都要</text>
 <text x="652.0" y="525.5" font-size="8.5" fill="#475569">Reduce 拆两半：DTE ack 只 consume_only，不改 stream 状态；</text>
@@ -361,6 +361,10 @@ MAS 把 `Stream_table` 单独展开一张表。功能描述照 MAS 原文，`-` 
 
 MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_update` 的 `credit` 子模块：检测 Router 送来的下游 core credit，满足后更新 `task_fsm`。
 
+**与 DTE 的分工**：业务层的资源在这一级查完：TS 查 RouterTable 和对应的 stream 资源，**有资源才下发**；下发之后 DTE 只查 VC 通路上的 flit credit（见 DTE 一节 F53）。两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 RouterTable 定。
+
+配套一条软件约束：**软件要保证 TS 里的任务足够小，下发到 DTE 之后不需要 RV core 再拆**。TS 看到大任务、DTE 看到小任务时，一个大任务拆出的小任务数量不确定，可能填满 DTE 的 TaskQueue，把 TS 下一个大任务堵在外面；而下一个大任务恰好是释放下游资源的那一笔时就形成死锁。
+
 
 | 编号 | 功能 |
 | - | - |
@@ -373,7 +377,7 @@ MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_upd
 | F66 | P2P 重发：软件把 bypass 本 core 的任务配成 datain 与 dataout 两个 task。不需要重发时 Router 用 `path_id` 匹配告知已完成，执行到该 task 时直接越过；需要重发时 datain 由 Router 请求直接驱动 datain_task 搬运，dataout 等前序任务做完、执行到本 task 时向 Router 请求 credit，满足后标记就绪等待下发 |
 | F67 | P2P 阻塞缓冲：软件可配开关、分给 P2P 缓存的 Core Mem 容量、开启的方向（最多 3 个）、每方向的容量与项数 |
 | F68 | TS 侧为 P2P 阻塞缓冲维护每方向一张映射表（`p2p vld` / `User id` / `Down direction` / `Data addr`）与对应下游 core 的 credit 计数器；下游 credit 释放后发起一个调度 DTE 搬数据到 Router 继续传输的 task，并通知上游释放 credit |
-| F69 | Reduce 任务的 credit：软件配 `reduce_num = N`，TS 发现是 reduce task 后顺序连续下发 N 笔 credit 请求，credit 满足即可顺序下发，直到收全 N 笔 Rmem finish |
+| F69 | Reduce 任务的 credit：软件配 `reduce_num = N`，TS 发现是 reduce task 后顺序连续下发 N 笔 credit 请求，credit 满足即可顺序下发，直到收全 N 笔 Rmem finish。这 N 笔之间不要求前一笔完成才发下一笔，连发是为了压掉逐级 reduce 的延迟。N 由 Rmem 容量定：单用户 16 KB 装不下 32 KB 的一笔 reduce，软件按 8 KB 拆，`N = 4` |
 | F70 | Head-only 退休：只允许 `head_ptr` 指向的那一项退休，条件是 `valid=1 && end=1 && task_fsm=TASK_FINISH` |
 | F71 | 退休顺序：先向 Router 持续发 credit 返还请求，Router 接收后才清除该槽位的 `valid` 并推进 `head_ptr`；返还的 credit 经本 core 的 Router 通知上游 core，让上游的 TS credit 加一 |
 | F72 | B core 的搬出 task 按 `B_CORE_DIRECTION` 查下游 core 的 TS credit；落 Matrix Mem 的那一侧不查 TS credit，反压由 GPU 到 Bach 的两层 credit 兜底 |
@@ -384,7 +388,7 @@ MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_upd
 
 | 编号 | 功能 |
 | - | - |
-| F75 | 七路完成事件：DTE、MU、VU 各有 RV core ack 与 DSA ack 共六路，DTE 这条 Lane 额外接收 Router 的 Reduce Done。三条 Completion Lane 直接写 stream_table，不设统一的 Update 模块。七路都是脉冲，Task_done 永远就绪，不向上游反压：完成事件在硬件里没有重发通路，接收方一旦拒收就等于把那个 stream 永远停在当前 task。同一拍多路同时到达时各自写各自的 stream，落到同一个 stream 的按写口优先级排队，请求保持到 `accepted` |
+| F75 | 七路完成事件：DTE、MU、VU 各有 RV core ack 与 DSA ack 共六路，DTE 这一路额外接收 Router 的 Reduce Done。三条 Completion Lane 直接写 stream_table，不设统一的 Update 模块。七路都是脉冲，Task_done 永远就绪，不向上游反压：完成事件在硬件里没有重发通路，接收方一旦拒收就等于把那个 stream 永远停在当前 task。同一拍多路同时到达时各自写各自的 stream，落到同一个 stream 的按写口优先级排队，请求保持到 `accepted` |
 | F76 | 按当前任务的 `task_recv_type` 判断哪一路才算数：只调 RV core 或调了 DSA 但 RV core 会等 DSA 完成后再执行一段程序时由 RV core 收尾；异步配置调度 DSA 后 RV core 立刻结束 task 程序时由 DSA 收尾；RV core 异步配置 DSA 后不查询完成状态但还要再执行一段程序时两者都上报，TS 等二者都完成 |
 | F77 | Reduce 任务的完成拆成两半：DTE ack 只代表搬运完成，执行 `consume_only`，不修改 stream 状态；只有 Router Reduce Done 才有权把 Reduce 任务置为 `TASK_FINISH` |
 | F78 | 两个事件可以任意顺序到达。Router Done 可以被 Hold，但必须等匹配的 DTE ack 被消费后才提交任务完成 |

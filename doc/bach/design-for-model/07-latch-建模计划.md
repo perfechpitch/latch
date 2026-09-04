@@ -126,7 +126,7 @@
   <rect x="676" y="284" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="304" font-size="11.5" fill="#111827">DTE DSA</text>
   <text x="688" y="320" font-size="9" fill="#475569">Header Parser · Commit · TaskQueue ×4</text>
-  <text x="688" y="334" font-size="9" fill="#475569">Lane ×4（AGCU）· 中间 Buffer · Completion RS · Hmem 与 LUT</text>
+  <text x="688" y="334" font-size="9" fill="#475569">5 个物理通道（AGCU）· 中间 Buffer · Completion RS · Hmem 与 Fast LUT</text>
   <text x="688" y="348" font-size="9" fill="#475569">topK 与 shareMem 写</text>
   <text x="1124" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
   <text x="1124" y="347" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/dte.md</text>
@@ -282,7 +282,7 @@ src/bach/
           task_done.h              七路完成合流
         rv_core/
           rv_core.h                驱动 src/rv32 的 SystemRv32 逐条执行；task_queue、dsa_iss、dsa_rq、lsq、gpr 就绪表、自定义 CSR
-          bach_insts.h             custom-0 自定义指令（dsar、dsari、dsaw.s、dsaw.d、dsawi.s、dsawi.d、task_done、flag_check、loop）
+          bach_insts.h             custom-0 自定义指令（dsar、dsari、dsaw、dsawi、task_done、flag_check、loop）
           rv_ports.h               RV core 地址空间：ITCM、DTCM、Share Mem、Core Mem、Router I/O reg 各一个 MemoryPort
           kernel/
             kernel_api.h           kernel 源码侧头文件：自定义指令的 inline asm 封装、DSA 寄存器地址、自定义 CSR 编号
@@ -513,7 +513,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | # | 规矩 | 落在哪 |
 | - | - | - |
-| 1 | 每个 VC 有 private 2 flit，队头永远能前进一步，不靠共享池。credit 也按 private 与 shared 两级记，与下游 buffer 的占用规则一一对应，一个方向的总量等于下游容量，不超发 | RouterStation 的 VC Buffer 与两级 credit |
+| 1 | 每个 VC 有 private 20 flit，队头永远能前进一步，不靠共享池。credit 也按 private 与 shared 两级记，与下游 buffer 的占用规则一一对应，一个方向的总量等于下游容量，不超发 | RouterStation 的 VC Buffer 与两级 credit |
 | 2 | 相互依赖的数据流分到不同 VC，避免循环等待 | `RouterTable.nxt_vc` 的填法，编译侧保证 |
 | 3 | credit 不足的 VC 被跳过，同一 input port 的其他 VC 不受影响 | RouterStation 的 VA |
 | 4 | 多播全有或全无。只发一半会让同一 User 的数据在不同分支上错位，已发方向占了资源却完不成整体传输 | RouterStation 与 Xbar |
@@ -627,9 +627,9 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 
 | 参数 | 默认值 |
 | - | - |
-| Router VC Buffer 深度 | private 2 flit / VC 加每方向 shared pool 20 flit |
+| Router VC Buffer 深度 | private 20 flit / VC 加每方向 shared pool 20 flit（防死锁下限 2，软件可配）|
 | Stream Resource Table 项数（每方向） | 16 |
-| VC credit 初值 | private 每 VC 2，shared 每方向 20，先扣 private 再扣 shared |
+| VC credit 初值 | private 每 VC 20，shared 每方向 20，先扣 private 再扣 shared |
 | RouterTable 表项数、副本数、每副本写入拍数 | 64、5、1 |
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
 | ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度 | 64 flit、4、2、8 |

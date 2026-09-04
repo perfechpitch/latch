@@ -134,7 +134,9 @@
 | 第二层　chip 内 core 间 | 切 K 后各 core 的部分和 | Router 的 ReduceModule，Read-Modify-Write | 包流经每一跳就加，不等齐 | ReduceModule 上下文，16 用户 × 16 KiB | Reduce credit |
 | 第三层　EP 组间 | 各 EP 组的组内结果 | R core 的 VU | 一个用户的两笔到齐才加 | R core 的 Matrix Mem，32 MB | 派遣前预留所有 R core 的余量 |
 
-三层不共用机制。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层借一个 core 的 Matrix Mem 做缓冲，等齐再加。
+三层不共用机制。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层用一个 core 的 Matrix Mem 做缓冲，等齐再加。
+
+第二层还带一条对软件的硬约束：**Rmem 给一个用户只留 16 KiB，而单用户一笔 reduce 的数据量是 32 KB**，所以软件必须把一笔 reduce task 拆成 **4 笔 8 KB** 的 reduce task 下发，对应 TS 任务链里的 `reduce_num = 4`。
 
 ***
 
