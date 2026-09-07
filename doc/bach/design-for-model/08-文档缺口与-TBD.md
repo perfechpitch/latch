@@ -47,6 +47,7 @@
 | R2R 带宽 | Router MAS：相邻 Router 双向各 256 GB/s @1GHz | DATA_NOC HAS：R2R 210 GB/s、C2C 90 GB/s | 两个都记：256 GB/s 是 256 B/T @1GHz 的接口理论值，210 GB/s 是 HAS 记的有效带宽。是否同一口径待确认 |
 | 重发（reissue）任务在不在主任务链上 | TS MAS 与 core 内调度机制：重发 task 不在主线任务链上，可并行执行、优先级最高（TS MAS 里“重发的 task 任务优先级最高”这句自己划了删除线） | Top 模拟器详设的三条【讨论结果】：插在任务链中实现，同一 stream 下即使无依赖也按任务顺序执行，需等它完成才能执行后面的任务；软件计算流程详细评估的 normal core 示例把 broadcast reissue 排成 task 1' | 按 TS MAS 与 core 内调度机制：不在链上、并行、优先级最高 |
 | TS 的时延数字 | TS MAS：task 唤醒延迟 2～3 cycle | Top 模拟器详设：调度间隔 16 T、需与 Router 通信 21 T、retire 5 T；TS LLD 时序图：CREATE 3 / WAKE 2 / DONE 3 / INSTALL 4 / RETIRE 6 | 三者口径不同不是矛盾：MAS 是硬件目标，模拟器是含 RV core 往返的端到端值，LLD 是逐级拍数。《TS 任务调度器》按这三层分别记 |
+| 进 core 的数据缓存在哪 | Router MAS：CoreStation 内的 HeaderFIFO 与 OutputBuffer，只给职责不给深度 | DATA_NOC HAS：Router 内 local 端口不设 buffer（容量栏写“—”，注明“buffer 在 DTE-local 桥接”），缓冲在 Router 外的 DTE-local 桥接模块，Router→DTE 60 flits × 288 B ≈ 16.9 KB | 结构按 MAS（不设独立桥接模块，逻辑拆到 core 与 Router 两侧），**容量按 HAS 的 60 flits** |
 | Router 的 Credit Bypass Route | Router MAS：软件通过 CSR 为每个业务 Credit 输入端口配置静态输出方向 Mask | 软件计算流程详细评估 Router 章：删除了该配置小节，软件只配 RouterTable；但同章检查清单与释放表仍引用 Credit Bypass Route | 按 Router MAS |
 | Matrix Mem bank 数 | MU MAS：32 个 Mmem Bank 与 32 个物理 Lane 一对一 | Mmem MAS：按 64 个 lane 分成 64 bank | **未解**，直接影响 8KB/T 的组织方式 |
 | MU 计算流水深度 | 参数表：执行拍数 / 流水延时 9T | Matrix exe 章节：单 Lane 内深度 10 级 | 差 1 拍，可能是含 / 不含某一级 |
@@ -105,7 +106,7 @@
 * **VC 机制到底实不实现**。原文的原话是“实现 VC 机制需要很大的额外面积、设计复杂度和验证空间，成本极高。具体是否实现需要模拟器介入，综合判断开发复杂度和效果收益”。这是本次建模要回答的问题之一，不是文档缺口
 * “Broadcast 过快引起空泡”这一档的定量结论，原文明确写了“需要模拟器介入协助确认”。前提是同一个用户在 core0 与 core2 上的处理速度不同，而计算量分布均匀时差距主要来自逐级 Reduce
 * P2P 流量控制的“流量控制使能”配在哪一张表，原文只写“在一个 Core 配置了流量控制使能”，没有指明是 TS 的 CFG_REG 还是 RouterTable。本套文档按配在 TS 建模
-* **走发送就绪门控的那些报文靠什么发现下游收不下**。同一个 user 在某方向已持有资源后，后续报文不再查 credit，最终用哪个硬件信号表达“下游收不下”原文没有定，把它列为需要硬件与产品拍板的开放问题。Top 模拟器做成可切换的桩：`SEND_READY_MODE` 默认 `backpressure`（链路与 Core Mem 的反压），另有 `per_user_ready` 与 `ack` 两档
+* **走发送就绪门控的那些报文靠什么发现下游收不下**。同一个 user 在某方向已持有资源后，后续报文不再查 stream credit，最终用哪个硬件信号表达“下游收不下”原文没有定，把它列为需要硬件与产品拍板的开放问题。Top 模拟器做成可切换的桩：`SEND_READY_MODE` 默认 `backpressure`（链路与 Core Mem 的反压），另有 `per_user_ready` 与 `ack` 两档
 
 **TS**
 
@@ -184,7 +185,7 @@
   * RouterTable 表项数与副本数
   * Xbar 与 ReduceModule 的仲裁算法
   * ReduceModule 的 Entry credit 与 bank 数
-  * CoreStation 的 HeaderFIFO 与 OutputBuffer 深度
+  * CoreStation 的 HeaderFIFO 深度与进 core 的包长上限（OutputBuffer 已取 60 flit，这两个值按它匹配）
   * `operation` 的 Reduce0 / Reduce1 / Reduce2 含义
 * **DTE**：Buffer、Completion RS、Done Pending 三处深度（TaskQueue 已定「每通道每侧不少于 16」，具体值仍待评估）
 * **VU**：ISQ 深度

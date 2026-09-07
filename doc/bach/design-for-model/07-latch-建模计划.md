@@ -530,7 +530,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 上面十条都靠反压兜底，反压的前提是没有任何一段通路把请求丢掉。三处特别容易写成丢弃：
 
-* Router 收满一个包后通知 TS 的 trigger 与 token 一一对应，TS 的入口占满时 CoreStation 保持本笔请求，不丢
+* Router 通知 TS 的 trigger 与 token 一一对应，TS 的入口占满时 CoreStation 保持本笔请求，不丢
 * Matrix Mem 同 bank 冲突只执行 MU，被让路的那一笔丢弃并计数，**模型直接断言失败**。这是硬约束被违反的表现，不是正常工作点：DTE 没有重传机制，丢一笔就少一段数据，用重试掩盖会让配置错误一直查不出来
 * MU 的 Drain 只丢越界任务的数据，已进入脉动通路的合法数据照常算完写回
 
@@ -633,7 +633,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | RouterTable 表项数、副本数、每副本写入拍数 | 64、5、1 |
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
 | ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度 | 64 flit、4、2、8 |
-| CoreStation HeaderFIFO、OutputBuffer 深度 | 16、32 flit |
+| CoreStation HeaderFIFO、OutputBuffer 深度 | 16、60 flit（OutputBuffer 取 DATA_NOC HAS 的 DTE-local 桥接 Router→DTE 60 flits；HeaderFIFO 无出处，16 这个值与 60 flit 装得下的包数不匹配）|
 | DTE TaskQueue、Buffer、Completion RS、Done Pending 深度 | 16、16 × 256 B × 2、16、16 |
 | VU ISQ 深度 | 8 |
 | Share Mem 四个 master 的仲裁算法 | 轮询 |

@@ -50,7 +50,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <text x="1172" y="131" font-size="11" fill="#111827" font-weight="600">ITCM / DTCM</text>
 <text x="1172.0" y="148.0" font-size="8.5" fill="#475569">ITCM 4 KB，8 B/T，1 拍</text>
 <text x="1172.0" y="161.5" font-size="8.5" fill="#475569">　firmware · kernel</text>
-<text x="1172.0" y="175.0" font-size="8.5" fill="#475569">　· bootloader</text>
+<text x="1172.0" y="175.0" font-size="8.5" fill="#475569">　· kernel</text>
 <text x="1172.0" y="188.5" font-size="8.5" fill="#475569">DTCM 8 KB，32 bit × 4 bank</text>
 <text x="1172.0" y="202.0" font-size="8.5" fill="#475569">　BSS 段 · 寄存器溢出 · 堆栈</text>
 <text x="1172.0" y="215.5" font-size="8.5" fill="#475569">由 ctrl_noc 装载</text>
@@ -234,7 +234,7 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 
 | 编号 | 功能 |
 | - | - |
-| F36 | ITCM 4 KB，8 B/T，1 拍，存 firmware、kernel、DTE core 的 bootloader |
+| F36 | ITCM 4 KB，8 B/T，1 拍，存 firmware 与 kernel；DTE core 的 weights loader 是 kernel 里的一段 |
 | F37 | DTCM 8 KB，存初始化 BSS 数据段、寄存器溢出与堆栈 |
 | F38 | ITCM 与 DTCM 由 ctrl_noc 装载，装载拍数按镜像字节数除以 4 B 计 |
 | F39 | CSR 由 ctrl_noc 直接配置，不经流水线 |
@@ -274,7 +274,7 @@ port ready (master, 电平, clk)                    // 进 wait 状态后拉高�
 ## 4　存储器
 
 ```
-mem itcm        SRAM        4 KB，8 B/T，1 拍                                  1R1W  ctrl_noc 装载        复位未定义   // firmware · kernel · bootloader
+mem itcm        SRAM        4 KB，8 B/T，1 拍                                  1R1W  ctrl_noc 装载        复位未定义   // firmware · kernel
 mem dtcm        SRAM        8 KB，4 bank × 32 bit，3 拍                        1R1W  同 bank 冲突阻塞第二条  复位未定义   // BSS · 寄存器溢出 · 堆栈
 mem gpr         FF 阵列     32 × 32 bit                                        —     由指令执行器读写      复位 0
 mem gpr_ready   FF          32 b 就绪位图                                       1RW   发出访存 / DSA 读时清，写回时置  复位 全 1

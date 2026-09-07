@@ -444,9 +444,10 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 2. Header Parser 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配
    TaskQueue 项和完成跟踪项。
 3. 两侧资源全部可用时 Commit 原子成功，RD_CH0 建立 Router 接收上下文，WR_CH0 建立 MM / CM 写入上下文。
-   否则 Header 入口保持背压。
-4. 后续 Payload 由 RD_CH0 控制写入 inbound buffer，附带 `task_id`、有效字节与任务边界信息。
-   Buffer 满时通过 TREADY 向 Router 反压。
+   否则 Header 入口保持背压。Commit 同时完成地址展开：源地址、目的地址与按任务边界切分的元数据都在这一步算好。
+4. **Header Commit 成功之后才允许 Payload Fire**：`in_core_data_ch` 的 `tready` 要在 inbound buffer 有空、
+   且 Commit 三样资源都够时才拉高。Payload 由 RD_CH0 控制写入 inbound buffer，
+   附带 `task_id`、有效字节与任务边界信息；buffer 满时通过 TREADY 向 Router 反压。
 5. WR_CH0 从 inbound buffer 按任务边界取数，经 DMA_XBAR 写入目标 MM / CM。
 6. RD_CH0 的帧接收结束和 WR_CH0 的写请求与响应 Drain 分别进入 Completion RS，
    二者按 `task_id` Join 后才向 TS 产生一次 `task_done`。

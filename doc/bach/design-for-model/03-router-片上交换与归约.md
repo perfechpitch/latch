@@ -498,12 +498,12 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 **进 core**
 
 6. 目标含本级 Core 时，先查本级 stream credit 表：UserID 已命中直接收；未命中且有空项则分配后收；无空项时该 VC 不能向 Core 发，但 VC 有空项仍可继续收上游数据。准入后不再检查 Core 方向的 VC credit，Header 写入 Header FIFO，Payload 写入 in_core_fifo（OutputBuffer），两者保持同一包顺序与边界。
-7. CoreStation 收满一个包，按包头顺序经 `notify_ch` 通知 TS，请求里带 UserID、PathID 与重发标记。DTE Core 经 AXI-Full 类接口读包头生成搬运任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头。
+7. CoreStation 按接收包头的顺序经 `notify_ch` 通知 TS，**Header 就绪即通知，不等整包收完**，请求里带 UserID、PathID 与重发标记。DTE Core 经 AXI-Full 类接口读包头生成搬运任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头。
 8. DataIn DTE 按 TS 的调度经 `in_core_data_ch`（AXI-Stream-Like）收拼接好的整包写进 Core Mem。Core 入口以整包为单位，不支持包间交织。被反压时 valid、Header、Payload、首尾标志与有效字节保持不变，解除后从同一 flit 继续。
 
 **出 core**
 
-9. DataOut DTE 按 PathID 查自己那份 RouterTable 得到 VC 与资源需求，先向 Router 申请到下游 Stream 或 Reduce 资源（申请不到就在 PendingTaskQ 等），再在目标 VC 有空时经 `out_core_data_ch` 发出整包。CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁。进 core 与出 core 两条路完全并行，互不共享仲裁状态。
+9. DataOut DTE 按 PathID 查自己那份 RouterTable 得到 VC 号。下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE 这一侧只查这条 VC 通路上的 flit credit，不够就在 PendingTaskQ 等，够了就经 `out_core_data_ch` 发出整包。CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁。进 core 与出 core 两条路完全并行，互不共享仲裁状态。
 
 **Reduce**
 
@@ -516,7 +516,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 直通（Bypass） | 上游 Router 的 `<方向>_data_in_ch` | RouterStation → CrossBar → 出口 RouterStation 的 output buffer / Packet Shifter | 下游该 VC 的 credit；目标方向需要 Stream 时查本级的下游 Stream 映射表 | 下一个 Router；flit 离开本级 VC 即还上游 VC credit |
 | 多播 | 同上，flow_dir 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
 | 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
-| 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | 目标 VC 有空才准 DTE 发；下游 Stream / Reduce 资源由 DTE 先向 Router 申请到 | 下一个 Router；发完向 TS 返回 UserID + PathID |
+| 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | DTE 查这条 VC 通路的 flit credit；下游 Stream / Rmem 资源由 TS 在下发前查好 | 下一个 Router；发完向 TS 返回 UserID + PathID |
 | Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Reduce credit 够整包（DTE 查）；输出时查目标 VC credit 与下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
@@ -542,6 +542,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 * 进 Core 对 Router 而言也是一个输出方向，要维护本级 Core 的 stream credit
 * 已通过 Stream 检查，因此**不再检查对 Core 的 VC credit**，一定有 CM 空间
+* **Header 就绪即通知 TS**，不等整包收完。OutputBuffer 因此是流水缓冲而不是整包缓冲：DTE 被调度后按 AXI-Stream-Like 的 valid 边收边搬，数据没到就停在原拍等，恢复后从同一 flit 继续
 
 按 `PathID` 查到需进 Core 后，检查本级 stream credit 表，按三种结果分别处理：
 
@@ -551,17 +552,20 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 通知 TS 这一步：
 
-* CoreStation 收满一个包，按接收包头的顺序经 `router2ts_trigger_ch` **直接通知 TS**
+* CoreStation 按接收包头的顺序经 `router2ts_trigger_ch` **直接通知 TS**，Header 就绪即通知
 * 请求里带 `user_id`、`path_id` 与这一笔要不要重发的标记
 * 这条通路硬件直连，不经过 RV core，也不经过任何软件环节
 * TS 据此调度 DTE 搬运
 
-DTE 取数这一步：
+DTE 取数这一步分三段，只有两头带地址：
 
-* DTE core 用 **AXI-Full 类接口**读包头生成 DTE 任务
-* 读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头
-* CoreStation 与 DTE 之间用 **AXI-Stream-Like** 协议传数据
-* **Core 内输入不支持多包交织**，Router 必须发完一个整包再发下一个
+| 段 | 协议 | 地址 |
+| - | - | - |
+| DTE 读包头 | AXI-Full 类（`hdr_rd`） | 映射到 Router I/O reg 的一个固定地址段。HeaderFIFO 的队头始终映射在这个地址上，DTE core 读完向指定地址写 1 弹出，CoreStation 把下一个包头顶上来 |
+| CoreStation → DTE 传 payload | AXI-Stream-Like | **没有地址通道**，只有 valid / ready / keep / last。flit 按到达顺序排列，包在哪结束靠包长度计数 |
+| DTE 写 Core Mem | DMA_XBAR | 有地址，由 TS 下发的搬运任务给出 |
+
+* 中间那段不需要地址，靠的是 **Core 内输入不支持多包交织**：Router 必须发完一个整包再发下一个，同一时刻通道上只有一个包在流，第 n 个 flit 就是这个包的第 n 段
 
 被反压时：
 
@@ -574,8 +578,8 @@ DTE 取数这一步：
 
 * DTE 内按 Router 一个方向的 VC 数各有一个 Buffer，某个 VC 阻塞只阻塞对应的那个 Buffer
 * DTE 发数据到 Router 时与 CoreStation 有 credit 协议，保证 VC 有容量才发
-* 包对下游 Stream 或 Rmem 资源有需求时，DTE 必须先申请到才能发，否则任务在 `PendingTaskQ` 等待
-* DTE 中也要有一份 RouterTable，按 PathID 查到 VC 和资源需求
+* 下游的 Stream 与 Rmem 资源由 TS 在下发任务前查好，不在 DTE 这一级；DTE 查 VC credit 不够时，任务在 `PendingTaskQ` 等待
+* DTE 中也要有一份 RouterTable，按 PathID 查到本跳的 VC 号
 * 进 Core 与出 Core 的数据通路**完全并行**，互不共享数据通路仲裁状态
 
 #### Reduce
@@ -808,14 +812,14 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
 | 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | **core ↔ Rmem 按 UserID；Rmem ↔ Rmem 按 flit 加 UserID 双粒度** |
 | 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router 是唯一有效状态（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table）；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | DTE 维护本级 ReduceModule 的；ReduceModule 维护相邻下游各方向的；Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包由 DTE 先向 Router 申请到授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
 | 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 输出 flit 被下游接受后产生携带 UserID 的 release，经业务 credit 的静态旁路路径返回上游 |
 | 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到 release，或收到 Retire 后删该用户全部授权表项 | 建：用户建 stream credit 表项时分配一个 entry 的 credit；删：收到 Retire 且 credit 恢复到分配数量 |
 | 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按 flit 还但要等下游 Reduce 完成 |
 
 stream credit的两条硬规则：
 
-* **只有 Router 负责真正申请表项**。DTE 要发数据必须先从 Router 拿到指定 user 的授权，禁止超额分配或重复授权
+* **只有 Router 负责真正申请表项**，禁止超额分配或重复授权。TS 在下发任务前向 Router 查到指定 user 的授权，DTE 拿到任务时这份授权已经到手
 * **Router 的进 core 表和 TS 内部的 stream credit 表按完全一致的逻辑申请空项**。分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收”
 
 Router 另外输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
@@ -1289,7 +1293,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |
 | ReduceBuffer 容量 | 通信机制记 8K × FP32 = 32 KB，正反双份 64 KB；Router MAS 记 16 用户 × 16 KiB，**未解** |
 | Reduce 加法器 | 256 B × 1 GHz × 2 输入 = 512 GB/s |
-| DTE-local 桥接 buffer | Router → DTE 方向 60 flits ≈ 16.9 KB |
+| 进核数据缓冲（in_core_fifo / OutputBuffer） | Router → DTE 方向 60 flits ≈ 16.9 KB；HAS 把它记在 Router 外的 DTE-local 桥接，本套文档放在 CoreStation |
 | CTRL_NOC 配置时钟 | 800 MHz（R2CU 接口，APB / AXI-lite，32 bit） |
 | 错误四类 | Link 错误、包长度不匹配（VA 阶段查 pkt_length 是否超过目标端口 buffer 能力）、Credit Overflow、Credit Underflow；后两类硬件自动把该 VC 的 credit 复位到固定初值 |
 | Reduce 输入 | 三路各 160 GB/s |

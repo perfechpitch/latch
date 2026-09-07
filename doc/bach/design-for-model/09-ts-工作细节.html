@@ -477,7 +477,7 @@ const S_TOPO={id:'topo',name:'① 硬件拓扑',vb:[1040,640],
   ref:'router.md 接口　core.md F18'},
 
  {t:'Router 与 TS：三条进，两条出',
-  d:['进 TS 的三条：包收满、Core Mem 资源到手、归约完一个整包。',
+  d:['进 TS 的三条：包头就绪、Core Mem 资源到手、归约完一个整包。',
      '出 TS 的两条：注册资源申请、用户退休与 credit 返还。',
      'core 内控制通路的全部就是这五条，<b>都不经软件</b>。'],
   act:['rt','ts'],eact:['e_rt_ts','e_ts_rt'],
@@ -629,7 +629,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 11 步',vb:[10
  table:{label:'stream_table 前四项',cols:ST_COLS,rows:ST_ROWS},
  steps:[
 /* ---------- task 0 ---------- */
- {t:'task 0 ①　CoreStation 收满一个包，发 trigger',
+ {t:'task 0 ①　CoreStation Header 就绪，发 trigger',
   d:['B core 广播来的 token 逐跳复制到本 core。',
      'CoreStation 按“已收数据量 vs 包头 payload 大小”判定一个 token 收完。',
      '直接通知 TS，<b>不经 RV Core、不经软件</b>。这是 TS 被激活的唯一入口。',
@@ -806,7 +806,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 11 步',vb:[10
 /* ---------- task 2 ---------- */
  {t:'task 2 ①　reduce 任务，连续下发 N 笔 credit 请求',
   d:['credit 的单位是 <b>stream 不是 task</b>，Core Mem 空间按 stream 申请和释放。',
-     '同一 stream 的任务链里，Router 只在第一次往下游发数据时检查 credit。',
+     '同一 stream 的任务链里，Router 只在第一次往下游发数据时检查 stream credit，之后走发送就绪门控。',
      '广播任务的 <code>CreditCounter</code> 初值 = 目的 core 数量，P2P 初值为 1。',
      '这一笔配了 <code>reduce_num = N</code>，所以顺序连续下发 N 笔请求。'],
   act:['ts','rt'],eact:['e_ts_rt'],
@@ -1116,7 +1116,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 11 步',vb:[10
    Router 侧只画与 TS 打交道的四块，存储与 Core Status 放在下排。
    ================================================================ */
 const MOD_NODES=[
- {id:'cs',  x:20, y:250,w:84, h:66,fs:9.5,t:'CoreStation',s:['收满一个包','就 trigger']},
+ {id:'cs',  x:20, y:250,w:84, h:66,fs:9.5,t:'CoreStation',s:['Header 就绪','就 trigger']},
  {id:'rmod',x:20, y:326,w:84, h:58,fs:9.5,t:'ReduceModule',s:['归约完整包','才报 TS']},
  {id:'ret', x:20, y:394,w:84, h:52,fs:9.5,t:'Retire',s:['回 accepted']},
  {id:'cmcm',x:20, y:456,w:84, h:66,fs:9.5,t:'CoreMem',s:['CreditMonitor','出核前监听']},
@@ -1188,7 +1188,7 @@ const S_MODS={id:'mods',name:'④ 每个模块的运行逻辑',vb:[1040,640],
  table:{label:'这个模块持有的存储器',cols:['名字','结构','读写'],
   rows:[['—','—','—'],['—','—','—'],['—','—','—'],['—','—','—']]},
  steps:[
- {t:'CoreStation　收满一个包就通知 TS',
+ {t:'CoreStation　Header 就绪就通知 TS',
   d:['判定依据：已收数据量 == 包头里的 payload 大小。',
      '包体交给 DTE DSA，包头留在 HeaderFIFO 等 <code>hdr_rd</code> 来读。',
      '同一笔 trigger 两个下游同时要接：User_Match 判建表，DataIn_task_table 登记搬运。',
@@ -1297,7 +1297,7 @@ const S_MODS={id:'mods',name:'④ 每个模块的运行逻辑',vb:[1040,640],
 
  {t:'Credit　向 Router 注册申请，等唤醒',
   d:['credit 的单位是 <b>stream 不是 task</b>，Core Mem 空间按 stream 申请和释放。',
-     '同一 stream 的任务链里，Router 只在第一次往下游发数据时检查。',
+     '同一 stream 的任务链里，只有第一次往下游发数据时查 stream credit，之后只受 VC credit 与链路握手约束。',
      '广播初值 = 目的 core 数量，P2P 初值 = 1，reduce 任务连续下发 N 笔请求。',
      '三层 credit 互不复用：VC credit、stream credit、Reduce credit 各管一段。'],
   act:['cr'],eact:['m_cm_cmon','m_cmon_cm','m_cr_st'],

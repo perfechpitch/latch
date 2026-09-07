@@ -182,7 +182,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 | `core_noc` | SCP 控制通路访问 Bach core 全局的路由模块 |
 | `TS` | Bach Core 的控制单元，负责用户以及用户间在 core 内多任务（DTE/MU/VU）的调度 |
 | `Router` | 数据通路的中转站，接收不同方向数据并路由到不同方向输出 |
-| `MU/VU/DTE RV Core` | 接收 TS 调度，给对应 DSA 下发任务。ITCM 存 firmware / kernel / bootloader，DTCM 存初始化数据、BSS 段 |
+| `MU/VU/DTE RV Core` | 接收 TS 调度，给对应 DSA 下发任务。ITCM 存 firmware 与 kernel，DTCM 存初始化数据、BSS 段 |
 | `MU DSA` | token 与 weights 的 GEMV 运算 |
 | `VU DSA` | SiLU & dot、tp-reduce、ep-reduce、concat 等向量运算 |
 | `DTE DSA` | DMA 搬移任务 |

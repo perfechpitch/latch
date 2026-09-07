@@ -33,7 +33,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
 | 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID，flit |
 | 谁维护 | RouterStation 的独立计数器，硬件自动维护 | Router 是唯一有效状态；DTE 持一份 cache；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | DTE 维护本级的，ReduceModule 维护相邻下游各方向的，Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包由 DTE 先向 Router 申请到授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
 | 何时还 | flit 离开下游 VC Buffer 就归还 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release，逐跳传到上游 | 输出 flit 被下游接受后产生携带 UserID 的 release，经静态旁路返回上游 |
 | 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按 flit 还但要等下游 Reduce 完成 |
 
@@ -312,13 +312,14 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F25 | 已通过 Stream 检查，进 core 不再检查对 Core 方向的 VC credit，一定有 Core Mem 空间 |
 | F26 | Header 写入 HeaderFIFO，Payload 写入 OutputBuffer（in_core_fifo），两者保持同一包顺序与边界 |
 | F27 | Core 入口以整包为单位，不支持包间交织，必须发完一个整包再发下一个 |
-| F28 | 收满一个包后按接收包头的顺序经 `router2ts_trigger_ch` 直接通知 TS，请求里带 `user_id`、`path_id`、这一笔要不要重发的标记，以及这个用户要不要做计算的 `compute` 位。这条通路硬件直连，不经 RV core，也不经任何软件环节 |
-| F29 | 判定一个包收完的依据：比较已接收数据量与包头里的 payload 大小 |
+| F28 | 按接收包头的顺序经 `router2ts_trigger_ch` 直接通知 TS，**Header 就绪即通知，不等整包收完**，请求里带 `user_id`、`path_id`、这一笔要不要重发的标记，以及这个用户要不要做计算的 `compute` 位。这条通路硬件直连，不经 RV core，也不经任何软件环节 |
+| F29 | 判定一个包收完的依据：比较已接收数据量与包头里的 payload 大小。这个判定用于确定包边界，据此开始接收下一个包 |
+| F112 | Header 就绪即通知，OutputBuffer 因此是流水缓冲而不是整包缓冲：DTE 被调度后按 AXI-Stream-Like 的 valid 边收边搬，数据没到就停在原拍等，恢复后从同一 flit 继续。进 core 的包长不受 OutputBuffer 容量约束 |
 | F30 | `compute` 取自包头软件 payload 里的一位，CoreStation 原样转给 TS，不做解释。DP+P2P 场景下 TS 用它跳过与本用户无关的那一半任务（**待定**：这一位在包头里的位置等 Router 接口规范定下包头位域后回填） |
 | F31 | 请求发出后保持到 TS 拉 `ready`。TS 的 trigger 入口占满时本笔请求原地保持，CoreStation 不发下一笔，也不清 HeaderFIFO 的队头。请求不允许丢弃：丢一笔 trigger 就等于丢一个 token |
 | F32 | DTE RV core 经 `cm_lsq` 映射到 Router I/O reg 的地址段读包头生成搬运任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头。Router 侧的 `hdr_rd` 是这条通路的从端，core 内不另设第二条读包头的通路 |
 | F33 | 被反压时保持 valid、当前 Header、Payload、首尾 flit 标志与有效字节信息不变，传输位置不得前移；反压解除后从同一 flit 继续握手，保证包不丢拍、不重拍、不跨包、不串包 |
-| F34 | 出 core：DTE 按 PathID 查自己那份 RouterTable 得到 VC 与资源需求，先向 Router 申请到下游 Stream 或 Reduce 资源，再在目标 VC 有空时经 `out_core_data_ch` 发出整包；CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁 |
+| F34 | 出 core：DTE 按 PathID 查自己那份 RouterTable 得到 VC 号；下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE 只查这条 VC 通路上的 flit credit，够了就经 `out_core_data_ch` 发出整包；CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁 |
 | F35 | 进 core 与出 core 两条数据通路完全并行，互不共享数据通路仲裁状态 |
 
 ### ReduceModule
@@ -392,7 +393,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F80 | 多个事件同时满足时按 StreamID 仲裁，选最老的任务通知 TS |
 | F81 | 进 core 重发的任务也注册到该队列，数据进 Core、资源就绪后通知 TS 重发 |
 | F82 | 同一 VC 的数据包要保序，当前 VC 有未重发完的数据时后续包不能提前发送 |
-| F83 | 只有 Router 负责真正申请 Stream 表项。DTE 要发数据必须先从 Router 拿到指定 user 的授权，禁止超额分配或重复授权 |
+| F83 | 只有 Router 负责真正申请 Stream 表项，禁止超额分配或重复授权。TS 在下发任务前向 Router 查到指定 user 的授权，DTE 拿到任务时这份授权已经到手 |
 | F84 | Router 的进 core 表和 TS 内部的 stream credit 表按完全一致的逻辑申请空项，分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收” |
 | F85 | 另输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入 |
 
@@ -467,7 +468,7 @@ port out_core_data_ch (slave, AXI-Stream-Like, clk)   // DTE → CoreStation：�
 port hdr_rd (slave, AXI-Full 类, clk)                 // DTE RV core 的 cm_lsq 读 HeaderFIFO 的包头，读完写 1 弹出
   in  araddr[31:0] · arvalid · awaddr[31:0] · wvalid · wdata[31:0]
   out arready · rvalid · rdata[255:0] · awready · wready
-port router2ts_trigger_ch (master, valid/ready, clk)  // CoreStation → TS：收满一个包
+port router2ts_trigger_ch (master, valid/ready, clk)  // CoreStation → TS：Header 就绪即通知
   out valid · user_id[15:0] · path_id[7:0] · reissue · compute
   in  ready                                               // = TS 的 trigger 入口队列有空项；拉低时 CoreStation 保持本笔请求，不发下一笔
 port router2ts_credit_ch (master, 脉冲, clk)          // CoreMemCreditMonitor → TS：资源到手
@@ -506,7 +507,7 @@ mem vc_credit[d][v]   FF        private 计数器，每下游方向每 VC 一个
 mem vc_shared_cr[d]   FF        shared 计数器，每下游方向一个                                1RW   private 为 0 时扣它；private 已满时 release 补它  复位 20
 mem stream_tab[d]     FF 阵列   每方向 16 项 × {valid, user_id[15:0]}                        1RW   建：新 UserID 首次到达；删：release 或 Retire  复位空
 mem hdr_fifo          FIFO      16 × 256 B 包头                                             1W1R  DTE 读完写 1 弹出          复位空
-mem out_buf           FIFO      32 flit（in_core_fifo）                                     1W1R  整包写入，不交织          复位空
+mem out_buf           FIFO      60 flit（in_core_fifo）                                     1W1R  整包写入，不交织          复位空
 mem rdc_ctx           SRAM      16 用户 × 16 KiB，FP32 中间累加结果                          1R1W  RMW 原位累加              复位未定义
 mem rdc_user_tab      FF 阵列   16 × {user_id[15:0], path_id[7:0], pkt_state[2:0], in_done_mask[2:0], expect_mask[2:0], out_state[1:0], retired}  1RW  建上下文时记下 expect_mask = rdc_rtab[path_id].reduce_in_mask  复位空
 mem rdc_down_credit   FF 阵列   16 用户 × 3 方向 × 计数器                                    1RW   发 flit 扣 1，release 加 1  复位 分配值
@@ -925,7 +926,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
   <text x="104" y="82" font-size="10" fill="#334155" text-anchor="middle">locked</text>
   <rect x="20" y="102" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="106" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 32 flit · 1W1R</text>
+  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 60 flit · 1W1R</text>
   <rect x="20" y="156" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="160" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">vc_credit[d][v] · FF private · 1RW</text>
@@ -977,7 +978,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
   <text x="850" y="72" font-size="10" fill="#374151" text-anchor="middle">hdr_fifo · FIFO 16 × 256 B · 1W</text>
   <rect x="762" y="105" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="766" y="109" width="168" height="34" fill="none" stroke="#374151"/>
-  <text x="850" y="126" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 32 flit · 1W</text>
+  <text x="850" y="126" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 60 flit · 1W</text>
   <rect x="232" y="20" width="486" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M7</text>
   <text x="704" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
@@ -994,7 +995,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 </svg>
 ```
 
-### M8 · 收满通知 TS
+### M8 · Header 就绪，通知 TS
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 903 198" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -1375,7 +1376,8 @@ VC credit 初值      private 每 VC 20，shared 每方向 20；发送先扣 pri
 Reduce 输入 / 输出   三路各 160 GB/s / 160 GB/s；算力 80 GFLOPS（FP32 / BF16）
 ReduceModule 上下文  16 用户 × 16 KiB；单个 Token 16 KB 这个下界来自“Core 必须一次性整包发进 ReduceBuffer，不能分段”
 ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度   64 flit、4、2、8（待定）
-CoreStation HeaderFIFO / OutputBuffer 深度   16 / 32 flit（待定）
+CoreStation HeaderFIFO / OutputBuffer 深度   16 / 60 flit；OutputBuffer 取 DATA_NOC HAS「Router 外（每 Core）」表的
+                    DTE-local 桥接 Router→DTE 60 flits ≈ 16.9 KB，HeaderFIFO 仍无出处
 监听事件队列        16 项全相连
 Xbar 与 ReduceModule 三路输入的仲裁算法      轮询（待定）
 operation 的 Reduce0 / Reduce1 / Reduce2     源分量 / 中继累加 / 最终汇聚（待定，原文未定义）

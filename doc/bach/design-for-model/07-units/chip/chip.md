@@ -335,7 +335,7 @@
 | F11 | 不派角色的 core 在 Skip Mask 里标成跳过：经过它的包走完整流水线但不投递 local。它的 Router 的**数据通路可时钟门控，配置通路时钟保持** |
 | F12 | 不派角色的 core 只配 Router 那两样，不配 TS、RV core、DSA，也不解复位它们（那几个模块本来就没构造）。Router 的配置排在 TS 与 RV core 之前，全 chip 一个 core 不落；漏掉任何一个 core 的 Router，经过它的 path 就全断 |
 | F13 | ctrl_noc 广播开关：关时依次配每个 core，开时只发一次带广播标记的请求给 core0，由 core0 依次广播；默认关 |
-| F14 | 每个 core 的初始化六步，按序做完：RV core firmware 写入 ITCM → DTE bootloader 写入 DTE RV core 的 ITCM → 配置 Bach core 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化 |
+| F14 | 每个 core 的初始化五步，按序做完：RV core firmware 写入 ITCM → 配置 Bach core 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化。DTE 的 weights loader 属于 kernel，随 kernel 镜像装入 |
 | F15 | RouterTable 的三份副本：等 Router 内部多副本提交完成后，软件才写 DTE 与 ReduceModule 的那两份，硬件不代为同步 |
 | F16 | core 内 boot：把启动程序搬进三个 RV core 的 ITCM，启动三个 RV core 进 wait，确认 `ready` 全高后开放业务接收权限，Router 才开始接收业务 |
 | F17 | TS 没有控制核，只有寄存器，复位清 0 后等外部启动，不需要装载程序 |
@@ -407,7 +407,7 @@ mem logical_map    FF 阵列   8 或 10 × {logical_core[3:0], role[2:0]}       
 mem addr_map       FF 阵列   N × {base[23:0], size, target_module, target_core}     1R    静态            复位由输入给   // ctrl_noc 地址分发表
 mem core_id_reg[N] FF        只读 core id，N 为本 chip 的 core 数                    1R    SCP 经 ctrl_noc 读，不可改     复位固定
 mem scp_fsm        FF        {state[3:0], core_idx[3:0], step[2:0], cursor[31:0]}   1RW   boot 序列       复位 自启动
-mem scp_img        FF 阵列   配置事务序列（firmware、bootloader、任务链、路由表、kernel、DSA 静态配置）  1R  编译侧读入  复位由输入给
+mem scp_img        FF 阵列   配置事务序列（firmware、任务链、路由表、kernel、DSA 静态配置）        1R  编译侧读入  复位由输入给
 mem noc_latch[N]   级间 latch {valid, addr[23:0], we, wdata[31:0]}                  —     每拍覆写        —              // 端点 → 目的模块 cfg 口
 mem noc_rdata      1-deep 寄存器 {rdata[31:0]}                                      1W1R  每拍覆写        —
 mem tx_vc_buf[4]   FIFO      每 VC 20 flit                                          1W1R  满 → 不再准入   复位空         // C2C Bridge TX 的 private buffer
@@ -506,7 +506,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="56" font-size="12" fill="#111827">SCP 桩 · 六步初始化逐笔发事务</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 自启动 → PCIe 训练 → 本 chip 全部 core 的 Router 配路由表与 credit 旁路</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 再顺序解复位各个 core，逐个走六步：RV firmware 进 ITCM → DTE</text>
-  <text x="262" y="118" font-size="10.5" fill="#475569">bootloader 进 ITCM → 解复位 → TS 任务链 → DSA 静态配置 → kernel</text>
+  <text x="262" y="118" font-size="10.5" fill="#475569">解复位 → TS 任务链 → DSA 静态配置 → kernel</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">3. scp_ctrl = {cfg_core, cfg_addr, cfg_we, cfg_wdata, cfg_bcast}，每笔一拍</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">4. Router 的 commit_done 拉高后才写 DTE 与 ReduceModule 的两份副本</text>
   <text x="250" y="182" font-size="10" fill="#9ca3af">三个 RV core 的 ready 全高后才开放业务接收</text>

@@ -326,21 +326,21 @@
 * ② 配 PCIe：配 PCIE_PLL、经 CRG 释放复位、配寄存器、完成链路训练；之后才能与上位 CPU 通信
 * ③ 解复位前配置（此时 core 内模块全部未解复位，`ctrl_noc` 已连通）
   * 初始化 ITCM：RV core 有分支预测、无预取，只扫 ITCM，避免预测取到未初始化内容触发异常
-  * 写固件：RV firmware 写到三个 RV core 的 ITCM reset pc 位置（固定位置）；DTE 的 ITCM 另写 weights loader（软件指定位置）；DTCM 写静态参数
+  * 写固件：RV firmware 写到三个 RV core 的 ITCM reset pc 位置（固定位置）；DTCM 写静态参数
   * 配本 chip 全部 core 的 Router：写 RouterTable、Skip Mask、Credit Bypass Route；不派角色的 core 也写这几项，其他不配
     * Router 上电顺序：PMU 释放 core 时钟域复位 → `stream_credit` 置 0 → RouterTable 全 bypass / no-op → 等 SCP 配表与 VC 使能 → 各 core 发初始化脉冲 → 就绪
     * RouterTable 多副本全部写完 Router 才回完成；SCP 拿到完成后再写 DTE 与 ReduceModule 各自的那一份，硬件不代为同步
 * ④ 解复位：SCP 写 clk / reset 模块
   * RV core 从 `boot_pc` 跑 firmware：配 CSR、初始化 gp / sp，执行 **WFT 指令**进 wait
   * WFT 指令：通知 TS 允许下发新任务；可选通知 IPI 向 SCP 上报状态（boot 阶段用）
-  * DTE 要能解析 MSG 并执行，解析程序随 boot 进 ITCM；MU、VU 不需要
+  * DTE 要能解析 MSG 并执行，解析程序是 DTE kernel 里的一段，随 kernel 镜像装入；MU、VU 不需要
   * TS 无控制核，复位清 0 进 wait_cfg；Router wait_cfg；DSA idle
 * ⑤ 收 boot done
   * 三个 RV core 都 boot done → 自定义指令置 Bach core 状态为 Boot done
   * SCP 轮询状态寄存器，或收 IPI 中断
   * 三个 RV core 的 ready 全高 → SCP 开放该 core 的业务接收权限，Router 才收业务
 * ⑥ 通知上位 CPU：SCP 经 PCIe 报 boot 完成；此时路由表里还没有业务路径，TS 也没有任务链
-* 每个 core 的初始化六步：RV firmware 进 ITCM → DTE bootloader 进 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化；TS 与 kernel 两步在装模型时做
+* 每个 core 的初始化五步：RV firmware 进 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化；后三步在装模型时做
 
 ***
 

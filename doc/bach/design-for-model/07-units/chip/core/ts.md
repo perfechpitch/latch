@@ -370,7 +370,8 @@ MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_upd
 | - | - |
 | F60 | 向 Router 注册资源申请，带 UserID、StreamID、TaskID、PathID；Router 申请到后经反向控制通路通知，唤醒对应 task 置 READY |
 | F61 | credit 的单位是 stream 不是 task：Core Mem 空间按 stream 申请和释放 |
-| F62 | 同一个 stream 的任务链里，Router 只在第一次往下游发数据时检查 credit；第一次满足之后后续发往同一下游的 DTE 任务不再检查 |
+| F62 | 发送分两道门，按这个 user 在目标方向上是否已经持有资源分：尚未持有走用户资源门控，查下游 stream credit，够才占用一个表项；已经持有走发送就绪门控，不查 stream credit，只受 VC credit 与链路握手的约束。因此同一个 stream 的任务链里，Router 只在第一次往下游发数据时检查 stream credit，之后发往同一下游的 DTE 任务都走发送就绪门控。免检的只是 stream credit，每个 flit 照样要查目标方向那个 VC 的 credit |
+| F98 | 是否已持有按每个出方向各自独立记录。一次 fork 涉及多个方向时先滤掉已持有的方向，只对剩余未持有的方向查 stream credit，全部已持有则本次不查；待申请的这个子集要全部成功才发，任一方向不足则整体不发，已持有的方向也一起等，避免重复占用表项与数据重复 |
 | F63 | 检查的发起方分两种：本 core Core Mem → 下游 Router 属于任务链里的 DTE 任务，由 TS 查下游 credit；本 core Router → 下游 Router 不属于任务链，由 Router 自己查下游 credit 并触发阻塞重发 |
 | F64 | Broadcast Reissue：broadcast 数据到达 Router trigger TS 时下游无法接收则把重发标记置为有效；TS 查询下游 credit，可下发时按用户顺序选最老的重发用户，发起重发 task 到 DTE 去 Core Mem 搬 token 到 Router |
 | F65 | 重发标记有效但未重发成功时，该用户的原始 token 数据不能被覆盖，也不能释放该用户 |
@@ -437,7 +438,7 @@ MAS 顶层模块表列的第九个模块：「负责检查在调度过程中出�
 ## 3　接口
 
 ```
-port router2ts_trigger_ch (slave, valid/ready, clk)  // Router 的 CoreStation 收满一个包
+port router2ts_trigger_ch (slave, valid/ready, clk)  // Router 的 CoreStation，Header 就绪即通知
   in  valid · user_id[15:0] · path_id[7:0] · reissue · compute
   out ready                                         // = 建表四条与 datain_hold 空位同时满足。拉低时 CoreStation 保持本笔请求
 port router2ts_credit_ch (slave, 脉冲, clk)       // Router 的 CoreMemCreditMonitor：资源到手
@@ -1084,7 +1085,7 @@ task 唤醒延迟        2～3 cycle（硬件目标值）
 | 选中后非抢占保持到 raw ACCEPT | F52 | `non_preemptive` |
 | ACCEPT 后 Generated 提交 INFLY，DataIn 只出槽 | F53 | `accept_handling` |
 | 三条发射通路同一拍可并行下发 3 个 task | F58 | `parallel_issue` |
-| credit 粒度是 stream，同一 stream 只在第一次发数据时检查 | F61、F62 | `credit_per_stream` |
+| credit 粒度是 stream，首次查 stream credit、之后走发送就绪门控 | F61、F62、F98 | `credit_per_stream` |
 | Broadcast Reissue：置标记、查 credit、选最老、并行于主链 | F64、F55 | `broadcast_reissue` |
 | 未重发成功前原始数据不能被覆盖，用户不能释放 | F65 | `reissue_hold_data` |
 | P2P 重发拆成 datain 与 dataout 两个 task | F66 | `p2p_reissue` |
