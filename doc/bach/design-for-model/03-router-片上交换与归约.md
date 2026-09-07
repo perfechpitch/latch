@@ -820,9 +820,21 @@ stream credit的两条硬规则：
 
 Router 另外输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
 
-#### stream credit按 1 KB 记账，广播一次扣的量含预留的输出空间
+#### 哪些 path 要申请 stream credit，各申请多少
 
-stream credit这一类 credit 的单位是 **1 KB**。《通信机制（分析过程）》给了三个走完整流程的例子（数值都是示意）：
+stream credit这一类 credit 的单位是 **1 KB**。每条 path 下一跳需要的 credit 类型与资源量记在 RouterTable 里，按 path 的性质分五类：
+
+| path | 申请多少 |
+| - | - |
+| 广播 | **这个用户在下游 core 上所需计算空间的大小**，不只是数据包大小 |
+| P2P | 自己数据包的大小 |
+| 数据直接进 Matrix Mem（B core、R core） | 不竞争 Core Mem 资源，由软件流控 |
+| Router 通路上已分配好 buffer 空间（逐级 Reduce） | 不竞争 Core Mem 资源 |
+| Core Mem 空间已由之前的 path 分好（树形 Reduce、concat） | 不竞争 Core Mem 资源 |
+
+因阻塞而要进本 core 占用的 credit 类型与资源量同样记在 RouterTable 里。每个方向实际可用的 credit 资源是静态配置的，分广播与 P2P 两份，两份各占多少由软件决定。
+
+《通信机制（分析过程）》给了三个走完整流程的例子（数值都是示意）：
 
 | 场景 | 扣 | 什么时候还 |
 | - | - | - |
