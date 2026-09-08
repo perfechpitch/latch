@@ -396,7 +396,7 @@ MAS 顶层的 `Credit_monitor` 已划删除线，这些功能归 `task_state_upd
 | F79 | `reduce_num = N` 时两半各有 N 笔，**按包一一配对**：包头带一个 `reduce_seq` 字段（0～N−1），DTE 发出时打上，Router 的 Reduce Done 原样带回。`reduce_pend[stream]` 里两张 N 位的位图 `dte_ack_map` 与 `router_done_map`，各按 `reduce_seq` 置位；只有两张位图的低 N 位全满才把该 task 置 `TASK_FINISH`，提交时清零。这样第 k 笔的 Router Done 只与第 k 笔的 DTE ack 配对，不会出现两边总数凑够、实际却漏了某一笔的情况 |
 | F80 | 同一个 `reduce_seq` 的两个事件可以任意顺序到达，先到的那个照常置位、不必等；F78 说的“等匹配的 DTE ack 被消费”落在**同一位**上：`dte_ack_map[k]` 与 `router_done_map[k]` 都置起来，第 k 笔才算配上 |
 | F81 | Router 不携带 `stream_id`，Task_done 内部按 `user_id` 找对应 Stream |
-| F82 | datain 任务的完成事件带的 `task_id` 就是 F27 查出来的那个 `t`，随 `task_cmd` 下发、由软件写进 DSA 的配置寄存器、再由 `dsa_done` 原样回来。`done_bitmap[t] = 1`，`task_id` 不推进 |
+| F82 | datain 任务的完成事件带的 `task_id` 就是 F27 查出来的那个 `t`，随 `task_cmd` 下发进 DTE RV core 的 CSR、经 `dsa_ids` 直连到 DTE、再由 `dsa_done` 原样回来。`done_bitmap[t] = 1`，`task_id` 不推进 |
 | F83 | 异常检测：异步 task 本该执行 1 次完成却返回多次；RV core 或 DSA 返回非法的 `task_id` / `stream_id`；异步任务长时间没有收到外部 trigger；用户长时间未 retire；Router 请求携带的 `path_id` 在 task_chain 里匹配不到。异常经 `ts2corestatus_int_ch` 上报，本轮只留接口名与状态位 |
 
 ### Except Check
@@ -452,7 +452,7 @@ port ts2router_retire (master, valid/ready, clk)   // 用户退休与 credit 返
   out valid · user_id[15:0]
   in  accepted                                      // 即 ready：Router 接收后才清 valid 并推进 head_ptr
 port task_cmd[u] (master, valid/ready, clk)       // u ∈ {DTE, MU, VU}：task 下发
-  out cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · task_dsa_en
+  out cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en
   in  cmd_ready                                     // = 该 RV core 的 task_queue 有空槽（raw ACCEPT）
 port rv_done[u] (slave, 脉冲, clk)                // RV core 报完成；自启动的表项靠它补 user_id
   in  valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · reduce_seq[5:0]
@@ -843,7 +843,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="78" font-size="10.5" fill="#475569">1. cand[u] = {i | valid &amp;&amp; task_fsm==READY &amp;&amp; task_unit==u}</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. DTE：先取 is_reissue 的最老者，否则 DataIn 与 Generated 比年龄</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. age(i) = (i − head_ptr) mod 16，取最小</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. task_cmd[u] = {task_pc, stream_id, local_user_id, task_id, user_id, dsa_en}</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. task_cmd[u] = {task_pc, stream_id, local_user_id, task_id, user_id, path_id, dsa_en}</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">选中后非抢占保持，命令字段到 ACCEPT 前不变</text>
   <path d="M188 45 L231 45" stroke="#475569" marker-end="url(#art4)" fill="none"/>
   <path d="M188 99 L231 99" stroke="#475569" marker-end="url(#art4)" fill="none"/>

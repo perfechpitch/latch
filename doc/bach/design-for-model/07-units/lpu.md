@@ -382,7 +382,7 @@ mem grid          FF 阵列   48 × {tray[1:0], layer[1:0], col[1:0], gx[1:0], g
 mem chip_shape    FF 阵列   48 × {中间列 2×4, 第一列 2×5, 最后一列 2×5}  1R   由 gx 推出                  // 每 chip 的 core 阵列形状
 mem logical_map   FF 阵列   48 × (8 或 10) × {logical_core[3:0], role[2:0]}  1R   编译侧读入   复位由输入给   // 逻辑 core 编号与角色
 mem entry_exit    FF        {global_top_left{gx,gy}, global_bottom_right{gx,gy}}  1R  编译侧读入  复位由输入给
-mem link_param    FF 阵列   每条链路一项 {bw, latency}                1R   参数表       复位由输入给
+mem link_param    FF 阵列   每条链路一项 {bw, latency}                1R   参数表       复位由输入给   // chip 之间落在发送侧那座桥的 AXI 段，chip 到 Switch 落在 Link 实例
 ```
 
 另有一项切分参数，构造期与各 chip 共用：
@@ -417,13 +417,13 @@ LPU 没有自己的一拍工作，全部逐拍行为在 chip 内各模块、PCIe
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `grid`、`chip_shape`、`link_param` | 1. `Build`：对 48 颗 chip，把 `chip_shape[i]` 交给第 i 个 Chip 构造<br>2. `WireRow`：同层左右，`(gx, gy)` 的 `c2c[E]` 与 `(gx+1, gy)` 的 `c2c[W]` 用一对 Link 对接，C2C 参数<br>3. `WireCol`：同列上下，`(gx, gy)` 的 `c2c[S]` 与 `(gx, gy+1)` 的 `c2c[N]` 对接；`gy` 与 `gy+1` 跨 tray 时（`gy mod 4 == 3`）换纵向链路参数<br>4. `WireEdge`：每层 `gx == 0` 的 `c2c[W]`、`gx == 3` 的 `c2c[E]` 接本 tray 那一侧的 PCIe Switch，一个 Switch 接两层<br>5. `WireExt`：入口桩与出口桩各挂一个 Switch 端口，走 ETH 参数的 Link | 模块实例与端口连接 | — |
+| `grid`、`chip_shape`、`link_param` | 1. `Build`：对 48 颗 chip，把 `chip_shape[i]` 与这颗 chip 四个口的链路参数交给第 i 个 Chip 构造<br>2. `WireRow`：同层左右，`(gx, gy)` 的 `c2c[E]` 与 `(gx+1, gy)` 的 `c2c[W]` 两座桥直接对接，这一段的带宽与延迟落在发送侧那座桥的 AXI 段上，取 C2C 参数<br>3. `WireCol`：同列上下，`(gx, gy)` 的 `c2c[S]` 与 `(gx, gy+1)` 的 `c2c[N]` 对接；`gy` 与 `gy+1` 跨 tray 时（`gy mod 4 == 3`）换纵向链路参数<br>4. `WireEdge`：每层 `gx == 0` 的 `c2c[W]`、`gx == 3` 的 `c2c[E]` 接本 tray 那一侧的 PCIe Switch，一个 Switch 接两层。这一段两端传的是 flit，带宽与延迟由一对 Link 承担，两侧桥的 AXI 段计 0；段与 flit 的折算在这个口上做<br>5. `WireExt`：入口桩与出口桩各挂一个 Switch 端口，走 ETH 参数的 Link | 模块实例与端口连接 | — |
 
 ### L2 · 坐标与角色表读入（构造期，不逐拍）
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `grid`、`logical_map`、`entry_exit` | 1. `gy = tray 序号 × 4 + tray 内层号`（0～11），`gx = 层内列号`（0～3）<br>2. 断言：`gx ∈ {1, 2}` 的 chip 有 8 个 core，`gx ∈ {0, 3}` 的有 10 个，全 LPU 共 432 个；每颗 chip 的计算 core 数都是 8<br>3. 断言：`gx == 0` 的 chip 的 `core0` 是 EP broadcast core、`core5` 不派角色，`gx == 3` 的 chip 的 `core9` 是 EP reduction core、`core4` 不派角色，这四个都不在 compute 集合里<br>4. 把换算好的 `(gx, gy, core_id)` 交给各 Router 的坐标换算表，包头里的目的坐标按这张表解释 | 静态表 | — |
+| `grid`、`logical_map`、`entry_exit` | 1. `gy = tray 序号 × 4 + tray 内层号`（0～11），`gx = 层内列号`（0～3）<br>2. 断言：`gx ∈ {1, 2}` 的 chip 有 8 个 core，`gx ∈ {0, 3}` 的有 10 个，全 LPU 共 432 个；每颗 chip 的计算 core 数都是 8<br>3. 断言：`gx == 0` 的 chip 的 `core0` 是 EP broadcast core、`core5` 不派角色，`gx == 3` 的 chip 的 `core9` 是 EP reduction core、`core4` 不派角色，这四个都不在 compute 集合里<br>4. 把 `(gx, gy)` 与片内编号交给各 Chip 与它的 core，core 认自己在阵列里的位置<br>5. 把 PCIe Switch 的路由表填上：`dst` 是片外那一段的目的标识，0～47 是 chip、48 是出口桩，一个 Switch 只认它自己接的那两颗 chip，接着出口桩的那个另认 48 | 静态表 | — |
 
 ***
 
@@ -462,6 +462,9 @@ DISPATCH      LPU 广播（当前选定的派遣方式）
 | 专用 core 位置固定：第一列 `core0` 是 EP broadcast，最后一列 `core9` 是 EP reduction | 编译侧，L2 第 3 条查 | `logical_map` |
 | 专用 core 不映射为 logical compute core | L2 第 3 条 | `special_reserved` |
 | 不派角色的 core 只构造 Router，坐在接 Switch 的那个口上，只作转发 | L2 第 3 条 | `spare_core_router_only` |
+| chip 到 Switch 的那个口上，出去的两拍段合成一个 flit，进来的一个 flit 摊成两拍 | L1 第 4 条 | `switch_port_fold` |
+| Switch 之间不互联，一个 Switch 只认它自己接的那两颗 chip | L2 第 5 条 | `switch_route` |
+| 跨表的自洽检查在构造期做完 | L2 第 2、3 条 | `lpu_table_check` |
 
 ***
 
@@ -472,6 +475,13 @@ DISPATCH      LPU 广播（当前选定的派遣方式）
 * **tray 与“层”为什么不单独建对象**
   * 它们对模型只起两个作用：给 chip 定全局坐标、指出哪两处纵向链路换参数
   * 两个作用都落在坐标换算表和链路参数里，再多一级容器是空壳
+* **chip 与 chip 之间为什么没有链路实例**
+  * 两座桥之间传的是段，链路模型搬的是 flit，段号只在一对桥之间有意义
+  * 这一段的带宽与延迟落在发送侧那座桥的 AXI 段上，与链路模型同一条规矩：到达拍算在发送侧，一段线的占用只有一个 owner
+  * chip 到 PCIe Switch 那一段传的是 flit，所以那一段有一对链路实例，两侧桥的 AXI 段计 0
 * **为什么只建一个 LPU**
   * 一个 LPU 装模型的一层 MoE，跨 LPU 走 ETH
   * 跨 LPU 的那一段在片外桩里表达成注入表的时刻与一条链路实例
+* **为什么允许只构造用到的那几颗 chip**
+  * 48 颗全建起来一拍要几十毫秒，一个 token 从入口走到出口是上万拍，一次要跑几个小时
+  * 一轮只用到其中几颗时给构造一份名单，名单外的不建；坐标、形状、角色、链路参数仍按 12 × 4 的整机算，两端有一端没建的链路不登记

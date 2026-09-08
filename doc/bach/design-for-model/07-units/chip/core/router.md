@@ -379,7 +379,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - |
 | F72 | ReduceModule 完成计算并发出全部包后向 Core 返回 UserID；Core 判定任务链结束后向 Router 和 ReduceModule 广播 User Retire |
 | F73 | Core 的保证：仅可在该 UserID 的全部进 core、出 core 数据搬运完成，且不会再发起新搬运之后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包 |
-| F74 | Router 的动作：停止该 UserID 的新发送，删除其全部 stream credit 授权表项 |
+| F74 | Router 的动作：删除该 UserID 在各方向上的全部 stream credit 授权表项。已经进了本级、正在等仲裁的包照发；「停止新发送」说的是新包要重新申请授权，而 Retire 之后本来就不会再有新包 |
 | F75 | ReduceModule 的动作是延迟回收，先记录 Retire，待相邻下游各方向的 Reduce credit 全部恢复到初始值后才删除对应用户映射 |
 | F76 | Stream credit 的回程：每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 |
 
@@ -447,6 +447,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F109 | 广播扣 credit 时扣掉的不只是广播数据本身的空间，还含提前预留的输出结果空间。原文的例子是一笔广播扣 32，其中 8 KB 是广播数据空间、24 KB 是提前预留的输出结果空间，该方向的 credit 从 128 减到 96 |
 | F110 | 广播 credit 的释放时机是计算完成、运算结果写到下游的同时，把这一笔一次性释放回上游的 CreditMonitor |
 | F111 | bypass 的扣与还：Core0 的 Router 查表要 bypass 给 Core1 时先查 Core1 的 credit 并扣掉，Core1 算完释放空间后通知 Core0 的 CreditMonitor 加回；反向同理，core2 的数据要经 core1 bypass 时扣 core1 的 credit，core1 把数据发给 core0 后归还 |
+| F112 | `rtab[path_id].ext_dst` 是这条 path 出了阵列之后的目的标识：0～47 是 chip，48 是出口桩。出核造包时按 `path_id` 取它写进包头的 `dst`，PCIe Switch 按 `dst` 查目的端口 |
 
 ***
 
@@ -496,13 +497,15 @@ port cfg (slave, ctrl_noc 写事务, clk)                // RouterTable、CSR、
 ## 4　存储器
 
 ```
-mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0], nxt_vc[4:0][1:0], path_core_mask_enable, path_core_mask_idx[3:0], path_core_bypass, need_buffer, stream_table_enable, cur_credit_type, cur_credit_require[5:0], nxt_credit_type[2:0], nxt_credit_require[2:0][5:0], reduce_data_type[2:0], reduce_outdata_type, reduce_in_mask[2:0], operation[1:0], stall_way}  1R1W  多副本，逐份写  复位 全条目 bypass / no-op
+mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0], nxt_vc[4:0][1:0], path_core_mask_enable, path_core_mask_idx[3:0], path_core_bypass, need_buffer, stream_table_enable, cur_credit_type, cur_credit_require[5:0], nxt_credit_type[2:0], nxt_credit_require[2:0][5:0], reduce_data_type[2:0], reduce_outdata_type, reduce_in_mask[2:0], operation[1:0], stall_way, ext_dst[5:0]}  1R1W  多副本，逐份写  复位 全条目 bypass / no-op
 mem skip_mask         FF        10 b，per-core 一位，按 chip 里最大的那种形状定宽             1R1W  与 RouterTable 分开配     复位 0
 mem rtab_commit       FF        {副本写入游标, 完成状态}                                    1RW   更新状态机                复位 空闲
 mem credit_bypass     FF 阵列   每个业务 credit 输入端口一个 {out_mask[6:0]}                1R1W  CSR 配置                  复位 0
 mem vc_buf[d][v]      FIFO      private 每 VC 20 flit                                       1W1R  满且 shared 也满 → 不再收上游  复位空    // d ∈ {left,right,mid,core}，v ∈ 0..3
 mem vc_shared[d]      FIFO      每方向 20 flit，四个 VC 先到先得                             1W1R  private 满时借用           复位空
 mem pkt_ctx[d][v]     FF 阵列   {vc[1:0], out_mask[6:0], remain_len[15:0], head, tail, locked}  1RW  队首上下文             复位空
+mem xbar_in_q[i]      FIFO      每入口 4 项 × 队首上下文                                    1W1R  剩余 < 2 时报收得下        复位空    // i ∈ {left,right,mid,core,reduce}
+mem core_credit[d]    FF        每方向一个，单位 1 KB                                       1RW   首次占坑时按 nxt_credit_require 扣，Retire 还  复位 128
 mem vc_credit[d][v]   FF        private 计数器，每下游方向每 VC 一个                          1RW   private > 0 时扣它；release 回来时优先补它  复位 20
 mem vc_shared_cr[d]   FF        shared 计数器，每下游方向一个                                1RW   private 为 0 时扣它；private 已满时 release 补它  复位 20
 mem stream_tab[d]     FF 阵列   每方向 16 项 × {valid, user_id[15:0]}                        1RW   建：新 UserID 首次到达；删：release 或 Retire  复位空
@@ -1397,6 +1400,7 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 机制 | 功能 | 用例 |
 | - | - | - |
 | 按 path_id 查表得到全部去向与资源需求 | F1、F53 | `router_lookup` |
+| 出核造包时按 path_id 取片外那一段的目的标识 | F112 | `ext_dst` |
 | 进 core 由 path_core_mask_enable 二选一，位由 path_core_mask_idx 指定 | F54 | `core_mask_index` |
 | reduce_data_type 配在表里，reduce_twice 时 TS 还没介入 | F55 | `reduce_twice_dtype` |
 | kernel / weight 搬运包跳过 TS 直接唤醒 DTE | F56 | `kernel_skip_ts` |
@@ -1414,6 +1418,14 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 业务 credit 旁路：不查表、不进仲裁、按静态 Mask 复制 | F14、F63 | `credit_bypass_route` |
 | 不派角色的 core 只透传，credit 跨过它 | F15、F70 | `spare_core_skip` |
 | Xbar 5 入 7 出，无冲突时五路并行 | F17、F18 | `xbar_parallel` |
+| 一个方向每拍出一个 flit：入口站按「Xbar 收得下就发」交，不等授予 | M2 与 M3 之间的接口 | `one_flit_per_cycle` |
+| 贪婪整包的第二档：攥着一整个包的入口排在只有半个包的前面 | F20 | `xbar_whole_packet` |
+| credit 的单位是 1 KB，广播扣的量含提前预留的输出结果空间 | F108、F109 | `credit_unit_1kb` |
+| 包头读口：读队头那个包的字段，写 1 弹出，下一个映射上来 | F32 | `header_pop` |
+| 包头队列满了对进 core 的数据反压，不静默丢 | F32 | `header_fifo_backpressure` |
+| 重发完成后向 TS 报一笔，带 UserID 与 PathID | F71 | `reissue_done` |
+| 输入 BF16 扩 FP32、中间累加固定 FP32、输出按 reduce_outdata_type 转回 | F37、F41 | `reduce_precision` |
+| reduce 包最前面 16 B 是软件辅助信息，加法跳过、输出照抄 | F105 | `reduce_hdr_skip_16b` |
 | 每 output 独立 RoundRobin，不跨拍锁定 | F19 | `xbar_rr` |
 | 贪婪整包的四级优先级 | F20 | `xbar_greedy_packet` |
 | 进 core 后锁定到尾 flit，R2R 可在 flit 边界切换包 | F23 | `interleave_grain` |
@@ -1499,6 +1511,10 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 * **为什么把 VC credit 和 stream credit分成两层**
   * 两者管的东西时间尺度差着数量级：VC credit 管下游 Router 的 buffer 槽位，flit 一进一出就归还；stream credit要等那个用户在下游 core 上跑完整条任务链才释放
   * 合成一层，快的那层会被慢的拖成一样慢
+* **入口站与 Xbar 之间为什么不是逐笔握手**
+  * 逐笔握手要两拍：入口站提请求、Xbar 下一拍授予、入口站再下一拍才看得到并提下一笔。而 VC Buffer 的队首每拍都能出一个 flit，一个方向的带宽会因此只剩一半
+  * 改成 Xbar 每拍发布自己那个入口还收不收得下，入口站读上一拍的电平，收得下就把队首交出去并当场出队。资源不够时这一笔留在 Xbar 的入口缓冲里等，同一入口后面的不越过它
+  * 电平拉低到入口站停下来隔着一拍，所以入口缓冲的容量比报「收得下」的门限多留两格
 * **为什么进 Core 之后不再查 VC credit**
   * Stream 检查已经保证目标 core 有 Core Mem 空间，再查一次是重复的资源判定
   * 这一路也没有下游 Router 的 buffer 需要保护

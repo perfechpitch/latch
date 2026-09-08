@@ -260,6 +260,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F1 | 首拍锁存 Header，检查 opcode / route、长度、身份字段和帧格式 |
 | F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
 | F3 | 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配 TaskQueue 项和完成跟踪项 |
+| F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map` 副本，与 TS 那一份同源：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号 |
+| F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
 | F4 | 一帧一任务：同一个 AXI-Stream Frame 只属于一个 Router → MM 或 Router → CM 任务，不允许任务间交织 |
 | F5 | 首拍固定为 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号 |
 | F6 | Header Commit 成功后才允许 Payload Fire；TLAST 标识最后一个 Payload beat；`byte_count` 为 0 时可由 Header beat 同时携带 TLAST |
@@ -276,6 +278,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F12 | 两个配置 Bank，Bank0 优先于 Bank1：都空闲时 Router 的配置进 Bank0、RV core 的配置进 Bank1；只剩一个 Bank 而两者竞争时优先配置 Router 信息 |
 | F13 | 两个任务入口在 Commit 边界汇成同一套内部任务模型 |
 | F14 | RV core 侧的配置序列：用 `dsawi` / `dsaw` 写 `TASK_CFG_ADDR` 与 `TASK_CFG_TD` 两个寄存器，一条指令写一个，再写 Trigger（`TASK_CFG_TRG`），`TASK_CFG_PACK` 随之自动写入。必须最后写 Trigger |
+| F14a | 写 Trigger 那一拍把当前模板的十一项与四个直连身份信号一起采下来拼成 Descriptor。四个身份不由软件写：`streamID` / `taskID` / `userID` / `pathID` 从 RV core 的 CSR 直连过来 |
+| F14b | 一笔配置写在被收下之前一直保持同一个序号。每拍换号的话 DSA 按序号去重就把同一笔认成好几笔，写一次执行一次的 Trigger 会被执行好几遍 |
 
 **Fast LUT**：从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE Setup Time，目标是压到 10T 以内。办法是常规任务不走 RV core 的配置 kernel：TS 给的 `task_id` 命中 Fast LUT 后，硬件拿表项内容（`length`、控制位）与 `user_id` 索引到的 User Base Register 拼出 task descriptor，直接推进对应通道的 TaskQueue，命中路径 4T；未命中才转发信息、重设 PC、启动 RV core 的 kernel，代价是 Core Latency + 4T。Fast LUT 只加速任务配置，不改路由定义、数据通路和完成条件。
 
@@ -305,7 +309,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 | 编号 | 功能 |
 | - | - |
-| F27 | 只在同一个 `task_id` 的 RD 与 WR 两侧条件都满足时产生 `task_done`（Join） |
+| F27 | 只在同一笔任务的 RD 与 WR 两侧条件都满足时产生 `task_done`（Join）。认哪两半属于同一笔用的是 Commit 准入时分配的内部序号：`task_id` 只在一个 stream 内唯一，同一拍在途的两笔任务可以带同一个值（一笔是 Router 送进来的搬入，另一笔是 RV core 配的搬出）。向 TS 上报时用的仍是 `stream_id` 与 `task_id` |
 | F28 | 同一拍多个 Join 命中时全部写入 Done Pending，不允许覆盖或丢失，由 Done Pending 负责串行化 |
 | F29 | 向 TS 的报告是 exactly-once |
 | F30 | 六个完成层级：`queued`（已进 TaskQueue 未装载）→ `active`（由对应 AGCU / Ctrl 执行）→ `issue_done`（该侧最后一个请求已 Fire）→ `drained`（相关响应、Buffer 数据和外部副作用均已收敛）→ `join_done`（同一 task_id 的 RD 与 WR 都满足）→ `task_done`（进 Done Pending 并与 TS 成功握手） |
@@ -333,8 +337,10 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F42 | `data_len` 在不同方向盖的范围不同：Router ↔ Matrix Mem 时是 topK + scale + data 的总长；Router ↔ Core Mem 时只是 data 的长度，scale 与 topK 的长度另算 |
 | F43 | 进核时计算 core 只在这个 token 需要分配新 `stream_id` 时才存包头（`hw_header_op = 1`），中间环节的 reduce 与 concat 任务直接丢弃（`hw_header_op = 0`）；广播 token 进核必然带 topK，必须存下来 |
 | F44 | 出核时改写硬件包头：`path_id` 用 TS 送来的那个，`size` 用 RV core 配的寄存器（Concat 这类算完数据量会变的场景就靠它），`core_mask` 只在 Bach 做 MoE Route 时改；计算结果出核不带 topK |
+| F44a | 出核任务要发的那个包在 Commit 准入时就建好，身份与长度按 F44 填；读侧从存储取回的每一块按已填字节数排进它的 payload |
+| F44b | 出核不改的包头字段沿用进核那一笔的：DPU 写的 `gpu_id` 与 `token_id` 在进核那一笔记进 Hmem 里这个 `stream_id` 的软件包头，出核造包时取回来填上 |
 | F45 | 支持纯包头任务（`data_len = 0`），进出 core 都可以 |
-| F46 | 地址的一条规矩：软件只配基址，偏移由硬件用 `stream_id` 算出来。`stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE，软件不需要知道这个 token 落在 Core Mem 的哪一片 |
+| F46 | 地址的一条规矩：软件只配基址，偏移由硬件用 `stream_id` 算出来。`stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE，软件不需要知道这个 token 落在 Core Mem 的哪一片。进核与出核两个方向都按这条算：进核的落点是 `stream_base + stream_id × stream_stride + dst_addr`，出核的取数点把 `src_addr` 代进同一个式子 |
 | F47 | 通用寻址式子是 `PhyAddr = base_addr + stream_id × stride + offset`，**`base_addr` 只对 Core Mem 有效**：Matrix Mem 的地址全由软件管，配任务时 `src_addr` / `dst_addr` 就是最终物理地址，硬件不再叠 `stream_id × stride`。四类地址按这个式子展开：data 在 Core Mem 侧是 `base_addr + stream_id × stream_stride`；包头（硬件加软件合并那一项）是 `header_base_addr + stream_id × 18 B`；scale 是 `scale_base_addr + stream_id × scale_stride`；topK 是 `topk_base_addr + stream_id × 256 B` |
 | F48 | 两项搬运长度硬件自己算，不用软件配：scale 是 `data_len / 32`（32 个元素共用一个 scale），topK 是 `router_ep_count × 6 B`（每项 `{expert_id 2 B, weight 4 B}`，每 stream 上限 256 B） |
 | F49 | Matrix Mem 一侧不加 stream 偏移，Core Mem 一侧加：Matrix Mem 放的是模型 weight 与按 pattern 排好序送来的 token，位置软件自己算准；Core Mem 按 stream 切成 16 片，谁占哪片由 TS 定，软件配的时候还不知道 |
@@ -358,6 +364,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F53 | 发数据之前实时检查该任务所属 VC 通路上的 flit credit，不够就让任务在 `PendingTaskQ` 等；下游 Stream / Rmem 资源不在这里查，TS 下发之前已经申请到 |
 | F54 | `PendingTaskQ` 排在 Commit **之前**：RV core 配好一个出核任务后，先按 `path_id` 查出走哪个 VC 与资源需求，credit 不够的进 `PendingTaskQ` 等，够了才去 Commit 申请那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项 |
 | F55 | `PendingTaskQ` 满时拉低 `dsa_cfg` 的 `req_ready`，反压 DTE RV core，该 RV core 不能参与下一个用户的搬运。反压只落到出核这条链上，进核那条链的 Commit 资源不受影响 |
+| F55a | 五个通道对每块存储的读与写各只有一个 master 口，由 DMA_XBAR 轮转仲裁。读与写各走各的口、各有各的轮转，一拍可以同时发一读一写。通道在入口各占几格，按序号把请求放进来；`req_ready` 报的是那几格还收不收得下 |
+| F55b | 四个出核通道对 Router 只有一个 `out_core_data_ch`，同样轮转仲裁。授权粘在一个通道上直到它把带 `tlast` 的那一拍发完，一个包的几拍中间不会插进别的包 |
 | F56 | 本级 Reduce credit 表：每用户一个 entry，flit 粒度。某个用户建 stream credit 表项时给这个用户分配一个 entry 的 credit 数量 |
 | F57 | 搬 Reduce 包前先检查本级 Reduce credit 是否够整包，再在 VC credit 满足的前提下发到 ReduceModule |
 | F58 | ReduceModule 每完成一次 Reduce 并把 flit 发给下游就释放一个 credit，经独立的释放通道把 Valid 加 UserID 送回 DTE |
@@ -408,6 +416,8 @@ port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss
   out req_ready                                         // = 配置通路未反压；Commit Bank 满或 PendingTaskQ 满时拉低
 port dsa_rdata (master, 脉冲, clk)                    // 读寄存器的异步返回
   out valid · rdata[31:0]
+port dsa_ids (slave, 电平, clk)                       // DTE RV core 的 CSR 直连；写 task_trigger 那一拍采样
+  in  stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0]
 port dsa_done (master, 脉冲, clk)                     // → TS：task_last 的那一笔完成时报
   out valid · stream_id[3:0] · task_id[5:0] · reduce_seq[5:0]   // reduce 任务才有效，供 TS 逐包配对
 port cmem_rd / cmem_wr (master, valid/ready, clk)     // 经 DMA_XBAR，256 B
@@ -440,11 +450,15 @@ mem done_pend        FIFO      16 × {stream_id[3:0], task_id[5:0]}             
 mem hmem             FF 阵列   16 项 × {core_mask 2 B, sw_header 16 B} = 288 B         1R1W  按 stream_id 索引；硬件写 core_mask，RV core 写 sw_header  复位 0
 mem fast_lut         FF 阵列   64 × {valid, length[15:0], ctrl_flags}                 1R    boot 期经 ctrl_noc 配好，按 task_id 索引  复位 valid=0   // 只加速任务配置，不改路由定义、数据通路和完成条件
 mem rtab_copy        FF 阵列   64 项，RouterTable 的外部副本                           1R1W  软件写，三方一致        复位 0
+mem path_task_copy   FF 阵列   64 × task_id[5:0]，TS 那张 path_task_map 的副本         1R1W  boot 期配成与 TS 一致    复位 0
 mem reduce_credit    FF 阵列   16 用户 × 计数器（flit 粒度）                           1RW   建 stream credit时分配，release 恢复  复位 0
 mem stream_cache     FF 阵列   3 方向 × 16 项 × {valid, user_id[15:0]}                 1R1W  Router 的 User Resource Allocation Table 的 cache，只跟随不分配  复位空
 mem pending_taskq    FIFO      16 × Descriptor                                        1W1R  排在 Commit 之前，资源没申请到的出核任务在这里等；满则拉低 dsa_cfg 的 req_ready  复位空
 mem out_vc_buf[4]    FIFO      每 VC 一个，深度按整包容量                              1W1R  某 VC 阻塞只阻塞该 buffer  复位空
 mem cfg_bank[2]      FF 阵列   两个配置 Bank × {TASK_CFG_ADDR, TASK_CFG_TD, TASK_CFG_PACK}  1RW  Bank0 优先  复位空
+mem template[4]      FF 阵列   3 套有效 + 1 套 header-only，每套 64 B 对齐 × 十一项    1RW   RV core 写；写 Trigger 那一项时按当前内容起一笔任务  复位 0
+mem xbar_slot[m][c]  FIFO      每块存储每通道 4 格 × 请求（m ∈ {CM, MM}）             1W1R  DMA_XBAR 入口；占到 2 格就拉低 req_ready  复位空
+mem out_slot[v]      FIFO      每出核通道 4 格 × 一拍（v ∈ 0..3）                     1W1R  出核仲裁入口；占到 2 格就拉低 tready  复位空
 mem pmu_cnt          FF 阵列   11 个计数器                                            1RW   搬运原语数、进核 / 出核各自的执行周期与数据量等  复位 0
 ```
 
@@ -927,6 +941,13 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | TKEEP 累计与 byte_count 比较 | F7 | `tkeep_count` |
 | 非法 Header 进 Drop Frame，只消费到 TLAST | F8 | `drop_frame` |
 | Commit 配对接纳：三样同时拿到才接纳 | F9、F10 | `commit_pairing` |
+| 进核任务的 stream_id 取自包头，task_id 按 path_id 查表 | F3a | `inbound_ids` |
+| 进核那一路按帧号认帧，同 path 的几个包不串 | F3b | `frame_seq_tag` |
+| 写 Trigger 那一拍采样四个直连身份信号 | F14a | `trigger_samples_ids` |
+| 一笔配置写在被收下之前保持同一个序号 | F14b | `cfg_seq_stable` |
+| DMA_XBAR 轮转仲裁五个通道对一块存储的访问 | F55a | `dma_xbar_arbitration` |
+| 四个出核通道轮转仲裁 Router 那一个口，一个包不被插断 | F55b | `out_arb_frame` |
+| 出核包在 Commit 建好，读回的数据排进它的 payload | F44a | `outbound_packing` |
 | 双 Bank，Bank0 优先，竞争时优先 Router | F12 | `commit_bank_priority` |
 | 必须最后写 Trigger，PACK 随之自动写入 | F14 | `trigger_order` |
 | 通道之间乱序，通道内读写两半独立 | F17 | `channel_ooo` |
@@ -940,7 +961,7 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | Router→CM 与 MM→CM 竞争 CM 写路径 | F21 | `cm_write_contend` |
 | 单任务上限 32 KB，超过拆成多个任务包 | F23 | `task_split_32k` |
 | Buffer 满时经 TREADY 反压 Router | F25 | `buffer_backpressure` |
-| Completion RS 按 task_id Join | F27 | `completion_join` |
+| Completion RS 按 Commit 分配的内部序号 Join | F27 | `completion_join` |
 | 同拍多个 Join 全部写入 Done Pending，不丢失 | F28 | `join_serialize` |
 | 向 TS exactly-once | F29 | `exactly_once` |
 | 六个完成层级 | F30 | `completion_levels` |
@@ -954,8 +975,9 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | data_len 在不同方向盖的范围不同 | F42 | `data_len_scope` |
 | hw_header_op 决定存不存包头 | F43 | `hw_header_op` |
 | 出核改写 path_id / size / core_mask | F41、F44 | `header_rewrite` |
+| DPU 的 gpu_id 与 token_id 随数据出核 | F44b | `dpu_header_relay` |
 | 纯包头任务 data_len = 0 | F45 | `header_only_task` |
-| 软件只配基址，硬件用 stream_id 算偏移 | F46、F47 | `stream_offset` |
+| 软件只配基址，硬件用 stream_id 算偏移，进核出核都按这条算 | F46、F47 | `stream_offset` |
 | scale 与 topK 的长度硬件自己算 | F48 | `derived_length` |
 | Matrix Mem 侧不加偏移，Core Mem 侧加 | F49 | `mm_no_offset` |
 | shareMem 写：搬入置 valid、搬出置 invalid | F50、F51 | `sharemem_flag` |

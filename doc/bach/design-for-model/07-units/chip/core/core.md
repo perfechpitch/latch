@@ -304,7 +304,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 | F16 | VU 不能直接读 Matrix Mem。需要 Matrix Mem 里的数据时先由 DTE 搬到 Core Mem |
 | F17 | 特权级只支持 M 态，不实现 MMU，中断异常上报 SCP。本轮只留状态位与接口名 |
 | F18 | DTE RV core 的 `cm_lsq` 按地址范围分流到两个从端：Core Mem 的 `cmem_rv`，与 Router CoreStation 的 `hdr_rd`。包头只有这一条读取通路，DTE DSA 不另接一条 |
-| F19 | 三个 DSA 的任务身份一律由软件写入各自的配置寄存器，core 内**不存在**从 RV core 到 DSA 的身份专用通路：DTE 写 `TASK_CFG_PACK`，MU 与 VU 写各自的动态配置寄存器 |
+| F19 | 任务身份到 DSA 有两条路。DTE 与 VU 各与它那个 RV core 之间有 `dsa_ids` 直连，从 CSR 直接连过去，DSA 在写 Trigger 那一拍采样：DTE 取四项，VU 取 `streamID` 与 `taskID` 两项。MU 没有这条线，那一组由软件写进它的动态配置寄存器 |
 | F20 | **三个 DSA 之间没有任何直连**：DTE 进核时把 topK 写进 Core Mem 的 topK 区，MU 自己从那里读回来。DSA 之间的数据一律经存储交换，控制一律经 TS 与各自的 RV core |
 
 ***
@@ -384,7 +384,7 @@ core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← 
 | 五对 Release / Acquire 配对 | F15 | `release_acquire_pairs` |
 | VU 不能直接读 Matrix Mem | F16 | `vu_no_mmem` |
 | cm_lsq 按地址分流到 Core Mem 与 Router 包头口，包头只有一条通路 | F18 | `cm_lsq_split` |
-| 三个 DSA 的身份都由软件写寄存器，无专用硬件通路 | F19 | `dsa_id_by_software` |
+| DTE 与 VU 的身份走 dsa_ids 直连，MU 由软件写寄存器 | F19 | `dsa_id_paths` |
 | 三个 DSA 之间没有直连，数据一律经存储交换 | F20 | `no_dsa_direct_link` |
 
 ***

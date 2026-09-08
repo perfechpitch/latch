@@ -363,6 +363,7 @@
 | F29 | TX Engine 拆包：按 4 KB 边界拆分，加 4-bit `seq_id` 与 tail 标记；位宽 2048 转 1024 |
 | F30 | RX Engine 拼包：按 `seq_id` 缓存，tail 到齐后还原原始包；位宽 1024 转 2048 |
 | F31 | AXI Bridge 做 credit 与 AXI4 的协议转换 |
+| F31a | AXI Bridge 的延迟按发送侧计：出方向记这一段物理链路的延迟，入方向只做协议转换、不计拍。两座桥对接时一段线的时间因此只算一次 |
 | F32 | 同向的数据与 credit release 之间做仲裁，小包优先；反向按类型 demux 分流 |
 | F33 | TX 方向的 AXI write 是 posted，写响应可以丢 |
 | F34 | RX 方向的 AXI 需要响应，由 AXI Bridge 返回 dummy response，释放 PCIe 的 outstanding 资源 |
@@ -470,7 +471,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="292" y="256" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="160" y="276" font-size="11" fill="#111827">RX Engine 拼包</text>
   <text x="20" y="352" font-size="10.5" fill="#374151">M1 每笔配置事务一拍，装载拍数按镜像字节数除以 4 B 计，与业务段用同一把尺。</text>
-  <text x="20" y="380" font-size="10.5" fill="#374151">M6 的 300 拍是 PCIe C2C 的 300 ns；Router 到 Router 的 400 T 是这一段加两侧 Bridge 与走线的合计。</text>
+  <text x="20" y="380" font-size="10.5" fill="#374151">M6 出方向的 300 拍是 PCIe C2C 的 300 ns，入方向计 0；Router 到 Router 的 400 T 是这一段加两侧 Bridge 与走线的合计。</text>
   <text x="20" y="408" font-size="10.5" fill="#374151">C2C Bridge 的 RC / VA / SA 与 core 内 Router 同一套逻辑，只是不建 stream credit 表、不参与 Reduce 累加。</text>
 </svg>
 ```
@@ -690,7 +691,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 出方向：credit 语义转成 AXI write burst</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 入方向：AXI read/write 转回 flit 与三类 release</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. release 的粒度是 flit，在 C2C 上压缩包数量后再传</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. 300 拍是 PCIe C2C 的 300 ns，按 1 T = 1 ns 折算</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 出方向 300 拍是 PCIe C2C 的 300 ns，入方向计 0</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Router 到 Router 的 400 T 含这一段与两侧 Bridge</text>
   <path d="M188 98 L231 98" stroke="#475569" marker-end="url(#arc6)" fill="none"/>
   <path d="M572 98 L620 98" stroke="#475569" marker-end="url(#arc6)" fill="none"/>
@@ -741,6 +742,7 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
 | 地址空间视野 | F25 | `address_map` |
 | credit 分 private 与 shared 两级，总量等于对侧 buffer 容量 | F37 | `c2c_credit_two_level` |
 | C2C 拆包：4 KB 边界 + seq_id + tail | F29 | `c2c_split` |
+| 一段线的时间只算一次：出方向记延迟，入方向计 0 | F31a | `c2c_latency_once` |
 | C2C 拼包：按 seq_id 缓存，tail 到齐还原 | F30 | `c2c_reassemble` |
 | 同向数据与 credit release 仲裁，小包优先 | F32 | `c2c_arb_small_first` |
 | TX posted write 丢响应，RX 返回 dummy response | F33、F34 | `c2c_axi_response` |

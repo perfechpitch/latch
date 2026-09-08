@@ -309,7 +309,10 @@ src/bach/
     build.h                        从编译侧产物装配出整套硬件
     completion.h                   完成判据与全局生命周期看门狗
   reference/
-    ffn_reference.py               参考实现（与 numeric/ 同一套累加顺序）
+    numeric_ref.py                 编解码与累加顺序的第二份实现，Python 写，与 numeric/ 互不引用
+    ffn_reference.py               FFN 那几档算子，累加顺序取自 numeric_ref
+    vectors.py                     产出比对向量，落进 vectors/
+    selftest.py                    本层自检，兼查向量与代码同步
 ```
 
 模块之间只有端口。装配容器把生产者的出口端口和消费者的入口端口对接，两侧都只看到端口束的字段，不持有对方的类型，装配顺序不受构造顺序牵制。

@@ -126,7 +126,7 @@ port done (master, 电平, clk)                     // 出口桩：完成集合�
 ## 3　存储器
 
 ```
-mem inject_tbl      FF 阵列   N_token × {inject_cycle[31:0], gpu_id[7:0], token_id[15:0], payload 6368 B{act FP8 6144 B, scale FP32 192 B, expert Int16 16 B, weight BF16 16 B}}  1R  编译侧读入  复位由输入给
+mem inject_tbl      FF 阵列   N_token × {inject_cycle[31:0], gpu_id[7:0], token_id[15:0], dst[5:0], path_id[7:0], compute, payload 6368 B{act FP8 6144 B, scale FP32 192 B, expert Int16 16 B, weight BF16 16 B}}  1R  编译侧读入  复位由输入给
 mem credit_local[G] FF        {buffer_depth_tokens[15:0], buffer_used[15:0], inflight_bach[15:0], grant_tokens[15:0]}  1RW  发 +1，retired −1  复位 0
 mem pool            FF        {pool_total[15:0], pool_avail[15:0]}   1RW    Σ inflight_bach                复位 pool_total
 mem seq_w           FF        W bit 序号，比较用模 2^W 差值           1RW    每发一 token +1                复位 0
@@ -216,6 +216,7 @@ BCORE_MM_SLOTS       ≥ 32 × 26 = 832（B core Matrix Mem 槽位，参数校�
 | 两道闸门都开才流；1 credit = 1 token | G1 第 3、5 条 | 同上 |
 | 序号回绕模 2^W 比较 | G3 第 2 条 + `common/seq.h` | `seq_wrap` |
 | DPU 自定义包头 `gpu_id(8) + token_id(16)`，Payload ≤ 64 KB | G2 第 1 条 | `gpu_header` |
+| 注入的包带 `dst` 与 `path_id`：PCIe Switch 按 `dst` 查目的端口，进了阵列之后每一跳的 Router 按 `path_id` 查自己的 RouterTable | G2 第 1 条 | `inject_header` |
 | 完成通知：Router 侧按已接收字节数与包头 payload 大小判 token 收完 | Router 文档 C1 第 5 条上报，桩侧 G3 记账 | `token_complete` |
 | 组播反压按最慢收端聚合，retired 取 min | G3 第 1 条 | `gpu_retired_min` |
 | LPU Dispatch 派遣：所有 R core 有余量才派，派时各减 1，最终 R core 返回后各加 1，顺序调度 | G1 第 4 条、G3 第 3 条 | `dispatch_reduce_slots` |

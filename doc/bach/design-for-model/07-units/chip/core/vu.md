@@ -33,18 +33,20 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <rect x="0" y="0" width="1700" height="1200" fill="#ffffff"/>
 <text x="20" y="26" font-size="12" fill="#111827">VU DSA · 第 0 层（十一个独立打拍的模块。方位：RV core 与 TS 在上，Core Mem 在下，cfg 从上进）</text>
 <text x="627" y="26" font-size="9.5" fill="#6b7280">一条宏指令 = 1 组静态配置（计算图通路的模板）+ 1 组动态参数（地址、索引、向量长度 / 精度）</text>
-<rect x="160" y="110" width="350" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
+<rect x="160" y="110" width="350" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="172" y="131" font-size="11" fill="#111827" font-weight="600">config_register</text>
 <text x="172.0" y="148.0" font-size="8.5" fill="#475569">8 组静态配置模板（默认全 0）+ 12 个动态参数寄存器</text>
 <text x="172.0" y="161.5" font-size="8.5" fill="#475569">macro_inst_trigger 是唯一的启动寄存器，写一次执行一次</text>
 <text x="172.0" y="175.0" font-size="8.5" fill="#475569">　字段：CONFIG_IDX · STATIC_DYNAMIC_MASK · EVENT_EN</text>
 <text x="172.0" y="188.5" font-size="8.5" fill="#475569">　· STREAM_ID_OVERRIDE · DATA_BROADCAST · MACRO_INST_FENCE</text>
 <text x="172.0" y="202.0" font-size="8.5" fill="#475569">TYPE_VL 一个寄存器含 VL、DATA_TYPE、ROUND_MODE 三个字段</text>
-<text x="172.0" y="215.5" font-size="8.5" fill="#475569">静态配置改写：目标组正被未完成的宏指令引用时，硬件把这次</text>
-<text x="172.0" y="229.0" font-size="8.5" fill="#475569">　配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效</text>
-<text x="172.0" y="242.5" font-size="8.5" fill="#475569">in-flight 的宏指令始终按改写前的配置执行完毕</text>
-<text x="172.0" y="256.0" font-size="8.5" fill="#475569">三条配置通路（VU-Core / Ctrl-NOC / Debug Module）共享同一份</text>
-<text x="172.0" y="269.5" font-size="8.5" fill="#475569">　寄存器视图、权限一致，流控彼此独立</text>
+<text x="172.0" y="215.5" font-size="8.5" fill="#475569">stream_id 与 task_id 没有寄存器，软件不配：经 dsa_ids 从 VU RV</text>
+<text x="172.0" y="229.0" font-size="8.5" fill="#475569">　core 的 CSR 直连过来，硬件在写 trigger 那一拍自动采样</text>
+<text x="172.0" y="242.5" font-size="8.5" fill="#475569">静态配置改写：目标组正被未完成的宏指令引用时，硬件把这次</text>
+<text x="172.0" y="256.0" font-size="8.5" fill="#475569">　配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效</text>
+<text x="172.0" y="269.5" font-size="8.5" fill="#475569">in-flight 的宏指令始终按改写前的配置执行完毕</text>
+<text x="172.0" y="283.0" font-size="8.5" fill="#475569">三条配置通路（VU-Core / Ctrl-NOC / Debug Module）共享同一份</text>
+<text x="172.0" y="296.5" font-size="8.5" fill="#475569">　寄存器视图、权限一致，流控彼此独立</text>
 <rect x="560" y="110" width="300" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="572" y="131" font-size="11" fill="#111827" font-weight="600">ISQ</text>
 <text x="572.0" y="148.0" font-size="8.5" fill="#475569">VU-Core 写完动态参数后写 macro_inst_trigger</text>
@@ -76,6 +78,9 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="405.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_cfg / dsa_rdata</text>
 <polygon points="649,44 780,44 771,74 640,74" fill="#f8fafc" stroke="#374151"/>
 <text x="710.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_done / Event → TS</text>
+<polygon points="29,120 140,120 131,150 20,150" fill="#f8fafc" stroke="#374151"/>
+<text x="80.0" y="138.5" font-size="9" fill="#374151" text-anchor="middle">dsa_ids</text>
+<path d="M136.0 135.0 L159.0 135.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#p)"/>
 <rect x="160" y="380" width="150" height="140.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
 <text x="172" y="401" font-size="11" fill="#111827" font-weight="600">Profile</text>
 <text x="172.0" y="418.0" font-size="8.5" fill="#475569">profile_ctrl 在 0x4000</text>
@@ -236,10 +241,11 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | 编号 | 功能 |
 | - | - |
 | F1 | 8 组静态配置模板，默认全 0；软件需要的组数不超过 8 时运行中无需改写 |
-| F2 | 12 个动态参数寄存器；动态参数区 0x0000～0x002C，静态模板区从 `N×0x100 + 0x1000` 起。`dsawi` 的立即数是 16 bit 字节地址、覆盖 0～64K，两个区都能直接用立即数寻址 |
+| F2 | 12 个动态参数寄存器（0x0000～0x002C）：`macro_inst_trigger`、`TYPE_VL`、`LD_addr`、`ST_addr`、`VRF_rd_index`、`VRF_wt_index`、`MRF_rd_index`、`MRF_wt_index`、`SRF_rd_index_0/1`、`SRF_wt_index_0/1`。静态模板区从 `N×0x100 + 0x1000` 起。`dsawi` 的立即数是 16 bit 字节地址、覆盖 0～64K，两个区都能直接用立即数寻址 |
 | F3 | `macro_inst_trigger` 是唯一的启动寄存器，写一次执行一次；两次写之间没有其他配置也启动两次 |
 | F4 | trigger 的六个字段：`CONFIG_IDX`（选静态配置组）、`STATIC_DYNAMIC_MASK`（逐参数选静态模板值还是动态寄存器值）、`EVENT_EN`、`STREAM_ID_OVERRIDE`、`DATA_BROADCAST`、`MACRO_INST_FENCE` |
-| F5 | 宏指令的 `stream_id` 与 `task_id` 都取自**动态参数寄存器**，由软件在写 `macro_inst_trigger` 之前配好：VU RV core 从自定义 CSR 读出 TS 下发的值再写给 VU。`STREAM_ID_OVERRIDE` 置位时 `stream_id` 改用另一个显式给定的值，用来访问不属于本 task 的 stream；`task_id` 不受它影响。`dsa_done` 回给 TS 的就是这一组 |
+| F5 | 宏指令的 `stream_id` 有两个来源：`STREAM_ID_OVERRIDE` 为 `0` 时沿用 VU-Core CSR 中自带的那一个，为 `1` 时改用 `macro_inst_trigger.STREAM_ID` 字段（4 bit，共 16 个 stream）给出的值，用来访问不属于本 task 的 stream。`task_id` 始终取 VU-Core CSR 那一份，不受这一位影响。`dsa_done` 回给 TS 的就是这一组 |
+| F5a | VU-Core CSR 那一组从 VU RV core 经 `dsa_ids` 直连过来，每拍有效，写 `macro_inst_trigger` 那一拍采样。**`task_id` 不是软件配置项**：VU 的寄存器空间里没有它，软件写不进来，硬件在采样那一拍自动填进宏指令描述符，`dsa_done` 回 TS 时原样带出 |
 | F6 | `TYPE_VL` 一个寄存器含 VL、DATA_TYPE、ROUND_MODE 三个字段，随 `STATIC_DYNAMIC_MASK.bit[0]` 一起在静态模板与动态寄存器之间切换 |
 | F7 | 静态配置的改写规则：目标组正被未完成的宏指令引用时，硬件把这次配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效、解除阻塞 |
 | F8 | in-flight 的宏指令始终按改写前的配置执行完毕 |
@@ -260,6 +266,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 
 | 编号 | 功能 |
 | - | - |
+| F15a | 静态配置组每组 23 个寄存器：前 12 个是没有动态副本的 `LU_op` / `SU_op` / `VALU0-2_op` / `VSFU_op` / `MEXE_op` / `SEXE0-2_op` / `mask_op` / `PRF_op`，后 11 个是动态参数寄存器的静态副本、与动态版本逐位相同，组内偏移 = 对应动态寄存器地址 + `0x2C` |
+| F15b | `STATIC_DYNAMIC_MASK` 的 7 个有效位各控制哪个参数：bit[0] `TYPE_VL`、bit[1] `LD_addr`、bit[2] `ST_addr`、bit[3] `VRF_rd_index`、bit[4] `VRF_wt_index`、bit[5] MRF 读写两个索引、bit[6] SRF 读写四个索引；bit[7] 保留。位为 1 取动态副本，为 0 取所属静态组里的那一份。全部 `*_op` / `mask_op` / `PRF_op` 没有动态副本，不在覆盖范围内 |
 | F16 | 把宏指令展开成各执行单元的微指令 |
 | F17 | Scoreboard 对 VRF / MRF / SRF 实时读写状态追踪，检测 RAW / WAR / WAW |
 | F18 | 重叠执行：前后宏指令无数据依赖、无执行资源冲突时，后续宏指令无需等前一条完全结束即可重叠发射微操作，最多两条相邻宏指令重叠 |
@@ -334,8 +342,10 @@ port dsa_cfg (slave, valid/ready, clk)            // VU RV core 的 dsa_iss；Ct
   out req_ready                                     // = 配置通路未阻塞；目标静态配置组被 in-flight 宏指令引用时拉低
 port dsa_rdata (master, 脉冲, clk)                // 读寄存器的异步返回
   out valid · rdata[31:0]
+port dsa_ids (slave, 电平, clk)                   // VU RV core 的 CSR 直连；写 macro_inst_trigger 那一拍采样
+  in  stream_id[3:0] · task_id[5:0]                 // RV core 侧驱动四项，VU 只取这两项
 port dsa_done (master, 脉冲, clk)                 // → TS：宏指令退休；EVENT_EN 置位时另发 Event 同步信号
-  out valid · stream_id[3:0] · task_id[5:0] · event   // 前两项取自动态参数寄存器，STREAM_ID_OVERRIDE 置位时 stream_id 改用显式给定的值
+  out valid · stream_id[3:0] · task_id[5:0] · event   // 取自 dsa_ids 采样的那一组，STREAM_ID_OVERRIDE 置位时 stream_id 改用 trigger 里显式给定的值
 port cmem_ld (master, valid/ready, clk)           // LU → Core Mem，一次固定 1024 bit，不 burst
   out req_valid · req_addr[31:0]
   in  req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
@@ -352,9 +362,9 @@ port cfg (slave, ctrl_noc 写事务, clk)            // 静态配置模板与 RF
 ## 4　存储器
 
 ```
-mem static_cfg    FF 阵列   8 组 × 静态模板（各单元的连接与 op）                     1R1W  被 in-flight 引用时写阻塞  复位 0
+mem static_cfg    FF 阵列   8 组 × 23 个（12 个 *_op / mask_op / PRF_op + 11 个副本）  1R1W  被 in-flight 引用时写阻塞  复位 0
 mem dyn_param     FF 阵列   12 个动态参数寄存器（含 TYPE_VL）                        1R1W  dsa_cfg 写                复位 0
-mem isq           FIFO      8 × {动态参数快照, 静态配置指针}                          1W1R  写 trigger 时压入          复位空
+mem isq           FIFO      8 × {动态参数快照, 静态配置指针, stream_id, task_id}      1W1R  写 trigger 时压入          复位空
 mem scoreboard    FF 阵列   VRF / MRF / SRF 的读写状态位图                            1RW   检测 RAW / WAR / WAW      复位 0
 mem vrf           SRAM      64 KB：128 B/entry × 512 entry                            2R2W  读写索引连续              复位未定义
 mem mrf           SRAM      4 KB                                                      2R1W  唯一写口三选一            复位未定义
@@ -447,9 +457,9 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
 ### M1 · config_register 写与 trigger
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 873 226" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 873 272" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs><marker id="arq1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="873" height="226" fill="#ffffff"/>
+  <rect x="0" y="0" width="873" height="272" fill="#ffffff"/>
 
   <polygon points="30,20 188,20 178,96 20,96" fill="#f8fafc" stroke="#374151"/>
   <text x="104" y="39" font-size="10.5" fill="#374151" text-anchor="middle">dsa_cfg</text>
@@ -462,21 +472,26 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <rect x="20" y="162" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="166" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="183" font-size="10" fill="#374151" text-anchor="middle">dyn_param · FF 12 个 · 1R1W</text>
+  <polygon points="30,216 188,216 178,262 20,262" fill="#f8fafc" stroke="#374151"/>
+  <text x="104" y="234" font-size="10.5" fill="#374151" text-anchor="middle">dsa_ids</text>
+  <text x="104" y="252" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_id[3:0] · task_id[5:0]</text>
   <rect x="677" y="92" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="681" y="96" width="168" height="34" fill="none" stroke="#374151"/>
   <text x="765" y="113" font-size="10" fill="#374151" text-anchor="middle">isq · FIFO 8 项 · 1W</text>
-  <rect x="232" y="34" width="401" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <rect x="232" y="34" width="401" height="174" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="50" font-size="8.5" fill="#6b7280">M1</text>
   <text x="619" y="50" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="70" font-size="12" fill="#111827">config_register · 写一次执行一次</text>
   <text x="250" y="92" font-size="10.5" fill="#475569">1. dsa_cfg.req_we → 动态参数区或静态模板区按 req_addr 写入</text>
   <text x="250" y="112" font-size="10.5" fill="#475569">2. 目标静态组正被在飞宏指令引用 → req_ready = 0，阻塞这次写</text>
-  <text x="250" y="132" font-size="10.5" fill="#475569">3. 写 macro_inst_trigger → 锁存当前 12 个动态参数为一份快照</text>
-  <text x="250" y="152" font-size="10.5" fill="#475569">4. inst = {快照, CONFIG_IDX 指针, STATIC_DYNAMIC_MASK, 六个字段}</text>
-  <text x="250" y="176" font-size="10" fill="#9ca3af">在飞宏指令按改写前的配置执行完毕</text>
+  <text x="250" y="132" font-size="10.5" fill="#475569">3. 写 macro_inst_trigger → 锁存当前 12 个动态参数为一份快照，同拍采样 dsa_ids</text>
+  <text x="250" y="152" font-size="10.5" fill="#475569">4. stream_id = STREAM_ID_OVERRIDE ? trigger.STREAM_ID : dsa_ids 那一份；task_id 只取后者</text>
+  <text x="250" y="172" font-size="10.5" fill="#475569">5. inst = {快照, CONFIG_IDX 指针, STATIC_DYNAMIC_MASK, 六个字段, stream_id, task_id}</text>
+  <text x="250" y="192" font-size="10" fill="#9ca3af">在飞宏指令按改写前的配置执行完毕</text>
   <path d="M188 58 L231 58" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
   <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
   <path d="M188 183 L231 183" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
+  <path d="M188 239 L210 239 L210 200 L231 200" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
   <path d="M633 113 L676 113" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
 </svg>
 ```
@@ -508,7 +523,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="78" font-size="10.5" fill="#475569">1. isq.push(inst)；macro_inst_left += 1</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. status = {BUSY, ISQ_FULL=isq.full, ISQ_EMPTY=isq.empty, ERROR_FLAG}</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 在飞宏指令数 &lt; 2 → cur = isq.pop()</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. stream_id = STREAM_ID_OVERRIDE ? 显式给定值 : 动态参数寄存器值</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. stream_id 与 task_id 随描述符原样出队，是 M1 那一拍定下的那一组</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">判全部宏指令是否完成用 macro_inst_left 或 BUSY</text>
   <path d="M188 63 L231 63" stroke="#475569" marker-end="url(#arq2)" fill="none"/>
   <path d="M188 125 L231 125" stroke="#475569" marker-end="url(#arq2)" fill="none"/>
@@ -808,7 +823,7 @@ CM 访问延迟        VU 侧 14T
 宏指令配置          8 组静态配置模板 + 12 个动态参数寄存器；8 组模板由编译侧算好，boot 期经 ctrl_noc 的 cfg 口写入
 宏指令重叠          最多两条相邻
 ISQ 深度           8（待定）
-算力               32 MAC/T（FP16 口径）
+算力               32 MAC/T（FP32 口径）
 内部启动延迟        40T（流水启动 5T + 20 条指令算地址 30T + core 发射 5T）
 寄存器偏移          动态参数区 0x0000～0x002C；静态配置区 N×0x100 + 0x1000 起；Profile 区 0x4000 起
 Top-K              K 固定为 16
@@ -821,7 +836,10 @@ Top-K              K 固定为 16
 | 机制 | 功能 | 用例 |
 | - | - | - |
 | 8 组静态模板 + 12 个动态参数，trigger 写一次执行一次 | F1、F3 | `macro_inst_trigger` |
-| stream_id 与 task_id 取自动态参数寄存器，STREAM_ID_OVERRIDE 只改 stream_id | F5 | `vu_ids_by_software` |
+| 静态组 23 个 = 12 个 op 加 11 个动态副本，副本偏移 = 动态地址 + 0x2C | F15a | `static_dup_layout` |
+| STATIC_DYNAMIC_MASK 逐位控制哪个参数走动态，op 类不在覆盖范围内 | F15b | `static_dynamic_mask` |
+| stream_id 取自 VU-Core CSR 或 trigger 的 STREAM_ID 字段，task_id 只取前者 | F5 | `vu_ids_source` |
+| VU-Core CSR 那一组走 dsa_ids 直连，写 trigger 那一拍采样 | F5a | `vu_ids_direct` |
 | 动态参数区与静态模板区都能用 dsawi 的 16 bit 字节地址直接寻址 | F2 | `reg_addressing` |
 | TYPE_VL 三字段随 STATIC_DYNAMIC_MASK 切换 | F6 | `type_vl_switch` |
 | 静态配置组被引用时配置写阻塞，in-flight 按改写前执行完 | F7、F8 | `static_cfg_block` |

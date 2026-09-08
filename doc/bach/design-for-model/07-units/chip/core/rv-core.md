@@ -166,7 +166,8 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F4 | `local_user_id` 与 `user_id` **互不相干，不存在换算关系**。`user_id` 16 bit 是全局编号，Router 与 credit 记账认它；`local_user_id` 12 bit 是 core 内部软件自己编的号，只用于 R core 的用户映射表与 Matrix Mem 地址计算。两者各走各的，硬件不做任何转换 |
 | F5 | 自启动的 B core 与 R core 反过来：TS 下发时没有用户身份，软件在 `flag_check` 认出这一笔属于哪个用户后，把 12 位 `local_user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table。`rv_done` 不带 `user_id`，也没有专用的 bind 通路 |
 | F6 | 完成信息三个字段：`stream_id`、`local_user_id`、`task_id`。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
-| F7 | RV core **不向 DSA 输出任务身份**。DSA 报 `dsa_done` 时填的 `stream_id` 与 `task_id`，来自软件在启动这一笔 DSA 任务之前写进 DSA 自己寄存器的值，三个 DSA 一样：DTE 写 `TASK_CFG_PACK`，MU 与 VU 写各自的动态配置寄存器。RV core 这一侧只把 TS 下发的 `stream_id` / `task_id` / `user_id` 放进自定义 CSR 供软件读，读出来再写给 DSA |
+| F6a | 自定义 CSR 读它当场拿到当前这一笔 task 的身份，不排队也不异步返回。DSA 寄存器读是另一档：发出去就走，数据由 dsa_rq 按记录的顺序写回 |
+| F7 | 身份到 DSA 有两条路，各 DSA 用哪条不同。DTE 与 VU 走 `dsa_ids` 直连，DSA 在写 Trigger 那一拍采样，软件不必再写一遍：DTE 取 `streamID` / `taskID` / `userID` / `pathID` 四项，VU 取前两项。MU 走软件写：RV core 把 TS 下发的这几个值放进自定义 CSR 供软件读，读出来在启动那一笔 DSA 任务之前写进它的动态配置寄存器。两条路填的都是同一组值，`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它 |
 
 ### 指令执行
 
@@ -247,13 +248,15 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 
 ```
 port task_cmd (slave, valid/ready, clk)           // TS → RV core：task 下发
-  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · task_dsa_en
+  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en
   out cmd_ready                                     // = task_queue 有空槽（raw ACCEPT）
 port rv_done (master, 脉冲, clk)                  // RV core → TS：task_done 指令带 TS 标志时产生
   out valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0]
 port dsa_cfg (master, valid/ready, clk)           // dsa_iss → 对应 DSA：配置写与 trigger
-  out req_valid · req_we · req_addr[11:0] · req_wdata[31:0]
+  out req_valid · req_we · req_addr[11:0] · req_wdata[31:0] · req_seq
   in  req_ready                                     // = DSA 的配置通路未反压
+port dsa_ids (master, 电平, clk)                  // → 对应 DSA：四个身份信号，DSA 写 trigger 那一拍采样；DTE 取全部四项，VU 只取前两项，MU 不接这条线
+  out stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0]
 port dsa_rdata (slave, 脉冲, clk)                 // DSA → dsa_rq：读寄存器的返回，异步
   in  valid · rdata[31:0]
 port sm_lsq (master, valid/ready, clk)            // → Share Mem，32 bit
@@ -678,7 +681,8 @@ custom-0 字段布局   见下一节
 | 下发六字段与完成三字段，stream_id 只读、local_user_id 可写 | F3、F6 | `task_fields` |
 | local_user_id 与 user_id 互不相干，硬件不换算 | F4 | `two_user_ids` |
 | 自启动 core 由软件写 local_user_id CSR，随 rv_done 回 TS | F5 | `self_start_writeback` |
-| DSA 的身份由软件写进 DSA 寄存器，RV core 不输出 | F7 | `dsa_id_by_software` |
+| 自定义 CSR 同步返回，DSA 寄存器读异步写回 | F6a | `csr_sync_read` |
+| DTE 与 VU 的身份走 dsa_ids 直连，MU 由软件写寄存器 | F7 | `dsa_id_paths` |
 | RV32IMC + 只支持 M 态 + fence 为 nop | F8、F9 | `isa_scope` |
 | 每条指令 1 拍，流水线细节折算进这 1 拍 | F10 | `one_cycle_per_inst` |
 | 八条 custom-0 自定义指令 | F12～F17 | `custom0_insts` |

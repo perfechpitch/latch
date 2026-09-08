@@ -21,9 +21,11 @@
 
 | 存储 | 接哪些 master |
 | - | - |
-| Core Mem | DTE、MU、VU 三个 DSA，加 DTE RV core、Router 的 CoreMem 重发、ctrl_noc |
-| Matrix Mem | DTE、ctrl_noc、MU；MU 只读 |
+| Core Mem | DTE、MU、VU 三个 DSA 的读与写各一个端口，加 DTE RV core、Router 的 CoreMem 重发、ctrl_noc |
+| Matrix Mem | DTE 的读与写各一个端口，加 ctrl_noc 与 MU 的读 |
 | Share Mem | 三个 RV core 的 sm_lsq，加 DTE DSA 的 shareMem 写 |
+
+一家的读与写各占一个端口：有 bank 冲突时在两者之间二选一，无冲突可同时访问。
 
 内部结构与两条约定：
 
