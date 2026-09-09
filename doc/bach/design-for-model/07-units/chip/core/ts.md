@@ -39,7 +39,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 <title>TS 第 0 层</title>
 <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
 <rect x="0" y="0" width="2000" height="1130" fill="#ffffff"/>
-<text x="20" y="26" font-size="12" fill="#111827">TS 任务调度器 · 第 0 层（九个独立打拍的模块。方位：TS 在 core 顶边，RV core 在下方；Router 的四条通路竖着穿过 core，本图画在右侧）</text>
+<text x="20" y="26" font-size="12" fill="#111827">TS 任务调度器 · 第 0 层（九个逐拍推进的模块。方位：TS 在 core 顶边，RV core 在下方；Router 的四条通路竖着穿过 core，本图画在右侧）</text>
 <text x="849" y="26" font-size="9.5" fill="#6b7280">绿线 = 与 Router 的控制通路　灰线 = TS 内部与 RV core 的下发 / 完成　橙线 = credit 与 retire　紫虚线 = ctrl_noc 配置</text>
 <rect x="160" y="110" width="450" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="172" y="131" font-size="11" fill="#111827" font-weight="600">Task_ctrl</text>
@@ -139,7 +139,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 <text x="1232.0" y="798.0" font-size="8.5" fill="#475569">候选：valid=1 且 task_fsm=READY</text>
 <text x="1232.0" y="811.5" font-size="8.5" fill="#475569">　且 task_unit=VU</text>
 <text x="1232.0" y="825.0" font-size="8.5" fill="#475569">规则同 MU_Arb</text>
-<text x="1232.0" y="838.5" font-size="8.5" fill="#475569">三条发射通路各自独立打拍，</text>
+<text x="1232.0" y="838.5" font-size="8.5" fill="#475569">三条发射通路各自逐拍推进，</text>
 <text x="1232.0" y="852.0" font-size="8.5" fill="#475569">同一拍可以并行下发 3 个 task</text>
 <text x="1232.0" y="865.5" font-size="8.5" fill="#475569"></text>
 <text x="1232.0" y="879.0" font-size="8.5" fill="#475569">B core：task 0 借 VU core 跑</text>
@@ -228,7 +228,7 @@ TS 是 core 的控制单元，一块上电配好就按固定逻辑跑的硬件�
 <rect x="153.2" y="345.4" width="9.5" height="120.0" fill="#ffffff" opacity="0.92"/>
 <text transform="rotate(-90 158 405.35)" x="158" y="408.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="7.5" fill="#475569" text-anchor="middle">异常上报 → Core Status → SCP</text>
 <text x="20" y="348" font-size="8" fill="#6b7280" text-anchor="start">（本轮只留接口名）</text>
-<text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">TS 是一块固定的硬件逻辑，不是可编程的调度器：上电配好几张表、写 TS_INIT_FINISH 之后就按固定逻辑跑，运行期不接受软件干预，也没有指令可执行。三条发射通路各自独立打拍。Router 在 core 底边，四条通路物理上竖穿 core。</text>
+<text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">TS 是一块固定的硬件逻辑，不是可编程的调度器：上电配好几张表、写 TS_INIT_FINISH 之后就按固定逻辑跑，运行期不接受软件干预，也没有指令可执行。三条发射通路各自逐拍推进。Router 在 core 底边，四条通路物理上竖穿 core。</text>
 </svg>
 ```
 
@@ -354,7 +354,7 @@ MAS 把 `Stream_table` 单独展开一张表。功能描述照 MAS 原文，`-` 
 | - | - |
 | F56 | 候选是 `valid=1 && task_fsm=TASK_READY && task_unit=MU`（或 VU）的 stream |
 | F57 | 从 `head_ptr` 开始环形年龄优先，选最老的 Stream；发射宽度各 1 |
-| F58 | 三条发射通路各自独立打拍，同一拍可以并行下发 3 个 task |
+| F58 | 三条发射通路各自逐拍推进，同一拍可以并行下发 3 个 task |
 | F59 | RV core 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
 
 ### credit（`task_state_update` 子模块）
@@ -452,7 +452,7 @@ port ts2router_retire (master, valid/ready, clk)   // 用户退休与 credit 返
   out valid · user_id[15:0]
   in  accepted                                      // 即 ready：Router 接收后才清 valid 并推进 head_ptr
 port task_cmd[u] (master, valid/ready, clk)       // u ∈ {DTE, MU, VU}：task 下发
-  out cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en
+  out cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · seq
   in  cmd_ready                                     // = 该 RV core 的 task_queue 有空槽（raw ACCEPT）
 port rv_done[u] (slave, 脉冲, clk)                // RV core 报完成；自启动的表项靠它补 user_id
   in  valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · reduce_seq[5:0]
@@ -1070,6 +1070,7 @@ task 唤醒延迟        2～3 cycle（硬件目标值）
 | trigger 口不设队列，条件不满足直接反压 Router，不丢 trigger | F19、F20、F22 | `trigger_backpressure` |
 | 建表一次性写入用户信息与 Task 0 的全部属性 | F21 | `create_atomic` |
 | DataIn_task_table 只有 1 项，占住就反压 Router | F23、F24 | `datain_hold` |
+| B core 与 R core 上进来的包不建 stream 表项，只登记 DATAIN_TASK 那一项 | F27、F28 | `selfstart_datain` |
 | 16 项顺序 FIFO，进度靠三个字段合起来判断 | F29、F31 | `stream_table_progress` |
 | user_id 与 local_user_id 是两个互不相干的编号 | F30 | `two_user_ids` |
 | 六个写口的固定优先级与两种失败处理 | F35、F36 | `six_write_ports` |

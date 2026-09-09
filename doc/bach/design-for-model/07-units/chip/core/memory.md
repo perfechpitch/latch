@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **Core Mem / Matrix Mem / Share Mem**
 
-给实现 core 内三块存储的人：三个独立打拍的模块各自做哪些事、端口与存储怎么定。
+给实现 core 内三块存储的人：三个逐拍推进的模块各自做哪些事、端口与存储怎么定。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 

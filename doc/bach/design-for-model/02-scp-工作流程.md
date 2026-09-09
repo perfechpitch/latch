@@ -650,7 +650,7 @@ weights 加载模式的三处配置：
 </svg>
 ```
 
-* SCP 桩每 chip 一个，只接 `ctrl_noc`；`ctrl_noc` 端点每 core 一个；都是独立打拍的模块，归属 Chip
+* SCP 桩每 chip 一个，只接 `ctrl_noc`；`ctrl_noc` 端点每 core 一个；都是每拍推进一次的模块，归属 Chip
 * 事务顺序：先给本 chip 全部 core 的 Router 配表，再顺序解复位并配置各个 core；每笔一拍
 * 编译侧的 `core_cfg`、`credit_init`、`kernel_img` 在 boot 期变成 `scp_img`；`scp_fsm` 记当前 core 与步骤
 * 三份 RouterTable 一致不在输入自洽检查里查，由 SCP 桩的写入顺序保证

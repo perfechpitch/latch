@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **MU DSA**
 
-给实现 MU 的人：七个独立打拍的模块各自做哪些事、端口与存储怎么定。MU MAS 的模块表分八项（`config regfile`、`issue_q`、`gen_ep_info`、`agu`、`acu`、`ldq`、`matrix exe`、`stq`），本文档把 `agu` 与 `acu` 合在一节讲，其余一一对应。
+给实现 MU 的人：七个逐拍推进的模块各自做哪些事、端口与存储怎么定。MU MAS 的模块表分八项（`config regfile`、`issue_q`、`gen_ep_info`、`agu`、`acu`、`ldq`、`matrix exe`、`stq`），本文档把 `agu` 与 `acu` 合在一节讲，其余一一对应。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -40,7 +40,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <title>MU DSA 第 0 层</title>
 <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
 <rect x="0" y="0" width="1700" height="930" fill="#ffffff"/>
-<text x="20" y="26" font-size="12" fill="#111827">MU DSA · 第 0 层（七个独立打拍的模块。方位：RV core 与 TS 在上，Matrix Mem / Core Mem 在下，cfg 从上进）</text>
+<text x="20" y="26" font-size="12" fill="#111827">MU DSA · 第 0 层（七个逐拍推进的模块。方位：RV core 与 TS 在上，Matrix Mem / Core Mem 在下，cfg 从上进）</text>
 <text x="702" y="26" font-size="9.5" fill="#6b7280">执行流水 regfile → issue_q → gen_ep_info → agu / acu → ldq → matrix exe → stq；load、计算、写回三段在相邻 task 之间重叠</text>
 <rect x="250" y="110" width="260" height="140.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="262" y="131" font-size="11" fill="#111827" font-weight="600">regfile</text>
@@ -228,7 +228,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | 编号 | 功能 |
 | - | - |
 | F15 | 三个 agu 分别算 token、weight、结果的访存地址 |
-| F16 | 任务拆分顺序：先循环 tile_K，再循环 tile_N |
+| F16 | 任务拆分的循环顺序由内往外是 tile_K、专家、tile_N。两级累加寄存器都只存一列，所以一列的几段与这一列的几个专家要连着算完 |
 | F17 | acu 检查地址越界与对齐 |
 | F18 | 异常时向阵列发排空指令（Drain），四步：阻塞任务下发 → 清理已发出的访存请求（已请求的回复照常处理，不再发起新的）→ 排空计算流水线 → 恢复默认状态 |
 | F19 | Drain 期间允许已进入脉动通路的合法数据正常算完并写回，仅丢弃越界任务数据，防止状态机死锁 |
@@ -242,6 +242,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F22 | Rd outstanding buffer 16 × 256 B = 4 KB，用来掩盖 latency |
 | F23 | Weight ldq 队列深度 4；Matrix Mem 读带宽 8 KB，bank 与 lane 一对一垂直贴合、无 crossbar；读延迟 4T（读 sram 2T + 打拍 2T） |
 | F24 | Weight 各 lane 访存地址相同，只需发一个地址然后逐级脉动到各 lane |
+| F24a | 三组地址的专家偏移：权重按专家在本 EP Group 内的序号隔开（`B_expert_stride`），激活与结果按 topK 里的先后隔开（`AC_expert_stride`）。使能专家间 reduce 时偏移算在激活这一侧（每个专家一份输入、合并成一份输出），不使能时算在结果这一侧（几个专家共用一份输入、各出一份） |
 | F25 | MAC 入口用乒乓 2 级缓存掩盖 Mmem 读出延迟 |
 | F26 | vlane 机制对 Load token 的影响：从 buffer 只读取 `256 B / vlane_num` 字节，再 copy 扩展到 256 B 输出 |
 
@@ -256,6 +257,8 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F31 | 数据类型：token(A) 与 weight(B) 输入 BF16 或 MXFP8，`W_ep` 输入 FP32，输出 FP32 或 BF16 |
 | F32 | vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树的第 128 输入层级节点插旁路 MUX，配上对应 vlane 分组的 MUX 逻辑和 `Ksplit_acc` 寄存器，做到单 lane 同时输出多个结果。vlane 有 1 和 2 两种模式 |
 | F33 | bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序 |
+| F33a | 两级累加寄存器，都是每 lane 一组，都只存一列那么宽：`kblock_acc` 收一列切出来的几段部分和，`ep_acc` 收这一列几个专家各乘上 `W_ep` 之后的加权和。段间与专家间都是顺序相加，每加一次 Clamp 一次；参考实现按同一个顺序算 |
+| F33b | 走完一列才产出结果：一列的几段与这一列的几个专家都算完，才按 `DTYPE_C` 转成 FP32 或 BF16 交给 stq |
 | F34 | 计算异常 `MATH_NAN_INF` 不走 Drain & Trap，不阻塞流水，由硬件自动 Clamp |
 | F35 | 单 lane MAC 阵列 bitmask 计算，零输入旁路加特殊值（NaN / Inf）穿透 |
 | F36 | DIDT 分级启动，分级模式可配置，最小分级为单 lane 启动；Matrix 与 Vector 错峰启动，防止二者功耗陡升叠加。本轮只留状态位与接口名 |
@@ -269,6 +272,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F39 | Wr concat buffer 1～2 KB：各 lane buffer 深度不同，取决于物理距离，最远 16 拍、最近 1 拍，越近 buffer 越大，最大深度 16 |
 | F40 | Store concat 按 vlane 分两种拼装方式：`vlane=1` 步进横切，所有 lane buffer 并行 128 B 截面，连续取 8 次攒满 1024 B（8T）；`vlane=2` 纵向整块，每 lane 一次取 8 B、共 256 B 截面，连续取 4 次攒满 1024 B（4T） |
 | F41 | 结果写回 Core Mem 后与 issue_q 的 finish 合成 `dsa_done`；trigger 里的 last 标志决定这一笔要不要报 TS |
+| F41a | `SYS_STATUS`（Offset `0x004`）的 `BUSY` 位给软件轮询：写 `SYS_CTRL` 的 `TASK_START` 起置位，到 F41 那一刻清，也就是结果写回 Core Mem 之后。一个 task 里连发几笔 MU 任务时，软件靠它等前一笔做完再配下一笔。位域表在原始文档的表格附件里，本地库没同步到，`BUSY` 本轮取 bit0（**待确认**） |
 
 ***
 
@@ -310,6 +314,8 @@ mem rd_outstanding  FF 阵列   16 × 256 B = 4 KB                              
 mem weight_ldq      FIFO      4 × {addr[24:0]}                                      1W1R  各 lane 地址相同       复位空
 mem mac_ping_pong   FF 阵列   每 lane 2 级缓存                                      1RW   掩盖 Mmem 读出延迟     复位空
 mem ksplit_acc      FF 阵列   每 lane 一组，vlane 分组的部分和                       1RW   vlane=2 时使用         复位 0
+mem kblock_acc      FF 阵列   每 lane 一组 FP32，一列切出来的几段的部分和            1RW   kblock > 1 时使用      复位 0
+mem ep_acc          FF 阵列   每 lane 一组 FP32，一列几个专家的加权和                1RW   专家间 reduce 时使用   复位 0
 mem stq             FIFO      16 × {addr[17:0], data}                               1W1R  —                     复位空
 mem wr_concat       FF 阵列   各 lane 1～2 KB，深度 1～16 不等（越近越大）           1RW   按 vlane 两种拼装      复位空
 mem 级间 latch       级间 latch 单 lane 内 10 级                                     —     每拍覆写              —
@@ -761,7 +767,9 @@ Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一
 | topK 的 global index 经 local_ep_table 转 local index | F10、F11 | `gen_ep_info` |
 | topK_ep_table 由 MU 自己从 Core Mem 载入 | F12 | `topk_load` |
 | router_expert_count = 0 时忽略 topK 寄存器 | F14 | `no_topk` |
-| 先循环 tile_K 再循环 tile_N | F16 | `tile_order` |
+| 循环顺序由内往外是 tile_K、专家、tile_N | F16 | `tile_order` |
+| 一列的几段攒在 kblock_acc，几个专家乘 W_ep 后攒在 ep_acc，走完一列才产出 | F33a、F33b | `expert_reduce` |
+| 权重按组内序号隔开、激活与结果按 topK 先后隔开 | F24a | `expert_stride` |
 | acu 越界 / 对齐检查触发 Drain 四步 | F17、F18 | `mu_drain_trap` |
 | Drain 时已进入脉动通路的合法数据照常算完写回 | F19 | `drain_keep_valid` |
 | Weight 各 lane 地址相同，发一个地址逐级脉动 | F24 | `weight_systolic_addr` |
@@ -778,6 +786,7 @@ Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一
 | Wr concat buffer 按物理距离定深度 | F39 | `concat_buffer_depth` |
 | Store concat 按 vlane 分两种拼装 | F40 | `vlane_store` |
 | last 标志决定这一笔要不要报 TS | F41 | `mu_dsa_done` |
+| BUSY 到结果写回 Core Mem 之后才清，软件轮询它等一笔做完 | F41a | `mu_busy_poll` |
 
 ***
 

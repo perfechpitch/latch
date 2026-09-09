@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **RV core ×3**
 
-给实现 RV core 的人：一个独立打拍的模块做哪些事、端口与存储怎么定。三个实例硬件相同、接口相同，区别只在绑定的 DSA、ITCM 里的镜像、可见的地址空间。
+给实现 RV core 的人：一个逐拍推进的模块做哪些事、端口与存储怎么定。三个实例硬件相同、接口相同，区别只在绑定的 DSA、ITCM 里的镜像、可见的地址空间。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -162,6 +162,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | - | - |
 | F1 | 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个，做到用户之间 task 的无 bubble 调度 |
 | F2 | 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
+| F2a | 一笔命令连着几拍出现在端口上，按 `seq` 认它，同一笔只入队一次。不按 `stream_id` 与 `task_id` 认：B core 与 R core 的 datain 任务不占 stream 表项，几笔的这两项都是 0 |
 | F3 | 下发信息六个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，硬件写入自定义 CSR 且只读；`local_user_id` 12 bit，用于 R core 用户映射表和 Matrix Mem 地址计算，可读写，R core 执行 `flag_check` 后由软件写入；`task_id` 6 bit 与 `user_id` 16 bit 由 TS 从 stream_table 取出一起下发，硬件写入自定义 CSR；`task_dsa_en` |
 | F4 | `local_user_id` 与 `user_id` **互不相干，不存在换算关系**。`user_id` 16 bit 是全局编号，Router 与 credit 记账认它；`local_user_id` 12 bit 是 core 内部软件自己编的号，只用于 R core 的用户映射表与 Matrix Mem 地址计算。两者各走各的，硬件不做任何转换 |
 | F5 | 自启动的 B core 与 R core 反过来：TS 下发时没有用户身份，软件在 `flag_check` 认出这一笔属于哪个用户后，把 12 位 `local_user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table。`rv_done` 不带 `user_id`，也没有专用的 bind 通路 |
@@ -248,7 +249,7 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 
 ```
 port task_cmd (slave, valid/ready, clk)           // TS → RV core：task 下发
-  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en
+  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · seq
   out cmd_ready                                     // = task_queue 有空槽（raw ACCEPT）
 port rv_done (master, 脉冲, clk)                  // RV core → TS：task_done 指令带 TS 标志时产生
   out valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0]
@@ -678,6 +679,7 @@ custom-0 字段布局   见下一节
 | - | - | - |
 | task_queue 提前接收，做到用户之间无 bubble 调度 | F1 | `task_queue_prefetch` |
 | 按空槽产生 task_ack，未接收时 TS 不能跳到下一个 | F2 | `task_ack_handshake` |
+| 同一笔命令按 seq 认，连着几笔身份相同的 datain 也不会漏 | F2a | `cmd_seq` |
 | 下发六字段与完成三字段，stream_id 只读、local_user_id 可写 | F3、F6 | `task_fields` |
 | local_user_id 与 user_id 互不相干，硬件不换算 | F4 | `two_user_ids` |
 | 自启动 core 由软件写 local_user_id CSR，随 rv_done 回 TS | F5 | `self_start_writeback` |
@@ -720,3 +722,7 @@ custom-0 字段布局   见下一节
 * **为什么 DSA 读寄存器不阻塞而配置写会阻塞**
   * 配置写要占 DSA 的配置通路，通路满了只能等
   * 读只是取一个状态，用 dsa_rq 记下目的寄存器就能异步返回，不必占住发射口
+* **为什么栈顶与全局指针在复位时直接赋值**
+  * 模型只跑业务流那一段：TS 下发 task 时取 `task_pc` 起始执行，firmware 从 `boot_pc` 跑到那条不通知 TS 的 `task_done` 为止的那一段没有执行的时机
+  * `sp` 与 `gp` 是 firmware 起始那两条指令设的，不设就是 0，kernel 一用栈就访问 0 号地址附近
+  * 取值照链接脚本给的 DTCM 栈顶与全局指针，与 firmware 设的那两个相同

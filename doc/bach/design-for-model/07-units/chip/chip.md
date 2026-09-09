@@ -35,9 +35,9 @@
 | 对象 | 形态 | 数量 |
 | - | - | - |
 | Chip | 装配容器，不打拍 | 1 |
-| SCP 桩 | 独立打拍的模块 | 1 |
-| ctrl_noc 端点 | 独立打拍的模块 | 8 或 10，每 core 一个 |
-| C2C Bridge | 独立打拍的模块 | 4，每行左右两端各一个 |
+| SCP 桩 | 逐拍推进的模块 | 1 |
+| ctrl_noc 端点 | 逐拍推进的模块 | 8 或 10，每 core 一个 |
+| C2C Bridge | 逐拍推进的模块 | 4，每行左右两端各一个 |
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1900 800" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Chip 第 0 层">
@@ -127,7 +127,7 @@
 <text x="1308" y="196" font-size="10" fill="#111827" font-weight="600">core4</text>
 <text x="1312" y="234.0" font-size="8.5" fill="#92400e">不派角色：只构造 Router 八个模块</text>
 <text x="1312" y="247.5" font-size="8.5" fill="#92400e">local 侧禁用 · 不接收溢流</text>
-<text x="1312" y="261.0" font-size="8.5" fill="#92400e">credit 跨过它透传</text>
+<text x="1312" y="261.0" font-size="8.5" fill="#92400e">业务 credit 跨过它透传，VC credit 照查</text>
 <text x="1312" y="274.5" font-size="8.5" fill="#92400e">只按路由表转发</text>
 <text x="1492" y="301" font-size="8.5" fill="#9ca3af" text-anchor="end">最后一列 chip 的空位</text>
 <rect x="348" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
@@ -303,7 +303,7 @@
 <path d="M84.5 174.0 L80.1 145.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
 <text x="150" y="194.0" font-size="8.5" fill="#6b7280" text-anchor="start">本轮只留接口名</text>
 <text x="20" y="762" font-size="10.5" fill="#374151" text-anchor="start">四个 chip 口由 LPU 接到相邻 chip 或 PCIe Switch；C2C 当作一种长延迟的 R2R，Router 到 Router 400T。</text>
-<text x="20" y="784" font-size="10.5" fill="#374151" text-anchor="start">Chip 不打拍，是装配容器：按 chip 形状构造 8 或 10 个 Core、接 mesh、接四个 C2C Bridge、接 ctrl_noc。SCP 桩、ctrl_noc 端点、C2C Bridge 是本层三种独立打拍的模块。</text>
+<text x="20" y="784" font-size="10.5" fill="#374151" text-anchor="start">Chip 不打拍，是装配容器：按 chip 形状构造 8 或 10 个 Core、接 mesh、接四个 C2C Bridge、接 ctrl_noc。SCP 桩、ctrl_noc 端点、C2C Bridge 是本层三种逐拍推进的模块。</text>
 </svg>
 ```
 
@@ -368,7 +368,9 @@
 | F33 | TX 方向的 AXI write 是 posted，写响应可以丢 |
 | F34 | RX 方向的 AXI 需要响应，由 AXI Bridge 返回 dummy response，释放 PCIe 的 outstanding 资源 |
 | F35 | VC Buffer 按方向分档：TX 是 private 20 flit/VC × 4 = 80 加 shared 约 20，合计 100 flit ≈ 28.8 KB，覆盖本级 R2R 往返约 20 cycle；RX 是 private 20 flit/VC × 4 = 80 加 shared 约 300，合计 380 flit ≈ 109.4 KB，覆盖 PCIe 往返 600 ns @1024-bit。两向合计约 138.7 KB |
+| F35a | 与本片 core 之间照 VC credit 那一套：一个 flit 离开桥的输入缓冲、交给下一级时，才把那个 VC 的位置还给 core。收下就还是不行的，那时它还占着位置，core 拿回额度又发，本级已经没地方收，那些 flit 只能丢，而 credit 已经扣掉了。收不收得下只看这个缓冲，容量与 Router 给这个方向的 VC credit 总量一致；对侧还有没有位置是往线上发那一步的事，两件事不能混 |
 | F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发 |
+| F36a | 链路层 credit 的归还跨片走：收方收下一段之后发一笔回给发方，发方收到才恢复额度。这一笔到对侧的桥为止，不往 core 送，与三类业务 release 的透传是两回事。单向流量下尤其要走这条路，否则发方的额度用完就再也回不来 |
 | F37 | 跨 chip 时同步上下游的 Reduce credit，防止上游超发；release 的粒度是 flit，在 C2C 上压缩包数量后再传 |
 | F38 | 三类 credit 的 release 一律透传，Bridge 自身不建 stream credit 表，也不参与 Reduce 累加 |
 | F39 | 三类 credit 可以共享同一个 AXI 传输包同步组包以提高效率，接收侧按分段还原。VC credit 在 Router 上是 flit 粒度，跨 C2C 要先转换成包粒度；业务层的两类本身就是包或 stream 粒度，不转换 |

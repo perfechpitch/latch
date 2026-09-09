@@ -2751,7 +2751,10 @@ Share Mem 里的三张表：
 | 2 | VU | 两笔求和，结果写回 Core Mem |
 | 3 | DTE | 结果从 Core Mem 搬到 Router。不是链尾组就送往下一组 EP 的 R core；是链尾组就经 PCIe Switch 送进 SNIC DPU 的 DDR，目的地址由 `(gpu_id, token_id)` 算出。任务链结束，释放 stream 与 Matrix Mem 空间，并通知 Router 更新本 core 的 credit |
 
-两条链用的不是同一套 stream_id；链一的两个方向也分别对应两个不同的 stream。两条链拆开的是“在 TS 里占一个 stream 项”与“数据在本核停留”两段时间：在途用户上限从 stream_table 的 16 项换成 Matrix Mem 的容量，按每笔 12 KiB（6144 个 BF16）算，32 MB 能同时挂着约 1300 个用户的半成品；推进顺序由链二自己挑，不受到达顺序约束。
+两条链用的不是同一套 stream_id；链一的两个方向也分别对应两个不同的 stream。
+
+链首那一组的 R core 只等一笔：这个用户在它之前没有别的组，槽的另一半一直是 0。
+它照样走链二，两笔求和时加上去的是 0，不改值，结果直接送下一组。两条链拆开的是“在 TS 里占一个 stream 项”与“数据在本核停留”两段时间：在途用户上限从 stream_table 的 16 项换成 Matrix Mem 的容量，按每笔 12 KiB（6144 个 BF16）算，32 MB 能同时挂着约 1300 个用户的半成品；推进顺序由链二自己挑，不受到达顺序约束。
 
 链二的 task 1 与 task 2 有一个备选：不在 VU 加，两笔先到的存 Matrix Mem，另一笔到达后 DTE 把它搬到 Router 的 ReduceModule 加完直接向下游输出。
 

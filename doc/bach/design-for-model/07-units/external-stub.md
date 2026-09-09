@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU 之外：**片外桩**
 
-给实现片外桩的人：入口桩与出口桩两个独立打拍的模块各自的端口、存储器、逐拍行为、参数，以及它们承载的机制。
+给实现片外桩的人：入口桩与出口桩两个逐拍推进的模块各自的端口、存储器、逐拍行为、参数，以及它们承载的机制。
 
 LPU 之外的全部硬件（GPU、SmartNIC 里的 DPU、ETH 交换机、tray 上的 CPU 与 DDR）都收在这两个桩里，只模仿接口行为：
 
@@ -97,7 +97,7 @@ LPU 之外的全部硬件（GPU、SmartNIC 里的 DPU、ETH 交换机、tray 上
   <path d="M200 270 L200 231" stroke="#475569" stroke-dasharray="4 3" marker-end="url(#a0)" fill="none"/>
   <text x="206" y="256" font-size="9" fill="#6b7280">done 集合 / retired 汇总</text>
 
-  <text x="20" y="400" font-size="10.5" fill="#374151">桩是模块（tick=true），坐标登记在片外节点表里，挂在 PCIe Switch 上；链路与 Switch 各有一份文档。</text>
+  <text x="20" y="400" font-size="10.5" fill="#374151">桩是模块，由 LPU 那一层的协程推，坐标登记在片外节点表里，挂在 PCIe Switch 上；链路与 Switch 各有一份文档。</text>
 </svg>
 ```
 

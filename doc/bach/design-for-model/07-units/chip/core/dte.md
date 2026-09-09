@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **DTE DSA**
 
-给实现 DTE 的人：八个独立打拍的模块各自做哪些事、端口与存储怎么定。
+给实现 DTE 的人：八个逐拍推进的模块各自做哪些事、端口与存储怎么定。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -40,7 +40,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <title>DTE DSA 第 0 层</title>
 <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
 <rect x="0" y="0" width="1760" height="1330" fill="#ffffff"/>
-<text x="20" y="26" font-size="12" fill="#111827">DTE DSA · 第 0 层（八个独立打拍的模块；一个进核通道加四个出核通道。方位：RV core 与 TS 在上，Core Mem / Matrix Mem 经 DTE xbar 在下，Router 在最下）</text>
+<text x="20" y="26" font-size="12" fill="#111827">DTE DSA · 第 0 层（八个逐拍推进的模块；一个进核通道加四个出核通道。方位：RV core 与 TS 在上，Core Mem / Matrix Mem 经 DTE xbar 在下，Router 在最下）</text>
 <text x="1010" y="26" font-size="9.5" fill="#6b7280">一个高层任务被劈成 RD / WR 两个子上下文，各自排队各自推进，完成时按 task_id 合回一次 task_done</text>
 <rect x="160" y="110" width="300" height="154.0" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="172" y="131" font-size="11" fill="#111827" font-weight="600">Completion RS</text>
@@ -94,7 +94,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="572.0" y="442.0" font-size="8.5" fill="#475569">MM 侧地址直给，CM 侧加 stream 偏移</text>
 <rect x="890" y="350" width="180" height="113.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="902" y="371" font-size="11" fill="#111827" font-weight="600">outbound buffer</text>
-<text x="902.0" y="388.0" font-size="8.5" fill="#475569">同上，与 inbound 合计约 8 KB</text>
+<text x="902.0" y="388.0" font-size="8.5" fill="#475569">同上，四条出核通道各一份 8 KB</text>
 <text x="902.0" y="401.5" font-size="8.5" fill="#475569">出口阻塞只通过 Credit</text>
 <text x="902.0" y="415.0" font-size="8.5" fill="#475569">　反压限制领先距离</text>
 <text x="902.0" y="428.5" font-size="8.5" fill="#475569">不要求读写用同一个</text>
@@ -111,14 +111,14 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="572" y="581" font-size="11" fill="#111827" font-weight="600">WR_CH0（进核写）· 进核通道 ×1</text>
 <text x="572.0" y="598.0" font-size="8.5" fill="#475569">从 inbound buffer 按任务边界取数</text>
 <text x="572.0" y="611.5" font-size="8.5" fill="#475569">经 DMA_XBAR 写入目标 Matrix Mem / Core Mem</text>
-<text x="572.0" y="625.0" font-size="8.5" fill="#475569">Router → MM：dst_addr 直给，不加 stream 偏移</text>
-<text x="572.0" y="638.5" font-size="8.5" fill="#475569">Router → CM：dst_addr = dst_base_addr</text>
+<text x="572.0" y="625.0" font-size="8.5" fill="#475569">Router → MM：dst_addr 取自包头，不加 stream 偏移</text>
+<text x="572.0" y="638.5" font-size="8.5" fill="#475569">Router → CM：dst_addr 取自包头，再叠 stream 偏移</text>
 <text x="572.0" y="652.0" font-size="8.5" fill="#475569">　　+ stream_id × stream_stride</text>
 <text x="572.0" y="665.5" font-size="8.5" fill="#475569">写请求与响应 Drain 后进 Completion RS</text>
 <rect x="890" y="560" width="180" height="140.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="902" y="581" font-size="11" fill="#111827" font-weight="600">inbound buffer</text>
-<text x="902.0" y="598.0" font-size="8.5" fill="#475569">与 outbound 合计约 8 KB</text>
-<text x="902.0" y="611.5" font-size="8.5" fill="#475569">256 B × 20～30 拍</text>
+<text x="902.0" y="598.0" font-size="8.5" fill="#475569">进核这条通道一份 8 KB</text>
+<text x="902.0" y="611.5" font-size="8.5" fill="#475569">256 B × 32 项</text>
 <text x="902.0" y="625.0" font-size="8.5" fill="#475569">最大可掩盖 32 T 延迟</text>
 <text x="902.0" y="638.5" font-size="8.5" fill="#475569">read-ahead 的领先量由</text>
 <text x="902.0" y="652.0" font-size="8.5" fill="#475569">　Buffer credit、读 outstanding</text>
@@ -261,6 +261,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
 | F3 | 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配 TaskQueue 项和完成跟踪项 |
 | F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map` 副本，与 TS 那一份同源：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号 |
+| F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。`route` 这一项按 core 的角色定死：计算 core 落 Core Mem，R core 落 Matrix Mem。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
+| F3d | B core 与 R core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象，因此不回 Ack |
 | F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
 | F4 | 一帧一任务：同一个 AXI-Stream Frame 只属于一个 Router → MM 或 Router → CM 任务，不允许任务间交织 |
 | F5 | 首拍固定为 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号 |
@@ -292,8 +294,9 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F17 | **通道之间可以乱序执行**：某个 VC 阻塞只堵住对应的那个出核通道，别的通道照发。同一通道内读写两半的状态也彼此独立，一侧的 Active Context 释放后就能激活下一个任务，不等另一侧 |
 | F18 | **通道内顺序执行**：TaskQueue 按序激活。read-ahead 允许 RD / WR 任务序号错位，但不改变通道内的顺序。向 TS 反馈完成仍按 TS 下发的顺序，与通道间的乱序无关 |
 | F19 | `issue_done` 就允许该侧提前激活下一任务，不必等全部 drain |
-| F20 | 读这一半允许领先写那一半，领先量由三件事共同约束：中间 Buffer 的可用 Credit、读的 outstanding 限额、可保留的任务边界数 |
+| F20 | 读这一半允许领先写那一半，领先量由三件事共同约束：中间 Buffer 的可用 Credit、读的 outstanding 限额、可保留的任务边界数。Buffer 的位置在发读请求那一刻就占下，不是等响应回来再看有没有地方：等回来再看的话，没位置的那些读响应只能丢，而请求已经发出去、outstanding 也已经记上 |
 | F21 | 并发约束：各通道目的资源无冲突时独立推进，共享 DMA_XBAR 端口时按其仲裁规则；Router → CM 与 MM → CM 竞争 CoreMem 写路径，由 CM 写仲裁器选择，未获选的一侧保持 valid 和上下文 |
+| F21a | 一个通道一拍里两侧都可能用存储端口：MM → CM 那一档读那一半读 Matrix Mem、写那一半写 Core Mem。两块存储各记各的占用，谁都不许替对方把端口置闲 |
 | F22 | 数据布局仅支持连续一维搬运，当前不支持 stride |
 | F23 | 单个 DTE 任务的搬运量上限是 32 KB（256 B × 128 拍），比包上限小，超过的要拆成多个任务包下发；一个任务可由多个任务包组成，包之间不保证顺序执行 |
 
@@ -301,7 +304,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 | 编号 | 功能 |
 | - | - |
-| F24 | inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算，最大可掩盖 32 T 的延迟 |
+| F24 | 中间 Buffer 每条通道一份，8 KB，按 256 B 一项算 32 项，最大可掩盖 32 T 的访存延迟 |
 | F25 | Buffer 满时通过 TREADY 向 Router 反压 |
 | F26 | 出口阻塞只通过 Credit 反压限制领先距离，不要求读写用同一个 Active Context |
 
@@ -335,9 +338,11 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F40 | **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 由 TS 直连送过来（TS 配置时就带 `user_id` / `stream_id` / `path_id` / `task_id` 四样），`size` 由 RV core 配寄存器给，或按 `data_len` 算出来 |
 | F41 | 包头分工：硬件只改硬件包头（`core_mask`），RV core 改软件包头 |
 | F42 | `data_len` 在不同方向盖的范围不同：Router ↔ Matrix Mem 时是 topK + scale + data 的总长；Router ↔ Core Mem 时只是 data 的长度，scale 与 topK 的长度另算 |
+| F42a | `CFG_DATA_LEN` 是 16 bit，写进去的数以 8 B 为一格，硬件乘回字节，所以一段最长 64 KB 差 8 B。不足一格的尾巴配不出来 |
 | F43 | 进核时计算 core 只在这个 token 需要分配新 `stream_id` 时才存包头（`hw_header_op = 1`），中间环节的 reduce 与 concat 任务直接丢弃（`hw_header_op = 0`）；广播 token 进核必然带 topK，必须存下来 |
 | F44 | 出核时改写硬件包头：`path_id` 用 TS 送来的那个，`size` 用 RV core 配的寄存器（Concat 这类算完数据量会变的场景就靠它），`core_mask` 只在 Bach 做 MoE Route 时改；计算结果出核不带 topK |
 | F44a | 出核任务要发的那个包在 Commit 准入时就建好，身份与长度按 F44 填；读侧从存储取回的每一块按已填字节数排进它的 payload |
+| F44c | 出核造包时把 DTE 模板里的 `dst_addr` 抄进包头：那一项配的是收方的落点，发方这一笔自己用不着它 |
 | F44b | 出核不改的包头字段沿用进核那一笔的：DPU 写的 `gpu_id` 与 `token_id` 在进核那一笔记进 Hmem 里这个 `stream_id` 的软件包头，出核造包时取回来填上 |
 | F45 | 支持纯包头任务（`data_len = 0`），进出 core 都可以 |
 | F46 | 地址的一条规矩：软件只配基址，偏移由硬件用 `stream_id` 算出来。`stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE，软件不需要知道这个 token 落在 Core Mem 的哪一片。进核与出核两个方向都按这条算：进核的落点是 `stream_base + stream_id × stream_stride + dst_addr`，出核的取数点把 `src_addr` 代进同一个式子 |
@@ -351,6 +356,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F50 | 任务数据传输完成后，按 `sharemem_waddr` / `sharemem_data` 写 shareMem，然后通知 TS |
 | F51 | 只在 B core 与 R core 使用，存 user_id 与 token entry 的 valid 标志：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid |
+| F51a | 搬入那一笔的标志由 Header Parser 建描述符时一并填：表的基址与一个 token 槽位多大由 core 的配置给，第几项按包头的 `dst_addr` 除以槽位大小算，写进去的值是 valid。搬入的描述符不经软件，标志的地址因此不能由软件配（原文只说了写哪里，没说搬入这一笔的地址怎么来） |
 
 ### 出核前的资源与流控
 
@@ -443,8 +449,8 @@ port cfg (slave, ctrl_noc 写事务, clk)                // 静态寄存器、Hm
 ```
 mem task_q[c][h]     FIFO      每通道每侧 ≥16 项 × Descriptor（c ∈ {in_ch, out_ch0..3}，h ∈ {RD, WR}）  1W1R  按序激活  复位空
 mem active_ctx[c][h] FF        每通道每侧一份 {task_id[5:0], stream_id[3:0], user_id[15:0], cur_addr, remain, boundary}  1RW  issue_done 后释放  复位空
-mem in_buf           FIFO      inbound，约 4 KB（256 B × 16）                        1W1R  满 → TREADY 拉低       复位空
-mem out_buf          FIFO      outbound，约 4 KB（256 B × 16）                       1W1R  满 → 停止 RD_CH1 发请求  复位空
+mem in_buf           FIFO      进核那条通道，8 KB（256 B × 32）                      1W1R  满 → TREADY 拉低       复位空
+mem out_buf[c]       FIFO      出核四条通道各一份，8 KB（256 B × 32）                 1W1R  满 → 停止 RD 侧发请求    复位空
 mem comp_rs          FF 阵列   16 项 × {task_id[5:0], rd_done, wr_done, drained}      1RW   Commit 时占，Join 时消  复位空
 mem done_pend        FIFO      16 × {stream_id[3:0], task_id[5:0]}                    1W1R  串行化同拍多个 Join    复位空
 mem hmem             FF 阵列   16 项 × {core_mask 2 B, sw_header 16 B} = 288 B         1R1W  按 stream_id 索引；硬件写 core_mask，RV core 写 sw_header  复位 0
@@ -678,10 +684,10 @@ stall_cycles  = cycles(valid && !ready)
   <text x="104" y="82" font-size="10" fill="#334155" text-anchor="middle">remain[15:0]</text>
   <rect x="20" y="102" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="106" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">in_buf · FIFO 4 KB · 1W</text>
+  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">in_buf · FIFO 8 KB · 1W</text>
   <rect x="20" y="156" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="160" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 4 KB · 1W</text>
+  <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 8 KB · 1W</text>
   <polygon points="727,38 893,38 883,96 717,96" fill="#f8fafc" stroke="#374151"/>
   <text x="805" y="57" font-size="10.5" fill="#374151" text-anchor="middle">cmem_rd / mmem_rd</text>
   <text x="805" y="75" font-size="9.5" fill="#6b7280" text-anchor="middle">req_valid · req_addr</text>
@@ -721,10 +727,10 @@ stall_cycles  = cycles(valid && !ready)
   <text x="104" y="61" font-size="9.5" fill="#6b7280" text-anchor="middle">rsp_valid · rsp_rdata</text>
   <rect x="20" y="76" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="80" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="97" font-size="10" fill="#374151" text-anchor="middle">in_buf · FIFO 4 KB · 1W1R</text>
+  <text x="104" y="97" font-size="10" fill="#374151" text-anchor="middle">in_buf · FIFO 8 KB · 1W1R</text>
   <rect x="20" y="130" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="134" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="151" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 4 KB · 1W1R</text>
+  <text x="104" y="151" font-size="10" fill="#374151" text-anchor="middle">out_buf · FIFO 8 KB · 1W1R</text>
   <rect x="704" y="53" width="176" height="92" fill="#f1f5f9" stroke="#334155"/>
   <rect x="704" y="53" width="176" height="18" fill="#334155"/>
   <text x="792" y="66" font-size="10.5" fill="#ffffff" text-anchor="middle">BUF_ST</text>
@@ -739,7 +745,7 @@ stall_cycles  = cycles(valid && !ready)
   <text x="250" y="98" font-size="10.5" fill="#475569">2. buf.full → 进方向拉低 tready 反压 Router；出方向停止 RD 发请求</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. RD 领先 WR 的距离只由 buffer credit 限制，不要求同一 Active Context</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 该 task 的数据全部被 WR 取走 → drained = 1</text>
-  <text x="250" y="162" font-size="10" fill="#9ca3af">合计约 8 KB，最大掩盖 32 T 延迟</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">每条通道一份 8 KB，最大掩盖 32 T 延迟</text>
   <path d="M188 44 L231 44" stroke="#475569" marker-end="url(#are5)" fill="none"/>
   <path d="M188 97 L231 97" stroke="#475569" marker-end="url(#are5)" fill="none"/>
   <path d="M188 151 L231 151" stroke="#475569" marker-end="url(#are5)" fill="none"/>
@@ -911,7 +917,7 @@ stall_cycles  = cycles(valid && !ready)
 ```
 物理通道           5（进核 `in_ch` 1 条 + 出核 `out_ch[0..3]` 4 条，与 4 个 VC 一一对应）；每条再拆读、写两侧
 TaskQueue          每通道每侧不少于 16 项
-中间 Buffer        inbound + outbound 约 8 KB，256 B × (20～30) T，最大掩盖 32 T 延迟
+中间 Buffer        每条通道一份 8 KB，256 B × 32 项，最大掩盖 32 T 延迟
 Completion RS      16 项（待定）；Done Pending 16 项（待定）
 与 Cmem 接口宽度    256 B/T，双向（DTE MAS 与 Cmem MAS 一致）
 与 Mmem 接口宽度    256 B，双向；写 9T、读 8T
@@ -975,12 +981,15 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | data_len 在不同方向盖的范围不同 | F42 | `data_len_scope` |
 | hw_header_op 决定存不存包头 | F43 | `hw_header_op` |
 | 出核改写 path_id / size / core_mask | F41、F44 | `header_rewrite` |
+| 进核搬运的落点取自包头，发方在出核造包时写进去 | F3c、F44c | `dst_from_header` |
+| B core 与 R core 上进核那一笔不回 Ack | F3d | `inbound_no_ack` |
 | DPU 的 gpu_id 与 token_id 随数据出核 | F44b | `dpu_header_relay` |
 | 纯包头任务 data_len = 0 | F45 | `header_only_task` |
 | 软件只配基址，硬件用 stream_id 算偏移，进核出核都按这条算 | F46、F47 | `stream_offset` |
 | scale 与 topK 的长度硬件自己算 | F48 | `derived_length` |
 | Matrix Mem 侧不加偏移，Core Mem 侧加 | F49 | `mm_no_offset` |
 | shareMem 写：搬入置 valid、搬出置 invalid | F50、F51 | `sharemem_flag` |
+| 搬入那一笔的标志项按落点算，不由软件配 | F51a | `inbound_flag_index` |
 | 三份 RouterTable 副本一致 | F52 | `dte_rtab_copy` |
 | 出核前置申请，没拿到就在 PendingTaskQ 等 | F53 | `dte_pending_taskq` |
 | PendingTaskQ 排在 Commit 之前，等资源的任务不占 Completion RS | F54 | `pending_before_commit` |

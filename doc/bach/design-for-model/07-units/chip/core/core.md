@@ -27,7 +27,7 @@ Core 是 chip 阵列里的一格，对外只有两组连接：
 
 Core 内七个单元，各一份文档：
 
-| 单元 | 独立打拍的模块 | 文档 |
+| 单元 | 逐拍推进的模块 | 文档 |
 | - | - | - |
 | Router | RouterStation ×3、Xbar、CoreStation、ReduceModule、RouterTable / CSR、CoreMem 重发、Retire、CoreMemCreditMonitor | [`router.md`](router.md) |
 | TS | User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check（`Stream_table` 内再展开 user_LUT、ptr_ctrl、stream_id_map、task_state_update、task_rdy_check、retire、except_check） | [`ts.md`](ts.md) |
@@ -62,7 +62,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <rect x="1858" y="130" width="56" height="880" rx="4" fill="#f3f4f6" stroke="#6b7280" stroke-dasharray="4 3"/>
 <text transform="rotate(-90 1886.0 570.0)" x="1886.0" y="573.7" font-size="10.5" fill="#4b5563" font-weight="600" text-anchor="middle">Debug Module：解析 DMI，实现 core 内组件的 debug（未建模）</text>
 <rect x="234" y="130" width="1200" height="114" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="246" y="151" font-size="11" fill="#111827" font-weight="600">TS 任务调度器（九个独立打拍的模块）</text>
+<text x="246" y="151" font-size="11" fill="#111827" font-weight="600">TS 任务调度器（九个逐拍推进的模块）</text>
 <text x="246.0" y="168.0" font-size="8.5" fill="#475569">CFG_REG：task_chain 64 项 · datain_task 1 项 · stream_num</text>
 <text x="246.0" y="181.5" font-size="8.5" fill="#475569">　CORE_TYPE · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
 <text x="246.0" y="195.0" font-size="8.5" fill="#475569">User_Match · DataIn_task_table（只有 1 项，占住就反压 Router）</text>
@@ -154,7 +154,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="336" y="931" font-size="11" fill="#111827" font-weight="600">DTE xbar（DMA_XBAR）</text>
 <text x="336.0" y="948.0" font-size="8.5" fill="#475569">DTE DSA 到 Core Mem 与 Matrix Mem 各 256 B/T；Core Mem 8 bank · Matrix Mem 64 bank，命中冲突就排队；MM → CM 的搬移也走这里，VU 不直接读 Matrix Mem</text>
 <rect x="234" y="1040" width="1590" height="114" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="246" y="1061" font-size="11" fill="#111827" font-weight="600">Router（八个独立打拍的模块）</text>
+<text x="246" y="1061" font-size="11" fill="#111827" font-weight="600">Router（八个逐拍推进的模块）</text>
 <text x="246.0" y="1078.0" font-size="8.5" fill="#475569">RouterStation ×3（left / right / mid）</text>
 <text x="246.0" y="1091.5" font-size="8.5" fill="#475569">　Header Parser · VC Buffer ×4 · Packet Context</text>
 <text x="246.0" y="1105.0" font-size="8.5" fill="#475569">　Stream Resource Table · VC Credit 计数器 · Credit Release 静态旁路</text>
