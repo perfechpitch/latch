@@ -49,6 +49,10 @@ class Recorder {
   // 目录；一个进程里跑多轮就会一轮盖一轮。要分开存就在开写之前改掉前缀。
   // 第一段落盘之后文件已经打开，这时再改前缀，改到的与写进去的对不上，所以拒绝。
   void SetPathPrefix(const std::string& v);
+  // 换个前缀重新开一份。上一份已经写好的文件留着不动，这一份从零攒。一个进程
+  // 里跑几轮、每轮要各自一份波形时用它：Finalize 之后只是把文件收了尾，状态还
+  // 停在「已收尾」上，不清掉就再也写不出第二份的索引。
+  void StartNew(const std::string& v);
 
  private:
   void EnsureOpen();

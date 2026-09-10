@@ -16,6 +16,23 @@ inline bool g_trace_disabled = false;
 inline void SetTraceDisabled(bool disabled) { g_trace_disabled = disabled; }
 inline bool TraceDisabled() { return g_trace_disabled; }
 
+// 建一段模块的时候把波形关掉，出了作用域还原成进来时的样子。一个模块记不记波形
+// 在它建出来那一刻就定下来了，所以把不看的那几个模块的构造包进来，它们的信号一
+// 个都不进波形，模块自己的代码不动。
+//
+// 出作用域还原而不是一律打开：外层可能本来就关着（只给头几颗 chip 记波形的那种
+// 跑法），一律打开会把那几颗又打开。
+class TraceOffScope {
+ public:
+  TraceOffScope() : saved(TraceDisabled()) { SetTraceDisabled(true); }
+  ~TraceOffScope() { SetTraceDisabled(saved); }
+  TraceOffScope(const TraceOffScope&) = delete;
+  TraceOffScope& operator=(const TraceOffScope&) = delete;
+
+ private:
+  bool saved;
+};
+
 class SignalTracer {
  public:
   ~SignalTracer() { Flush(); }

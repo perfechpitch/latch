@@ -2812,6 +2812,12 @@ window.addEventListener("mouseup", () => {
   S.tree = init.tree;
   S.treeById = new Map(S.tree.map((r) => [r.id, r]));
   buildChildrenIndex();
+  // Boot folded: the sidebar opens with one row per top-level node — one
+  // folder per chip — rather than every signal in the trace at once. A
+  // many-chip run is thousands of rows, and unfolded they bury the handful
+  // the reader came for. The header button opens them all again; a click on
+  // a row opens just that one.
+  for (const id of collapsibleModuleIds()) S.collapsed.add(id);
 
   // Clock period (one cycle = this many ticks); drives the cycle-labelled
   // ruler, the cycle grid, and the zoom floor.

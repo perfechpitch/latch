@@ -1,140 +1,373 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_CORE_
 #define _LATCH_BACH_IP_CHIP_CORE_CORE_
 
-// 一个 Core。它是挂时钟的节点，内部八个单元都跟着它的一个协程走。
+// Core：chip 阵列里的一格。
 //
-// 每拍的 stage 顺序按"末级先做"排：先让已经在做的事完成，再让新的事派下去。这样
-// 一次完成与它引发的连锁反应落在同一拍，与 Bach 里同刻的函数调用一致：
+// 自己不打拍 —— 全部逐拍行为在七个单元的模块里，这一层只做构造期的接线，加上
+// 几条不归任何单个单元的约定。
 //
-//   Router     本拍到点的封包重组齐了交给 DTE，各入端口的新包进队列，仲裁转发
-//   存储       访存到点的释放仲裁器，本拍排在后面的就能接上
-//   倍率表     读写到点的落表，本拍要用它的计算与搬运才拿得到值
-//   计算核     算完的 ack 出去
-//   DTE        发完或收完的 ack 出去，收到的 RETIRE 把额度还给 CreditUnit
-//   CreditUnit 拿上一步刚还回来的额度验资，验过的 ack 出去
-//   TaskScheduler 把本拍所有 ack 一起看进来，推进各条流水，派下一批任务
+// 对外只有两组连接：三个 R2R 方向各一条 256 B/T 的双向链路，与 ctrl_noc 的配置
+// 写事务口。没有第三条路：core 的一切进出都过 Router。
 //
-// 排在最后的 TaskScheduler 看得到本拍全部完成，所以依赖链不掉拍；代价是它本拍派下去
-// 的任务，各单元要到下一拍才开始动。这一拍相对 setup 的几十拍可以忽略，而依赖链掉拍
-// 会直接改变屏障与退休顺序，所以两者之间取前者。
+// router_only 那一档是边界 chip 里不派角色的那个 core：只构造 Router 的八个
+// 模块，不构造 TS、RV core、DSA 与三块存储。它仍要承担单向转发、多播、
+// router-level reduce 与三类 credit 的透传，而且坐在 chip 接 PCIe Switch 的
+// 那个口上，所以 Router 一个都不能少。
 //
-// Router 排在 DTE 之前，同样是这个取舍：本拍投递到的包 DTE 本拍就处理，而 DTE 本拍
-// 发出去的包 Router 下一拍才仲裁。
-//
-// Core 对外只有 Router 的十二个端口。片内 mesh 的连线动作在 Chip 里做，但被连的端口
-// 长在 Core 上。
+// 三个 DSA 之间没有任何直连：DSA 之间的数据一律经存储交换，控制一律经 TS 与
+// 各自的 RV core。每个 DSA 与本核那个 RV core 之间另有四个身份信号直连
+// （streamID、taskID、userID、pathID），DSA 在写 trigger 寄存器那一拍采样。
 
-#include <cstdint>
+#include <array>
+#include <memory>
 #include <string>
+#include <vector>
 
-#include "base/clock.h"
-#include "base/log.h"
-#include "base/module.h"
-#include "base/runtime.h"
-#include "bach/common/packet.h"
-#include "bach/ip/chip/core/compute/matrix_core.h"
-#include "bach/ip/chip/core/compute/vector_core.h"
-#include "bach/ip/chip/core/core_context.h"
-#include "bach/ip/chip/core/credit_unit.h"
+#include "bach/ip/chip/chip_ports.h"
+#include "bach/ip/module_base.h"
 #include "bach/ip/chip/core/dte/dte.h"
-#include "bach/ip/chip/core/memory/memory_system.h"
-#include "bach/ip/chip/core/moe_bitmap.h"
-#include "bach/ip/chip/core/ports.h"
+#include "bach/ip/chip/core/memory/core_mem.h"
+#include "bach/ip/chip/core/memory/matrix_mem.h"
+#include "bach/ip/chip/core/memory/share_mem.h"
+#include "bach/ip/chip/core/mu/mu.h"
 #include "bach/ip/chip/core/router/router.h"
-#include "bach/ip/chip/core/task_scheduler.h"
-#include "bach/ip/route_config.h"
-#include "bach/observer/span_recorder.h"
+#include "bach/ip/chip/core/rv_core/rv_core.h"
+#include "bach/ip/chip/core/ts/ts.h"
+#include "bach/ip/chip/core/vu/vu.h"
 
 namespace latch {
 namespace bach {
 
-class Core : public ClkModule {
- public:
-  Core(ClockPtr clock, CoreContext const& context, Coord position,
-       RouteConfig const* route, std::string const& name, uint64_t parent)
-      : ClkModule(clock),
-        coord(position),
-        ctx(WithRecorder(context, &recorder)),
-        self_id(RegisterId(name, parent)),
-        memory(clock, ctx, "memory", self_id),
-        bitmap(clock, ctx, "bitmap", self_id),
-        mc(clock, ctx, "matrix", self_id),
-        vc(clock, ctx, "vector", self_id),
-        dte(clock, ctx, "dte", self_id),
-        cu(clock, ctx, "credit", self_id),
-        ts(clock, ctx, "scheduler", self_id),
-        router(clock, ctx, position, route, "router", self_id) {
-    ctx.Validate();
-    dte.Connect(&ts, &cu, &router, &bitmap, &memory);
-    router.Connect(&dte);
-    mc.Connect(&ts, &bitmap);
-    vc.Connect(&ts, &bitmap);
-    cu.Connect(&ts);
-    ts.Connect(&dte, &mc, &vc, &cu);
-  }
-
-  // 软件 credit 图的一条边：本核向这个下游申请与归还额度。它与物理连线是两张图，
-  // 谁跟谁有线不决定谁向谁要额度。
-  void AddDownstream(int64_t core_id, uint64_t capacity, CoreType type) {
-    cu.AddDownstream(core_id, capacity, type);
-  }
-
-  void Cycle() override {
-    DelayCycle(1);
-
-    router.Step();
-    memory.Step();
-    bitmap.Step();
-    mc.Step();
-    vc.Step();
-    dte.Step();
-    cu.Step();
-    ts.Step();
-
-    TracePerCycle("active_users", ts.ActiveUserNum());
-    TracePerCycle("flows", ts.FlowNum());
-    TracePerCycle("free_stream_slots", ts.FreeSlotNum());
-    TracePerCycle("dte_jobs", dte.InFlight());
-    TracePerCycle("dte_free_slots", dte.FreeSlotNum());
-    TracePerCycle("router_queued", router.QueuedBeats());
-  }
-
-  uint64_t CoreId() const { return ctx.CoreId(); }
-  Coord Position() const { return coord; }
-  SpanRecorder const& Recorder() const { return recorder; }
-  SpanRecorder& MutableRecorder() { return recorder; }
-
-  Router& Rt() { return router; }
-  TaskScheduler& Scheduler() { return ts; }
-  Dte& DteUnit() { return dte; }
-  CreditUnit& Credit() { return cu; }
-  MoeBitMap& BitMap() { return bitmap; }
-  MatrixCore& Matrix() { return mc; }
-  VectorCore& Vector() { return vc; }
-  MemorySystem& Memory() { return memory; }
-
- private:
-  static CoreContext WithRecorder(CoreContext c, SpanRecorder* r) {
-    c.rec = r;
-    return c;
-  }
-
-  Coord coord;
-  SpanRecorder recorder;
-  CoreContext ctx;
-  uint64_t self_id;
-
-  MemorySystem memory;
-  MoeBitMap bitmap;
-  MatrixCore mc;
-  VectorCore vc;
-  Dte dte;
-  CreditUnit cu;
-  TaskScheduler ts;
-  Router router;
+// 一个 core 在系统里扮演什么。不派角色的那个只转发。
+enum class CoreRole : uint32_t {
+  kCompute = 0,     // logical compute core 0～7
+  kBroadcast = 1,   // B core：第一列 chip 的 core0
+  kReduce = 2,      // R core：最后一列 chip 的 core9
+  kSpare = 3,       // 不派角色，只构造 Router
 };
 
-}
-}
+// 只读上下文，core 内各模块共用。构造期写入，之后不变。
+struct CoreContext {
+  uint64_t core_id = 0;      // 本 chip 内的编号
+  uint64_t gx = 0, gy = 0;   // 全局坐标
+  CoreRole role = CoreRole::kCompute;
+  bool router_only = false;
+  // R core 与 B core：进核那一笔搬完之后置这个 token 槽位的 valid 标志。表在
+  // Share Mem 里，一项 4 B，第几项按落点除以槽位大小算。两个数由编译侧给，
+  // entry_bytes 为 0 表示本 core 不置标志。
+  uint64_t inbound_flag_base = 0;
+  uint64_t inbound_entry_bytes = 0;
+  // 本 core 自己挂时钟（占一个常驻协程），还是由 chip 那一层顺序调 RunStep()。
+  // core 之间只经 LinkEnd 通讯，那一组端口全部打拍，所以两种驱动方式逐拍结果
+  // 相同。挂时钟时 core 之间才能真正并行。
+  bool tick = false;
+};
+
+class Core : public BachModule {
+ public:
+  Core(ClockPtr clock, const std::string& name, CoreContext const& context,
+       uint64_t parent = 0)
+      : BachModule(clock, name, parent, context.tick), ctx(context) {
+    RouterCfg rcfg;
+    // 不派角色的 core 在 Skip Mask 里标成跳过：经过它的包走完整流水线但不投递
+    // local。CoreStation 永远不准入，ReduceModule 不累加。
+    rcfg.pass_through = ctx.router_only;
+    rcfg.tick = false;
+    // 波形上一个 core 只有 EmitTrace() 那一组信号，直接挂在 core 下面，单元与
+    // 模块不在层次里各占一级。所以底下的模块建出来时波形一律关掉，由本层统一
+    // 发。要看某个模块自己的全部信号，跑 test/bach/ip/chip/core/ 下对应的单
+    // 模块用例，那里不经这一层。
+    TraceOffScope off;
+    router = std::make_unique<Router>(clock, "router", rcfg, Id());
+    if (ctx.router_only) return;
+
+    TsCfg tcfg;
+    tcfg.tick = false;
+    ts = std::make_unique<Ts>(clock, "ts", tcfg, Id());
+
+    DteCfg dcfg;
+    dcfg.tick = false;
+    dcfg.inbound = BusinessInbound();
+    dcfg.inbound_no_ack = BusinessNoAck();
+    dcfg.inbound_flag_base = ctx.inbound_flag_base;
+    dcfg.inbound_entry_bytes = ctx.inbound_entry_bytes;
+    dte = std::make_unique<Dte>(clock, "dte", dcfg, Id());
+
+    cmem = std::make_unique<CoreMem>(clock, "cmem", Id(), false);
+    mmem = std::make_unique<MatrixMem>(clock, "mmem", Id(), false);
+    smem = std::make_unique<ShareMem>(clock, "smem", Id(), false);
+
+    rv[0] = std::make_unique<RvCore>(clock, "rv_dte", RvUnit::kDte, Id());
+    rv[1] = std::make_unique<RvCore>(clock, "rv_mu", RvUnit::kMu, Id());
+    rv[2] = std::make_unique<RvCore>(clock, "rv_vu", RvUnit::kVu, Id());
+
+    mu = std::make_unique<Mu>(clock, "mu", MuCfg{}, Id());
+    vu = std::make_unique<Vu>(clock, "vu", Id());
+    Wire();
+  }
+
+  // ── 对外：三个 R2R 方向 ──
+  LinkEndPtr InWire(uint64_t d) const { return router->InWire(d); }
+  LinkEndPtr OutWire(uint64_t d) const { return router->OutWire(d); }
+  LinkEndPtr BackWire(uint64_t d) const { return router->BackWire(d); }
+  LinkEndPtr UpBackWire(uint64_t d) const { return router->UpBackWire(d); }
+  LinkEndPtr UpReleaseWire(uint64_t d) const {
+    return router->UpReleaseWire(d);
+  }
+
+  // 切进 weights 加载模式：这一阶段进来的是权重，落 Matrix Mem；这一阶段不建
+  // stream 表项，进核那一笔没有可报的对象，不回 Ack。
+  void SetWeightsInbound() { dte->SetInbound(Route::kRouterToMm, true); }
+  // 切回业务模式：进核那一档按本 core 的角色定。
+  void SetBusinessInbound() {
+    dte->SetInbound(BusinessInbound(), BusinessNoAck());
+  }
+
+  CoreContext const& Context() const { return ctx; }
+  // 三个 RV core 都进 wait 后拉高，SCP 据此开放业务接收权限。
+  bool Ready() const {
+    if (ctx.router_only) return true;
+    for (auto const& r : rv) {
+      if (!r->Ready()) return false;
+    }
+    return true;
+  }
+
+  // boot 期 ctrl_noc 端点把一笔配置写交到这里，按目的模块分发。
+  //
+  // 走方法调用而不是端口：端点与目的模块都在装配这一个协程里，而且这几条通路
+  // 只在 boot 期用 —— 业务期是 RV core 的 dsa_iss 在写 DSA 的那个口，两者不
+  // 同时。VU 那一侧例外，它本来就有三条独立的配置通路，Ctrl-NOC 占其中一条。
+  void CfgWrite(CfgRoute const& r, bool we, uint64_t data) {
+    if (!we) return;
+    switch (r.target) {
+      case kCfgRouter:
+        // RouterTable 的 CSR。逐笔写按 path_id 铺表。
+        router->Table().SetSkipMask(data);
+        break;
+      case kCfgTs:
+        if (ts) ts->Cfg().SetStreamNum(data == 0 ? 1 : data);
+        break;
+      case kCfgDte:
+        // DTE 的寄存器由它的 Commit 那一侧收，boot 期只配 Hmem 的表。
+        break;
+      case kCfgMu:
+        if (mu) mu->Regfile().CfgWrite(r.offset, data);
+        break;
+      case kCfgVu:
+        // VU 有三条独立的配置通路，Ctrl-NOC 占其中一条，走端口。
+        break;
+      case kCfgItcm:
+        if (rv[r.index]) {
+          std::vector<uint8_t> word(4);
+          for (int k = 0; k < 4; ++k) word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
+          rv[r.index]->PokeItcm(r.offset, word);
+        }
+        break;
+      case kCfgSmem:
+        if (smem) PokeWord(*smem, r.offset, data);
+        break;
+      case kCfgCmem:
+        if (cmem) PokeWord(*cmem, r.offset, data);
+        break;
+      case kCfgMmem:
+        if (mmem) PokeWord(*mmem, r.offset, data);
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ── 观测 ──
+  Router& GetRouter() { return *router; }
+  Ts& GetTs() { return *ts; }
+  RvCore& Rv(uint64_t i) { return *rv.at(i); }
+  Dte& GetDte() { return *dte; }
+  Mu& GetMu() { return *mu; }
+  Vu& GetVu() { return *vu; }
+  CoreMem& Cmem() { return *cmem; }
+  MatrixMem& Mmem() { return *mmem; }
+  ShareMem& Smem() { return *smem; }
+
+  // 末级先做：一笔活在一拍里最多前进一级。存储排在最前 —— 它是各条通路的末端。
+  void Step() override {
+    router->RunStep();
+    if (ctx.router_only) {
+      EmitTrace();
+      return;
+    }
+    cmem->RunStep();
+    mmem->RunStep();
+    smem->RunStep();
+    vu->RunStep();
+    mu->RunStep();
+    dte->RunStep();
+    for (auto& r : rv) r->RunStep();
+    ts->RunStep();
+    EmitTrace();
+  }
+
+  // 一个 core 在波形上的全部信号，一处定完，全部平铺在 core 下面。看的是数据
+  // 与任务在这个 core 上流没流动、堵没堵。各模块自己不发信号，值从它们的观测
+  // 访问器读，读的是本拍这一遍 RunStep() 算完的值。
+  void EmitTrace() {
+    static const char* kFwd[3] = {"fwd_mid", "fwd_left", "fwd_right"};
+    static const char* kOcc[3] = {"occ_mid", "occ_left", "occ_right"};
+    for (uint64_t d = 0; d < 3; ++d) {
+      TracePerCycle(kFwd[d], router->Station(d).Forwarded());
+      TracePerCycle(kOcc[d], router->Station(d).Occupancy());
+    }
+    TracePerCycle("xbar_stall", router->GetXbar().Stalled());
+    TracePerCycle("reduce_q", router->GetReduce().OutQueued());
+    TracePerCycle("core_in", router->GetCoreStation().OutBufDepth());
+    if (ctx.router_only) return;
+    TracePerCycle("core_out", dte->OutBuf().Occupancy());
+    TracePerCycle("ts_inflight", ts->Table().InFlight());
+    TracePerCycle("ts_issue", ts->DteArbiter().Issued() +
+                                  ts->MuArbiter().Issued() +
+                                  ts->VuArbiter().Issued());
+    TracePerCycle("ts_done", ts->Done().Finished());
+  }
+
+  bool Quiescent() const override {
+    if (!router->Quiescent()) return false;
+    if (ctx.router_only) return true;
+    for (auto const& r : rv) {
+      if (!r->Quiescent()) return false;
+    }
+    return ts->Quiescent() && dte->Quiescent() && mu->Quiescent() &&
+           vu->Quiescent();
+  }
+
+ private:
+  // 业务模式下进核那一笔落哪块存储：R core 收到的两笔都落 Matrix Mem，它不参与
+  // 计算，Core Mem 只在链二求和那几步用。B core 也落 Matrix Mem，它留下这一份
+  // 再广播给本组各 core。
+  Route BusinessInbound() const {
+    return ctx.role == CoreRole::kReduce || ctx.role == CoreRole::kBroadcast
+               ? Route::kRouterToMm
+               : Route::kRouterToCm;
+  }
+  // B core 与 R core 上进来的包不建 stream 表项，进核那一笔不回 Ack。
+  bool BusinessNoAck() const {
+    return ctx.role == CoreRole::kReduce || ctx.role == CoreRole::kBroadcast;
+  }
+
+  void Wire() {
+    // B core 的搬出查的是广播那几个方向的下游资源。方向由软件写进 TS 的
+    // B_CORE_DIRECTION，Router 用的时候现读。
+    if (ctx.role == CoreRole::kBroadcast) {
+      router->SetBcastDirs([this] { return ts->Cfg().BCoreDirection(); });
+    }
+    WireRouterToTs();
+    WireTsToRv();
+    WireRvToDsa();
+    WireRouterToDte();
+    WireMemory();
+  }
+
+  // Router 与 TS 之间的四条控制线。
+  void WireRouterToTs() {
+    ts->AttachTrigger(router->TriggerPtr());
+    ts->AttachCreditReq(router->CreditReqPtr());
+    ts->AttachCreditGrant(router->CreditGrantPtr());
+    ts->AttachRetire(router->RetireReqPtr());
+    ts->AttachReduceDone(router->ReduceDonePtr());
+    // Router 的 CoreMem 重发完成后报给 TS，TS 据此清掉那一项的重发标记。
+    ts->AttachReissueDone(router->GetReissue().DonePtr());
+  }
+
+  // TS 下发 task 给三个 RV core，RV core 报完成回 TS。
+  //
+  // 一个 task 的共同形状：TS 把 task_pc 与 stream_id 配给一个 RV core → RV core
+  // 向自己的 DSA 发一条异步任务指令后立刻向 TS 交还自己，不等 DSA 执行完 →
+  // DSA 干完向 TS 回 ack，TS 据此推进同一 stream 的下一个 task。只做标量活的
+  // task 不调 DSA，由 RV core 自己报完成。
+  void WireTsToRv() {
+    rv[0]->AttachCmd(ts->DteCmdPtr());
+    rv[1]->AttachCmd(ts->MuCmdPtr());
+    rv[2]->AttachCmd(ts->VuCmdPtr());
+    for (uint64_t i = 0; i < 3; ++i) {
+      rv[i]->AttachDone(ts->RvDonePtr(i));
+    }
+    dte->AttachToTs(ts->DsaDonePtr(0));
+    mu->AttachDone(ts->DsaDonePtr(1));
+    vu->AttachDone(ts->DsaDonePtr(2));
+  }
+
+  // 每个 RV core 只配自己那个 DSA 的寄存器，另有四个身份信号直连过去。
+  void WireRvToDsa() {
+    rv[0]->AttachDsaCfg(dte->CfgPtr());
+    rv[1]->AttachDsaCfg(mu->CfgPtr());
+    rv[2]->AttachDsaCfg(vu->CfgPtr());
+    dte->AttachIds(rv[0]->DsaIdsPtr());
+    // VU 的 stream_id 与 task_id 也从它那个 RV core 的 CSR 直连过来；MU 那一
+    // 组由软件写进动态配置寄存器。
+    vu->AttachIds(rv[2]->DsaIdsPtr());
+    // 读 DSA 寄存器的返回值走独立的一根线回 dsa_rq。三个 RV core 各读各的那一个
+    // DSA：MU 的软件轮询 SYS_STATUS 等一笔任务做完，VU 的轮询 macro_inst_left
+    // 等这一批宏指令做完。
+    rv[0]->AttachDsaRdata(dte->RdataPtr());
+    rv[1]->AttachDsaRdata(mu->RdataPtr());
+    rv[2]->AttachDsaRdata(vu->RdataPtr());
+  }
+
+  // 进 core 与出 core 两条数据通路完全并行，互不共享仲裁状态。
+  void WireRouterToDte() {
+    dte->AttachFromRouter(router->ToDtePtr());
+    dte->AttachToRouter(router->FromDtePtr());
+    // 出核任务发数据之前读 Xbar 发布的 VC credit 电平。
+    dte->AttachVcLevel(router->CreditLevelPtr());
+  }
+
+  // 三块存储的各个 master 口。Matrix Mem 对三个 RV core 都不可见，VU 也读不到
+  // ——要 Matrix Mem 里的数据得先由 DTE 搬到 Core Mem。
+  void WireMemory() {
+    // 读与写各占一个端口：存储那一侧只在 bank 冲突时才在读写之间二选一，
+    // 合成一根线的话同一拍发出的读与写会互相盖掉。
+    mu->AttachCmemRd(cmem->PortPtr(kCmemMuRd));
+    mu->AttachCmemWr(cmem->PortPtr(kCmemMuWr));
+    mu->AttachMmemRd(mmem->PortPtr(kMmemMu));
+    vu->AttachCmemLd(cmem->PortPtr(kCmemVuRd));
+    vu->AttachCmemSt(cmem->PortPtr(kCmemVuWr));
+    // DTE 对每块存储的读与写各一个 master 口，五个通道在它自己的 DMA_XBAR
+    // 里仲裁。
+    dte->AttachCmemRd(cmem->PortPtr(kCmemDteRd));
+    dte->AttachCmemWr(cmem->PortPtr(kCmemDteWr));
+    dte->AttachMmemRd(mmem->PortPtr(kMmemDteRd));
+    dte->AttachMmemWr(mmem->PortPtr(kMmemDteWr));
+    // 三个 RV core 的 sm_lsq 各占 Share Mem 的一个口，DTE DSA 的 shareMem 写
+    // 占第四个。
+    rv[0]->AttachSmem(smem->PortPtr(kSmemDteRv));
+    rv[1]->AttachSmem(smem->PortPtr(kSmemMuRv));
+    rv[2]->AttachSmem(smem->PortPtr(kSmemVuRv));
+    // DTE 搬完一笔之后写 shareMem 表项的那一路。
+    dte->AttachSmemWr(smem->PortPtr(kSmemDteDsa));
+    // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
+    // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
+    rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));
+    rv[0]->AttachHdr(router->HdrPtr());
+  }
+
+  static void PokeWord(BankedMem& mem, uint64_t at, uint64_t data) {
+    std::vector<uint8_t> word(4);
+    for (int k = 0; k < 4; ++k) word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
+    mem.Poke(at, word);
+  }
+
+  CoreContext ctx;
+  std::unique_ptr<Router> router;
+  std::unique_ptr<Ts> ts;
+  std::array<std::unique_ptr<RvCore>, 3> rv;
+  std::unique_ptr<Dte> dte;
+  std::unique_ptr<Mu> mu;
+  std::unique_ptr<Vu> vu;
+  std::unique_ptr<CoreMem> cmem;
+  std::unique_ptr<MatrixMem> mmem;
+  std::unique_ptr<ShareMem> smem;
+};
+
+}  // namespace bach
+}  // namespace latch
 
 #endif

@@ -160,7 +160,28 @@ class Latch : public LeafBase<T> {
       }
     }
 
+    // 这一拍要写的值与上一次写进去的一样就不写。Get 找的是不晚于 t 的最近一次
+    // 写，值没变时写不写读到的都是同一个数。空转的模块每拍把出口全驱动一遍，
+    // 写的都是同一组 Idle 值，这一条把那些写全省掉。
+    //
+    // 只在写者一直是同一个线程、cache 没被污染时才判：换了写者 CacheWrite 会
+    // 把 cache 标脏，那时一律照写。
+    bool SameAsLast(T const& v) const {
+      if constexpr (std::is_trivially_copyable_v<T>) {
+        if (cacheBad.load(std::memory_order_relaxed)) return false;
+        if (cacheWriterTid.load(std::memory_order_relaxed) != ThreadId) {
+          return false;
+        }
+        if (cacheLastT == kCacheNone) return false;
+        return __builtin_memcmp(&cacheLastV, &v, sizeof(T)) == 0;
+      } else {
+        (void)v;
+        return false;
+      }
+    }
+
     void Set(T v, Time t) {
+      if (SameAsLast(v)) return;
       LOGCHECK(Base   <= t, "Latch::Set: t < Base.");
       LOGCHECK(t <= Target, "Latch::Set: t > Target.");
 

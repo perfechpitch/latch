@@ -1,62 +1,132 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_PORTS_
 #define _LATCH_BACH_IP_CHIP_CORE_PORTS_
 
-// Core 内单元之间的调用口，以及 Core 对外的封包出入口。
+// core 内的端口束。
 //
-// 单元之间是同刻调用，所以口就是一组纯虚方法，不是 Fifo。之所以要抽出接口而不是
-// 互相持有具体类型，是因为调用是双向的：TaskScheduler 派任务给 DTE 与两个计算核，
-// 它们完成后又要回调 TaskScheduler。用接口把回调那一侧收窄成"只暴露被调用方真正
-// 需要的能力"，装配顺序也就不受构造顺序牵制。
+// 一个端口组是一组上拍写、下拍读的寄存器。同一个束里不同字段可以有不同的写者
+// （req_* 归 master，ready 与 rsp_* 归 slave），因为每个字段各是一个 Latch，
+// 「同一拍同一个 Latch 只能一个写者」这条约束是按字段算的。
 //
-// PacketSink 是 Core 对外发包的唯一出口。第一期它接一条直连链路，往后由 Router
-// 实现，DTE 那一侧的代码不变：DTE 只负责把一拍交出去，往哪条线上走、什么时候到，
-// 由实现方决定。
+// 协议照各单元文档的接口声明：
+//   valid/ready        发送方拉 valid 并保持数据不变直到看见 ready；接收方的
+//                      ready 是它上一拍锁存的值，一次握手最少两拍
+//   脉冲               单拍有效，接收方当拍锁存
+//   电平               持续有效，接收方任意拍读
 
 #include <cstdint>
+#include <memory>
+#include <vector>
 
-#include "bach/common/packet.h"
+#include "base/logic.h"
 
 namespace latch {
 namespace bach {
 
-// 完成确认。计算核与 CreditUnit 只需要这一件事。
-class AckPort {
+using ByteBlock = std::vector<uint8_t>;
+using ByteBlockPtr = std::shared_ptr<ByteBlock>;
+
+// 存储的一个 master 端口。
+class MemPort : public Logic {
  public:
-  virtual ~AckPort() = default;
-  virtual void Ack(uint64_t uid, uint64_t tid) = 0;
+  // master 侧写
+  //
+  // req_woff 是这一笔在 wdata 里的有效起点：CM 接口一次固定搬一整块，而一条
+  // 向量的两端可能落在块中间，那两头的字节不该被这一笔动。写请求因此除了地址
+  // 与长度还要给出块内起点，存储只改 [addr + woff, addr + woff + bytes)。
+  Logic64 req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff;
+  LogicPtr<ByteBlock> req_wdata;
+  // 每发一笔加一。收方按它认这一笔见没见过 —— 两侧各自打拍时，谁先跑决定读到
+  // 的是当拍还是上一拍的值，只看 req_valid 就可能把同一笔收两次或漏掉一次。
+  Logic64 req_seq;
+  // 存储侧写
+  Logic64 req_ready, rsp_valid;
+  LogicPtr<ByteBlock> rsp_rdata;
+
+  explicit MemPort(ClockPtr c)
+      : req_valid(c), req_we(c), req_addr(c), req_bytes(c), req_scale_en(c),
+        req_woff(c), req_wdata(c), req_seq(c), req_ready(c), rsp_valid(c),
+        rsp_rdata(c) {
+    Fields(req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff,
+           req_wdata, req_seq, req_ready, rsp_valid, rsp_rdata);
+  }
+
+  // master 每拍二选一调一次。
+  void Read(uint64_t addr, uint64_t bytes, bool scale_en = false) {
+    req_valid = 1;
+    req_we = 0;
+    req_addr = addr;
+    req_bytes = bytes;
+    req_scale_en = scale_en ? 1 : 0;
+    req_woff = 0;
+    req_wdata = ByteBlockPtr();
+    req_seq = ++issue_seq;
+  }
+  // woff 与 bytes 给出这一笔在 wdata 里的有效区间。整块写就用默认值。
+  void Write(uint64_t addr, ByteBlockPtr data, bool scale_en = false,
+             uint64_t woff = 0, uint64_t bytes = 0) {
+    req_valid = 1;
+    req_we = 1;
+    req_addr = addr;
+    req_bytes = bytes != 0 ? bytes : (data ? data->size() - woff : 0);
+    req_scale_en = scale_en ? 1 : 0;
+    req_woff = woff;
+    req_wdata = data;
+    req_seq = ++issue_seq;
+  }
+  void IdleReq() {
+    req_valid = 0;
+    req_we = 0;
+    req_addr = 0;
+    req_bytes = 0;
+    req_scale_en = 0;
+    req_woff = 0;
+    req_wdata = ByteBlockPtr();
+    req_seq = req_seq.Get();
+  }
+
+  // 存储每拍调一次。
+  void DriveSlave(bool ready, bool rsp, ByteBlockPtr data) {
+    req_ready = ready ? 1 : 0;
+    rsp_valid = rsp ? 1 : 0;
+    rsp_rdata = std::move(data);
+  }
+
+  uint64_t Seq() const { return req_seq.Get(); }
+  bool Ready() const { return req_ready.Get() != 0; }
+  bool RspValid() const { return rsp_valid.Get() != 0; }
+  ByteBlockPtr RspData() const { return rsp_rdata.Get(); }
+
+ private:
+  // master 自己的计数，不跨模块读，所以是普通成员。
+  uint64_t issue_seq = 0;
 };
 
-// DTE 还要问当前 StreamID，以及为收到 reduction 首包的 user 直接开一条流水。
-class SchedulerPort : public AckPort {
- public:
-  // unknown_to_tail 为真时，没在活跃队列里的 user 排到队尾，而不是报错。收方向的
-  // 包可能比它的 USER_INIT 更早到，这时它还没有 StreamID。
-  virtual uint64_t StreamPriority(uint64_t uid, bool unknown_to_tail) const = 0;
-  virtual void AdmitWithPrecompletedTask(uint64_t uid) = 0;
+struct MemReqView {
+  bool valid = false;
+  bool we = false;
+  uint64_t addr = 0;
+  uint64_t bytes = 0;
+  bool scale_en = false;
+  uint64_t woff = 0;
+  uint64_t seq = 0;
+  ByteBlockPtr wdata;
 };
 
-// DTE 收到 RETIRE 包时向上游归还额度。
-class CreditReturnPort {
- public:
-  virtual ~CreditReturnPort() = default;
-  virtual void ReturnCredit(int64_t core_id, uint64_t amount) = 0;
-};
-
-// 一拍数据交出去的地方。size 是这一片的字节数，dst 是目的坐标，路由只看坐标。
-class PacketSink {
- public:
-  virtual ~PacketSink() = default;
-  virtual void Inject(CommInstPtr const& payload, Coord dst, uint64_t size) = 0;
-};
-
-// 收到一拍数据的地方。DTE 与两个外部节点都实现它。
-class PacketTarget {
- public:
-  virtual ~PacketTarget() = default;
-  virtual void HandleComm(CommInstPtr const& payload) = 0;
-};
-
+inline MemReqView ReadMemReq(MemPort const& p) {
+  MemReqView v;
+  v.valid = p.req_valid.Get() != 0;
+  if (!v.valid) return v;
+  v.we = p.req_we.Get() != 0;
+  v.addr = p.req_addr.Get();
+  v.bytes = p.req_bytes.Get();
+  v.scale_en = p.req_scale_en.Get() != 0;
+  v.woff = p.req_woff.Get();
+  v.seq = p.req_seq.Get();
+  v.wdata = p.req_wdata.Get();
+  return v;
 }
-}
+
+}  // namespace bach
+}  // namespace latch
 
 #endif

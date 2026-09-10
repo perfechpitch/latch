@@ -2,7 +2,9 @@
 
 #include <cstdio>
 #include <cstring>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "base/log.h"
 #include "base/runtime.h"
@@ -32,6 +34,17 @@ void Recorder::SetPathPrefix(const std::string& v) {
   std::lock_guard<std::mutex> lk(mu);
   LOGCHECK(fp == nullptr, "Recorder: the .trace file is already open");
   prefix = v;
+}
+
+void Recorder::StartNew(const std::string& v) {
+  std::lock_guard<std::mutex> lk(mu);
+  CloseTrace();
+  prefix = v;
+  seg_index.clear();
+  str_ids.clear();
+  sig_labels.clear();
+  off = 0;
+  finalized = false;
 }
 
 void Recorder::EnsureOpen() {
@@ -160,17 +173,38 @@ void Recorder::WriteStrings() {
 
 void Recorder::WriteMeta() {
   auto& mods = RT::GetModulePool().Modules();
-  const uint64_t record_cnt = mods.size();
+
+  // 只写与这份波形有关的那些模块：记下过段的信号，沿 parent 链把它们的每一级
+  // 祖先一并带上。模块表装的是这一轮建过的全部模块，阵列大了之后有几万个，没记
+  // 波形的那些写进去只是让读波形的那一侧白拿一遍。名字是相对名、层次靠 parent，
+  // 所以祖先必须补齐，缺一级读的那一侧就拼不出路径。
+  std::unordered_set<uint64_t> keep;
+  for (auto const& kv : seg_index) {
+    uint64_t id = kv.first;
+    // insert 返回 false 说明这条链上面那一段已经收过了。
+    while (id != 0 && keep.insert(id).second) {
+      auto it = mods.find(id);
+      if (it == mods.end()) break;
+      id = it->second.first;
+    }
+  }
+
+  std::vector<const std::pair<const uint64_t,
+                              std::pair<uint64_t, std::string>>*> picked;
+  for (auto const& kv : mods) {
+    if (keep.count(kv.first) != 0) picked.push_back(&kv);
+  }
+  const uint64_t record_cnt = picked.size();
 
   WriteRaw(kMetaMagic, 4);
   const uint32_t ver = kMetaVersion;
   WriteRaw(&ver, 4);
   WriteRaw(&record_cnt, 8);
 
-  for (auto const& kv : mods) {
-    const uint64_t id        = kv.first;
-    const uint64_t parent_id = kv.second.first;
-    const std::string& name  = kv.second.second;
+  for (auto const* kv : picked) {
+    const uint64_t id        = kv->first;
+    const uint64_t parent_id = kv->second.first;
+    const std::string& name  = kv->second.second;
     const uint16_t name_len  = static_cast<uint16_t>(name.size());
     WriteRaw(&id, 8);
     WriteRaw(&parent_id, 8);

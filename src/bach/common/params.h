@@ -118,6 +118,53 @@ struct Params {
   }
 };
 
+// ============================================================================
+// 逐拍 cycle 模型的参数表
+//
+// 上面那个 Params 是 Python 版模拟器移植过来的，服务的是旧模型，保留不动。
+// 下面这一组是《latch 建模计划》定的新模型参数，出处逐条标在注释里：
+//
+//   MAS      原始设计文档给的
+//   规格书   性能需求规格说明书给的
+//   待定     设计未给值，建模计划填的默认值，向设计方要到值后只改这里
+//
+// 时间单位 1 T = 1 ns，带宽单位 B/T。GB/s 换算成 B/T 就是除以 1（1 GB/s ≈ 1 B/ns），
+// 除不尽的向下取整，偏保守。
+// ============================================================================
+
+struct LinkParams {
+  uint64_t bandwidth = 256;   // B/T
+  uint64_t latency = 40;      // T
+  uint64_t queue_depth = 64;  // 在途队列深度，按 latency 每拍 1 flit 的上限取
+};
+
+// chip 内相邻 core 的 Router 之间。规格书：256 B/T、40T
+inline LinkParams LinkR2R() { return {256, 40, 64}; }
+
+// chip 之间的 C2C，Router 到 Router。规格书：400T
+inline LinkParams LinkC2C() { return {256, 400, 448}; }
+
+// PCIe C2C：64 GB/s、300 ns
+inline LinkParams LinkPcieC2C() { return {64, 300, 352}; }
+
+// tray 间纵向链路：120 GB/s（试算值，待定）
+inline LinkParams LinkTrayVertical() { return {120, 400, 448}; }
+
+// PCIe 到 Router：128 B/T，左右 10T + 25T
+inline LinkParams LinkPcieRouterLr() { return {128, 35, 64}; }
+
+// PCIe 到 Router：上下 10T + 50T
+inline LinkParams LinkPcieRouterUd() { return {128, 60, 96}; }
+
+// ETH 注入：50 GB/s 每口，3 μs
+inline LinkParams LinkEthIn() { return {50, 3000, 3072}; }
+
+// PCIe 入口 x16 54.4 GB/s，向下取整
+inline LinkParams LinkPcieIn() { return {54, 300, 352}; }
+
+// PCIe 出口 x32 108.8 GB/s，向下取整
+inline LinkParams LinkPcieOut() { return {108, 300, 352}; }
+
 // 拍数换算。全模型统一走这一个函数：size 不大于 0 时仍算一拍，其余向上取整。
 inline uint64_t CalcCycles(int64_t size, uint64_t bandwidth) {
   LOGCHECK(bandwidth > 0, "CalcCycles: bandwidth must be positive.");

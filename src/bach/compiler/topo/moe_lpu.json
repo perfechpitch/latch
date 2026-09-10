@@ -1,0 +1,14 @@
+{
+  "name": "moe_lpu",
+  "note": "一层 MoE 摊在 48 颗 chip 上：12 层 × 4 列，两层一个 EP 组共 6 组。token 只送进第一组左上角那颗 chip 的 B core，逐个传到六个组；每组 64 份部分和沿蛇形链归约成组结果落进本组 R core，六个 R core 串成一条链逐组相加",
+  "layer": "moe_lpu",
+  "chips": {"rows": 12, "cols": 4},
+  "groups": 6,
+  "stream_num": 16,
+  "reduce": {
+    "note": "chip_order 与 turn 同 reference/vectors.py 的 MOE_LPU_CHIP_ORDER 与 MOE_LPU_TURN",
+    "chip_order": [4, 0, 1, 5, 6, 2, 3, 7],
+    "turn": [[null, "n"], ["s", "e"], ["w", "s"], ["n", "e"],
+             ["w", "n"], ["s", "e"], ["w", "s"], ["n", "e"]]
+  }
+}

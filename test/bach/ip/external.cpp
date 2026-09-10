@@ -1,363 +1,306 @@
-// 整条链路跑通：注入源推一个 user 进阵列，核按任务表做完，结果经路由送到汇聚点，
-// 退休信号回到上游把额度还回去。
+// 进出口桩与整条片外通路的行为基线。
 //
-// 这一组同时是第一期与第二期的验收：任务表跑完、额度闭环、队首退休的约束生效，以及
-// 封包真的走路由而不是直连。逐段时间在用例里手算对齐，对不上就是某一段的语义变了。
+// 步 2 的判据在最后一个用例：一个包从入口桩发出，经链路与 Switch 回到出口桩，
+// 到达拍与手算一致。
 
 #include <gtest/gtest.h>
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/core/core.h"
-#include "bach/ip/external/host.h"
-#include "bach/ip/external/out.h"
-#include "bach/ip/route_config.h"
-#include "bach/observer/span_recorder.h"
-#include "fixture.h"
+#include "bach/ip/external/in_stub.h"
+#include "bach/ip/external/out_stub.h"
+#include "bach/ip/link/link.h"
+#include "bach/ip/pcie_switch.h"
+#include "bach/ip/wiring.h"
 
 using namespace latch;
 using namespace latch::bach;
-using latch::bach::test::CoreTables;
 
 namespace {
 
 constexpr Time kPeriod = 1;
-constexpr uint64_t kVolume = 8192;
 
-// 阵列尺寸。外部节点的坐标落在阵列之外，所以它们不占核位。
-// 一条双向物理链路：a 的 port 接 b，b 的反向口接回 a。
-void Attach(Router& a, Port port, Router& b) {
-  const Port back = OppositePort(port);
-  a.ConnectPort(port, b.Position(), b.IsInternal(), &b.OpenPort(back));
-  b.ConnectPort(back, a.Position(), a.IsInternal(), &a.OpenPort(port));
-}
+// 在协程内抄计数，主线程读不到 Logic64 的当前值。
+class Probe : public BachModule {
+ public:
+  Probe(ClockPtr c, InStub& src, OutStub& dst)
+      : BachModule(c, "probe"), in(src), out(dst) {}
 
-Dim MakeDim(uint32_t cols) {
-  Dim d;
-  d.chip_rows = 1;
-  d.chip_cols = 1;
-  d.core_rows_per_chip = 1;
-  d.core_cols_per_chip = cols;
-  d.node_chip_rows = 1;
-  d.node_chip_cols = 1;
-  return d;
+  uint64_t injected = 0, pool_avail = 0, done = 0, mismatch = 0, last = 0;
+
+ protected:
+  void Step() override {
+    injected = in.Injected();
+    pool_avail = in.PoolAvail();
+    done = out.DoneCount();
+    mismatch = out.MismatchCount();
+    if (out.DoneCount() != 0) last = out.LastCycle();
+  }
+
+ private:
+  InStub& in;
+  OutStub& out;
+};
+
+InjectItem Token(uint64_t at, uint64_t gpu, uint64_t id, uint64_t bytes = 256) {
+  InjectItem it;
+  it.inject_cycle = at;
+  it.gpu_id = gpu;
+  it.token_id = id;
+  it.dst = 1;
+  it.bytes = bytes;
+  return it;
 }
 
 }  // namespace
 
-// ---------------------------------------------------------------- 单核全链路
+// 第一层闸门：GPU 本地缓冲占满就不再放行。深度 2 时前两笔走，第三笔卡住。
+TEST(BachInStub, LocalCreditGate) {
+  uint64_t injected = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/100);
+    stub.SetGpuBuffer(0, 2);
+    stub.SetInjectTable({Token(1, 0, 0), Token(1, 0, 1), Token(1, 0, 2)});
+    OutStub sink(clk, "out");
+    Probe probe(clk, stub, sink);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    injected = probe.injected;
+  }
+  RT::Reset();
+  EXPECT_EQ(injected, 2u);
+}
 
-TEST(BachSingleCore, RunsOneUserThroughTheWholeTaskTable) {
-  RT::Reset(4, 4);
-  ClockPtr clk = MakeClock(0, kPeriod);
+// 第二层闸门：全局池子。池子 1 时只放行一笔，与本地缓冲多深无关。
+TEST(BachInStub, PoolGate) {
+  uint64_t injected = 0, pool = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/1);
+    stub.SetGpuBuffer(0, 16);
+    stub.SetInjectTable({Token(1, 0, 0), Token(1, 0, 1), Token(1, 0, 2)});
+    OutStub sink(clk, "out");
+    Probe probe(clk, stub, sink);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    injected = probe.injected;
+    pool = probe.pool_avail;
+  }
+  RT::Reset();
+  EXPECT_EQ(injected, 1u);
+  EXPECT_EQ(pool, 0u);
+}
 
-  const Coord host_coord{0, -1};
-  const Coord core_coord{0, 0};
-  const Coord out_coord{0, 1};
+// retired 回来腾出位置，后面的才继续走。
+TEST(BachInStub, RetiredFreesCredit) {
+  uint64_t injected = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/1);
+    stub.SetGpuBuffer(0, 1);
+    stub.SetInjectTable({Token(1, 0, 0), Token(1, 0, 1), Token(1, 0, 2)});
+    OutStub sink(clk, "out");
+    // 出口桩收齐一个就回报，入口桩据此放行下一个
+    sink.OnRetired([&](uint64_t gpu, uint64_t token) {
+      stub.ReportRetired(gpu, /*src=*/0, token + 1);
+    });
 
-  CoreTables tb(0);
-  tb.Task(UnitType::kSkip, Opcode::kUserInit, 0, kVolume, core_coord)
-      .Task(UnitType::kMc, Opcode::kDontCare, 0, 100)
-      .Task(UnitType::kDte, Opcode::kMove, 0, kVolume, out_coord)
-      .Task(UnitType::kDte, Opcode::kRetire, 0, 0, host_coord, -1);
+    LinkEndPtr wire = MakeWire(clk);
+    stub.AttachTx(wire);
+    sink.AttachRx(wire);
 
-  RouteConfig cfg;
-  cfg.dim = MakeDim(1);
-  cfg.AddExtNode(host_coord, core_coord, Port::kPcieWest);
-  cfg.AddExtNode(out_coord, core_coord, Port::kPcieEast);
+    Probe probe(clk, stub, sink);
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    injected = probe.injected;
+  }
+  RT::Reset();
+  EXPECT_EQ(injected, 3u);
+}
 
-  Core core(clk, tb.Context(), core_coord, &cfg, "core0", 0);
-  Host host(clk, tb.params, 100, host_coord, &cfg, kVolume,
-            tb.params.pcie_bandwidth, tb.params.stream_count,
-            Opcode::kUserInit, "host", 0);
-  Out out(clk, tb.params, 101, out_coord, &cfg, kVolume,
-          tb.params.pcie_bandwidth, "out", 0);
+// 组播下 retired 取 min：两个收端，只有慢的那个也退了才腾位置。
+TEST(BachInStub, RetiredTakesMinAcrossSources) {
+  uint64_t injected = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/8);
+    stub.SetGpuBuffer(0, 1);
+    stub.SetInjectTable({Token(1, 0, 0), Token(1, 0, 1)});
+    OutStub sink(clk, "out");
+    Probe probe(clk, stub, sink);
+    // 只有 src=0 报了退到 1，src=1 还停在 0，min 仍是 0，不腾位置
+    stub.ReportRetired(0, 0, 1);
+    stub.ReportRetired(0, 1, 0);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    injected = probe.injected;
+  }
+  RT::Reset();
+  EXPECT_EQ(injected, 1u);
+}
 
-  Attach(core.Rt(), Port::kPcieWest, host.Rt());
-  Attach(core.Rt(), Port::kPcieEast, out.Rt());
+// LPU Dispatch：任一 R core 没余量就不派遣。
+TEST(BachInStub, DispatchNeedsAllReduceSlots) {
+  uint64_t injected = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/8);
+    stub.SetGpuBuffer(0, 8);
+    stub.SetDispatchSlots({2, 0});  // 第二个 R core 没余量
+    stub.SetInjectTable({Token(1, 0, 0), Token(1, 0, 1)});
+    OutStub sink(clk, "out");
+    Probe probe(clk, stub, sink);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    injected = probe.injected;
+  }
+  RT::Reset();
+  EXPECT_EQ(injected, 0u);
+}
 
-  host.SetUsers({HostUser{0, core_coord, 0, 1}});
+// 一个包切成多个 flit，出口桩按尾 flit 判收齐，一个 token 只算一次。
+TEST(BachOutStub, ReassemblesMultiFlitToken) {
+  uint64_t done = 0;
+  std::vector<OutStub::TokenKey> set;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/8);
+    stub.SetGpuBuffer(0, 8);
+    // 6368 B 要 25 个 flit
+    stub.SetInjectTable({Token(1, 0, 5, kTokenBytes)});
+    OutStub sink(clk, "out");
+    LinkEndPtr wire = MakeWire(clk);
+    stub.AttachTx(wire);
+    sink.AttachRx(wire);
+    Probe probe(clk, stub, sink);
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    done = probe.done;
+    set = sink.DoneSet();
+  }
+  RT::Reset();
+  EXPECT_EQ(done, 1u);
+  ASSERT_EQ(set.size(), 1u);
+  EXPECT_EQ(set[0].first, 0u);
+  EXPECT_EQ(set[0].second, 5u);
+}
 
-  clk->Continue(30000 * kPeriod);
-  RT::JoinAll();
+// 步 2 的判据：入口桩 → ETH 链路 → Switch → PCIe 链路 → 出口桩，
+// 到达拍与手算一致。
+TEST(BachExternal, EndToEndThroughSwitch) {
+  uint64_t done = 0, last = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub stub(clk, "in", /*pool_total=*/8);
+    stub.SetGpuBuffer(0, 8);
+    stub.SetInjectTable({Token(1, 0, 3, 256)});
 
-  RunRecorder run;
-  run.Collect(core.Recorder());
-  run.Collect(host.Recorder());
-  run.Collect(out.Recorder());
-  run.Finalize(1);
+    // 桩到 Switch 走 ETH 参数，Switch 到桩走 PCIe 出口参数
+    Link eth(clk, "eth", LinkEthIn());
+    PcieSwitch sw(clk, "sw", 2);
+    sw.SetRoute(1, {1});
+    Link pcie(clk, "pcie", LinkPcieOut());
+    OutStub sink(clk, "out");
 
-  EXPECT_TRUE(run.Result().Succeeded());
-  ASSERT_EQ(run.Result().completed_uids.size(), 1u);
-  EXPECT_EQ(run.Result().completed_uids[0], 0u);
-  EXPECT_TRUE(run.Result().lost_uids.empty());
+    // 四根线，每根一个对象
+    LinkEndPtr w1 = MakeWire(clk);  // 桩 → eth
+    LinkEndPtr w2 = MakeWire(clk);  // eth → sw
+    LinkEndPtr w3 = MakeWire(clk);  // sw → pcie
+    LinkEndPtr w4 = MakeWire(clk);  // pcie → 桩
+    stub.AttachTx(w1);
+    eth.AttachIn(w1);
+    eth.AttachOut(w2);
+    sw.AttachIn(0, w2);
+    sw.AttachOut(1, w3);
+    pcie.AttachIn(w3);
+    pcie.AttachOut(w4);
+    sink.AttachRx(w4);
 
-  // 槽位与额度都回到起点，说明这个 user 在核上与在注入源上都完整地下了车
-  EXPECT_EQ(host.CreditLevel(), tb.params.stream_count);
-  EXPECT_EQ(core.Scheduler().ActiveUserNum(), 0u);
-  EXPECT_EQ(core.Scheduler().FlowNum(), 0u);
-  EXPECT_EQ(core.DteUnit().FreeSlotNum(), core.DteUnit().TotalSlots());
-  EXPECT_EQ(out.CompletedNum(), 1u);
-
-  // 核上这一段逐段手算。注入源与汇聚点各自带一个路由器，所以进出阵列各是两跳：
-  // 外部节点的路由器一跳、网关核的路由器一跳。
+    Probe probe(clk, stub, sink);
+    clk->Continue(8000 * kPeriod);
+    RT::JoinAll();
+    done = probe.done;
+    last = probe.last;
+  }
+  RT::Reset();
+  ASSERT_EQ(done, 1u);
+  // 手算，每一段都能在参数表里查到：
+  //   拍 1     入口桩注入并封包进 tx_q。Transmit 排在 Inject 之前（末级先做），
+  //            所以本拍还发不出去
+  //   拍 2     发第一个 flit 上 w1
+  //   拍 3     eth 收下：arrive = 3 + ceil(256/50) + 3000 = 3009
+  //   拍 3009  eth 出到 w2
+  //   拍 3010  sw 收下进出口队列。Drain 也排在 Accept 之前，本拍出不去
+  //   拍 3011  sw 出到 w3
+  //   拍 3012  pcie 收下：arrive = 3012 + ceil(256/108) + 300 = 3315
+  //   拍 3315  pcie 出到 w4
+  //   拍 3316  出口桩收到尾 flit（单 flit 包，头即尾）
   //
-  //   推包间隔                                     100
-  //   第 k 拍在 100+k 交给自己的路由器，下一拍被它服务
-  //   一跳一拍加访问延迟十拍加跨 node 五千拍         → 网关核在 5112+k 收到
-  //   网关核再一跳一拍加访问延迟十拍                 → DTE 在 5123+k 收到
-  //   六十四拍收齐                                  → 5186
-  //   DTE 收方向 setup 85 加写倍率表 1               → 5272 认识这个 user
-  //   两轮取指 32，走过占位行停在矩阵那一行
-  //   矩阵 setup 40 加读表 1 加计算 100              → 5445
-  //   一轮取指 16，DTE 发方向 setup 85 加 16 拍       → 5562
-  //   一轮取指 16，DTE 退休 setup 85 加 1 拍          → 5664
-  const Time init_done = 5186 + tb.params.dte_setup_time +
-                         tb.params.bitmap_access_time;
-  const Time matrix_done = init_done + 2 * tb.params.ts_logic_time +
-                           tb.params.mu_setup_time +
-                           tb.params.bitmap_access_time + 100;
-  const Time move_done = matrix_done + tb.params.ts_logic_time +
-                         tb.params.dte_setup_time + 16;
-  const Time retire_done = move_done + tb.params.ts_logic_time +
-                           tb.params.dte_setup_time + 1;
-  EXPECT_EQ(init_done, 5272u);
-  EXPECT_EQ(matrix_done, 5445u);
-  EXPECT_EQ(move_done, 5562u);
-  EXPECT_EQ(retire_done, 5664u);
-
-  // 出阵列那一段。DTE 每拍交一拍数据给路由器，路由器把 512 字节按 PCIe 的 128 切成
-  // 四片，四片各占一拍，所以出口每拍只吐得出四分之一拍数据，第 k 拍要排队 3k 拍。
-  //
-  //   5546 + 1        路由器取到第一拍
-  //   + 4             四片各一拍的服务
-  //   + 10 + 5000     访问延迟加跨 node
-  //   汇聚点那边前三片攒着不动，第四片到齐才继续，再一跳一拍加访问延迟十拍
-  const Time first_beat_last_frag = 5547 + 4 + tb.params.noc_access_delay +
-                                    tb.params.cross_node_delay;
-  EXPECT_EQ(first_beat_last_frag, 10561u);
-  const Time first_beat_landed =
-      first_beat_last_frag + 1 + tb.params.noc_access_delay;
-  EXPECT_EQ(first_beat_landed, 10572u);
-
-  ASSERT_EQ(run.Latency().size(), 1u);
-  EXPECT_EQ(run.Latency()[0].start, 100u);
-  EXPECT_EQ(run.Latency()[0].end, first_beat_landed + 4 * 15);
-  EXPECT_EQ(run.Result().end_time, 10632u);
+  // 每过一个模块多一拍，是「上拍写、下拍读」的必然结果，与 RTL 的寄存器语义
+  // 一致。链路那两段的传输与延迟拍数与 link.md 的参数逐项对得上。
+  EXPECT_EQ(last, 3316u);
 }
 
-// ---------------------------------------------------------------- 额度闭环
-
-TEST(BachTwoCores, DownstreamCreditGatesTheSecondUser) {
-  RT::Reset(4, 4);
-  ClockPtr clk = MakeClock(0, kPeriod);
-
-  const Coord host_coord{0, -1};
-  const Coord a_coord{0, 0};
-  const Coord b_coord{0, 1};
-  const Coord out_coord{0, 2};
-
-  // 上游核：收 Init、验资、把 user 转给下游、退休回注入源
-  CoreTables ta(0);
-  ta.Task(UnitType::kSkip, Opcode::kUserInit, 0, kVolume, a_coord)
-      .Task(UnitType::kCu, Opcode::kDontCare, 0, 0)
-      .Task(UnitType::kDte, Opcode::kUserInit, 0, kVolume, b_coord, 0, 1)
-      .Task(UnitType::kDte, Opcode::kRetire, 0, 0, host_coord, -1)
-      .Credit(1, {1});
-
-  // 下游核：收 Init、算一段、把结果送出去、退休回上游核
-  CoreTables tb(1);
-  tb.Task(UnitType::kSkip, Opcode::kUserInit, 0, kVolume, b_coord)
-      .Task(UnitType::kMc, Opcode::kDontCare, 0, 100)
-      .Task(UnitType::kDte, Opcode::kMove, 0, kVolume, out_coord)
-      .Task(UnitType::kDte, Opcode::kRetire, 0, 0, a_coord, 0);
-
-  RouteConfig cfg;
-  cfg.dim = MakeDim(2);
-  cfg.AddExtNode(host_coord, a_coord, Port::kPcieWest);
-  cfg.AddExtNode(out_coord, b_coord, Port::kPcieEast);
-
-  Core core_a(clk, ta.Context(), a_coord, &cfg, "core0", 0);
-  Core core_b(clk, tb.Context(), b_coord, &cfg, "core1", 0);
-  Host host(clk, ta.params, 100, host_coord, &cfg, kVolume,
-            ta.params.pcie_bandwidth, ta.params.stream_count,
-            Opcode::kUserInit, "host", 0);
-  Out out(clk, ta.params, 101, out_coord, &cfg, kVolume,
-          ta.params.pcie_bandwidth, "out", 0);
-
-  // 下游只给一份额度：第二个 user 必须等第一个在下游退休才能被转过去
-  core_a.AddDownstream(1, 1, CoreType::kNormal);
-
-  Attach(core_a.Rt(), Port::kEast, core_b.Rt());
-  Attach(core_a.Rt(), Port::kPcieWest, host.Rt());
-  Attach(core_b.Rt(), Port::kPcieEast, out.Rt());
-
-  host.SetUsers({HostUser{0, a_coord, 0, 1}, HostUser{1, a_coord, 0, 1}});
-
-  clk->Continue(30000 * kPeriod);
-  RT::JoinAll();
-
-  RunRecorder run;
-  run.Collect(core_a.Recorder());
-  run.Collect(core_b.Recorder());
-  run.Collect(host.Recorder());
-  run.Collect(out.Recorder());
-  run.Finalize(2);
-
-  EXPECT_TRUE(run.Result().Succeeded());
-  ASSERT_EQ(run.Result().completed_uids.size(), 2u);
-  EXPECT_EQ(run.Result().completed_uids[0], 0u);
-  EXPECT_EQ(run.Result().completed_uids[1], 1u);
-  EXPECT_EQ(core_a.Credit().Level(1), 1u);
-  EXPECT_EQ(host.CreditLevel(), ta.params.stream_count);
-  EXPECT_EQ(core_a.DteUnit().FreeSlotNum(), core_a.DteUnit().TotalSlots());
-  EXPECT_EQ(core_b.DteUnit().FreeSlotNum(), core_b.DteUnit().TotalSlots());
-
-  // 第二个 user 卡在等下游额度上，这一段在等待桶里必须找得到
-  bool saw_credit_wait = false;
-  for (UnitWait const& w : run.Waits()) {
-    if (w.reason == WaitReason::kDownstreamCredit && w.uid == 1) {
-      saw_credit_wait = true;
-      EXPECT_GT(w.end - w.start, 0u);
-    }
-  }
-  EXPECT_TRUE(saw_credit_wait);
+// 序号按模 2^16 比较：绕回 0 之后仍然分得清谁在前。
+TEST(BachSeq, WrapAroundComparison) {
+  EXPECT_EQ(SeqAdd(kSeqMod - 1, 1), 0u) << "加满一圈回到 0";
+  EXPECT_EQ(SeqAdd(kSeqMod - 1, 3), 2u);
+  // 绕回前后的差值仍然是正确的正数。
+  EXPECT_EQ(SeqDiff(kSeqMod - 2, 1), 3u);
+  EXPECT_TRUE(SeqAfter(kSeqMod - 2, 1)) << "绕过去的那一个更新";
+  EXPECT_FALSE(SeqAfter(1, kSeqMod - 2)) << "反过来就不是";
+  // 相等不算「在之后」。
+  EXPECT_FALSE(SeqAfter(5, 5));
+  // 差值超过半个模时算落在过去。
+  EXPECT_FALSE(SeqAfter(0, kSeqHalf + 1));
 }
 
-// ---------------------------------------------------------------- 屏障与退休
+// DPU 的自定义包头：gpu_id 与 token_id 随包走，出口桩按这一对认 token。
+TEST(BachInStub, HeaderCarriesGpuAndTokenId) {
+  std::vector<MessagePtr> got;
+  {
+    RT::Reset(8, 8);
+    ClockPtr clk = MakeClock(0, kPeriod);
+    InStub in(clk, "in", /*pool_size=*/8);
+    in.SetGpuBuffer(3, 4);
+    std::vector<InjectItem> tbl;
+    InjectItem it;
+    it.inject_cycle = 2;
+    it.gpu_id = 3;
+    it.token_id = 77;
+    it.dst = 5;
+    it.bytes = 256;
+    tbl.push_back(it);
+    in.SetInjectTable(tbl);
 
-TEST(BachTwoCores, BarrierRowWaitsForTheIncomingPacket) {
-  RT::Reset(4, 4);
-  ClockPtr clk = MakeClock(0, kPeriod);
+    // 收 tx 那一路，看包头里写了什么。
+    class TxTap : public BachModule {
+     public:
+      TxTap(ClockPtr c, LinkEndPtr w) : BachModule(c, "tap"), wire(std::move(w)) {}
+      std::vector<MessagePtr> msgs;
 
-  const Coord host_coord{0, -1};
-  const Coord a_coord{0, 0};
-  const Coord b_coord{0, 1};
-  const Coord out_coord{0, 2};
+     protected:
+      void Step() override {
+        FlitView f = ReadFlit(wire->flit);
+        if (f.valid && f.msg) msgs.push_back(f.msg);
+      }
 
-  // 上游核先验资再把 user 转给下游，自己算一段，再把结果加法包送过去。
-  // 验资那一行不能省：下游退休时会把额度还回来，没扣过就还，账本立刻就不平了。
-  CoreTables ta(0);
-  ta.Task(UnitType::kSkip, Opcode::kUserInit, 0, kVolume, a_coord)
-      .Task(UnitType::kCu, Opcode::kDontCare, 0, 0)
-      .Task(UnitType::kDte, Opcode::kUserInit, 0, kVolume, b_coord, 0, 1)
-      .Task(UnitType::kMc, Opcode::kDontCare, 0, 200)
-      .Task(UnitType::kDte, Opcode::kReduce, 2, kVolume, b_coord, 0, 1)
-      .Task(UnitType::kDte, Opcode::kRetire, 0, 0, host_coord, -1)
-      .Credit(1, {1});
-
-  // 下游核第 2 行是屏障：它要停在这里，等上游那个加法包到了才继续
-  CoreTables tb(1);
-  tb.Task(UnitType::kSkip, Opcode::kUserInit, 0, kVolume, b_coord)
-      .Task(UnitType::kMc, Opcode::kDontCare, 0, 50)
-      .Task(UnitType::kSkip, Opcode::kReduce, 0, kVolume, b_coord)
-      .Task(UnitType::kDte, Opcode::kMove, 0, kVolume, out_coord)
-      .Task(UnitType::kDte, Opcode::kRetire, 0, 0, a_coord, 0);
-
-  RouteConfig cfg;
-  cfg.dim = MakeDim(2);
-  cfg.AddExtNode(host_coord, a_coord, Port::kPcieWest);
-  cfg.AddExtNode(out_coord, b_coord, Port::kPcieEast);
-
-  Core core_a(clk, ta.Context(), a_coord, &cfg, "core0", 0);
-  Core core_b(clk, tb.Context(), b_coord, &cfg, "core1", 0);
-  Host host(clk, ta.params, 100, host_coord, &cfg, kVolume,
-            ta.params.pcie_bandwidth, ta.params.stream_count,
-            Opcode::kUserInit, "host", 0);
-  Out out(clk, ta.params, 101, out_coord, &cfg, kVolume,
-          ta.params.pcie_bandwidth, "out", 0);
-
-  core_a.AddDownstream(1, ta.params.stream_count, CoreType::kNormal);
-  Attach(core_a.Rt(), Port::kEast, core_b.Rt());
-  Attach(core_a.Rt(), Port::kPcieWest, host.Rt());
-  Attach(core_b.Rt(), Port::kPcieEast, out.Rt());
-
-  host.SetUsers({HostUser{0, a_coord, 0, 1}});
-
-  clk->Continue(30000 * kPeriod);
-  RT::JoinAll();
-
-  RunRecorder run;
-  run.Collect(core_a.Recorder());
-  run.Collect(core_b.Recorder());
-  run.Collect(host.Recorder());
-  run.Collect(out.Recorder());
-  run.Finalize(1);
-
-  EXPECT_TRUE(run.Result().Succeeded());
-
-  // 屏障那一行的等待要落在等待桶里，归因是"等对端数据到达"
-  Time barrier_wait = 0;
-  for (UnitWait const& w : run.Waits()) {
-    if (w.reason == WaitReason::kIncomingBarrier) barrier_wait = w.end - w.start;
+     private:
+      LinkEndPtr wire;
+    };
+    TxTap tap(clk, in.TxPtr());
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    got = tap.msgs;
   }
-  EXPECT_GT(barrier_wait, 0u);
-
-  // 下游那条加法要等上游算完 200 拍再走一趟 NoC，所以它比下游自己那 50 拍晚得多
-  EXPECT_GT(run.Result().end_time, 200u);
-}
-
-TEST(BachSingleCore, RetiresUsersInStreamOrder) {
-  RT::Reset(4, 4);
-  ClockPtr clk = MakeClock(0, kPeriod);
-
-  const Coord host_coord{0, -1};
-  const Coord core_coord{0, 0};
-  const Coord out_coord{0, 1};
-
-  CoreTables tb(0);
-  tb.Task(UnitType::kSkip, Opcode::kUserInit, 0, kVolume, core_coord)
-      .Task(UnitType::kMc, Opcode::kDontCare, 0, 100)
-      .Task(UnitType::kDte, Opcode::kMove, 0, kVolume, out_coord)
-      .Task(UnitType::kDte, Opcode::kRetire, 0, 0, host_coord, -1);
-
-  RouteConfig cfg;
-  cfg.dim = MakeDim(1);
-  cfg.AddExtNode(host_coord, core_coord, Port::kPcieWest);
-  cfg.AddExtNode(out_coord, core_coord, Port::kPcieEast);
-
-  Core core(clk, tb.Context(), core_coord, &cfg, "core0", 0);
-  Host host(clk, tb.params, 100, host_coord, &cfg, kVolume,
-            tb.params.pcie_bandwidth, tb.params.stream_count,
-            Opcode::kUserInit, "host", 0);
-  Out out(clk, tb.params, 101, out_coord, &cfg, kVolume,
-          tb.params.pcie_bandwidth, "out", 0);
-
-  Attach(core.Rt(), Port::kPcieWest, host.Rt());
-  Attach(core.Rt(), Port::kPcieEast, out.Rt());
-
-  std::vector<HostUser> list;
-  for (uint64_t uid = 0; uid < 4; ++uid) {
-    list.push_back(HostUser{uid, core_coord, 0, 1});
-  }
-  host.SetUsers(list);
-
-  clk->Continue(30000 * kPeriod);
-  RT::JoinAll();
-
-  RunRecorder run;
-  run.Collect(core.Recorder());
-  run.Collect(host.Recorder());
-  run.Collect(out.Recorder());
-  run.Finalize(4);
-
-  EXPECT_TRUE(run.Result().Succeeded());
-  // 硬件规定 StreamID 小的先退休，注入顺序就是退休顺序，也就是完成顺序
-  ASSERT_EQ(run.Result().completed_uids.size(), 4u);
-  for (uint64_t uid = 0; uid < 4; ++uid) {
-    EXPECT_EQ(run.Result().completed_uids[uid], uid);
-  }
-  EXPECT_EQ(core.Scheduler().ActiveUserNum(), 0u);
-  EXPECT_EQ(core.DteUnit().FreeSlotNum(), core.DteUnit().TotalSlots());
-
-  // 后一个 user 的同一条任务要等前一个的上一条做完，这条等待必须出现
-  bool saw_stream_wait = false;
-  for (UnitWait const& w : run.Waits()) {
-    if (w.reason == WaitReason::kStreamPredecessor) saw_stream_wait = true;
-  }
-  EXPECT_TRUE(saw_stream_wait);
+  RT::Reset();
+  ASSERT_FALSE(got.empty());
+  EXPECT_EQ(got[0]->gpu_id, 3u);
+  EXPECT_EQ(got[0]->token_id, 77u);
+  EXPECT_EQ(got[0]->dst, 5u) << "PCIe Switch 按它查目的端口";
+  EXPECT_EQ(got[0]->size, 256u);
 }

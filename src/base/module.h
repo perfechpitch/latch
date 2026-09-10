@@ -27,7 +27,11 @@ class Clock;
 class ClkModule : public Object {
  public:
 
-  ClkModule(std::shared_ptr<Clock> clock, bool tick = true) : clk(clock) {
+  // 记不记波形在建出来这一刻定下来，之后不再看全局那个开关。这样一次仿真里
+  // 可以只给关心的那几个模块记：构造它们的时候把开关打开，构造其余的时候关上。
+  // 阵列大了之后信号数上万，全记的话看波形的那一侧一次要拿十几 MB 的信号摘要。
+  ClkModule(std::shared_ptr<Clock> clock, bool tick = true)
+      : clk(clock), trace_off(TraceDisabled()) {
     LOGCHECK(clk != nullptr, "clock could not be null.");
     if (tick) clk->Bind([&]() { this->Cycle(); });
   }
@@ -38,19 +42,19 @@ class ClkModule : public Object {
   virtual void DelayTime(Time t = 10) final { clk->DelayTime(t); }
 
   void Trace(const std::string& name, uint64_t value) {
-    if (TraceDisabled()) return;
+    if (trace_off) return;
     tracer.Record(obj_id, name, RT::Now(), value);
   }
 
   void Trace(const std::string& name, const std::string& value) {
-    if (TraceDisabled()) return;
+    if (trace_off) return;
     const uint64_t sig_id = tracer.IdFor(obj_id, name);
     const uint64_t id = RT::GetRecorder().InternString(sig_id, value);
     tracer.Record(obj_id, name, RT::Now(), id);
   }
 
   void TracePerCycle(std::string_view name, uint64_t value) {
-    if (TraceDisabled()) return;
+    if (trace_off) return;
     const uint64_t t = RT::Now();
     std::string key(name);
     PerCycleSig& s = perCycle[key];
@@ -60,7 +64,7 @@ class ClkModule : public Object {
   }
 
   void TraceUnder(uint64_t owner, const std::string& name, uint64_t value) {
-    if (TraceDisabled()) return;
+    if (trace_off) return;
     tracer.Record(owner, name, RT::Now(), value);
   }
 
@@ -74,6 +78,8 @@ class ClkModule : public Object {
 
  protected:
   ClockPtr clk;
+  // 建出来那一刻的波形开关，见构造函数那一段。
+  bool trace_off = false;
 
  private:
 

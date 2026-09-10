@@ -1,13 +1,2 @@
-add_executable(bach_run ${LATCH_ROOT_DIR}/src/bach/tools/run_bachir.cpp)
-target_include_directories(bach_run PUBLIC ${LATCH_ROOT_DIR}/src)
-target_link_libraries(bach_run latch_base_static)
-target_link_libraries(bach_run spdlog)
-target_link_libraries(bach_run pthread dl)
-target_link_libraries(bach_run sqlite3)
-
-add_executable(ksim_run ${LATCH_ROOT_DIR}/src/bach/tools/ksim_run.cpp)
-target_include_directories(ksim_run PUBLIC ${LATCH_ROOT_DIR}/src)
-target_link_libraries(ksim_run latch_base_static)
-target_link_libraries(ksim_run spdlog)
-target_link_libraries(ksim_run pthread dl)
-target_link_libraries(ksim_run sqlite3)
+# Bach 的建模代码全是头文件，没有要单独编的目标：src/bach/ip/ 与 common/ 由各
+# 用例直接包含，compiler/ 与 reference/ 是 Python 与 riscv gcc 那一侧的产物。
