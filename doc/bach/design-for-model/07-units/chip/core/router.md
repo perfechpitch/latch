@@ -351,8 +351,9 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - |
 | F53 | 64 条表项，按 `path_id` 索引。字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`：<br>`op_type` 2 bit（0 = kernel / weight 搬运、1 = transfer、2 = reduce、3 = reduce_twice）<br>`flow_dir` 5 bit 出方向掩码（bit0 上下、bit1 左、bit2 右、bit3 reduce1、bit4 reduce2）<br>`cur_vc` 2 bit、`nxt_vc` 五个出方向各 2 bit<br>`path_core_mask_enable` 1 bit、`path_core_mask_idx` 4 bit、`path_core_bypass` 1 bit（0 进 core、1 bypass）<br>`need_buffer` 1 bit（这条 path 允许进 core 缓存，即溢流使能）<br>`stream_table_enable` 1 bit（这个包要不要查输出端的 stream credit table）<br>`cur_credit_type` 1 bit（0 广播 / 1 P2P）、`cur_credit_require` 6 bit<br>`nxt_credit_type` 3 bit（三个 R2R 方向各一位）、`nxt_credit_require` 三个 R2R 方向各 6 bit<br>`reduce_data_type` 3 bit（输入精度 BF16 / FP32）、`reduce_outdata_type` 1 bit（输出精度）<br>`reduce_in_mask` 3 bit、`operation` 2 bit（0 转发、1 Reduce0、2 Reduce1、3 Reduce2）、`stall_way` 1 bit |
 | F54 | 进不进本 core 由两个字段二选一决定：`path_core_mask_enable = 0` 时按 `path_core_bypass` 定，适用于普通广播与 P2P；`= 1` 时取 MSG 里 `path_core_mask` 的第 `path_core_mask_idx` 位，适用于 EP 广播。**位到 core 的对应关系不是固定编码**，每个 core 在自己的表项里指定看哪一位 |
+| F54a | 开了 `path_core_mask` 的那条 path 走遍一串 core，包落在哪几个由包头挑。走到既不进本 core 又没有出方向的那一跳，这一笔就在那里终止。`path_core_mask_enable = 0` 的表项进不进核与包无关，那时候没有出方向是表项配错 |
 | F55 | `reduce_data_type` 配在表里而不是由 TS 给，是因为 `reduce_twice` 时 Router 可能先收到两个远程的 Reduce Token 而不是本 core 发出的那一份，那时 TS 还没有介入 |
-| F56 | `op_type = 0` 的 kernel / weight 搬运包进 core 时**跳过 TS，直接唤醒 DTE**，不走 `router2ts_trigger_ch` 那条建表通路 |
+| F56 | `op_type = 0` 是走 msg 流搬 kernel 那一档：这种包进 core 时**跳过 TS，直接唤醒 DTE**，不走 `router2ts_trigger_ch` 那条建表通路。装 weights 不用这一档，weights 包照常通知 TS，由 TS 派 datain 任务 |
 | F57 | 另有一组与 RouterTable 分开配的 **Skip Mask 寄存器**：per-core 一位，标记该 core 是否被跳过；位宽按 5 列 chip 的 10 个 core 定，4 列 chip 只用低 8 位。复位释放后 RouterTable 的所有条目为 bypass / no-op，配置写入前不投递任何包 |
 | F58 | `flow_dir` 与 `reduce_in_mask` 一个管出一个管进：前者是这条 path 从本级往哪几个方向发，后者是这条 path 在本级要等哪几个相邻方向的分量。两者互相独立，出分量的源核 `reduce_in_mask` 为 0；最终汇聚的核 `flow_dir` 全不置位，它只把结果交给本 core，进核由 `path_core_bypass` 判 |
 | F59 | 只描述静态路由与资源需求，不保存包的动态执行状态 |
@@ -1410,8 +1411,9 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 按 path_id 查表得到全部去向与资源需求 | F1、F53 | `router_lookup` |
 | 出核造包时按 path_id 取片外那一段的目的标识 | F112 | `ext_dst` |
 | 进 core 由 path_core_mask_enable 二选一，位由 path_core_mask_idx 指定 | F54 | `core_mask_index` |
+| 开了 core_mask 的 path 上，走到既不进核又没有下游的那一跳就终止 | F54a | `core_mask_tail` |
 | reduce_data_type 配在表里，reduce_twice 时 TS 还没介入 | F55 | `reduce_twice_dtype` |
-| kernel / weight 搬运包跳过 TS 直接唤醒 DTE | F56 | `kernel_skip_ts` |
+| 走 msg 流搬 kernel 的包跳过 TS 直接唤醒 DTE | F56 | `kernel_skip_ts` |
 | Skip Mask 与 RouterTable 分开配；复位后全条目 bypass / no-op | F57 | `skip_mask_reset` |
 | reduce 与 reduce_twice 两档，两个源可都来自本 core 的 DTE | F43 | `reduce_twice` |
 | 四个 VC 独立缓存独立计 credit，一个堵住不影响其他 | F2、F10 | `vc_isolation` |

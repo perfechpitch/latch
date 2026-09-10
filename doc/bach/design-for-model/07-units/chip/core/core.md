@@ -256,8 +256,8 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <path d="M1029.1 1155.0 L1033.4 1213.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
 <text x="1524" y="546" font-size="8.5" fill="#4b5563" text-anchor="start">连线说明（灰双向箭头两端都是主动方）：</text>
 <text x="1524" y="559.5" font-size="8.5" fill="#4b5563" text-anchor="start">TS ↔ RV core：task_cmd（task_pc · stream_id ·</text>
-<text x="1524" y="573.0" font-size="8.5" fill="#4b5563" text-anchor="start">　local_user_id）/ task_ack；rv_done（stream_id ·</text>
-<text x="1524" y="586.5" font-size="8.5" fill="#4b5563" text-anchor="start">　local_user_id · task_id）</text>
+<text x="1524" y="573.0" font-size="8.5" fill="#4b5563" text-anchor="start">　user_id · task_id）/ task_ack；rv_done（stream_id ·</text>
+<text x="1524" y="586.5" font-size="8.5" fill="#4b5563" text-anchor="start">　user_id · task_id）</text>
 <text x="1524" y="600.0" font-size="8.5" fill="#4b5563" text-anchor="start">RV core ↔ DSA：dsa_cfg：dsaw / dsawi 写寄存器 +</text>
 <text x="1524" y="613.5" font-size="8.5" fill="#4b5563" text-anchor="start">　写 trigger 启动；dsar / dsari 读不阻塞，按 dsa_rq</text>
 <text x="1524" y="627.0" font-size="8.5" fill="#4b5563" text-anchor="start">　顺序写回 gpr</text>

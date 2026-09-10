@@ -433,12 +433,12 @@
 * 装 weights（MB 级，每 core 不同，不经 SCP）
   * ① SCP 先配 weights 加载模式（三处配置见下表），再通知上位 CPU 可以下发
   * ② SCP 读每个 core 的 `core_id`：编译器按物理 id 配路由表，用户 kernel 只见逻辑 id
-  * 数据路径：Host msg 流 → PCIe → Router → Router 通知 TS 触发 datain → TS 派 DTE RV core 跑 weights loader → 算出 Matrix Mem 地址 → DTE 指令搬 Router → Matrix Mem → 完成后通知 TS 释放，不触发任务链；先发最远路径的数据
+  * 数据路径：Host msg 流 → PCIe → Router → Router 通知 TS 触发 datain → TS 派 DTE RV core 跑 weights loader；数据由 DTE 按包头里的落点搬进 Matrix Mem，loader 数搬进来几笔 → datain 出槽，不触发任务链；先发最远路径的数据
   * 完成：weights loader 计数满 → 自定义指令中断 SCP → 执行 WFT 进入正常模式
 * ③ 切业务模式（SCP 收到中断后改三处）
   * Router 路由表换业务路径：token 广播、逐级 reduce 等
   * TS：`datain_task` 的 pc 指向 token 搬移，`trigger_task_chain_en = 1`；`task_chain` 配成本 core 角色的业务任务链（也可在 weights 模式就配好）
-  * DSA 写业务场景的静态配置
+  * DSA 写业务场景的静态配置；DTE 的进核那一笔改回本 core 角色的落点，计算 core 是 Core Mem
   * TS 配置的写入顺序：全局项 `CORE_TYPE`、`STREAM_NUM`、`B_CORE_DIRECTION` → 逐项 `task_chain[i]`（硬件自动置 `TASK_VALID`）→ `DATAIN_TASK` → `TS_INIT_FINISH`；硬件随即查五项合规性写 `TS_STATE`，B / R core 自启动 16 项
 * ④ SCP 经 PCIe 通知 launch 完成；此后 token 进来才会算
 
@@ -448,7 +448,7 @@ weights 加载模式的三处配置：
 | - | - |
 | Router | 路由表只用 1 条 path，是 weights 专用的 P2P 路径；path 与物理 core id 解耦，软件在 path 里指定 core index、在 msg 里标记落在哪些 core；不派角色的 core 数据不进核，仍按位置转发 |
 | TS | `WEIGHTS_MODE = 1`；`datain_task` 的 pc 指向 weights loader，`trigger_task_chain_en = 0`，搬完不启动任务链 |
-| DTE | SCP 复位 DTE → 全局静态寄存器 → task LUT → stream 表 → header / topK 参数 → 使能 TS 直接触发；DTE 回 `init_done` |
+| DTE | SCP 复位 DTE → 全局静态寄存器 → task LUT → stream 表 → header / topK 参数 → 使能 TS 直接触发；进核那一笔落 Matrix Mem；DTE 回 `init_done` |
 
 ```svg
 <svg viewBox="0 0 920 180" width="920" height="180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bach core 状态机">

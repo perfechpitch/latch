@@ -444,7 +444,7 @@ TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 T
 | - | - | - | - |
 | `task_pc` | 有 | — | 起始取指 PC |
 | `stream_id` | 有 | 有 | 4 bit，用于计算该用户的 Core Mem 与 share_mem 区域基址；硬件写入自定义 CSR，只读 |
-| `local_user_id` | 有 | 有 | 12 bit，core 内部软件自己编的号，用于 R-core 用户映射表和 Matrix Mem 地址计算；与全局的 16 bit `user_id` **互不相干，不能互相换算**；**可读写**，R-core 执行 flag_check 后由软件写入 |
+| `user_id` | 有 | 有 | 用户号，软件读它算 R-core 的用户映射表和 Matrix Mem 地址，Router 与 credit 记账认的也是它；**可读写**，普通计算 core 上 TS 下发 task 时硬件写入，B core 与 R core 上由软件在 flag_check 认出用户后写入 |
 | `task_id` | — | 有 | 6 bit，只读；**异步 datain 任务由软件识别包头后写入**，用于告诉 TS 是任务链中哪一步完成 |
 
 ### dsa_iss 的下发规则

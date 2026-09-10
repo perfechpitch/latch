@@ -204,9 +204,9 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 
 每个 Core 的状态机数量有界：stream 表项 16、DTE TaskQueue 4 × 16、VU 在飞宏指令 2、MU issue_q 16、Router 每方向 4 个 VC 各一个队首上下文。
 
-`common/arbiter.h` 提供四种排队语义：
+排队分四种语义，各模块在自己那一处实现（存储的 `bank_arbiter.h`、TS 的 `dte_arb.h` 与 `mu_vu_arb.h`、DTE 的 `out_arb.h`、Router 的三类 credit）：
 
-| 硬件里的资源 | 仲裁器 |
+| 硬件里的资源 | 排队怎么排 |
 | - | - |
 | 独占且先到先得（bank 端口、Lane、Xbar 出口） | 独占仲裁器，等待队列先进先出 |
 | 按年龄或固定优先级（TS 三条发射通路、Cmem 的 MU > VU = DTE、DTE Commit 的 Bank0 > Bank1） | 优先级仲裁器，等待队列按优先级、请求拍、插入序排 |
@@ -244,7 +244,7 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 
 ### 目录按硬件层级
 
-`ip/` 的目录层级与对象清单的层级一致：一层硬件一个目录，目录里每个头文件对应清单里的一个模块，与 `07-units/` 下那一层的文档一一对上。Python 版模拟器遗留的单元（`credit_unit.h`、`moe_bitmap.h`、`compute/`、`eth_switch/`、`external/phase*`、`dispatcher.h`）保留不动，新单元不依赖它们。
+`ip/` 的目录层级与对象清单的层级一致：一层硬件一个目录，目录里每个头文件对应清单里的一个模块，与 `07-units/` 下那一层的文档一一对上。
 
 ```
 src/bach/
@@ -254,6 +254,7 @@ src/bach/
     wiring.h                       接一条双向物理链路（数据端口对 + 三种 release 端口）
     lpu.h                          LPU 装配：构造 48 个 Chip、按 12 × 4 网格接 C2C、接 PCIe Switch 与片外桩
     lpu_grid.h                     全局坐标换算：(tray, 层, 列) ↔ (gx, gy)，以及片外节点与跨 chip 网关的坐标
+    bundle_load.h                  读 bundle 里那份 .bachir，按记录名把配置分发到各 IP 的配置口
     link/
       link.h                       链路模型：带宽、延迟、arrive_cycle 计算
     pcie_switch.h                  双路 x16、组播复制、按最慢收端反压
@@ -288,11 +289,8 @@ src/bach/
           task_done.h              七路完成合流
         rv_core/
           rv_core.h                驱动 src/rv32 的 SystemRv32 逐条执行；task_queue、dsa_iss、dsa_rq、lsq、gpr 就绪表、自定义 CSR
-          bach_insts.h             custom-0 自定义指令（dsar、dsari、dsaw、dsawi、task_done、flag_check、loop）
+          exec.h                   自定义指令（dsar、dsari、dsaw、dsawi、task_done、flag_check、loop）走约定地址的读写
           rv_ports.h               RV core 地址空间：ITCM、DTCM、Share Mem、Core Mem、Router I/O reg 各一个 MemoryPort
-          kernel/
-            kernel_api.h           kernel 源码侧头文件：自定义指令的 inline asm 封装、DSA 寄存器地址、自定义 CSR 编号
-            *.c  link.ld  Makefile 各 kernel（bcore_datain、check_flag、broadcast、weights loader、计算 core 各 task），riscv gcc 编译成每类 core 一个 ELF
         dte/
           header_parser.h  commit.h  task_queue.h  lane.h  agcu.h  buffer.h  completion_rs.h  hmem.h
         mu/
@@ -304,21 +302,26 @@ src/bach/
   common/
     flit.h  message.h              封包与 Message
     params.h                       全部参数的唯一出处
-    regmap.h                       DSA 寄存器地址映射（VU 按 MAS；MU、DTE 为临时映射）
-    arbiter.h                      四种仲裁器
+    seq.h                          序号的回绕比较，进出口桩按它认先后
     numeric/                       FP8_e4m3 / MXFP8 / MXFP4 / NVFP4 / BF16 / FP32 的编解码、舍入、CSA 累加顺序
-  tables/
-    router_table.h  task_chain.h  header_tables.h  loader.h      编译侧产物的读入
-  observer/
-    span_recorder.h  jsonl_writer.h
-  sim/
-    build.h                        从编译侧产物装配出整套硬件
-    completion.h                   完成判据与全局生命周期看门狗
-  reference/
-    numeric_ref.py                 编解码与累加顺序的第二份实现，Python 写，与 numeric/ 互不引用
-    ffn_reference.py               FFN 那几档算子，累加顺序取自 numeric_ref
-    vectors.py                     产出比对向量，落进 vectors/
-    selftest.py                    本层自检，兼查向量与代码同步
+  compiler/
+    topo/                          拓扑描述：阵列摆多大、几个 EP 组、部分和按什么次序归约
+    hwconfig/
+      topology.py                  读拓扑描述，按 layer 分派给展开器
+      moe.py                       一层 MoE 那套的展开：几何换算、三条链的铺法、三档 core 的任务链
+      bachir.py                    把展开出来的配置写成一份 .bachir
+      kernelmap.py                 三份镜像的符号表，一笔 task 的函数名换成入口地址
+      geometry.py                  核阵列看成一个全局格子时的坐标换算
+    bundle/<拓扑名>/               装进硬件的一套：一份 .bachir 与三份 kernel 镜像，每套自己带全
+    kernel/
+      bach.h                       kernel 源码侧头文件：自定义指令的封装、DSA 寄存器地址、存储布局
+      kernel_{dte,mu,vu}.c         三个 RV core 各一份，一笔 task 一个函数
+      link.ld  Makefile            riscv gcc 编译，四样产物都落在 build/，hex 由 gen_hwconfig 拷进各套 bundle
+    reference/
+      numeric_ref.py               编解码与累加顺序的第二份实现，Python 写，与 numeric/ 互不引用
+      ffn_reference.py             FFN 那几档算子，累加顺序取自 numeric_ref
+      vectors.py                   产出比对向量，落进 vectors/
+      selftest.py                  本层自检，兼查向量与代码同步
 ```
 
 模块之间只有端口。装配容器把生产者的出口端口和消费者的入口端口对接，两侧都只看到端口束的字段，不持有对方的类型，装配顺序不受构造顺序牵制。
@@ -497,7 +500,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | 步 | 建什么 | 跑通的判据 |
 | - | - | - |
-| 1 | `common/`（flit、message、params、arbiter、numeric）与 `ip/module_base.h` | 四种仲裁器的单测；`numeric/` 与 `reference/` 的编解码逐 bit 对齐 |
+| 1 | `common/`（flit、message、params、numeric）与 `ip/module_base.h` | `numeric/` 与 `reference/` 的编解码逐 bit 对齐 |
 | 2 | 链路、PCIe Switch、入口桩与出口桩 | 一个 flit 从入口桩发出、经链路与 Switch 回到出口桩，到达拍与手算一致 |
 | 3 | 三块存储与它们的 bank 仲裁器 | 各 master 端口的端到端拍数等于参数表；同 bank 冲突按优先级授予 |
 | 4 | Router 的八个模块 | Router 单测跑 A2、A5、A15、A16、A17 五个场景；credit 守恒 |
@@ -629,6 +632,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 * **TS 直接启动 DTE、DTE 的 3 Lane 方案、DSA-RF 调试通路不建**。
 * **Router 的输出移位拼接不建**：flit 定长 256 B，尾 flit 带有效字节数。
 * **一个 token、每个 EP 组内两个激活专家**：分片的方向与尺寸都照真实的来：K 是完整的 embedding 6144，中间维是 2048 按 TP8 切下来的那 256，输出维 6144，每 core 装两个专家的 W1 / W3 / W2 共 18 MiB。共享专家、多个 token 连着跑与派遣那一档不在里面。
+* **权重走数据面只建一颗 chip 那一档**：weights 加载模式的一整段照真实的建 —— 配 `WEIGHTS_MODE`、包按 `path_core_mask` 落进指定 core、loader 数搬进来几笔、数够了切业务模式。更大规模那两份的权重用后门铺进 Matrix Mem：三百八十四个 core 合 6.9 GiB，按一包 16 KB 是 45 万个包，逐包搬跑不完。
 * **时间常数未校准**：第 5 章标“偏小”“带问号”的值与第 8 章的冲突项都是配置值，支持同参数下的相对比较，不是绝对性能预测。
 
 ### 设计未给值、本章填了默认值的参数

@@ -261,7 +261,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
 | F3 | 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配 TaskQueue 项和完成跟踪项 |
 | F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map` 副本，与 TS 那一份同源：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号 |
-| F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。`route` 这一项按 core 的角色定死：计算 core 落 Core Mem，R core 落 Matrix Mem。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
+| F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。`route` 这一项由 SCP 配：业务模式下计算 core 落 Core Mem，B core 与 R core 落 Matrix Mem；weights 加载阶段进来的都是权重，计算 core 上也落 Matrix Mem。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
 | F3d | B core 与 R core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象，因此不回 Ack |
 | F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
 | F4 | 一帧一任务：同一个 AXI-Stream Frame 只属于一个 Router → MM 或 Router → CM 任务，不允许任务间交织 |

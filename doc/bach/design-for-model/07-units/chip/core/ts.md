@@ -266,7 +266,7 @@ MAS 里的 `Credit_monitor` 标题划了删除线，已不再是独立模块：�
 | F11 | 三处用它：datain 请求进来时定这一笔属于哪个 datain 任务，取该项的 `task_pc`；完成事件回来时定该点亮 `done_bitmap` 的哪一位；P2P 不需要重发时 Router 按 `path_id` 告知哪个 task 已完成，本表定位到那一项 |
 | F12 | 写 `TS_INIT_FINISH` 时一并查：`task_chain` 里每个带 `TASK_PATH_ID` 的项，其 `path_id` 在本表里必须有 valid 项且指回该项自己；查不过写进 `TS_STATE` |
 | F13 | 硬件位域里没有的软件侧属性从软件侧任务链表另行读入，与硬件表分开存：`exe_dest`、`reduce_num`、`dsa_en`。分组不在这一档，它由硬件位域 `TASK_EXE_MASK` 承载 |
-| F14 | `CORE_TYPE` 是 B core 或 R core 时，硬件在复位后直接自启动 16 个表项，每项按 task 0 的属性建立、`task_fsm` 置 `TASK_RDY`；此时还没有用户信息，等自启动任务的 RV core 返回 `user_id` 后再补进表项 |
+| F14 | `CORE_TYPE` 是 B core 或 R core 时，硬件在复位后直接自启动 16 个表项，每项按 task 0 的属性建立、`task_fsm` 置 `TASK_RDY`；此时还没有用户信息，等自启动任务的 RV core 返回 `user_id` 后补进表项 |
 
 ### User_Match
 
@@ -297,7 +297,7 @@ MAS 里的 `Credit_monitor` 标题划了删除线，已不再是独立模块：�
 | 编号 | 功能 |
 | - | - |
 | F29 | 16 项顺序 FIFO，每项对应一条完整用户业务流；`head_ptr` 与 `tail_ptr` 环形推进 |
-| F30 | 用户级标记（建表写入，整条任务链期间基本不动）：`valid`、`user_id`、`local_user_id`、`reissue`、`compute`。`local_user_id` 与 `user_id` **是两个互不相干的编号**，不能互相换算：`user_id` 16 bit，是 Router 与 credit 记账认的那个全局编号，建表时从 Router 请求里取；`local_user_id` 12 bit，是 core 内部软件自己编的号，用于 R core 的用户映射表与 Matrix Mem 地址计算，普通计算 core 上由 TS 随任务下发、自启动 core 上由软件 `flag_check` 之后写回 |
+| F30 | 用户级标记（建表写入，整条任务链期间基本不动）：`valid`、`user_id`、`reissue`、`compute`。用户号只有 `user_id` 一个：Router 与 credit 记账认它，软件也读它算 R core 的用户映射表与 Matrix Mem 地址。普通计算 core 上建表时从 Router 请求里取，自启动 core 上由软件 `flag_check` 之后写回 |
 | F31 | 进度三字段合起来才是完整进度：`task_id` 是链上的第几步，`task_fsm` 是这一步的状态，`done_bitmap` 是 64 位对应 64 个 task 的数据齐没齐 |
 | F32 | 异步 datain 提前完成表现为 `done_bitmap` 上某一位先亮而 `task_id` 还没走到那里 |
 | F33 | 当前 task 的属性摊平存在表项里（`task_unit`、`task_dsa_en`、`task_pc`、`is_reissue`、`end`），每次更新 `task_id` 时索引 `task_chain` 得到，随 `task_id` 一起被覆盖 |
@@ -415,7 +415,7 @@ MAS 顶层模块表列的第九个模块：「负责检查在调度过程中出�
 | - | - |
 | F84 | 复位后直接自启动 `stream_num` 个 stream_table 表项，同时激活这些用户的自启动任务参与仲裁发射，执行过程同普通计算 core。B core 与 R core 的 `stream_num` 配成 16，自启动数因此是 16；`stream_num < 16` 时自启动数随之减少，`tail_ptr − head_ptr < stream_num` 这条约束在自启动路径上同样成立 |
 | F85 | 启动时没有用户信息，等自启动任务的 RV core 返回 `user_id` 后更新 stream_table，再调度后续任务 |
-| F86 | 这一路走 `completion` 写口，不另设专用写口：`rv_done` 带回 12 位 `local_user_id`，Task_done 按 `stream_id` 定位表项，把它写进表项的 `local_user_id` 字段，同时按 F37 的规则处理 `done_bitmap` 与 `task_fsm`。补写之前该表项的 `local_user_id` 无效，软件的用户映射表查不到它 |
+| F86 | 这一路走 `completion` 写口，不另设专用写口：`rv_done` 带回 `user_id`，Task_done 按 `stream_id` 定位表项，把它写进表项的 `user_id` 字段并置 `user_id_vld`，同时按 F37 的规则处理 `done_bitmap` 与 `task_fsm`。补写之前该表项的 `user_id` 无效，软件的用户映射表查不到它，向 Router 申请资源时也没有可带的用户号 |
 | F87 | 数据接收类 datain 任务由 datain task 支持，但完成 flag 由软件设置维护，不在 TS 里更新 |
 | F88 | check flag 的 RV core 需要长期工作，该 task 不调度对应的 DSA。跑 check flag 的那个 RV core 在这类 core 的任务链上没有别的活：B core 的链只有 VU 的 check flag 与 DTE 的搬出，R core 的链是 MU 的 check flag、DTE 搬入、VU 求和、DTE 搬出。因此长期占用不会挡住同一个 core 上的其他 task |
 | F89 | 任务链创建不受用户数据 trigger 影响，自动在每个 stream 表项创建起点 task，按 stream 顺序激活执行 check flag task |
@@ -452,10 +452,10 @@ port ts2router_retire (master, valid/ready, clk)   // 用户退休与 credit 返
   out valid · user_id[15:0]
   in  accepted                                      // 即 ready：Router 接收后才清 valid 并推进 head_ptr
 port task_cmd[u] (master, valid/ready, clk)       // u ∈ {DTE, MU, VU}：task 下发
-  out cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · seq
+  out cmd_valid · task_pc[31:0] · stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · seq
   in  cmd_ready                                     // = 该 RV core 的 task_queue 有空槽（raw ACCEPT）
 port rv_done[u] (slave, 脉冲, clk)                // RV core 报完成；自启动的表项靠它补 user_id
-  in  valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · reduce_seq[5:0]
+  in  valid · stream_id[3:0] · user_id[15:0] · task_id[5:0] · reduce_seq[5:0]
 port dsa_done[u] (slave, 脉冲, clk)               // DSA 报完成
   in  valid · stream_id[3:0] · task_id[5:0] · event   // event 只在 u = VU 有效，EVENT_EN 置位时随完成一起拉高
 port ts2corestatus_int_ch (master, 电平, clk)     // 异常上报，本轮只留接口名
@@ -477,7 +477,7 @@ mem sw_attr        FF 阵列   64 × {exe_dest, reduce_num[5:0], dsa_en}        
 mem task_masks     FF        {DATA_IN_MASK[63:0], REISSUE_MASK[63:0], END_MASK[63:0], EXE_MASK[63:0]}  1R1W  写 TS_INIT_FINISH 时由 task_chain 派生  复位 0
 mem path_task_map  FF 阵列   64 × {task_id[5:0], valid}，按 path_id 索引                    1R1W  软件逐项写                    复位 0
 mem path_flowctl   FF 阵列   64 × {flowctl_en, window_n[7:0]}，按 path_id 索引            1R1W  软件逐项写                    复位 0    // 超前发送窗口，配在哪一张表原文未指明，见 F97
-mem stream_table   FF 阵列   16 × {valid, user_id[15:0], user_id_vld, local_user_id[11:0], reissue, compute, task_id[5:0], task_fsm[2:0], done_bitmap[63:0], task_unit[1:0], task_dsa_en, task_pc[31:0], is_reissue, end}  6W1R  六个写口按固定优先级仲裁  复位空
+mem stream_table   FF 阵列   16 × {valid, user_id[15:0], user_id_vld, reissue, compute, task_id[5:0], task_fsm[2:0], done_bitmap[63:0], task_unit[1:0], task_dsa_en, task_pc[31:0], is_reissue, end}  6W1R  六个写口按固定优先级仲裁  复位空
 mem stream_ptr     FF        {head_ptr[4:0], tail_ptr[4:0]}                                1RW   建表推 tail，退休推 head       复位 0
 mem datain_hold    FF        1 项 {valid, task_pc[31:0], user_id[15:0], path_id[7:0]}      1RW   占住即反压 Router              复位空
 mem credit_cnt     FF 阵列   每 {path_id, stream_id} 一个计数器                             1RW   广播初值 = 目的 core 数，P2P = 1  复位由输入给
@@ -843,7 +843,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="250" y="78" font-size="10.5" fill="#475569">1. cand[u] = {i | valid &amp;&amp; task_fsm==READY &amp;&amp; task_unit==u}</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. DTE：先取 is_reissue 的最老者，否则 DataIn 与 Generated 比年龄</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. age(i) = (i − head_ptr) mod 16，取最小</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. task_cmd[u] = {task_pc, stream_id, local_user_id, task_id, user_id, path_id, dsa_en}</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. task_cmd[u] = {task_pc, stream_id, task_id, user_id, path_id, dsa_en}</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">选中后非抢占保持，命令字段到 ACCEPT 前不变</text>
   <path d="M188 45 L231 45" stroke="#475569" marker-end="url(#art4)" fill="none"/>
   <path d="M188 99 L231 99" stroke="#475569" marker-end="url(#art4)" fill="none"/>
@@ -892,7 +892,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <polygon points="30,35 188,35 178,93 20,93" fill="#f8fafc" stroke="#374151"/>
   <text x="104" y="54" font-size="10.5" fill="#374151" text-anchor="middle">rv_done[u] · dsa_done[u]</text>
   <text x="104" y="72" font-size="9.5" fill="#6b7280" text-anchor="middle">valid · stream_id[3:0]</text>
-  <text x="104" y="90" font-size="9.5" fill="#6b7280" text-anchor="middle">task_id[5:0] · local_user_id</text>
+  <text x="104" y="90" font-size="9.5" fill="#6b7280" text-anchor="middle">task_id[5:0] · user_id</text>
   <polygon points="30,105 188,105 178,145 20,145" fill="#f8fafc" stroke="#374151"/>
   <text x="104" y="124" font-size="10.5" fill="#374151" text-anchor="middle">rmem2ts_done_ch</text>
   <text x="104" y="142" font-size="9.5" fill="#6b7280" text-anchor="middle">valid · user_id[15:0]</text>
@@ -911,7 +911,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="262" y="118" font-size="10.5" fill="#475569">=两者 → 两个都到才完成</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">3. reduce task：dte_ack_cnt += 1（consume_only），router_done_cnt += 1</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">4. done_bitmap[task_id] 无条件置位；task_id == 当前 task_id 才改 task_fsm</text>
-  <text x="262" y="178" font-size="10.5" fill="#475569">自启动 core：把 rv_done.local_user_id 写进该 stream 的同名字段</text>
+  <text x="262" y="178" font-size="10.5" fill="#475569">自启动 core：把 rv_done.user_id 写进该 stream 的同名字段</text>
   <text x="250" y="202" font-size="10" fill="#9ca3af">七路都是脉冲，本级永远就绪，不向上游反压</text>
   <path d="M188 64 L231 64" stroke="#475569" marker-end="url(#art6)" fill="none"/>
   <path d="M188 125 L231 125" stroke="#475569" marker-end="url(#art6)" fill="none"/>
@@ -1072,11 +1072,11 @@ task 唤醒延迟        2～3 cycle（硬件目标值）
 | DataIn_task_table 只有 1 项，占住就反压 Router | F23、F24 | `datain_hold` |
 | B core 与 R core 上进来的包不建 stream 表项，只登记 DATAIN_TASK 那一项 | F27、F28 | `selfstart_datain` |
 | 16 项顺序 FIFO，进度靠三个字段合起来判断 | F29、F31 | `stream_table_progress` |
-| user_id 与 local_user_id 是两个互不相干的编号 | F30 | `two_user_ids` |
+| 用户号只有 user_id 一个，两条写入路径写同一个字段 | F30 | `one_user_id` |
 | 六个写口的固定优先级与两种失败处理 | F35、F36 | `six_write_ports` |
 | completion 口无条件置 done_bitmap，只在是当前 task 时改 fsm | F37 | `completion_fsm_guard` |
 | credit_wake 对老用户同时置 reissue | F38 | `credit_wake_reissue` |
-| 自启动的表项经 completion 口补写 local_user_id | F86 | `self_start_writeback` |
+| 自启动的表项经 completion 口补写 user_id | F86 | `self_start_writeback` |
 | SKIP_MASK 一拍跳过，连续 skip 不增加周期 | F41、F43 | `skip_mask` |
 | End task 即使已完成也不能跳，且不再生成后继 | F44 | `end_task_no_skip` |
 | 后继任务的全部字段一起原子写入 | F45 | `install_atomic` |

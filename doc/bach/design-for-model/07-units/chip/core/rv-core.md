@@ -78,7 +78,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <text x="1172" y="341" font-size="11" fill="#111827" font-weight="600">CSR</text>
 <text x="1172.0" y="358.0" font-size="8.5" fill="#475569">M 态 CSR + 自定义 CSR</text>
 <text x="1172.0" y="371.5" font-size="8.5" fill="#475569">stream_id 只读（4 bit）</text>
-<text x="1172.0" y="385.0" font-size="8.5" fill="#475569">local_user_id 可读写（12 bit）</text>
+<text x="1172.0" y="385.0" font-size="8.5" fill="#475569">user_id 可读写</text>
 <text x="1172.0" y="398.5" font-size="8.5" fill="#475569">由 ctrl_noc 直接配置，不经流水线</text>
 <rect x="160" y="584.5" width="320" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="172" y="605.5" font-size="11" fill="#111827" font-weight="600">dsa_iss / dsa_rq</text>
@@ -163,10 +163,10 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F1 | 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个，做到用户之间 task 的无 bubble 调度 |
 | F2 | 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
 | F2a | 一笔命令连着几拍出现在端口上，按 `seq` 认它，同一笔只入队一次。不按 `stream_id` 与 `task_id` 认：B core 与 R core 的 datain 任务不占 stream 表项，几笔的这两项都是 0 |
-| F3 | 下发信息六个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，硬件写入自定义 CSR 且只读；`local_user_id` 12 bit，用于 R core 用户映射表和 Matrix Mem 地址计算，可读写，R core 执行 `flag_check` 后由软件写入；`task_id` 6 bit 与 `user_id` 16 bit 由 TS 从 stream_table 取出一起下发，硬件写入自定义 CSR；`task_dsa_en` |
-| F4 | `local_user_id` 与 `user_id` **互不相干，不存在换算关系**。`user_id` 16 bit 是全局编号，Router 与 credit 记账认它；`local_user_id` 12 bit 是 core 内部软件自己编的号，只用于 R core 的用户映射表与 Matrix Mem 地址计算。两者各走各的，硬件不做任何转换 |
-| F5 | 自启动的 B core 与 R core 反过来：TS 下发时没有用户身份，软件在 `flag_check` 认出这一笔属于哪个用户后，把 12 位 `local_user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table。`rv_done` 不带 `user_id`，也没有专用的 bind 通路 |
-| F6 | 完成信息三个字段：`stream_id`、`local_user_id`、`task_id`。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
+| F3 | 下发信息五个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，只读；`user_id` 与 `task_id` 6 bit 由 TS 从 stream_table 取出一起下发；`task_dsa_en`。三个身份都硬件写入自定义 CSR |
+| F4 | 自定义 CSR 三个：`stream_id` 与 `task_id` 只读，`user_id` 可读写。`user_id` 有两条写入路径，写的是同一个字段：普通计算 core 上 TS 下发 task 时硬件写入；B core 与 R core 上 TS 下发时还没有用户身份，软件认出之后自己写。软件读它算 R core 的用户映射表与 Matrix Mem 地址，Router 与 credit 记账认的也是它 |
+| F5 | 自启动的 B core 与 R core 上，软件在 `flag_check` 认出这一笔属于哪个用户后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
+| F6 | 完成信息三个字段：`stream_id`、`user_id`、`task_id`。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
 | F6a | 自定义 CSR 读它当场拿到当前这一笔 task 的身份，不排队也不异步返回。DSA 寄存器读是另一档：发出去就走，数据由 dsa_rq 按记录的顺序写回 |
 | F7 | 身份到 DSA 有两条路，各 DSA 用哪条不同。DTE 与 VU 走 `dsa_ids` 直连，DSA 在写 Trigger 那一拍采样，软件不必再写一遍：DTE 取 `streamID` / `taskID` / `userID` / `pathID` 四项，VU 取前两项。MU 走软件写：RV core 把 TS 下发的这几个值放进自定义 CSR 供软件读，读出来在启动那一笔 DSA 任务之前写进它的动态配置寄存器。两条路填的都是同一组值，`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它 |
 
@@ -249,10 +249,10 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 
 ```
 port task_cmd (slave, valid/ready, clk)           // TS → RV core：task 下发
-  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · local_user_id[11:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · seq
+  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · seq
   out cmd_ready                                     // = task_queue 有空槽（raw ACCEPT）
 port rv_done (master, 脉冲, clk)                  // RV core → TS：task_done 指令带 TS 标志时产生
-  out valid · stream_id[3:0] · local_user_id[11:0] · task_id[5:0]
+  out valid · stream_id[3:0] · user_id[15:0] · task_id[5:0]
 port dsa_cfg (master, valid/ready, clk)           // dsa_iss → 对应 DSA：配置写与 trigger
   out req_valid · req_we · req_addr[11:0] · req_wdata[31:0] · req_seq
   in  req_ready                                     // = DSA 的配置通路未反压
@@ -282,11 +282,11 @@ mem itcm        SRAM        4 KB，8 B/T，1 拍                                
 mem dtcm        SRAM        8 KB，4 bank × 32 bit，3 拍                        1R1W  同 bank 冲突阻塞第二条  复位未定义   // BSS · 寄存器溢出 · 堆栈
 mem gpr         FF 阵列     32 × 32 bit                                        —     由指令执行器读写      复位 0
 mem gpr_ready   FF          32 b 就绪位图                                       1RW   发出访存 / DSA 读时清，写回时置  复位 全 1
-mem task_q      FIFO        深 2 × {task_pc[31:0], stream_id[3:0], local_user_id[11:0], task_id[5:0], user_id[15:0], task_dsa_en}  1W1R  满 → task_ack 拉低  复位空
+mem task_q      FIFO        深 2 × {task_pc[31:0], stream_id[3:0], task_id[5:0], user_id[15:0], task_dsa_en}  1W1R  满 → task_ack 拉低  复位空
 mem dsa_rq      FIFO        8 × {rd_idx[4:0]}                                  1W1R  顺序记录，返回时按序写回 gpr  复位空
 mem sm_lsq      FIFO        16 × {we, addr[14:0], wdata[31:0], rd_idx[4:0]}     1W1R  顺序发射，每拍一个    复位空
 mem cm_lsq      FIFO        16 × {we, addr[17:0], wdata[31:0], be[3:0], rd_idx[4:0]}  1W1R  顺序发射，每拍一个；只有 DTE core 有  复位空
-mem csr         FF 阵列     M 态 CSR + 自定义 CSR                              1R1W  stream_id 只读，local_user_id 可读写  复位 0
+mem csr         FF 阵列     M 态 CSR + 自定义 CSR                              1R1W  stream_id 与 task_id 只读，user_id 可读写  复位 0
 mem pc          FF          {pc[31:0], state[2:0]}                             1RW   复位取 boot_pc；收 task 取 task_pc  复位 boot_pc
 ```
 
@@ -393,7 +393,7 @@ kernel 清单按 RV core 分：
   <rect x="736" y="110" width="176" height="18" fill="#334155"/>
   <text x="824" y="123" font-size="10.5" fill="#ffffff" text-anchor="middle">CSR</text>
   <text x="824" y="146" font-size="10" fill="#334155" text-anchor="middle">stream_id · task_id</text>
-  <text x="824" y="163" font-size="10" fill="#334155" text-anchor="middle">local_user_id · user_id</text>
+  <text x="824" y="163" font-size="10" fill="#334155" text-anchor="middle">user_id</text>
   <rect x="232" y="20" width="460" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M1</text>
   <text x="678" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
@@ -401,7 +401,7 @@ kernel 清单按 RV core 分：
   <text x="250" y="78" font-size="10.5" fill="#475569">1. cmd_ready = task_q.free &gt; 0；cmd_valid &amp;&amp; cmd_ready → task_q.push(cmd)</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 前一个 task 执行完 → cur = task_q.pop()</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. pc = cur.task_pc；csr.stream_id = cur.stream_id（只读）</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. csr.{task_id, user_id, local_user_id} = cur 的对应字段，供软件读出后写给 DSA</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. csr.{stream_id, task_id, user_id} = cur 的对应字段，供软件读出后写给 DSA</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">提前接收让用户之间的切换无 bubble</text>
   <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arv1)" fill="none"/>
   <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arv1)" fill="none"/>
@@ -590,7 +590,7 @@ kernel 清单按 RV core 分：
   <polygon points="761,34 927,34 917,128 751,128" fill="#f8fafc" stroke="#374151"/>
   <text x="839" y="53" font-size="10.5" fill="#374151" text-anchor="middle">rv_done</text>
   <text x="839" y="71" font-size="9.5" fill="#6b7280" text-anchor="middle">valid · stream_id[3:0]</text>
-  <text x="839" y="89" font-size="9.5" fill="#6b7280" text-anchor="middle">local_user_id[11:0]</text>
+  <text x="839" y="89" font-size="9.5" fill="#6b7280" text-anchor="middle">user_id[15:0]</text>
   <text x="839" y="107" font-size="9.5" fill="#6b7280" text-anchor="middle">task_id[5:0]</text>
   <text x="839" y="125" font-size="9.5" fill="#6b7280" text-anchor="middle">user_id[15:0] · bind</text>
   <polygon points="761,140 927,140 917,180 751,180" fill="#f8fafc" stroke="#374151"/>
@@ -600,7 +600,7 @@ kernel 清单按 RV core 分：
   <text x="250" y="46" font-size="8.5" fill="#6b7280">M6</text>
   <text x="693" y="46" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="66" font-size="12" fill="#111827">task_done 指令 · 交还自己或通知 TS</text>
-  <text x="250" y="88" font-size="10.5" fill="#475569">1. 带 TS 标志 → rv_done = {stream_id, local_user_id, task_id, user_id, bind}</text>
+  <text x="250" y="88" font-size="10.5" fill="#475569">1. 带 TS 标志 → rv_done = {stream_id, user_id, task_id}</text>
   <text x="250" y="108" font-size="10.5" fill="#475569">2. task_q 非空 → pc = 队头 task_pc，走 M1</text>
   <text x="250" y="128" font-size="10.5" fill="#475569">3. task_q 空 → state = wait，阻塞取指</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. 三个 RV core 都进 wait → ready 拉高，SCP 才开放业务接收</text>
@@ -680,9 +680,9 @@ custom-0 字段布局   见下一节
 | task_queue 提前接收，做到用户之间无 bubble 调度 | F1 | `task_queue_prefetch` |
 | 按空槽产生 task_ack，未接收时 TS 不能跳到下一个 | F2 | `task_ack_handshake` |
 | 同一笔命令按 seq 认，连着几笔身份相同的 datain 也不会漏 | F2a | `cmd_seq` |
-| 下发六字段与完成三字段，stream_id 只读、local_user_id 可写 | F3、F6 | `task_fields` |
-| local_user_id 与 user_id 互不相干，硬件不换算 | F4 | `two_user_ids` |
-| 自启动 core 由软件写 local_user_id CSR，随 rv_done 回 TS | F5 | `self_start_writeback` |
+| 下发五字段与完成三字段，stream_id 与 task_id 只读、user_id 可写 | F3、F6 | `task_fields` |
+| 自定义 CSR 三个，user_id 有硬件写与软件写两条路径 | F4 | `user_id_csr` |
+| 自启动 core 由软件写 user_id CSR，随 rv_done 回 TS | F5 | `self_start_writeback` |
 | 自定义 CSR 同步返回，DSA 寄存器读异步写回 | F6a | `csr_sync_read` |
 | DTE 与 VU 的身份走 dsa_ids 直连，MU 由软件写寄存器 | F7 | `dsa_id_paths` |
 | RV32IMC + 只支持 M 态 + fence 为 nop | F8、F9 | `isa_scope` |
