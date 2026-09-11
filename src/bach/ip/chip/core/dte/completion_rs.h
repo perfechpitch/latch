@@ -58,7 +58,7 @@ class CompletionRs : public BachModule {
   std::shared_ptr<HalfDonePort> RdDonePtr() const { return rd_done; }
   std::shared_ptr<HalfDonePort> WrDonePtr() const { return wr_done; }
 
-  // 五个通道各有两侧，各自写各自的口 —— 一根线只有一个写者，不能让五个 Lane
+  // 五个通道各有两侧，各自写各自的口：一根线只有一个写者，不能让五个 Lane
   // 挤在同一个口上。装配层把它们都登记进来，这里每拍逐个收。
   void AddSource(std::shared_ptr<HalfDonePort> rd,
                  std::shared_ptr<HalfDonePort> wr) {
@@ -201,7 +201,7 @@ class CompletionRs : public BachModule {
       to_ts->Idle();
       return;
     }
-    to_ts->Drive(p.stream_id, p.task_id, p.reduce_seq);
+    to_ts->Drive(p.stream_id, p.task_id);
     pend.pop_front();
     ++report_pending;
   }

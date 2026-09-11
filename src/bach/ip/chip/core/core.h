@@ -3,7 +3,7 @@
 
 // Core：chip 阵列里的一格。
 //
-// 自己不打拍 —— 全部逐拍行为在七个单元的模块里，这一层只做构造期的接线，加上
+// 自己不打拍：全部逐拍行为在七个单元的模块里，这一层只做构造期的接线，加上
 // 几条不归任何单个单元的约定。
 //
 // 对外只有两组连接：三个 R2R 方向各一条 256 B/T 的双向链路，与 ctrl_noc 的配置
@@ -136,7 +136,7 @@ class Core : public BachModule {
   // boot 期 ctrl_noc 端点把一笔配置写交到这里，按目的模块分发。
   //
   // 走方法调用而不是端口：端点与目的模块都在装配这一个协程里，而且这几条通路
-  // 只在 boot 期用 —— 业务期是 RV core 的 dsa_iss 在写 DSA 的那个口，两者不
+  // 只在 boot 期用；业务期是 RV core 的 dsa_iss 在写 DSA 的那个口，两者不
   // 同时。VU 那一侧例外，它本来就有三条独立的配置通路，Ctrl-NOC 占其中一条。
   void CfgWrite(CfgRoute const& r, bool we, uint64_t data) {
     if (!we) return;
@@ -189,7 +189,7 @@ class Core : public BachModule {
   MatrixMem& Mmem() { return *mmem; }
   ShareMem& Smem() { return *smem; }
 
-  // 末级先做：一笔活在一拍里最多前进一级。存储排在最前 —— 它是各条通路的末端。
+  // 末级先做：一笔活在一拍里最多前进一级。存储排在最前，因为它是各条通路的末端。
   void Step() override {
     router->RunStep();
     if (ctx.router_only) {
@@ -211,15 +211,17 @@ class Core : public BachModule {
   // 与任务在这个 core 上流没流动、堵没堵。各模块自己不发信号，值从它们的观测
   // 访问器读，读的是本拍这一遍 RunStep() 算完的值。
   void EmitTrace() {
-    static const char* kFwd[3] = {"fwd_mid", "fwd_left", "fwd_right"};
-    static const char* kOcc[3] = {"occ_mid", "occ_left", "occ_right"};
-    for (uint64_t d = 0; d < 3; ++d) {
+    // 四个入口站：三个 R2R 方向，加本 core 的 DTE 出核进 Router 那一路。
+    static const char* kFwd[4] = {"fwd_mid", "fwd_left", "fwd_right", "fwd_core"};
+    static const char* kOcc[4] = {"occ_mid", "occ_left", "occ_right", "occ_core"};
+    for (uint64_t d = 0; d < 4; ++d) {
       TracePerCycle(kFwd[d], router->Station(d).Forwarded());
       TracePerCycle(kOcc[d], router->Station(d).Occupancy());
     }
     TracePerCycle("xbar_stall", router->GetXbar().Stalled());
     TracePerCycle("reduce_q", router->GetReduce().OutQueued());
     TracePerCycle("core_in", router->GetCoreStation().OutBufDepth());
+    EmitRouter();
     if (ctx.router_only) return;
     TracePerCycle("core_out", dte->OutBuf().Occupancy());
     TracePerCycle("ts_inflight", ts->Table().InFlight());
@@ -227,6 +229,62 @@ class Core : public BachModule {
                                   ts->MuArbiter().Issued() +
                                   ts->VuArbiter().Issued());
     TracePerCycle("ts_done", ts->Done().Finished());
+    EmitIssue();
+  }
+
+  // Router 里设计文档画出来的那几个方框，各记一两个量：
+  //
+  //   out_mid / out_left / out_right / out_core  Xbar 往这四个出口各发出的 flit 数
+  //   out_rdc   Xbar 送进 ReduceModule 三条 lane 的 flit 数之和
+  //   cs_trig   CoreStation 发给 TS 的 trigger 数
+  //   rdc_ctx   ReduceModule 占着几个用户上下文
+  //   reissue   CoreMem 重发那一侧暂存着、还没重发出去的笔数
+  //   retire    Retire 广播过的用户数
+  //   cmcm_q    CreditMonitor 里排队等资源的申请数
+  //
+  // out_*、cs_trig、retire 是只加不清零的累计数，其余是水位。RouterTable 是静态
+  // 配置，不记。
+  void EmitRouter() {
+    static const char* kOut[4] = {"out_mid", "out_left", "out_right", "out_core"};
+    Xbar& xb = router->GetXbar();
+    for (uint64_t o = 0; o < 4; ++o) TracePerCycle(kOut[o], xb.SentCount(o));
+    TracePerCycle("out_rdc", xb.SentCount(kOutReduce0) + xb.SentCount(kOutReduce1) +
+                                 xb.SentCount(kOutReduce2));
+    TracePerCycle("cs_trig", router->GetCoreStation().Triggers());
+    TracePerCycle("rdc_ctx", router->GetReduce().ContextUsed());
+    CoreMemReissue& rs = router->GetReissue();
+    uint64_t stored = rs.Stored(), reissued = rs.Reissued();
+    TracePerCycle("reissue", stored >= reissued ? stored - reissued : 0);
+    TracePerCycle("retire", router->GetRetire().Broadcast());
+    TracePerCycle("cmcm_q", router->GetMonitor().QueueLen());
+  }
+
+  // 本拍新下发的那几笔 task，落成两个信号。
+  //
+  // 认「新的一笔」看的是三条发射通路各自的 seq：一笔命令会在端口上连着摆几拍
+  // 等 RV core 收下，只看 cmd_valid 会把同一笔数很多遍。
+  //
+  //   ts_unit  位掩码，bit0 DTE、bit1 MU、bit2 VU。0 表示本拍没有新下发。
+  //   ts_task  三路的 task 号各占 8 bit：dte | mu << 8 | vu << 16。
+  //            那一路本拍没发就填 0xFF。
+  //
+  // 三条通路各管各的 stream，同一拍可以各发各的，所以两个信号都按路分位，不能
+  // 只留一路。
+  void EmitIssue() {
+    TaskCmdPort* cmd[3] = {&ts->DteCmd(), &ts->MuCmd(), &ts->VuCmd()};
+    uint64_t mask = 0, pack = 0;
+    for (uint64_t u = 0; u < 3; ++u) {
+      uint64_t s = cmd[u]->Seq();
+      uint64_t id = 0xFFu;
+      if (s != issue_seq[u]) {
+        issue_seq[u] = s;
+        mask |= 1ull << u;
+        id = cmd[u]->task_id.Get() & 0xFFu;
+      }
+      pack |= id << (8 * u);
+    }
+    TracePerCycle("ts_unit", mask);
+    TracePerCycle("ts_task", pack);
   }
 
   bool Quiescent() const override {
@@ -320,8 +378,8 @@ class Core : public BachModule {
     dte->AttachVcLevel(router->CreditLevelPtr());
   }
 
-  // 三块存储的各个 master 口。Matrix Mem 对三个 RV core 都不可见，VU 也读不到
-  // ——要 Matrix Mem 里的数据得先由 DTE 搬到 Core Mem。
+  // 三块存储的各个 master 口。Matrix Mem 对三个 RV core 都不可见，VU 也读不到。
+  // 要 Matrix Mem 里的数据得先由 DTE 搬到 Core Mem。
   void WireMemory() {
     // 读与写各占一个端口：存储那一侧只在 bank 冲突时才在读写之间二选一，
     // 合成一根线的话同一拍发出的读与写会互相盖掉。
@@ -356,6 +414,8 @@ class Core : public BachModule {
   }
 
   CoreContext ctx;
+  // 三条发射通路上一次见到的 seq，EmitIssue() 用它认新下发的那一笔。
+  std::array<uint64_t, 3> issue_seq{};
   std::unique_ptr<Router> router;
   std::unique_ptr<Ts> ts;
   std::array<std::unique_ptr<RvCore>, 3> rv;

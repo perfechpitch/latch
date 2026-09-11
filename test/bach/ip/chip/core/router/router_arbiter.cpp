@@ -1,7 +1,7 @@
 // Xbar 的资源与仲裁。
 //
-// 这一份直接给 Xbar 灌请求，绕开 RouterStation：验的是 VA / SA / ST 三级本身
-// 的判断 —— 四个 VC 各占各的 private、多播全有全无、五路无冲突时并行、每个
+// 这一份直接给 Xbar 灌请求，绕开 RouterStation，验的是 VA / SA / ST 三级本身
+// 的判断：四个 VC 各占各的 private、多播全有全无、五路无冲突时并行、每个
 // 出口独立 RoundRobin、贪婪整包、stream 授权按 user 记。
 
 #include <gtest/gtest.h>
@@ -306,8 +306,8 @@ TEST(BachXbar, SameOutputTakesTurns) {
 
 // 贪婪整包：三个入口争同一个出口时，上一包的 body 排在别的入口的新 head 前面。
 //
-// R2R 的通路允许在 flit 边界切换包，所以别的包会占掉本包两个 flit 之间那一拍
-// —— 一次握手要两拍，body 在那一拍还没提出来。要看的是 body 一提出来就被授予，
+// R2R 的通路允许在 flit 边界切换包，所以别的包会占掉本包两个 flit 之间那一拍：
+// 一次握手要两拍，body 在那一拍还没提出来。要看的是 body 一提出来就被授予，
 // 没有被 RoundRobin 推到后面去。
 TEST(BachXbar, BodyBeatsAnotherInputsHead) {
   std::vector<uint64_t> at;

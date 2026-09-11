@@ -126,7 +126,7 @@ inline std::vector<float> DecodeScale(DataType t,
 
 // Decode 的对偶：把一组 FP32 编回该格式的字节。高转低按 mode 舍入。
 //
-// scale 由调用方给。MXFP8 的 scale 是 E8M0，FP4 那两档是 FP8 —— 与 DecodeScale
+// scale 由调用方给。MXFP8 的 scale 是 E8M0，FP4 那两档是 FP8，与 DecodeScale
 // 对称。VU 的 SU 走这一条写回 Core Mem。
 inline std::vector<uint8_t> Encode(DataType t, std::vector<float> const& v,
                                    std::vector<float> const& block_scale,

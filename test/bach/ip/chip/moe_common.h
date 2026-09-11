@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -195,8 +196,13 @@ inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
 //
 // 与 compiler/kernel/bach.h 的 MOE_* 同源，改一处要一起改。
 constexpr uint64_t kTopkAt = 0x3000;
+// FC2 的结果出核时拆成 kPieceNum 个 reduce 包，Core Mem 里一包一格，格首 16 B
+// 留给这一包的头，数据写在它之后。
 constexpr uint64_t kSendAt = 0x9800;
-constexpr uint64_t kResultAt = kSendAt + kReduceSwHeaderBytes;
+constexpr uint64_t kPieceData = 8192;
+constexpr uint64_t kPieceBytes = kReduceSwHeaderBytes + kPieceData;
+constexpr uint64_t kPieceStride = 0x2080;
+constexpr uint64_t kPieceNum = 3;
 constexpr uint64_t kW1At = 0x000000;
 constexpr uint64_t kW3At = 0x600000;
 constexpr uint64_t kW2At = 0xC00000;
@@ -219,6 +225,42 @@ constexpr uint64_t kWeightsCntOff = 0x05D0;
 constexpr uint64_t kWeightsChunk = 16 * 1024;
 // 这一阶段的用户号。权重不进归约，与业务那个用户不相干。
 constexpr uint64_t kWeightsUser = 3;
+
+// 按格摆的那一份拼回连着的数据：逐格跳过格首的 16 B 头。
+template <typename Mem>
+inline std::vector<uint8_t> GatherPieces(Mem& mem, uint64_t base) {
+  std::vector<uint8_t> out;
+  for (uint64_t k = 0; k < kPieceNum; ++k) {
+    std::vector<uint8_t> b =
+        mem.Peek(base + k * kPieceStride + kReduceSwHeaderBytes, kPieceData);
+    out.insert(out.end(), b.begin(), b.end());
+  }
+  return out;
+}
+
+// 一个 core 自己算出来的那一份部分和：留在 Core Mem 里出核那几格。
+inline std::vector<uint8_t> PartialOf(Core& core) {
+  return GatherPieces(core.Cmem(), kSendAt);
+}
+
+// 出口上收到的几包按落点排好，拼回一整份，每包跳过格首的 16 B 头。
+inline std::vector<uint8_t> JoinPieces(std::vector<MessagePtr> msgs) {
+  std::sort(msgs.begin(), msgs.end(),
+            [](MessagePtr const& a, MessagePtr const& b) {
+              return a->dst_addr < b->dst_addr;
+            });
+  std::vector<uint8_t> out;
+  for (MessagePtr const& m : msgs) {
+    if (m->payload.size() != kPieceBytes) {
+      ADD_FAILURE() << "一包的长度是 " << m->payload.size() << "，该是 "
+                    << kPieceBytes;
+      continue;
+    }
+    out.insert(out.end(), m->payload.begin() + kReduceSwHeaderBytes,
+               m->payload.end());
+  }
+  return out;
+}
 
 // ── chip 内的拓扑 ──
 //
@@ -301,54 +343,51 @@ inline uint64_t OppositeOf(uint64_t dir) {
 
 // ── 每个 core 的配置 ──
 
-// EPTP-NN 的五步。第 2 步与第 3 步各在一个 task 里发几笔 DSA 任务，收 RV core
-// 那一路的完成；最后一步是 reduce 任务，DTE 的搬运与 Router 的归约两半配齐才
-// 算完。
+// EPTP-NN 的五步。FC1 与 FC3、门控、FC2 三步各在一个 task 里发几笔 DSA 任务，
+// 收 RV core 那一路的完成；最后 kPieceNum 项是逐级 reduce 任务，一项出一个包，
+// Router 报回那一包归约完才算这一项做完。
 inline void WriteMoeChain(Core& core, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = kInPath;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init", "dte");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry fc13;
   fc13.send_unit = SendUnit::kMu;
   fc13.recv_unit = RecvUnit::kRvOnly;
-  fc13.exe_mask = true;
   fc13.task_pc = SymbolOf("task_mu_fc13", "mu");
   core.GetTs().Cfg().WriteTask(1, fc13);
 
   TaskEntry gate;
   gate.send_unit = SendUnit::kVu;
   gate.recv_unit = RecvUnit::kRvOnly;
-  gate.exe_mask = true;
   gate.task_pc = SymbolOf("task_vu_gate", "vu");
   core.GetTs().Cfg().WriteTask(2, gate);
 
   TaskEntry fc2;
   fc2.send_unit = SendUnit::kMu;
-  fc2.recv_unit = RecvUnit::kDsa;
-  fc2.dsa_en = true;
-  fc2.exe_mask = true;
+  fc2.recv_unit = RecvUnit::kRvOnly;
   fc2.task_pc = SymbolOf("task_mu_fc2", "mu");
   core.GetTs().Cfg().WriteTask(3, fc2);
 
-  TaskEntry out;
-  out.send_unit = SendUnit::kDte;
-  out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
-  out.reduce = true;
-  out.reduce_num = 1;
-  out.end = true;
-  out.exe_mask = true;
-  out.path_id = out_path;
-  out.task_pc = SymbolOf("task_dte_send_moe", "dte");
-  core.GetTs().Cfg().WriteTask(4, out);
+  // FC2 的结果拆成 kPieceNum 个 reduce 包出核，一包一项逐级 reduce 任务。
+  for (uint64_t k = 0; k < kPieceNum; ++k) {
+    TaskEntry out;
+    out.send_unit = SendUnit::kDte;
+    out.recv_unit = RecvUnit::kDsa;
+    out.task_type = TaskType::kReduce;
+    out.credit_en = true;
+    out.end = k + 1 == kPieceNum;
+    out.path_id = out_path;
+    out.task_pc =
+        SymbolOf(("task_dte_send_moe_p" + std::to_string(k)).c_str(), "dte");
+    core.GetTs().Cfg().WriteTask(4 + k, out);
+  }
 
-  core.GetTs().Cfg().WritePathMap(kInPath, 0);
+  core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(kInPath, 0);
 }
@@ -364,14 +403,17 @@ inline RouteEntry EnterAndSpread(uint64_t flow) {
 }
 
 // 归约那一条：本级收哪几路、算完往哪个方向发。结果不进任何 core，链尾那一份
-// 直接出 chip。
-inline RouteEntry ReduceHop(uint64_t in_mask, uint64_t flow, bool first) {
+// 直接出 chip。operation 按收几路编码；链尾那一级的下游不做归约，结果往下游发时
+// 不查下游 Reduce 资源。
+inline RouteEntry ReduceHop(uint64_t in_mask, uint64_t flow, bool first,
+                            bool last) {
   RouteEntry e;
   e.op_type = OpType::kReduce;
   e.flow_dir = flow;
   e.path_core_bypass = true;
   e.reduce_in_mask = in_mask;
   e.operation = first ? Operation::kReduce0 : Operation::kReduce1;
+  e.reduce_need = !last;
   e.reduce_data_type = kReduceFp32;
   e.reduce_outdata_type = kReduceFp32;
   return e;
@@ -459,16 +501,17 @@ inline void WireReduceChain(std::vector<Chip*> const& chips,
             << "第 " << i << " 跳的出口槽位上没有口";
         in_lane = DirOfPort(port);
         if (!PortSitsOnCompute(shape, port)) {
-          chips[chip]
-              ->GetCore(CoreOfPort(shape, port))
-              .GetRouter()
-              .Preload(path, PassThrough(FlowOf(OppositeOf(in_lane))));
+          Router& relay = chips[chip]->GetCore(CoreOfPort(shape, port)).GetRouter();
+          relay.Preload(path, PassThrough(FlowOf(OppositeOf(in_lane))));
+          // 下游还回来的 Reduce release 从对面那个口进来，原路转回 chip 口那一侧。
+          relay.SetCreditBypass(OppositeOf(in_lane), FlowOf(in_lane));
         }
       }
     }
 
     uint64_t flow = tail_flow;
     uint64_t out_port = kChipPortNum;
+    uint64_t out_dir = kDirNum;
     if (i + 1 < order.size()) {
       uint64_t next_chip = order[i + 1] / kCorePerChip;
       uint64_t next = order[i + 1] % kCorePerChip;
@@ -476,19 +519,22 @@ inline void WireReduceChain(std::vector<Chip*> const& chips,
         uint64_t d = DirBetween(self, next);
         ASSERT_NE(d, kDirNum) << "第 " << i << " 跳往下走的两个槽位不相邻";
         flow = FlowOf(d);
+        out_dir = d;
       } else {
         out_port = PortOfSlot(self);
         ASSERT_LT(out_port, kChipPortNum) << "第 " << i << " 跳的出口槽位上没有口";
         flow = FlowOf(DirOfPort(out_port));
+        out_dir = DirOfPort(out_port);
       }
     } else {
       out_port = PortOfSlot(self);
     }
     if (out_port < kChipPortNum && !PortSitsOnCompute(shape, out_port)) {
-      chips[chip]
-          ->GetCore(CoreOfPort(shape, out_port))
-          .GetRouter()
-          .Preload(path, PassThrough(FlowOf(DirOfPort(out_port))));
+      Router& relay = chips[chip]->GetCore(CoreOfPort(shape, out_port)).GetRouter();
+      relay.Preload(path, PassThrough(FlowOf(DirOfPort(out_port))));
+      // 下游还回来的 Reduce release 从 chip 口那一侧进来，原路转回本 chip 里面。
+      relay.SetCreditBypass(DirOfPort(out_port),
+                            FlowOf(OppositeOf(DirOfPort(out_port))));
     }
 
     uint64_t own_lane = in_lane == kDirMid ? 1 : 0;
@@ -496,10 +542,15 @@ inline void WireReduceChain(std::vector<Chip*> const& chips,
     uint64_t mask = 1ull << own_lane;
     if (in_lane != kDirNum) mask |= 1ull << in_lane;
 
-    RouteEntry e = ReduceHop(mask, flow, i == 0);
+    RouteEntry e = ReduceHop(mask, flow, i == 0, i + 1 == order.size());
     Core& core = chips[chip]->GetCore(CoreOfSlot(shape, self));
     core.GetRouter().Preload(path, e);
     core.GetDte().Tables().PreloadRtab(path, e);
+    if (i + 1 < order.size()) {
+      // 下游做完一笔还回来的 release 从往下游去的那个口进来，交给本级。
+      Router& rt = core.GetRouter();
+      rt.SetCreditBypass(out_dir, rt.Table().CreditBypass(out_dir) | kReleaseSelf);
+    }
   }
 }
 
@@ -511,8 +562,8 @@ inline void LoadKernels(Core& core) {
   core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
 }
 
-// 铺数据与运行期那两处资源：权重、topK 表、本组专家表、Share Mem 的初值，以及
-// 归约那一条要的用户上下文与 credit。配置表不在这里，由 bundle 装。
+// 铺数据：权重、topK 表、本组专家表与 Share Mem 的初值。配置表不在这里，由
+// bundle 装。
 inline void SetUpCoreData(Core& core, SpreadCase const& want, uint64_t shard,
                           uint64_t send_half = 0) {
   // 本组把结果送到 R core 的哪一半，boot 期写进 Share Mem。
@@ -532,13 +583,6 @@ inline void SetUpCoreData(Core& core, SpreadCase const& want, uint64_t shard,
     core.Mmem().Poke(kW2At + local * kBStride,
                      TameBf16(want.inter * want.out_n, want.w2_seed + off));
   }
-
-  // 归约那一条的两处占用：Router 里给这个用户开一个 ReduceModule 上下文，
-  // DTE 侧给它拨一份本级 Reduce credit。真机上这两样由建表那一步一起做。
-  core.GetRouter().AllocUser(kUserId);
-  // credit 按 flit 记，要够一整个 reduce 包。
-  core.GetDte().Tables().AllocReduceCredit(
-      kUserId, FlitsOf(kReduceSwHeaderBytes + want.out_n * 4) + 4);
 }
 
 // 手工配表那一档：kernel 与任务链自己写，数据自己铺。单元测试用这个。
@@ -626,7 +670,6 @@ inline MessagePtr MakeToken(SpreadCase const& want) {
   m->gpu_id = 2;
   m->token_id = 1;
   m->size = want.token.size();
-  m->compute = 1;
   m->stream_id = 0;
   m->task_id = 0;
   m->payload = want.token;
@@ -681,7 +724,7 @@ class SpreadHarness : public BachModule {
   void Step() override {
     // 结果还没出来就不必挨个问：判停要两件事同时成立，先看便宜的那件。
     bool all_empty = false;
-    if (!out_msgs.empty()) {
+    if (out_msgs.size() >= kPieceNum) {
       inflight.clear();
       all_empty = true;
       for (Chip* c : chips) {
@@ -721,9 +764,9 @@ class SpreadHarness : public BachModule {
     FlitView f = ReadFlit(out_stub.ToCore()->flit);
     if (f.valid && f.msg) out_msgs.push_back(f.msg);
 
-    // 结果收到、所有 core 的任务链都走空就停表。拍数上限只作兜底：卡住时要
-    // 停得下来，跑通时不必空转。
-    if ((!out_msgs.empty() && all_empty) || CycleNow() >= limit) {
+    // 结果的几包都收到、所有 core 的任务链都走空就停表。拍数上限只作兜底：卡
+    // 住时要停得下来，跑通时不必空转。
+    if ((out_msgs.size() >= kPieceNum && all_empty) || CycleNow() >= limit) {
       stopped_at = CycleNow();
       clk->Stop();
     }
@@ -787,16 +830,12 @@ inline void CheckResult(SpreadCase const& want,
   for (uint64_t g = 0; g < inflight.size(); ++g) {
     EXPECT_EQ(inflight[g], 0u) << "第 " << g << " 个 core 的任务链没走到头";
   }
-  ASSERT_FALSE(got.empty()) << "出口上一个包都没有";
-  MessagePtr result = got.front();
-  ASSERT_EQ(result->payload.size(),
-            kReduceSwHeaderBytes + want.out_bits.size() * 4);
+  ASSERT_EQ(got.size(), kPieceNum) << "出口上要收齐拆开的那几包";
+  std::vector<uint8_t> result = JoinPieces(got);
+  ASSERT_EQ(result.size(), want.out_bits.size() * 4);
   for (uint64_t j = 0; j < want.out_bits.size(); ++j) {
     uint32_t b = 0;
-    for (int t = 0; t < 4; ++t) {
-      b |= uint32_t(result->payload[kReduceSwHeaderBytes + j * 4 + t])
-           << (8 * t);
-    }
+    for (int t = 0; t < 4; ++t) b |= uint32_t(result[j * 4 + t]) << (8 * t);
     EXPECT_EQ(b, want.out_bits[j]) << "归约结果第 " << j << " 个";
   }
 }
@@ -810,9 +849,11 @@ struct BcastPlan {
   std::vector<uint64_t> out_port;
 };
 
-// 与 compiler/kernel/bach.h 的 RC_* 同源。
-constexpr uint64_t kRcHalfBytes = 0x6100;
+// 与 compiler/kernel/bach.h 的 RC_* 同源。一半装 kPieceNum 包，一包一格；到齐
+// 标志每包一项，硬件按落点除以格距找项，所以标志的格子大小配 kPieceStride。
+constexpr uint64_t kRcHalfBytes = kPieceNum * kPieceStride;
 constexpr uint64_t kRcFlagOff = 0x0000;
+constexpr uint64_t kRcFlagEntryBytes = kPieceStride;
 constexpr uint64_t kRcSumOff = 0x0000;
 
 // R core 的两条链。链二从 task 0 起，链一是单独配的 datain_task。
@@ -820,40 +861,34 @@ inline void WriteRcoreChains(Core& core, uint64_t out_path) {
   TaskEntry find;
   find.send_unit = SendUnit::kMu;
   find.recv_unit = RecvUnit::kRvOnly;
-  find.self_start = true;
-  find.exe_mask = true;
   find.task_pc = SymbolOf("task_rc_find", "mu");
   core.GetTs().Cfg().WriteTask(0, find);
 
   TaskEntry load;
   load.send_unit = SendUnit::kDte;
   load.recv_unit = RecvUnit::kDsa;
-  load.dsa_en = true;
-  load.exe_mask = true;
   load.task_pc = SymbolOf("task_dte_rc_load", "dte");
   core.GetTs().Cfg().WriteTask(1, load);
 
   TaskEntry add;
   add.send_unit = SendUnit::kVu;
   add.recv_unit = RecvUnit::kRvOnly;
-  add.exe_mask = true;
   add.task_pc = SymbolOf("task_vu_add", "vu");
   core.GetTs().Cfg().WriteTask(2, add);
 
   TaskEntry send;
   send.send_unit = SendUnit::kDte;
   send.recv_unit = RecvUnit::kDsa;
-  send.dsa_en = true;
   send.end = true;
-  send.exe_mask = true;
   send.path_id = out_path;
   send.task_pc = SymbolOf("task_dte_rc_send", "dte");
   core.GetTs().Cfg().WriteTask(3, send);
+  core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
 
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_rc_datain", "dte"),
                                      /*weights_mode=*/false);
-  core.GetTs().Cfg().SetCoreType(CoreType::kReduction);
-  // B core 与 R core 的 stream_num 配 16，自启动数因此也是 16（ts.md F84）。
+  core.GetTs().Cfg().SetSelfStart(true);
+  // B core 与 R core 的 stream_num 配 16，自启动数因此也是 16（ts.md F72）。
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
   core.GetTs().Cfg().SetInitFinish();
   core.GetTs().SelfStart();
@@ -885,37 +920,33 @@ inline void WriteBcoreChains(Core& core, uint64_t out_path, uint64_t dirs,
   TaskEntry wait;
   wait.send_unit = SendUnit::kVu;
   wait.recv_unit = RecvUnit::kRvOnly;
-  wait.self_start = true;
-  wait.exe_mask = true;
   wait.task_pc = SymbolOf("task_bc_wait", "vu");
   core.GetTs().Cfg().WriteTask(0, wait);
 
   TaskEntry send;
   send.send_unit = SendUnit::kDte;
   send.recv_unit = RecvUnit::kDsa;
-  send.dsa_en = true;
   send.end = next_path == 0;
-  send.exe_mask = true;
   send.credit_en = true;
   send.path_id = out_path;
   send.task_pc = SymbolOf("task_dte_bc_send", "dte");
   core.GetTs().Cfg().WriteTask(1, send);
+  core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
 
   if (next_path != 0) {
     TaskEntry relay;
     relay.send_unit = SendUnit::kDte;
     relay.recv_unit = RecvUnit::kDsa;
-    relay.dsa_en = true;
     relay.end = true;
-    relay.exe_mask = true;
     relay.path_id = next_path;
     relay.task_pc = SymbolOf("task_dte_bc_relay", "dte");
     core.GetTs().Cfg().WriteTask(2, relay);
+    core.GetTs().Cfg().WriteRouterTable(next_path, 0, next_path % kVcNum);
   }
 
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_bc_datain", "dte"),
                                      /*weights_mode=*/false);
-  core.GetTs().Cfg().SetCoreType(CoreType::kBroadcast);
+  core.GetTs().Cfg().SetSelfStart(true);
   core.GetTs().Cfg().SetBCoreDirection(dirs);
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
   core.GetTs().Cfg().SetInitFinish();

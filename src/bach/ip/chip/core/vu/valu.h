@@ -5,7 +5,7 @@
 //
 // 三个 VALU 共用一个 8 位编码空间，各自支持其中一部分：加减乘、最值与标量广播
 // 三个都有；MACC、除法、符号注入、比较生成 Mask、vfclass 与 vfmerge 只有 VALU0
-// 有；归约、Top-16 与 vfmv.f.s 只有 VALU1 有；vmv.v.v 只有 VALU2 有 —— 它是把
+// 有；归约、Top-16 与 vfmv.f.s 只有 VALU1 有；vmv.v.v 只有 VALU2 有。它是把
 // VALU2 当一级延迟对齐缓冲，补偿同一条宏指令内两条并行通路的级数差。
 //
 // 本 VALU 不支持的编码与未分配的编码一律按无操作处理，与 0x00 等效，不置异常。
@@ -276,7 +276,7 @@ class VuValu : public VuExeStage {
     return numeric::ClampNanInf(r);
   }
 
-  // 乘积与累加器都先各自算出来再合，不写成一句 —— 写成一句编译器会合成 FMA，
+  // 乘积与累加器都先各自算出来再合，不写成一句，因为写成一句编译器会合成 FMA，
   // 中间那一次舍入就没了，与硬件的位对不上。
   static float Macc(ValuOp op, float a, float b, float d) {
     float prod = a * b;

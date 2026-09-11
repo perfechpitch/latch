@@ -97,7 +97,7 @@ class OutCatcher : public BachModule {
 //
 // 但 credit 与 stream 表是 Xbar 的裸成员，只由它自己的 Step() 触碰；在别的模块
 // 的 Step() 里读它们是跨线程读非 atomic 容器，读数取决于两个协程谁先跑。那几样
-// 一律等 JoinAll 之后在主线程读 —— 那时所有协程都退出了。
+// 一律等 JoinAll 之后在主线程读，那时所有协程都退出了。
 class XbarProbe : public BachModule {
  public:
   XbarProbe(ClockPtr c, Xbar& target) : BachModule(c, "probe"), xb(target) {}
@@ -198,7 +198,7 @@ TEST(BachRouter, UnconfiguredPathIsNotDelivered) {
   EXPECT_EQ(got, 0u);
 }
 
-// A5：同一个 user 第二次发送，坑余额不变 —— 坑按 user 记，不按包记。
+// A5：同一个 user 第二次发送，坑余额不变，因为坑按 user 记，不按包记。
 TEST(BachRouter, SameUserTwiceKeepsOneStreamSlot) {
   uint64_t stream_used = 0, got = 0;
   {

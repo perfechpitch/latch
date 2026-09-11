@@ -63,7 +63,7 @@ class StationHarness : public BachModule {
   std::vector<uint64_t> dte_seq, dte_at;
   std::vector<MessagePtr> dte_msgs;
   std::vector<uint64_t> trig_users, trig_at;
-  std::vector<uint64_t> trig_compute;
+  std::vector<uint64_t> trig_path, trig_reissue;
   std::vector<uint64_t> station_at;
   MessagePtr station_msg;
 
@@ -79,7 +79,8 @@ class StationHarness : public BachModule {
     }
     if (cs.Trigger().Valid() && now >= ts_ready_from) {
       trig_users.push_back(cs.Trigger().user_id.Get());
-      trig_compute.push_back(cs.Trigger().compute.Get());
+      trig_path.push_back(cs.Trigger().path_id.Get());
+      trig_reissue.push_back(cs.Trigger().reissue.Get());
       trig_at.push_back(now);
     }
     FlitView f = ReadFlit(to_station->flit);
@@ -165,30 +166,33 @@ struct Bench {
 
 }  // namespace
 
-// compute 位原样转给 TS，Router 自己不解释它。
-TEST(BachCoreStation, ComputeBitReachesTsUntouched) {
-  std::vector<uint64_t> comps, users;
+// path_id 与 reissue 位原样转给 TS，Router 自己不解释它们。
+TEST(BachCoreStation, PathAndReissueReachTsUntouched) {
+  std::vector<uint64_t> paths, reissues, users;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     StationHarness h(clk, *b.cs, b.in_wire, b.out_wire);
     auto m0 = MakeMsg(11, 3);
-    m0->compute = 1;
-    auto m1 = MakeMsg(12, 3);
-    m1->compute = 0;
+    m0->reissue = 1;
+    auto m1 = MakeMsg(12, 5);
+    m1->reissue = 0;
     h.in_jobs = {{1, m0, true, true, 0}, {6, m1, true, true, 0}};
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
-    comps = h.trig_compute;
+    paths = h.trig_path;
+    reissues = h.trig_reissue;
     users = h.trig_users;
   }
   RT::Reset();
-  ASSERT_GE(comps.size(), 2u);
+  ASSERT_GE(users.size(), 2u);
   EXPECT_EQ(users[0], 11u);
-  EXPECT_EQ(comps[0], 1u);
+  EXPECT_EQ(paths[0], 3u);
+  EXPECT_EQ(reissues[0], 1u);
   EXPECT_EQ(users[1], 12u);
-  EXPECT_EQ(comps[1], 0u);
+  EXPECT_EQ(paths[1], 5u);
+  EXPECT_EQ(reissues[1], 0u);
 }
 
 // TS 入口占满时这一笔原地保持，不发下一笔：丢一笔 trigger 就等于丢一个 token。

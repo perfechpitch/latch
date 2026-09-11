@@ -1,34 +1,32 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_TS_TASK_DONE_
 #define _LATCH_BACH_IP_CHIP_CORE_TS_TASK_DONE_
 
-// task_done：七路完成事件合流。
+// task_done：七路完成事件合流，对应详细设计的 Task Done Module。
 //
-// 六路是 DTE、MU、VU 各自的 RV core ack 与 DSA ack，第七路是 Router 的 Reduce
+// 六路是 DTE、MU、VU 各自的 RV core ACK 与 DSA ACK，第七路是 Router 的 Reduce
 // Done。七路都是脉冲，这里永远就绪、不向上游反压：完成事件在硬件里没有重发通路，
 // 接收方一旦拒收就等于把那个 stream 永远停在当前 task。
 //
-// 哪一路才算数由当前任务的 task_recv 定：
-//   只调 RV core                RV core 收尾
-//   调了 DSA、RV core 不等它     DSA 收尾
-//   两者都要                     等二者都完成
+// 哪几路才算完成由 TASK_RECV_UNIT 定：00 只要 RV core 的 ACK；01 要同一个执行
+// 单元的 RV core 与 DSA 两路 ACK 都到，先到的一半按 {执行单元, stream, task} 记
+// 下，另一半到了才算。逐级 reduce 任务只认 Router 的 Reduce Done：Router 只带
+// user_id，按它找到那个 stream，完成的就是它的当前任务；同一个用户同时最多一笔
+// reduce 在做。本地的 ACK 对 reduce 任务只算搬完，不改状态。
 //
-// Reduce 任务的完成拆成两半，这是最容易实现错的一条：DTE ack 只代表搬运完成，
-// 执行 consume_only、不修改 stream 状态；只有 Router Reduce Done 才有权把 Reduce
-// 任务置 FINISH。两个事件可以任意顺序到达。
+// 完成的是当前任务就置 FINISH；是还没走到的后面某项，比如异步 datain 提前完成，
+// 只点亮 done_bitmap 那一位。
 //
-// reduce_num = N 时两半各有 N 笔，按包一一配对：包头带 reduce_seq（0～N−1），
-// DTE 发出时打上，Router 的 Reduce Done 原样带回。两张 N 位位图各按 reduce_seq
-// 置位，只有低 N 位都满才置 FINISH。这样第 k 笔的 Router Done 只与第 k 笔的
-// DTE ack 配对，不会出现两边总数凑够、实际却漏了某一笔的情况。
+// 两类 ACK 直接丢掉：权重加载期间的全部完成事件，以及自启动 core 上 Bypass
+// datain 带保留身份 SID 15 / TID 63 回来的 ACK。
 //
-// datain 任务的完成只点亮 done_bitmap 对应位，不推进 task_id：它的执行时刻就是
-// 数据到达时刻，与主线走到哪无关。
+// PID 更新任务：RV core 的 ACK 带回新 PID，这一笔完成时写进表项，等紧邻后继继承。
+// 自启动 core：Task 0 的 RV core ACK 带回用户号，这时补进表项。
 
-#include <array>
 #include <deque>
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/log.h"
 #include "bach/ip/chip/core/router/reduce_module.h"
@@ -74,6 +72,7 @@ class TaskDone : public BachModule {
   }
 
   uint64_t Finished() const { return finished.Get(); }
+  // 两路 ACK 配齐的次数。
   uint64_t Paired() const { return paired.Get(); }
 
   bool Quiescent() const override { return q.empty(); }
@@ -101,44 +100,41 @@ class TaskDone : public BachModule {
 
  private:
   struct Event {
+    uint64_t unit = 0;  // 0 DTE、1 MU、2 VU
     uint64_t stream_id = 0;
     uint64_t task_id = 0;
-    uint64_t reduce_seq = 0;
     bool from_dsa = false;
     bool from_router = false;
-    // 自启动 core 的 RV core 带回来的用户号。建表那一刻表项里没有，软件认出
-    // 这一笔属于哪个用户之后随完成一起回来。
-    bool has_user = false;
     uint64_t user_id = 0;
+    uint64_t pid = 0;
   };
-  // 每个 stream 一份 reduce 配对状态。只由这个模块读写。
-  struct ReducePend {
-    uint64_t dte_ack_map = 0;
-    uint64_t router_done_map = 0;
+  // 两路 ACK 配对时先到的那一半。RV core 那一半带着用户号与 PID。
+  struct Half {
+    bool core = false, dsa = false;
+    uint64_t user_id = 0, pid = 0;
   };
 
   void Collect() {
     for (uint64_t u = 0; u < 3; ++u) {
       if (rv_done[u]->Valid()) {
-        q.push_back({rv_done[u]->stream_id.Get(), rv_done[u]->task_id.Get(),
-                     rv_done[u]->reduce_seq.Get(), false, false, true,
-                     rv_done[u]->user_id.Get()});
+        q.push_back({u, rv_done[u]->stream_id.Get(), rv_done[u]->task_id.Get(),
+                     false, false, rv_done[u]->user_id.Get(),
+                     rv_done[u]->pid.Get()});
       }
       if (dsa_done[u]->Valid()) {
-        q.push_back({dsa_done[u]->stream_id.Get(), dsa_done[u]->task_id.Get(),
-                     dsa_done[u]->reduce_seq.Get(), true, false});
+        q.push_back({u, dsa_done[u]->stream_id.Get(),
+                     dsa_done[u]->task_id.Get(), true, false, 0, 0});
       }
     }
-    // Router 不携带 stream_id，按 user_id 找对应 Stream。
+    // Router 不携带 stream_id，按 user_id 找对应 Stream，完成的是它的当前任务。
     if (rdc_done->Valid()) {
       uint64_t user = rdc_done->user_id.Get();
-      uint64_t seq = rdc_done->reduce_seq.Get();
       StreamSnapshotPtr s = snap->Get();
       if (s) {
         for (uint64_t i = 0; i < kStreamNum; ++i) {
-          if (s->entry[i].valid && s->entry[i].user_id_vld &&
-              s->entry[i].user_id == user) {
-            q.push_back({i, s->entry[i].task_id, seq, false, true});
+          StreamEntry const& e = s->entry[i];
+          if (e.valid && e.user_id_vld && e.user_id == user) {
+            q.push_back({0, i, e.task_id, false, true, user, 0});
             break;
           }
         }
@@ -151,61 +147,51 @@ class TaskDone : public BachModule {
     if (!s || q.empty()) return;
     Event e = q.front();
     q.pop_front();
+    if (cfg.WeightsMode()) return;
+    if (cfg.SelfStartCore() && e.stream_id == kBypassSid &&
+        e.task_id == kBypassTid) {
+      return;
+    }
+    if (e.stream_id >= kStreamNum || e.task_id >= kTaskChainNum) return;
     StreamEntry const& st = s->entry[e.stream_id];
     if (!st.valid) return;
 
     TaskEntry const& t = cfg.Task(e.task_id);
+    if (t.IsReduce()) {
+      // 本地 ACK 只算搬完，Router 的 Reduce Done 才算做完。
+      if (e.from_router) Complete(e, st, true);
+      return;
+    }
+    if (e.from_router) return;
+    if (t.recv_unit == RecvUnit::kRvOnly) {
+      if (!e.from_dsa) Complete(e, st, false);
+      return;
+    }
+    // 01：同一个执行单元的两路都要到。
+    uint64_t key = (e.unit * kStreamNum + e.stream_id) * kTaskChainNum +
+                   e.task_id;
+    Half& h = halves[key];
+    if (e.from_dsa) {
+      h.dsa = true;
+    } else {
+      h.core = true;
+      h.user_id = e.user_id;
+      h.pid = e.pid;
+    }
+    if (!(h.core && h.dsa)) return;
+    Event done = e;
+    done.from_dsa = false;
+    done.user_id = h.user_id;
+    done.pid = h.pid;
+    halves.erase(key);
+    ++pair_pending;
+    Complete(done, st, false);
+  }
+
+  void Complete(Event const& e, StreamEntry const& st, bool give_rmem) {
     auto w = std::make_shared<StreamWrite>();
     w->valid = true;
     w->stream_id = e.stream_id;
-
-    // datain 任务：只点亮 done_bitmap，不推进 task_id。
-    if (t.IsDataIn()) {
-      w->set_done_bit = true;
-      w->done_bit = e.task_id;
-      completion->Drive(w);
-      pending = true;
-      return;
-    }
-
-    // Reduce 任务：两半按 reduce_seq 逐位配对。
-    if (t.reduce) {
-      ReducePend& p = pend[e.stream_id];
-      uint64_t n = t.reduce_num == 0 ? 1 : t.reduce_num;
-      if (e.from_router) {
-        p.router_done_map |= 1ull << e.reduce_seq;
-      } else {
-        // DTE ack 只代表搬运完成，consume_only，不改 stream 状态。
-        p.dte_ack_map |= 1ull << e.reduce_seq;
-      }
-      uint64_t full = n >= 64 ? ~0ull : ((1ull << n) - 1);
-      if ((p.dte_ack_map & full) != full ||
-          (p.router_done_map & full) != full) {
-        return;  // 还没配齐，先到的那个照常置位、不必等
-      }
-      p = ReducePend{};  // 提交时清零
-      ++pair_pending;
-      w->set_done_bit = true;
-      w->done_bit = e.task_id;
-      w->set_fsm = true;
-      w->fsm = TaskFsm::kFinish;
-      w->fsm_if_current = true;
-      w->from_task_id = e.task_id;
-      completion->Drive(w);
-      pending = true;
-      ++finish_pending;
-      return;
-    }
-
-    // 普通任务：按 task_recv 判哪一路算数。
-    if (!Counts(t.recv_unit, e.from_dsa, e.stream_id, e.task_id)) return;
-
-    // 自启动 core：建表那一刻没有用户信息，RV core 认出这一笔属于哪个用户之后
-    // 随完成带回来，这一路走 completion 写口补进表项，不另设专用写口。
-    if (e.has_user && !st.user_id_vld) {
-      w->set_user_id = true;
-      w->user_id = e.user_id;
-    }
     w->set_done_bit = true;
     w->done_bit = e.task_id;
     w->set_fsm = true;
@@ -213,34 +199,33 @@ class TaskDone : public BachModule {
     // 只有这一笔的 task_id 等于该 stream 当前的 task_id 时才改 task_fsm。
     w->fsm_if_current = true;
     w->from_task_id = e.task_id;
+    w->give_rmem = give_rmem;
+    // 自启动 core：Task 0 的 RV core ACK 带回用户号，走 completion 写口补进表项。
+    if (!e.from_router && !e.from_dsa && !st.user_id_vld) {
+      w->set_user_id = true;
+      w->user_id = e.user_id;
+    }
+    // PID 更新任务：当前任务完成时写进带回的新 PID。
+    TaskEntry const& t = cfg.Task(e.task_id);
+    if (t.task_type == TaskType::kPidUpdate && !e.from_router &&
+        e.task_id == st.task_id) {
+      w->set_pid = true;
+      w->pid = e.pid;
+    }
     completion->Drive(w);
     pending = true;
     ++finish_pending;
   }
 
-  // 两者都要上报时等二者都到。用一张小表记「这一笔已经收到过哪一边」。
-  bool Counts(RecvUnit recv, bool from_dsa, uint64_t stream, uint64_t task) {
-    if (recv == RecvUnit::kRvOnly) return !from_dsa;
-    if (recv == RecvUnit::kDsa) return from_dsa;
-    // kDteDsaRmem：两边都要。
-    uint64_t key = stream * kTaskChainNum + task;
-    uint32_t& seen = both[key];
-    seen |= from_dsa ? 2u : 1u;
-    if (seen != 3u) return false;
-    both.erase(key);
-    return true;
-  }
-
   CfgReg& cfg;
-  std::vector<std::shared_ptr<DonePort>> rv_done, dsa_done;
-  std::shared_ptr<ReduceDonePort> rdc_done;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<StreamWritePortIf> completion;
+  std::shared_ptr<ReduceDonePort> rdc_done;
+  std::vector<std::shared_ptr<DonePort>> rv_done, dsa_done;
 
   // Step 独占。
   std::deque<Event> q;
-  std::array<ReducePend, kStreamNum> pend{};
-  std::map<uint64_t, uint32_t> both;
+  std::map<uint64_t, Half> halves;
   bool pending = false;
   uint64_t finish_pending = 0, pair_pending = 0;
 

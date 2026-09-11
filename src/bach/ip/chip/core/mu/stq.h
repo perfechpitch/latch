@@ -6,7 +6,7 @@
 // 队列深 16；Core Mem 写带宽 256 B（接口 1 KB），不足 1 KB 按实际传输并标记
 // mask；写延迟 16（待定）。
 //
-// Wr concat buffer 1～2 KB：各 lane 的 buffer 深度不同，取决于物理距离 —— 最远
+// Wr concat buffer 1～2 KB：各 lane 的 buffer 深度不同，取决于物理距离，最远
 // 16 拍、最近 1 拍，越近 buffer 越大，最大深度 16。
 //
 // Store concat 按 vlane 分两种拼装：
@@ -91,7 +91,7 @@ class MuStq : public BachModule {
     }
     Entry e = q.front();
     q.pop_front();
-    // 不足 1 KB 按实际传输并标记 mask —— 这里就是按实际长度发。
+    // 不足 1 KB 按实际传输并标记 mask。这里就是按实际长度发。
     auto data = std::make_shared<ByteBlock>(e.bytes);
     port->Write(e.addr, data);
     ++store_pending;

@@ -43,8 +43,6 @@ struct InjectItem {
   // 进了阵列之后按它走：每一跳的 Router 拿它查自己的 RouterTable。dst 只管到
   // 第一颗 chip 的边缘口为止。
   uint64_t path_id = 0;
-  // 这一份数据要不要算。取自软件 payload 的一位，Router 解析包头时原样转给 TS。
-  bool compute = true;
   uint64_t bytes = kTokenBytes;
   std::vector<uint8_t> payload;  // 空表示这一轮不关心内容
 };
@@ -163,7 +161,6 @@ class InStub : public BachModule {
     m->token_id = it.token_id;
     m->dst = it.dst;
     m->path_id = it.path_id;
-    m->compute = it.compute ? 1 : 0;
     m->size = it.bytes;
     m->user_id = it.token_id;
     m->seq = hdr_cnt[it.gpu_id]++;

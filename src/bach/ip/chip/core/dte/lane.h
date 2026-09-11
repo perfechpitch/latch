@@ -8,7 +8,7 @@
 //
 // 通道之间可以乱序执行：某个 VC 阻塞只堵住对应的那个出核通道，别的通道照发。
 // 通道内顺序执行：TaskQueue 按序激活。同一通道内读写两半的状态彼此独立，一侧的
-// Active Context 释放后就能激活下一个任务，不等另一侧 —— issue_done 就允许提前
+// Active Context 释放后就能激活下一个任务，不等另一侧：issue_done 就允许提前
 // 激活下一任务，不必等全部 drain。
 //
 // 读这一半允许领先写那一半，领先量由三件事共同约束：中间 Buffer 的可用 Credit、
@@ -103,7 +103,7 @@ class Lane : public BachModule {
  protected:
   void Step() override {
     // MM → CM 那一档一拍里两侧都用存储：RD 侧读 Matrix Mem，WR 侧写 Core Mem。
-    // 谁都不许替对方调 IdleReq —— 同线程同拍两次写 Latch 不触发断言，盖掉的请
+    // 谁都不许替对方调 IdleReq：同线程同拍两次写 Latch 不触发断言，盖掉的请
     // 求是静默丢的。所以两块存储各记各的，本拍末尾只把没人用的那一个置闲。
     cmem_used = false;
     mmem_used = false;
@@ -236,6 +236,7 @@ class Lane : public BachModule {
       ctx[h].issue_done = false;
       ctx[h].drained = false;
       ctx[h].filled = 0;
+      ctx[h].sent_first = false;
       q[h].Pop();
     }
   }
@@ -338,7 +339,9 @@ class Lane : public BachModule {
     if (Outbound() && c.desc.route != Route::kMmToCm) {
       // 出核：发给 Router。这一档的出口是 Router TX。
       if (!to_router->Ready()) return;
-      to_router->Drive(b.bytes, b.last, b.last, c.desc.vc, b.msg);
+      // thdr 标这一包的首拍，tlast 标末拍：Router 那一侧按这两个认帧边界。
+      to_router->Drive(b.bytes, b.last, !c.sent_first, c.desc.vc, b.msg);
+      c.sent_first = true;
       router_used = true;
       buffer.Pop(idx);
       ++move_pending;

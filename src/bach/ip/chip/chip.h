@@ -132,7 +132,7 @@ class Chip : public BachModule {
   // ── 对外：四个 C2C 口 ──
   //
   // 两片对接就是把一侧的 TakeOut() 喂给另一侧的 PushIn()。C2C 上传的是段与
-  // release，不是 flit —— 位宽转换与拆包合包在桥里做完了。
+  // release，不是 flit。位宽转换与拆包合包在桥里做完了。
   C2cBridge& Port(uint64_t d) { return *bridges.at(d); }
 
   ScpStub& Scp() { return *scp; }

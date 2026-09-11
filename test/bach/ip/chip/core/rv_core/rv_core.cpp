@@ -46,7 +46,7 @@ bool KernelBuilt(std::string const& kind) {
 
 // 扮演 Share Mem / Core Mem / Router 包头口：一律收得下，隔几拍回响应。
 //
-// 现在 RV core 真的会往这几个口上发请求了 —— 没有从端时 req_ready 一直是 0，
+// 现在 RV core 真的会往这几个口上发请求了。没有从端时 req_ready 一直是 0，
 // 请求发不出去，gpr 的就绪位也就永远立不起来，核会停在那条指令上。
 class MemStub : public BachModule {
  public:
@@ -198,9 +198,9 @@ TEST(BachRvCore, RunsOneTaskAndReportsDone) {
   EXPECT_GT(insts, 0u);       // 真的跑了指令
 }
 
-// 配了 DSA 的 task：RV core 配完寄存器就交还自己，不向 TS 报完成 —— 这一笔的
-// 完成由 DSA 报。
-TEST(BachRvCore, DsaTaskYieldsWithoutReportingToTs) {
+// 配了 DSA 的 task：RV core 配完寄存器照样向 TS 报一次完成，DSA 做完另报一次，
+// TS 两路都收到才算这一笔做完。
+TEST(BachRvCore, DsaTaskStillReportsItsOwnDone) {
   if (!KernelBuilt("dte")) GTEST_SKIP() << "kernel 还没编";
   uint64_t dones = 0, started = 0, dsa_writes = 0;
   {
@@ -225,7 +225,7 @@ TEST(BachRvCore, DsaTaskYieldsWithoutReportingToTs) {
   RT::Reset();
   EXPECT_EQ(started, 1u);     // 起了这一个 task
   EXPECT_GT(dsa_writes, 0u);  // 真的配了 DSA 寄存器
-  EXPECT_EQ(dones, 0u);       // 没向 TS 报完成
+  EXPECT_EQ(dones, 1u);       // RV core 这一路报了一次
 }
 
 // 每条指令 1 拍：跑完一个 task 花的拍数不少于它的指令数。

@@ -16,6 +16,10 @@
 DIR_MID, DIR_LEFT, DIR_RIGHT, DIR_NUM = 0, 1, 2, 4
 FLOW_MID, FLOW_LEFT, FLOW_RIGHT = 1, 2, 4
 FLOW_REDUCE1, FLOW_REDUCE2 = 8, 16
+# VC 数，与模型的 kVcNum 同源。
+VC_NUM = 4
+# Release 静态路由的出方向掩码：低三位与 flow 同位，这一位交给本级
+RELEASE_SELF = 8
 
 # chip 的四个对外口
 CHIP_N, CHIP_E, CHIP_W, CHIP_S, CHIP_PORT_NUM = 0, 1, 2, 3, 4
@@ -27,7 +31,7 @@ SHAPE_MIDDLE, SHAPE_FIRST, SHAPE_LAST = 0, 1, 2
 COLS = 4
 CORE_PER_CHIP = 8
 
-# Operation：0 转发、1 Reduce0、2 Reduce1、3 Reduce2
+# Operation：0 转发、1 reduce0 单流、2 reduce1 两流、3 reduce2 三流（Router MAS）
 OP_FORWARD, OP_REDUCE0, OP_REDUCE1 = 0, 1, 2
 # OpType：1 transfer、2 reduce
 OPTYPE_TRANSFER, OPTYPE_REDUCE = 1, 2
@@ -115,7 +119,7 @@ class Entry:
                  mask_idx=0, need_buffer=False, stream_table_enable=False,
                  credit_type=0, credit_require=0, reduce_in_mask=0,
                  reduce_data_type=0, reduce_outdata_type=0, stall_way=False,
-                 ext_dst=0):
+                 ext_dst=0, reduce_need=False):
         self.flow_dir = flow_dir
         self.vc = vc
         self.operation = operation
@@ -132,10 +136,12 @@ class Entry:
         self.reduce_outdata_type = reduce_outdata_type
         self.stall_way = stall_way
         self.ext_dst = ext_dst
+        self.reduce_need = reduce_need
 
 
-# 表项里的 VC 一律留 0：一笔从哪个 VC 出核由 DTE 按 path_id 挑，路由表的
-# nxt_vc 是给转发那一跳改写包头用的，这几条 path 上不改。
+# 表项里的 VC 一律留 0：一笔从哪个 VC 出核由 TS 的 ROUTER_TABLE 随 DTE 任务给出
+# （见 Plan.ts_routes），路由表的 nxt_vc 是给转发那一跳改写包头用的，这几条 path
+# 上不改。
 def enter_and_spread(path_id, flow):
     """广播那一条：落进本 core，再按 flow 往下游复制。"""
     return Entry(flow_dir=flow, bypass=False)
@@ -146,11 +152,16 @@ def pass_through(path_id, flow):
     return Entry(flow_dir=flow, bypass=True)
 
 
-def reduce_hop(path_id, in_mask, flow, first):
-    """归约那一条：本级收哪几路、算完往哪个方向发。结果不进任何 core。"""
+def reduce_hop(path_id, in_mask, flow, first, last):
+    """归约那一条：本级收哪几路、算完往哪个方向发。结果不进任何 core。
+
+    operation 按收几路编码：链首只收本 core 那一份，其余收两份。链尾那一级的下游
+    不做归约，结果往下游发时不查下游 Reduce 资源。
+    """
     return Entry(flow_dir=flow, op_type=OPTYPE_REDUCE,
                  bypass=True, reduce_in_mask=in_mask,
                  operation=OP_REDUCE0 if first else OP_REDUCE1,
+                 reduce_need=not last,
                  reduce_data_type=REDUCE_FP32, reduce_outdata_type=REDUCE_FP32)
 
 
@@ -168,11 +179,24 @@ class Fabric:
         # DTE 里那份 RouterTable 副本只在出核那几笔要查的 path 上配，内容与
         # Router 那份相同，这里只记哪几条要。
         self.dte = {}
+        # Release 静态路由（RTR_RELEASE_ROUTE）：从某个口进来的业务 credit
+        # release 转去哪几个方向、交不交给本级。
+        # {(chip, 片内 core 号): {入口方向: 出方向掩码}}
+        self.release_route = {}
 
     def put(self, chip, core, path_id, entry, dte=False):
         self.entries.setdefault((chip, core), {})[path_id] = entry
         if dte:
             self.dte.setdefault((chip, core), set()).add(path_id)
+
+    def put_release_route(self, chip, core, in_dir, out_mask):
+        """一个口一份静态掩码，不分 path：两条 path 要的方向不一样就配不出来。"""
+        table = self.release_route.setdefault((chip, core), {})
+        old = table.get(in_dir, out_mask)
+        if old != out_mask:
+            raise ValueError(f"chip {chip} core {core} 方向 {in_dir} 的 Release"
+                             f"路由对不上：{old} 与 {out_mask}")
+        table[in_dir] = out_mask
 
     def put_slot(self, chip, slot, path_id, entry, dte=False):
         self.put(chip, core_of_slot(self.shapes[chip], slot), path_id, entry,
@@ -242,9 +266,14 @@ def wire_reduce_chain(fab, order, tail_flow, path_id=OUT_PATH):
                     fab.put(chip, core_of_port(shape, port), path_id,
                             pass_through(path_id,
                                          flow_of(opposite_of(in_lane))))
+                    # 下游还回来的 Reduce release 从对面那个口进来，原路转回
+                    # chip 口那一侧。
+                    fab.put_release_route(chip, core_of_port(shape, port),
+                                   opposite_of(in_lane), flow_of(in_lane))
 
         flow = tail_flow
         out_port = CHIP_PORT_NUM
+        out_dir = DIR_NUM
         if i + 1 < len(order):
             next_chip = order[i + 1] // CORE_PER_CHIP
             nxt = order[i + 1] % CORE_PER_CHIP
@@ -253,16 +282,23 @@ def wire_reduce_chain(fab, order, tail_flow, path_id=OUT_PATH):
                 if d == DIR_NUM:
                     raise ValueError(f"归约链第 {i} 跳往下走的两个槽位不相邻")
                 flow = flow_of(d)
+                out_dir = d
             else:
                 out_port = port_of_slot(self_slot)
                 if out_port == CHIP_PORT_NUM:
                     raise ValueError(f"归约链第 {i} 跳的出口槽位上没有口")
                 flow = flow_of(dir_of_port(out_port))
+                out_dir = dir_of_port(out_port)
         else:
             out_port = port_of_slot(self_slot)
         if out_port < CHIP_PORT_NUM and not port_sits_on_compute(shape, out_port):
             fab.put(chip, core_of_port(shape, out_port), path_id,
                     pass_through(path_id, flow_of(dir_of_port(out_port))))
+            # 下游还回来的 Reduce release 从 chip 口那一侧进来，原路转回本 chip
+            # 里面。
+            fab.put_release_route(chip, core_of_port(shape, out_port),
+                           dir_of_port(out_port),
+                           flow_of(opposite_of(dir_of_port(out_port))))
 
         own_lane = 1 if in_lane == DIR_MID else 0
         if own_lane == 1:
@@ -271,7 +307,12 @@ def wire_reduce_chain(fab, order, tail_flow, path_id=OUT_PATH):
         if in_lane != DIR_NUM:
             mask |= 1 << in_lane
         fab.put_slot(chip, self_slot, path_id,
-                     reduce_hop(path_id, mask, flow, i == 0), dte=True)
+                     reduce_hop(path_id, mask, flow, i == 0,
+                                i + 1 == len(order)), dte=True)
+        if i + 1 < len(order):
+            # 下游做完一笔还回来的 release 从往下游去的那个口进来，交给本级。
+            fab.put_release_route(chip, core_of_slot(shape, self_slot), out_dir,
+                                  RELEASE_SELF)
 
 
 def wire_bcore_broadcast(fab, chip, enter_port, out_ports=()):
@@ -314,69 +355,77 @@ def wire_bcore_broadcast(fab, chip, enter_port, out_ports=()):
 
 
 class ChainItem:
-    """任务链上的一笔，字段与模型的 TaskEntry 一一对应。
+    """任务链上的一笔，字段与 TASK_CHAIN_xx_PC / ATTR 一一对应。
 
     `sym` 是这一笔在 kernel 里的函数，(镜像, 函数名)；入口地址由上层查符号表填。
+    `recv_unit` 取 "RV_ONLY"（只收 RV core 的 ACK）或 "DSA"（RV core 与 DSA 两路
+    都收）。`task_type` 取 bachir.TASK_TYPE_NAME 里的一档。
     """
 
-    def __init__(self, idx, unit, recv_unit, sym, path_id=0, self_start=False,
-                 wait_wake=False, reduce=False, credit_en=False, end=False,
-                 exe_mask=True, dsa_en=False, reduce_num=0, exe_dest=0):
+    def __init__(self, idx, unit, recv_unit, sym, path_id=0, wait_wake=False,
+                 task_type="NORMAL", p2p_reissue_tid=0, credit_en=False,
+                 end=False):
         self.idx = idx
         self.unit = unit
         self.recv_unit = recv_unit
         self.sym = sym
         self.path_id = path_id
-        self.self_start = self_start
         self.wait_wake = wait_wake
-        self.broadcast_reissue = False
-        self.p2p_reissue = False
-        self.reduce = reduce
+        self.task_type = task_type
+        self.p2p_reissue_tid = p2p_reissue_tid
         self.credit_en = credit_en
         self.end = end
-        self.exe_mask = exe_mask
-        self.dsa_en = dsa_en
-        self.reduce_num = reduce_num
-        self.exe_dest = exe_dest
         self.task_pc = 0
 
 
+# FC2 的结果拆成几个 reduce 包出核，与 kernel/bach.h 的 MOE_PIECE_NUM 同源。
+REDUCE_PIECES = 3
+
+
 def compute_chain(out_path):
-    """计算 core 的五笔：EPTP-NN 那一段。"""
-    return [
+    """计算 core 的任务链：EPTP-NN 那一段。
+
+    token 进核那一项是搬入任务，标 wait_wake，Router 送来的 PID 按它匹配。
+    FC2 在一个 task 里按 reduce 包分段发几笔 MU，每笔都报一次完成，所以与 FC1、
+    FC3 一样收 RV core 那一路。结果拆成 REDUCE_PIECES 个 reduce 包出核，一包一项
+    逐级 reduce 任务，由 Router 报完成；同一个用户同时最多一笔 reduce 在做，所以
+    一项做完才轮到下一项。"""
+    items = [
         ChainItem(0, "DTE", "DSA", ("dte", "task_dte_user_init"),
-                  path_id=IN_PATH, dsa_en=True),
+                  path_id=IN_PATH, wait_wake=True),
         ChainItem(1, "MU", "RV_ONLY", ("mu", "task_mu_fc13")),
         ChainItem(2, "VU", "RV_ONLY", ("vu", "task_vu_gate")),
-        ChainItem(3, "MU", "DSA", ("mu", "task_mu_fc2"), dsa_en=True),
-        ChainItem(4, "DTE", "DSA", ("dte", "task_dte_send_moe"),
-                  path_id=out_path, dsa_en=True, reduce=True, reduce_num=1,
-                  end=True),
+        ChainItem(3, "MU", "RV_ONLY", ("mu", "task_mu_fc2")),
     ]
+    for k in range(REDUCE_PIECES):
+        items.append(ChainItem(4 + k, "DTE", "DSA",
+                               ("dte", f"task_dte_send_moe_p{k}"),
+                               path_id=out_path, task_type="REDUCE",
+                               credit_en=True, end=k + 1 == REDUCE_PIECES))
+    return items
 
 
 def bcore_chain(out_path, next_path=0):
     """B core 的链二：等一格、广播出去，前五组还要往下一组转一笔。"""
     items = [
-        ChainItem(0, "VU", "RV_ONLY", ("vu", "task_bc_wait"), self_start=True),
+        ChainItem(0, "VU", "RV_ONLY", ("vu", "task_bc_wait")),
         ChainItem(1, "DTE", "DSA", ("dte", "task_dte_bc_send"),
-                  path_id=out_path, dsa_en=True, credit_en=True,
-                  end=next_path == 0),
+                  path_id=out_path, credit_en=True, end=next_path == 0),
     ]
     if next_path:
         items.append(ChainItem(2, "DTE", "DSA", ("dte", "task_dte_bc_relay"),
-                               path_id=next_path, dsa_en=True, end=True))
+                               path_id=next_path, end=True))
     return items
 
 
 def rcore_chain(out_path):
     """R core 的链二：扫标志表、搬进 Core Mem、两笔求和、送下一组。"""
     return [
-        ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find"), self_start=True),
-        ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_load"), dsa_en=True),
+        ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find")),
+        ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_load")),
         ChainItem(2, "VU", "RV_ONLY", ("vu", "task_vu_add")),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_rc_send"),
-                  path_id=out_path, dsa_en=True, end=True),
+                  path_id=out_path, end=True),
     ]
 
 
@@ -413,6 +462,7 @@ class Plan:
         self.entries = {}
         self.dte_rtab = {}
         self.path_task = {}
+        self.release_route = {}   # {(chip, core): {入口方向: 出方向掩码}}
         self.chains = {}
         self.role = {}
         self.datain = {}          # {(chip, core): (镜像, 函数名)}
@@ -420,6 +470,31 @@ class Plan:
         self.bcast_dirs = {}
         self.stream_num = 1
         self.name = ""
+
+    def self_start(self, key):
+        """B core 与 R core 是自启动模式：Task 0 不等 Router trigger 就启动。"""
+        return self.role.get(key) in ("BROADCAST", "REDUCTION")
+
+    def ts_routes(self):
+        """TS 的 ROUTER_TABLE：每个配了任务链的 core，按它用到的 PID 各一项
+        {pid: (TASK_DIR, TASK_VCID)}。方向取自这个 core 上那条 path 的路由表项，
+        bit0 上下（mid）、bit1 左、bit2 右、bit3 进本 core；VCID 沿用出核按
+        path_id 对 VC 数取模的挑法。"""
+        out = {}
+        for key, items in self.chains.items():
+            table = self.entries.get(key, {})
+            pids = {it.path_id for it in items} | set(self.path_task.get(key, {}))
+            one = {}
+            for pid in sorted(pids):
+                e = table.get(pid)
+                d = 0
+                if e is not None:
+                    d = e.flow_dir & (FLOW_MID | FLOW_LEFT | FLOW_RIGHT)
+                    if not e.path_core_bypass:
+                        d |= 8
+                one[pid] = (d, pid % VC_NUM)
+            out[key] = one
+        return out
 
 
 def cores_of(shape):
@@ -466,6 +541,7 @@ def build_plan(desc):
                           int(one.get("path", OUT_PATH)))
     plan.entries = fab.entries
     plan.dte_rtab = fab.dte
+    plan.release_route = fab.release_route
 
     for chip, shape in enumerate(shapes):
         for core, role in sorted(cores_of(shape).items()):
@@ -618,6 +694,7 @@ def build_lpu_plan(desc):
                        R_PATH[g % 2])
     plan.entries = fab.entries
     plan.dte_rtab = fab.dte
+    plan.release_route = fab.release_route
 
     # 第一列每颗 chip 的 core0 与最后一列每颗的 core9 在构造期就是 B core 与
     # R core，但一个组只用得上一对：只有本组左上角那颗与本组最后那颗配任务链，

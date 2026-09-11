@@ -218,50 +218,15 @@ TEST(BachDteCommit, RouterSideGoesFirstWhenBothCompete) {
   EXPECT_EQ(users[1], 52u);
 }
 
-// 出核任务先在 PendingTaskQ 等 credit，够了才来申请那三样。
-TEST(BachDteCommit, OutboundWaitsForReduceCredit) {
-  uint64_t admitted_without = 0, admitted_with = 0;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    // 这条 path 要做归约，本级的 Reduce credit 一个都没有。
-    b.hmem->PreloadRtab(9, Reduce(kFlowRight));
-    CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, true, Outbound(52, 9, 1024)}};
-    clk->Continue(40 * kPeriod);
-    RT::JoinAll();
-    admitted_without = h.admits.size();
-  }
-  RT::Reset();
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.hmem->PreloadRtab(9, Reduce(kFlowRight));
-    // 1024 B 是四个 flit，给足四个 credit。
-    b.hmem->AllocReduceCredit(52, 4);
-    CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, true, Outbound(52, 9, 1024)}};
-    clk->Continue(40 * kPeriod);
-    RT::JoinAll();
-    admitted_with = h.admits.size();
-  }
-  RT::Reset();
-  EXPECT_EQ(admitted_without, 0u) << "credit 不够就在 PendingTaskQ 里等";
-  EXPECT_EQ(admitted_with, 1u) << "够了才放行";
-}
-
-// Reduce credit 要够整包，不够就整笔等着，不发一半。
-TEST(BachDteCommit, ReduceCreditMustCoverTheWholePacket) {
+// Reduce 包与其他出核包一样只看 VC credit：本级 Rmem 资源由 TS 在下发前申请，
+// DTE 这一侧不另记 credit。
+TEST(BachDteCommit, ReducePacketNeedsOnlyVcCredit) {
   uint64_t admitted = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.hmem->PreloadRtab(9, Reduce(kFlowRight));
-    // 四个 flit 的包只给三个 credit。
-    b.hmem->AllocReduceCredit(52, 3);
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
     h.jobs = {{2, true, Outbound(52, 9, 1024)}};
     clk->Continue(40 * kPeriod);
@@ -269,7 +234,7 @@ TEST(BachDteCommit, ReduceCreditMustCoverTheWholePacket) {
     admitted = h.admits.size();
   }
   RT::Reset();
-  EXPECT_EQ(admitted, 0u) << "差一个也不发";
+  EXPECT_EQ(admitted, 1u) << "VC 通路收得下就放行";
 }
 
 // PendingTaskQ 满了只反压出核这条链，进核那一路照走。
@@ -280,7 +245,11 @@ TEST(BachDteCommit, FullPendingQueueOnlyStallsOutbound) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.hmem->PreloadRtab(7, Forward(kFlowRight));
-    b.hmem->PreloadRtab(9, Reduce(kFlowRight));  // 没 credit，一直堵着
+    b.hmem->PreloadRtab(9, Forward(kFlowRight));
+    // 往右那条 VC 通路一个空位都没有：电平口不驱，读出来全是 0，出核那几笔一直
+    // 堵在 PendingTaskQ。
+    auto level = std::make_shared<CreditLevelPort>(clk);
+    b.commit->AttachVcLevel(level);
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
     // 先把 PendingTaskQ 灌满。
     for (uint64_t i = 0; i < kPendingTaskQDepth + 2; ++i) {

@@ -4,7 +4,7 @@
 // VU 的宏指令、静态配置与微指令。
 //
 // VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好整张计算图的通路。
-// 一条由两半组成 —— 8 组静态配置模板之一定各执行单元的连接与 op，12 个动态参数
+// 一条由两半组成：8 组静态配置模板之一定各执行单元的连接与 op，12 个动态参数
 // 寄存器定地址、索引、VL / 精度 / 舍入。写 macro_inst_trigger 就把当时的动态
 // 参数锁成一份快照，与静态配置的指针打包压进 ISQ。
 //
@@ -85,7 +85,7 @@ constexpr uint64_t kVuStatusIsqFull = 1u << 1;
 constexpr uint64_t kVuStatusIsqEmpty = 1u << 2;
 constexpr uint64_t kVuStatusErrorFlag = 1u << 3;
 
-// error_code 位域。没有 ILLEGAL_OPCODE 这一位 —— 未分配与不支持的编码按无操作
+// error_code 位域。没有 ILLEGAL_OPCODE 这一位：未分配与不支持的编码按无操作
 // 处理，不置任何异常。
 constexpr uint64_t kVuErrUnimplReg = 1u << 0;   // 访问了未实现的寄存器地址
 constexpr uint64_t kVuErrCfg = 1u << 2;         // 静态配置非法

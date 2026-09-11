@@ -35,7 +35,7 @@ def sigmoid(x):
 def silu(values):
     """SwiGLU 的门控：x × sigmoid(x)。
 
-    VSFU 先算出 sigmoid，VALU 再乘回 x —— 两级各自舍入一次，不合成一步。
+    VSFU 先算出 sigmoid，VALU 再乘回 x，两级各自舍入一次，不合成一步。
     """
     return [n.f32(x * sigmoid(x)) for x in values]
 
@@ -43,7 +43,7 @@ def silu(values):
 def gemm(dtype, token, weight, scale, k, count_n, out_bf16):
     """MU 的一条原语：一个 1×K 的 token 乘一个 K×N 的权重块。
 
-    权重按列存，一列 K 个元素连着。块内先把乘积加完再乘 scale，块间顺序加 ——
+    权重按列存，一列 K 个元素连着。块内先把乘积加完再乘 scale，块间顺序加，
     与硬件的 CSA 树同一个顺序。乘积先逐个算出来再加，不合成积和融合：那样少一
     次舍入，与硬件先乘后加差一个 bit。
     """

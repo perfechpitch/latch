@@ -6,7 +6,7 @@
 // head_ptr 与 tail_ptr 环形推进：建表推 tail，退休推 head。
 //
 // 六个写口按固定优先级仲裁，每口一拍一笔，请求保持到 accepted 才算生效。优先级
-// 由高到低是 retirement、completion、install、issue、credit_wake、create —— 让
+// 由高到低是 retirement、completion、install、issue、credit_wake、create，让
 // 表项先腾空再填新的，回收类排在生成类前面，create 排最后，队头卡住时不会因为
 // 新用户不断插队而饿死。
 //
@@ -64,9 +64,8 @@ class StreamTable : public BachModule {
       e.valid = true;
       e.user_id_vld = false;
       e.task_id = 0;
-      e.task_fsm = TaskFsm::kReady;
-      e.compute = true;
       ApplyTaskAttr(e, task0);
+      e.task_fsm = InitFsmOf(task0);
     }
     tail_ptr = n;
     snap_port->Drive(MakeSnapshot());
@@ -81,19 +80,6 @@ class StreamTable : public BachModule {
   uint64_t InFlight() const { return in_flight.Get(); }
   uint64_t Writes() const { return writes.Get(); }
   uint64_t Conflicts() const { return conflicts.Get(); }
-
-  // 把 task_chain 的一项摊进表项里。每次更新 task_id 时索引 task_chain 得到，
-  // 随 task_id 一起被覆盖。
-  static void ApplyTaskAttr(StreamEntry& e, TaskEntry const& t) {
-    e.task_unit = t.send_unit;
-    e.task_recv = t.recv_unit;
-    e.task_dsa_en = t.dsa_en;
-    e.task_pc = t.task_pc;
-    e.task_path_id = t.path_id;
-    e.is_reissue = t.IsReissue();
-    e.end = t.end;
-    e.reduce_num = t.reduce ? t.reduce_num : 0;
-  }
 
   bool Quiescent() const override {
     for (uint64_t i = 0; i < kStreamNum; ++i) {
@@ -168,9 +154,20 @@ class StreamTable : public BachModule {
     }
     if (w.set_reissue) e.reissue = true;
     if (w.clear_reissue) e.reissue = false;
+    if (w.take_rmem) e.rmem_busy = true;
+    if (w.give_rmem) e.rmem_busy = false;
+    if (w.set_pid) {
+      e.task_path_id = w.pid;
+      e.pid_pending = true;
+    }
+    if (w.done_mask != 0) {
+      // 跳过的几项并进完成位；含当前任务的，当前任务同时算做完。
+      e.done_bitmap |= w.done_mask;
+      if ((w.done_mask >> e.task_id) & 1u) e.task_fsm = TaskFsm::kFinish;
+    }
     if (w.set_fsm) {
       // completion 口写两样，但改 task_fsm 有条件：只有这一笔的 task_id 等于该
-      // stream 当前的 task_id 时才改。异步 datain 提前完成落在这个分支上 ——
+      // stream 当前的 task_id 时才改。异步 datain 提前完成落在这个分支上：
       // 只亮一位，不动状态机。
       if (!w.fsm_if_current || w.from_task_id == e.task_id) {
         e.task_fsm = w.fsm;

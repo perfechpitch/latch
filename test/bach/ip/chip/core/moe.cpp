@@ -8,6 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <array>
 
 #include <cmath>
@@ -642,10 +644,12 @@ namespace {
 //
 // 摆放与 compiler/kernel/bach.h 的 MOE_* 同源，改一处要一起改。
 constexpr uint64_t kChainTopkAt = 0x3000;
-// 出核那个包在 Core Mem 里的起点。最前面 16 B 是软件辅助信息，Router 做加法时
-// 跳过这一段，MU 的结果因此写在它之后。
+// 出核那几包在 Core Mem 里的起点。结果拆成 kChainPieceNum 包，一包一格，格首
+// 16 B 是软件辅助信息，Router 做加法时跳过这一段，MU 的结果因此写在它之后。
 constexpr uint64_t kChainSendAt = 0x9800;
-constexpr uint64_t kChainOutAt = kChainSendAt + kReduceSwHeaderBytes;
+constexpr uint64_t kChainPieceData = 8192;
+constexpr uint64_t kChainPieceStride = 0x2080;
+constexpr uint64_t kChainPieceNum = 3;
 constexpr uint64_t kChainW1At = 0x000000;
 constexpr uint64_t kChainW3At = 0x600000;
 constexpr uint64_t kChainW2At = 0xC00000;
@@ -669,51 +673,44 @@ bool KernelBuilt() {
   return f.good();
 }
 
-// EPTP-NN 的五步。第 2 步与第 3 步各在一个 task 里发几笔 DSA 任务，每笔都会报
-// 一次完成，报几次会让 TS 把任务链推过头，所以这两步收 RV core 那一路的完成。
+// EPTP-NN 的五步。FC1 与 FC3、门控、FC2 三步各在一个 task 里发几笔 DSA 任务，每
+// 笔都会报一次完成，报几次会让 TS 把任务链推过头，所以这三步收 RV core 那一路的
+// 完成。
 void WriteMoeChain(Core& core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = 3;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init", "dte");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry fc13;
   fc13.send_unit = SendUnit::kMu;
   fc13.recv_unit = RecvUnit::kRvOnly;
-  fc13.exe_mask = true;
   fc13.task_pc = SymbolOf("task_mu_fc13", "mu");
   core.GetTs().Cfg().WriteTask(1, fc13);
 
   TaskEntry gate;
   gate.send_unit = SendUnit::kVu;
   gate.recv_unit = RecvUnit::kRvOnly;
-  gate.exe_mask = true;
   gate.task_pc = SymbolOf("task_vu_gate", "vu");
   core.GetTs().Cfg().WriteTask(2, gate);
 
   TaskEntry fc2;
   fc2.send_unit = SendUnit::kMu;
-  fc2.recv_unit = RecvUnit::kDsa;
-  fc2.dsa_en = true;
-  fc2.exe_mask = true;
+  fc2.recv_unit = RecvUnit::kRvOnly;
   fc2.task_pc = SymbolOf("task_mu_fc2", "mu");
   core.GetTs().Cfg().WriteTask(3, fc2);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = 0;
   out.task_pc = SymbolOf("task_dte_send_moe", "dte");
   core.GetTs().Cfg().WriteTask(4, out);
 
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -848,7 +845,6 @@ TEST(BachMoe, FiveStepChainMatchesReference) {
     token->path_id = 3;
     token->user_id = 77;
     token->size = want.token.size();
-    token->compute = 1;
     token->stream_id = 0;
     token->task_id = 0;
     token->payload = want.token;
@@ -862,16 +858,22 @@ TEST(BachMoe, FiveStepChainMatchesReference) {
     dte_dones = harness.dte_dones;
     mu_dones = harness.mu_dones;
     vu_dones = harness.vu_dones;
-    landed = core.Cmem().Peek(kChainOutAt, want.out_n * 4);
+    for (uint64_t k = 0; k < kChainPieceNum; ++k) {
+      std::vector<uint8_t> b = core.Cmem().Peek(
+          kChainSendAt + k * kChainPieceStride + kReduceSwHeaderBytes,
+          kChainPieceData);
+      landed.insert(landed.end(), b.begin(), b.end());
+    }
   }
   RT::FlushRecorder();
   RT::Reset();
 
   EXPECT_EQ(head, tail) << "任务链没走到头，这个用户没退休";
-  // 五步各自发了几笔 DSA 任务：进核与出核各一笔，FC1 与 FC3 两笔加 FC2 一笔，
-  // 门控每个专家三条宏指令。
+  // 五步各自报了几次 DSA 完成：进核与出核各一次（出核拆成几包，这条路不归约，
+  // 只有最后一包带 task_last），FC1 与 FC3 两笔加 FC2 按包分成的几笔，门控每个
+  // 专家三条宏指令。
   EXPECT_EQ(dte_dones, 2u);
-  EXPECT_EQ(mu_dones, 3u);
+  EXPECT_EQ(mu_dones, 2u + kChainPieceNum);
   EXPECT_EQ(vu_dones, 3u * want.experts);
   // 先看留在 Core Mem 里的那一份：出核那一步之前算完的就是它。
   ASSERT_EQ(landed.size(), want.out_bits.size() * 4);
@@ -880,16 +882,22 @@ TEST(BachMoe, FiveStepChainMatchesReference) {
     for (int t = 0; t < 4; ++t) b |= uint32_t(landed[j * 4 + t]) << (8 * t);
     EXPECT_EQ(b, want.out_bits[j]) << "Core Mem 里第 " << j << " 个结果";
   }
-  ASSERT_FALSE(got.empty()) << "出口上一个包都没有";
-  MessagePtr result = got.front();
-  ASSERT_EQ(result->payload.size(),
-            kReduceSwHeaderBytes + want.out_bits.size() * 4);
+  // 出口上收到的几包按落点排好拼回一整份，每包跳过格首的 16 B 头。
+  ASSERT_EQ(got.size(), kChainPieceNum) << "出口上要收齐拆开的那几包";
+  std::sort(got.begin(), got.end(),
+            [](MessagePtr const& a, MessagePtr const& b) {
+              return a->dst_addr < b->dst_addr;
+            });
+  std::vector<uint8_t> result;
+  for (MessagePtr const& m : got) {
+    ASSERT_EQ(m->payload.size(), kReduceSwHeaderBytes + kChainPieceData);
+    result.insert(result.end(), m->payload.begin() + kReduceSwHeaderBytes,
+                  m->payload.end());
+  }
+  ASSERT_EQ(result.size(), want.out_bits.size() * 4);
   for (uint64_t j = 0; j < want.out_bits.size(); ++j) {
     uint32_t b = 0;
-    for (int t = 0; t < 4; ++t) {
-      b |= uint32_t(result->payload[kReduceSwHeaderBytes + j * 4 + t])
-           << (8 * t);
-    }
+    for (int t = 0; t < 4; ++t) b |= uint32_t(result[j * 4 + t]) << (8 * t);
     EXPECT_EQ(b, want.out_bits[j]) << "出核那一份第 " << j << " 个结果";
   }
 }

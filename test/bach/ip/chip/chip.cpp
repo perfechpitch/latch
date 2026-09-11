@@ -63,7 +63,7 @@ TEST(BachChip, ShapeAndRoles) {
 
 TEST(BachChip, SpareCoreIsRouterOnly) {
   // 不派角色的 core 只构造 Router 的八个模块，不构造 TS、RV core、DSA 与三块
-  // 存储。它的 Ready 恒为真 —— 没有 RV core 要等。
+  // 存储。它的 Ready 恒为真，因为没有 RV core 要等。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   ChipCfg cfg;
@@ -99,7 +99,7 @@ TEST(BachCore, PortsAreRouterOnly) {
 
 TEST(BachCore, WiringIsByPortsNotOrder) {
   // 模块之间只通过端口相连：两侧只看到端口束的字段，不持有对方的类型。这里
-  // 验证接线的结果 —— 同一根线两端拿到的是同一个对象。
+  // 验证接线的结果：同一根线两端拿到的是同一个对象。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   CoreContext ctx;
@@ -268,7 +268,7 @@ TEST(BachC2c, CreditIsPrivateThenShared) {
 }
 
 TEST(BachC2c, TxSplitsAtSegmentBoundary) {
-  // 按 4 KB 边界拆分，加 4 位 seq_id 与 tail 标记，位宽 2048 转 1024 —— 一段
+  // 按 4 KB 边界拆分，加 4 位 seq_id 与 tail 标记，位宽 2048 转 1024，一段
   // 占两拍。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
@@ -383,7 +383,7 @@ class C2cSink : public BachModule {
 
 TEST(BachC2c, TwoBridgesPassThroughUnchanged) {
   // 只做透明传输：左侧收到的包默认发到右侧，Bridge 不做路由判断。包在 TX 那边
-  // 按 4 KB 拆、位宽减半，在 RX 那边按 seq_id 拼回来 —— 出来的还是原来那一个。
+  // 按 4 KB 拆、位宽减半，在 RX 那边按 seq_id 拼回来，出来的还是原来那一个。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   C2cCfg cfg;
@@ -466,7 +466,7 @@ TEST(BachChip, SpareCoreTakesNoRole) {
 }
 
 // 同向的数据与 credit release 之间仲裁，小包优先：release 是最小的那种。
-// 用业务层那一类来验 —— VC 那一类是 flit 粒度，跨 C2C 要先攒成包粒度。
+// 用业务层那一类来验，因为VC 那一类是 flit 粒度，跨 C2C 要先攒成包粒度。
 TEST(BachC2c, ReleaseGoesBeforeData) {
   bool first_is_release = false;
   {
@@ -611,7 +611,7 @@ class CoreDriver : public BachModule {
 
 TEST(BachCore, IdleCyclesDoNotClash) {
   // core 内近百个模块每拍都在驱动自己的端口。任何一处两个模块写同一根线，
-  // Latch 当场断言 —— 空转本身就是一条判据，接线错了跑不过去。
+  // Latch 当场断言。空转本身就是一条判据，接线错了跑不过去。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   CoreContext ctx;
@@ -720,7 +720,6 @@ MessagePtr ChipToken(uint64_t path, uint64_t user, uint64_t bytes) {
   m->path_id = path;
   m->user_id = user;
   m->size = bytes;
-  m->compute = 1;
   m->stream_id = 0;
   m->task_id = 0;
   m->payload.resize(bytes);
@@ -735,25 +734,22 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = in_path;
+  in.wait_wake = true;
   in.task_pc = ChipSymbolOf("task_dte_user_init", "dte");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = out_path;
   out.task_pc = ChipSymbolOf("task_dte_move", "dte");
   core.GetTs().Cfg().WriteTask(1, out);
 
-  core.GetTs().Cfg().WritePathMap(in_path, 0);
+  core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().Cfg().SetInitFinish();
-  // DTE 那一份 path_task_map 与 TS 配成一样：进核搬运报完成时按它填 task_id。
+  // DTE 的 path_task_map：进核搬运报完成时按它填 task_id。
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
 

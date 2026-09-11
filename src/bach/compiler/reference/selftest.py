@@ -67,7 +67,7 @@ def check_bounds():
 
 
 def check_accum_order():
-    """顺序换一个，结果就该不一样 —— 不然逐 bit 比对根本没在比顺序。"""
+    """顺序换一个，结果就该不一样，不然逐 bit 比对根本没在比顺序。"""
     # 1 加三个 2^-24：顺序加时每一个都被舍掉，两两先加则凑出一个 2^-23 留下。
     one, tiny = n.float_of(0x3F800000), n.float_of(0x33800000)
     vals = [one, tiny, tiny, tiny]

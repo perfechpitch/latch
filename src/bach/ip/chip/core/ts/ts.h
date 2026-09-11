@@ -48,8 +48,8 @@ class Ts {
                                              gid, setting.tick);
     task_ctrl = std::make_unique<TaskCtrl>(clock, "task_ctrl", *cfg, gid,
                                            setting.tick);
-    dte_arb = std::make_unique<DteArb>(clock, "dte_arb", *user_match, gid,
-                                       setting.tick);
+    dte_arb = std::make_unique<DteArb>(clock, "dte_arb", *user_match, *cfg,
+                                       gid, setting.tick);
     mu_arb = std::make_unique<UnitArb>(clock, "mu_arb", SendUnit::kMu,
                                        gid, setting.tick);
     vu_arb = std::make_unique<UnitArb>(clock, "vu_arb", SendUnit::kVu,

@@ -15,7 +15,7 @@ NM := $(CROSS)nm
 ARCH := -march=rv32im_zicsr -mabi=ilp32
 # -fno-pic：裸机上没有装载器也没有 GOT，`la` 要展开成 auipc + addi 的绝对
 # 寻址。默认的 PIC 会让它去 GOT 取值，而 GOT 落在 DTCM 里、装载时没进去，
-# 取出来的是 0 —— 栈指针成了 0，一用栈就访问到 0xFFFFFFFC。
+# 取出来的是 0，栈指针成了 0，一用栈就访问到 0xFFFFFFFC。
 CFLAGS := $(ARCH) -Os -g0 -nostdlib -nostartfiles -ffreestanding \
           -fno-builtin -fno-pic -Wall -Wextra -I.
 LDFLAGS := -T link.ld

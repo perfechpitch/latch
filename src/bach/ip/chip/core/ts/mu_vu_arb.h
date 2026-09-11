@@ -56,6 +56,7 @@ class UnitArb : public BachModule {
         w->set_fsm = true;
         w->fsm = TaskFsm::kInfly;
         infly = w;
+        infly_fresh = true;
       } else {
         DriveIssue();
         issued = issue_pending;
@@ -69,11 +70,16 @@ class UnitArb : public BachModule {
   }
 
  private:
+  // 一笔回写只驱一次，之后保持不动直到表收下：表按序号认它，每拍重驱会换一个
+  // 序号，被当成新的一笔再执行一遍。
   void DriveIssue() {
-    if (infly) {
-      issue->Drive(infly);
-    } else {
+    if (!infly) {
       issue->Idle();
+      return;
+    }
+    if (infly_fresh) {
+      issue->Drive(infly);
+      infly_fresh = false;
     }
   }
 
@@ -101,8 +107,8 @@ class UnitArb : public BachModule {
       // 刚发出去的那一笔，表里的 READY → INFLY 还没落下来：写口一拍、快照一
       // 拍，这两拍里快照上它仍是 READY。不挡住的话同一个 task 会被下发两次。
       if (i == issued_stream && e.task_id == issued_task) continue;
-      cmd->Drive(e.task_pc, i, e.task_id, e.user_id,
-                 e.task_path_id, e.task_dsa_en, ++cmd_seq);
+      cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
+                 e.task_recv == RecvUnit::kDsa, ++cmd_seq);
       holding = true;
       hold_stream = i;
       hold_task = e.task_id;
@@ -118,6 +124,7 @@ class UnitArb : public BachModule {
 
   // 还没被表收下的那一笔状态回写。
   std::shared_ptr<StreamWrite> infly;
+  bool infly_fresh = false;
   bool holding = false;
   uint64_t hold_stream = 0, hold_task = 0, cmd_seq = 0;
   // 刚发出、表里还没变成 INFLY 的那一笔。

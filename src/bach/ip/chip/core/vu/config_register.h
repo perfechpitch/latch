@@ -4,7 +4,7 @@
 // M1 · config_register 写与 trigger。
 //
 // 8 组静态配置模板加 12 个动态参数寄存器。macro_inst_trigger 是唯一的启动
-// 寄存器，写一次执行一次 —— 两次写之间没有其他配置也启动两次，所以不能按
+// 寄存器，写一次执行一次：两次写之间没有其他配置也启动两次，所以不能按
 // 「值变了才算一次」去认，得按写事务本身认。
 //
 // 静态配置的改写规则：目标组正被未完成的宏指令引用时，把这次配置写阻塞在配置
@@ -127,7 +127,7 @@ class VuConfigRegister : public BachModule {
     if (!rdata_used) rdata->Idle();
     // 端口的驱动集中在这里。Serve 里写 trigger 的那一拍才刚把 pending 立起来，
     // 若在 Drain 那一步驱动，这一条就一拍也没出现在端口上，下一拍的 Drain 又会
-    // 把它当成「已发出且被收走」清掉 —— 宏指令会静默丢掉。
+    // 把它当成「已发出且被收走」清掉，宏指令会静默丢掉。
     Publish();
 
     triggers = trigger_cnt;

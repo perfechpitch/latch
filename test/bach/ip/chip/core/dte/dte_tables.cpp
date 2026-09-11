@@ -64,24 +64,6 @@ TEST(BachDteHmem, FastLutHitAndMiss) {
   RT::Reset();
 }
 
-// 本级 Reduce credit 按用户记：够整包才发，发完扣，ReduceModule 那边释放一个补
-// 回来一个。
-TEST(BachDteHmem, ReduceCreditIsPerUser) {
-  ClockPtr clk = MakeClock(0, kPeriod);
-  Hmem h(clk, "hmem", 0, false);
-
-  h.AllocReduceCredit(41, 4);
-  EXPECT_EQ(h.ReduceCredit(41), 4u);
-  EXPECT_EQ(h.ReduceCredit(42), 0u) << "没分过的用户没有 credit";
-  EXPECT_TRUE(h.ReduceCreditEnough(41, 4));
-  EXPECT_FALSE(h.ReduceCreditEnough(41, 5)) << "差一个也不算够";
-  h.TakeReduceCredit(41, 3);
-  EXPECT_EQ(h.ReduceCredit(41), 1u);
-  h.ReturnReduceCredit(41);
-  EXPECT_EQ(h.ReduceCredit(41), 2u);
-  RT::Reset();
-}
-
 // stream_cache 只跟随不分配：按 Router 送回来的 release 记账，方向各记各的。
 TEST(BachDteHmem, StreamCacheOnlyFollows) {
   ClockPtr clk = MakeClock(0, kPeriod);

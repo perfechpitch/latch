@@ -5,15 +5,20 @@
 //
 // 候选是 valid=1 且 task_fsm=READY 且 task_unit=DTE 的 stream。
 //
-// Reissue 任务优先级最高，从 head_ptr 选最老的 Reissue；没有 Reissue 时，DataIn
-// 与普通 Generated 按相对 head_ptr 的 Stream 年龄比较，较老者优先，同一 Stream
-// 时优先选 Generated。
+// DataIn 与普通 Generated 全部按相对 head_ptr 的 Stream 年龄比较，较老者优先；
+// 同一 Stream 上两者都在时优先选 Generated。自启动 core 上 Bypass 那一路 datain
+// 不占 stream 表项，按队头的年龄算。
 //
 // 选中后非抢占保持：锁定任务上下文，命令与相关字段保持稳定，直到对应 RV core
 // 返回 raw ACCEPT。
 //
 // 收到 ACCEPT 后，Generated 任务向 Stream_table 提交 READY → INFLY；DataIn 任务
 // 只通知 DataIn_task_table 出槽，不改 stream_table 里的当前任务状态。
+//
+// reduce 任务收到 ACCEPT 后的那一笔回写同时占掉这个用户本级 Rmem 的 credit，
+// Rmem 做完报回来才还。
+//
+// 命令里带 VCID：按当前任务的 PID 查 ROUTER_TABLE 得到，DTE 出核用它选 VC。
 //
 // 重发 task 不在用户主线任务链上，可与用户任务链并行执行。
 
@@ -32,9 +37,10 @@ namespace bach {
 class DteArb : public BachModule {
  public:
   DteArb(ClockPtr clock, const std::string& name, UserMatch& matcher,
-         uint64_t parent = 0, bool tick = true)
+         CfgReg& reg, uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         um(matcher),
+        cfg(reg),
         cmd(std::make_shared<TaskCmdPort>(clock)),
         snap(std::make_shared<SnapshotPort>(clock)),
         issue(std::make_shared<StreamWritePortIf>(clock)),
@@ -87,17 +93,8 @@ class DteArb : public BachModule {
         issued_stream = kStreamNum;
       }
     }
-    // 先找最老的 Reissue。
-    for (uint64_t k = 0; k < kStreamNum; ++k) {
-      uint64_t i = s->AgeOrder(k);
-      StreamEntry const& e = s->entry[i];
-      if (!Candidate(i, e)) continue;
-      if (!e.is_reissue) continue;
-      Lock(i, e);
-      return;
-    }
-    // 没有 Reissue 时，DataIn 与普通 Generated 按相对 head_ptr 的 Stream 年龄
-    // 比较，较老者优先；同一个 Stream 上两者都在时优先选 Generated。
+    // DataIn 与普通 Generated 按相对 head_ptr 的 Stream 年龄比较，较老者优先；
+    // 同一个 Stream 上两者都在时优先选 Generated。
     //
     // 把 DataIn 一律排在所有 Generated 之后是不行的：主线上只要一直有就绪的
     // Generated，那一格 DataIn 就发不出去，而它占着 DataIn_task_table 唯一的
@@ -105,7 +102,9 @@ class DteArb : public BachModule {
     DatainHold const& h = um.Hold();
     uint64_t datain_age = kStreamNum;
     if (h.valid) {
-      datain_age = (h.stream_id + kStreamNum - s->head_ptr) % kStreamNum;
+      datain_age = h.task_id == kBypassTid
+                       ? 0
+                       : (h.stream_id + kStreamNum - s->head_ptr) % kStreamNum;
     }
     for (uint64_t k = 0; k < kStreamNum; ++k) {
       uint64_t i = s->AgeOrder(k);
@@ -137,12 +136,14 @@ class DteArb : public BachModule {
   }
 
   void Lock(uint64_t i, StreamEntry const& e) {
-    cmd->Drive(e.task_pc, i, e.task_id, e.user_id,
-               e.task_path_id, e.task_dsa_en, ++cmd_seq);
+    cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
+               e.task_recv == RecvUnit::kDsa, ++cmd_seq,
+               cfg.Route(e.task_path_id).vcid);
     holding = true;
     hold_stream = i;
     hold_task = e.task_id;
     hold_datain = false;
+    hold_reduce = e.task_type == TaskType::kReduce;
   }
 
   void LockDatain(DatainHold const& h) {
@@ -152,6 +153,7 @@ class DteArb : public BachModule {
     hold_stream = h.stream_id;
     hold_task = h.task_id;
     hold_datain = true;
+    hold_reduce = false;
   }
 
   void Accept() {
@@ -170,25 +172,35 @@ class DteArb : public BachModule {
     w->stream_id = hold_stream;
     w->set_fsm = true;
     w->fsm = TaskFsm::kInfly;
+    w->take_rmem = hold_reduce;
     infly = w;
+    infly_fresh = true;
   }
 
+  // 一笔回写只驱一次，之后保持不动直到表收下：Latch 留着上一拍的值，表按序号
+  // 认它。每拍重驱会换一个序号，表就当成新的一笔再执行一遍，占 credit、已发
+  // 笔数加一这类写会被执行两次。
   void DriveIssue() {
-    if (infly) {
-      issue->Drive(infly);
-    } else {
+    if (!infly) {
       issue->Idle();
+      return;
+    }
+    if (infly_fresh) {
+      issue->Drive(infly);
+      infly_fresh = false;
     }
   }
 
   UserMatch& um;
+  CfgReg& cfg;
   std::shared_ptr<TaskCmdPort> cmd;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<StreamWritePortIf> issue;
 
   // 还没被表收下的那一笔状态回写。
   std::shared_ptr<StreamWrite> infly;
-  bool holding = false, hold_datain = false;
+  bool infly_fresh = false;
+  bool holding = false, hold_datain = false, hold_reduce = false;
   uint64_t hold_stream = 0, hold_task = 0;
   // 刚发出、表里还没变成 INFLY 的那一笔。
   uint64_t issued_stream = kStreamNum, issued_task = 0;

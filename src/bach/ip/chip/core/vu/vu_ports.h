@@ -4,7 +4,7 @@
 // VU 内部的端口束。
 //
 // 宏指令与微指令都用 LogicPtr 整包搬，不把字段摊平：一条宏指令带 12 个动态
-// 参数与一整组静态配置，摊平成几十根 Logic64 既不好读，也不像硬件 —— 硬件上
+// 参数与一整组静态配置，摊平成几十根 Logic64 既不好读，也不像硬件。硬件上
 // 这些位是随微指令一起走级间 latch 的。
 //
 // 每个端口每拍必须 Drive 或 Idle 二选一：Logic64 一拍只能写一次，一拍不写会
@@ -84,7 +84,7 @@ class VuUopsPort : public Logic {
 // 这里取写回值。硬件上这是级间 latch 上的一组线，不是一块可寻址的存储。
 struct VuFlow {
   VuUops uops;
-  // 各执行单元的输出。SEXE 三次迭代各占一格 —— DMUX 的六个 SRF 写口是逐次
+  // 各执行单元的输出。SEXE 三次迭代各占一格：DMUX 的六个 SRF 写口是逐次
   // 迭代各写一个的，挤在一格里会把前一次的结果覆盖掉。
   VuOperand lu, su_in;
   std::array<VuOperand, 3> valu;

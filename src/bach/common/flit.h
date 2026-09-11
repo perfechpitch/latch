@@ -121,6 +121,16 @@ class ReleasePort : public Logic {
     reduce_valid = reduce_rel ? 1 : 0;
     reduce_user = reduce_u;
   }
+  // 同一根回线上 VC 那一类与 Reduce 那一类由不同的模块写：各写各的那几项，
+  // 不碰另一类。
+  void DriveVc(bool vc_rel, uint64_t vc) {
+    vc_valid = vc_rel ? 1 : 0;
+    vc_id = vc;
+  }
+  void DriveReduce(bool reduce_rel, uint64_t reduce_u) {
+    reduce_valid = reduce_rel ? 1 : 0;
+    reduce_user = reduce_u;
+  }
 };
 
 struct ReleaseView {

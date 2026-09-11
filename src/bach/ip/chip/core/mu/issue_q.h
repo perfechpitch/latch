@@ -32,7 +32,7 @@ enum class MuStage : uint32_t {
 };
 
 // 一笔任务不是一次原语：物理阵列一次只算 K × N 那么大，一笔任务要按 tile 走
-// kblock × 专家数 × nblock 遍。三个计数记的是这一笔走到哪了 —— 发了几个 tile
+// kblock × 专家数 × nblock 遍。三个计数记的是这一笔走到哪了：发了几个 tile
 // 的读、算完几个、写回几个。三段重叠就落在这三个计数的差上：写回第 i 个 tile
 // 的同时可以在算第 i+1 个、读第 i+2 个。
 //
@@ -53,7 +53,7 @@ struct MuInflight {
   std::vector<TopkEntry> topk;
   bool topk_asked = false;
   bool topk_ready = false;
-  // 各 tile 写回哪。发读的时候由 AGU 算出来记下，算完那一拍再取 —— AGU 的
+  // 各 tile 写回哪。发读的时候由 AGU 算出来记下，算完那一拍再取，因为 AGU 的
   // 迭代这时已经走到后面的 tile 了。
   std::vector<uint64_t> out_addr;
 
@@ -125,7 +125,7 @@ class MuIssueQ : public BachModule {
     }
     return nullptr;
   }
-  // 队头做完就出队 —— finish 按顺序，与执行通路上的重叠无关。
+  // 队头做完就出队：finish 按顺序，与执行通路上的重叠无关。
   void RetireFront() {
     if (!q.empty() && q.front().stage == MuStage::kFinished) q.pop_front();
   }

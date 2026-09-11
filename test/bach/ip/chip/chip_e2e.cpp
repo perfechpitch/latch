@@ -1,7 +1,7 @@
 // 跨 chip 的端到端：一个 token 经 C2C 从一颗 chip 走到另一颗。
 //
 // 与 chip.cpp 里那条两 core 接力的区别：那一条只走 chip 内的 Link，包在链路上
-// 原样过去；这一条要过 C2C —— 出方向按 4 KB 拆段、位宽 2048 转 1024，入方向按
+// 原样过去；这一条要过 C2C，出方向按 4 KB 拆段、位宽 2048 转 1024，入方向按
 // seq_id 拼回来，中间隔着一段 300 拍的 PCIe 链路。
 //
 // 走的路与 LPU 里同行相邻两颗 chip 的接法一致：前一颗的 E 口对后一颗的 W 口。
@@ -56,7 +56,6 @@ MessagePtr MakeToken(uint64_t path, uint64_t user) {
   m->gpu_id = 2;
   m->token_id = user;
   m->size = kTokenBytes;
-  m->compute = 1;
   m->stream_id = 0;
   m->task_id = 0;
   m->payload.resize(kTokenBytes);
@@ -87,23 +86,20 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = in_path;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = out_path;
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(1, out);
 
-  core.GetTs().Cfg().WritePathMap(in_path, 0);
+  core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }

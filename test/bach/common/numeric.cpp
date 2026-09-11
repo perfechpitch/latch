@@ -2,7 +2,7 @@
 //
 // 步 8 的判据是「逐条计算原语与参考实现逐 bit 比对」，比对的基准就是这一层。
 // 所以这里先把这一层自己钉住：往返转换要么精确、要么落在该格式能表示的最近一
-// 档；累加顺序换一下结果就变，那件事要能被看见 —— 顺序是结果的一部分。
+// 档；累加顺序换一下结果就变，那件事要能被看见，因为顺序是结果的一部分。
 
 #include <gtest/gtest.h>
 
@@ -100,8 +100,8 @@ TEST(Numeric, EncodeDecodeBf16) {
 }
 
 TEST(Numeric, EncodeDecodeMxfp8WithScale) {
-  // 一个 32 元素的块共用一个 E8M0 的 scale。往返后不必逐 bit 相同 —— MXFP8 只有
-  // 8 位 —— 但要落在这一档能表示的最近一格：解出来再编回去必须是同一个字节。
+  // 一个 32 元素的块共用一个 E8M0 的 scale。往返后不必逐 bit 相同（MXFP8 只有
+  // 8 位），但要落在这一档能表示的最近一格：解出来再编回去必须是同一个字节。
   std::vector<float> v;
   for (int i = 0; i < 32; ++i) v.push_back(float(i + 1) * 3.25f);
   std::vector<float> scale = MakeScale(DataType::kMxfp8, v);
@@ -129,7 +129,7 @@ TEST(Numeric, Fp4PacksTwoPerByte) {
 // ── 累加顺序 ──
 
 TEST(Numeric, AccumOrderMatters) {
-  // 一个大数配一串小数：顺序加会把小数吃掉，分块加不会。两个结果不同 bit ——
+  // 一个大数配一串小数：顺序加会把小数吃掉，分块加不会。两个结果不同 bit。
   // 这正是「顺序是结果的一部分」那件事，参考实现必须照抄硬件的顺序。
   std::vector<float> v;
   v.push_back(1.0e8f);

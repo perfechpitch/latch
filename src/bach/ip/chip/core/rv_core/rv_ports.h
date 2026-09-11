@@ -38,7 +38,7 @@ constexpr uint64_t kDtcmSize = 8 * 1024;
 //
 // 硬件上这几样是 custom-0 自定义指令（task_done / dsar / dsaw 那一组），模型里
 // 走 MMIO：rv32 的功能模型认的是标准 RV32IM，加一条自定义指令要动 gen/ 里
-// codegen 出来的解码表。走 MMIO 的行为等价 —— 都是「往一个约定地址写一笔就
+// codegen 出来的解码表。走 MMIO 的行为等价：都是「往一个约定地址写一笔就
 // 触发」，而且 kernel 那边本来就用 store 配 DSA 寄存器。
 constexpr uint64_t kTaskCtrlBase = 0x00030000;
 constexpr uint64_t kTaskCtrlSize = 4 * 1024;
@@ -48,6 +48,9 @@ constexpr uint64_t kCsrTaskId = 0x04;
 constexpr uint64_t kCsrUserId = 0x08;        // 可读写，B / R core 的软件写它
 constexpr uint64_t kRegTaskDone = 0x10;      // 写 1 = 通知 TS，写 0 = 不通知
 constexpr uint64_t kRegWaitTask = 0x14;      // 读它阻塞到下一个 task 到来
+// 当前任务的 PID：TS 随 task 一起送来，可读写。PID 更新任务的软件把新值写进
+// 来，随 task_done 回 TS，交给紧邻的后继任务。
+constexpr uint64_t kCsrPathId = 0x18;
 
 constexpr uint64_t kShareMemBase = 0x00040000;
 constexpr uint64_t kShareMemSize = 32 * 1024;
@@ -55,6 +58,8 @@ constexpr uint64_t kShareMemSize = 32 * 1024;
 // 只有 DTE core 有。Router I/O reg 复用这一段的高地址。
 constexpr uint64_t kCoreMemBase = 0x00080000;
 constexpr uint64_t kCoreMemSize = 1024 * 1024 + 32 * 1024;
+// Router I/O reg 从这一段的第 1 MB 起。
+constexpr uint64_t kRouterIoOffset = 1024 * 1024;
 
 // 访存延迟，记在时间轴上。
 constexpr uint64_t kDtcmLatency = 3;
@@ -87,17 +92,17 @@ enum class LsqTarget : uint32_t {
 class TaskStartPort : public Logic {
  public:
   Logic64 valid, ready, task_pc, stream_id, task_id, user_id, path_id, dsa_en,
-      seq;
+      seq, vcid;
 
   explicit TaskStartPort(ClockPtr c)
       : valid(c), ready(c), task_pc(c), stream_id(c), task_id(c), user_id(c),
-        path_id(c), dsa_en(c), seq(c) {
+        path_id(c), dsa_en(c), seq(c), vcid(c) {
     Fields(valid, ready, task_pc, stream_id, task_id, user_id, path_id, dsa_en,
-           seq);
+           seq, vcid);
   }
 
   void Drive(uint64_t pc, uint64_t stream, uint64_t task, uint64_t user,
-             uint64_t path, bool en, uint64_t n) {
+             uint64_t path, bool en, uint64_t n, uint64_t vc = 0) {
     valid = 1;
     task_pc = pc;
     stream_id = stream;
@@ -106,6 +111,7 @@ class TaskStartPort : public Logic {
     path_id = path;
     dsa_en = en ? 1 : 0;
     seq = n;
+    vcid = vc;
   }
   void Idle() {
     valid = 0;
@@ -116,6 +122,7 @@ class TaskStartPort : public Logic {
     path_id = 0;
     dsa_en = 0;
     seq = seq.Get();
+    vcid = 0;
   }
   void DriveReady(bool ok) { ready = ok ? 1 : 0; }
   bool Valid() const { return valid.Get() != 0; }
@@ -228,30 +235,34 @@ class LsqReqPort : public Logic {
   uint64_t Seq() const { return seq.Get(); }
 };
 
-// ── 指令执行器 → DSA：四个身份信号 ──
+// ── 指令执行器 → DSA：身份信号 ──
 //
 // 《DTE寄存器配置参数》§硬件直连信号：streamID、taskID、userID、pathID 从
 // RV core 的 CSR 直连到 DSA，DSA 在写 trigger 寄存器那一拍采样。所以这一束不
-// 握手、每拍驱动，取的是本核当前那个 task 的身份。
+// 握手、每拍驱动，取的是本核当前那个 task 的身份。vc 不在那份清单里：它是 TS
+// 随 DTE 任务下发的 VCID，模型经这一束带给 DTE 出核选 VC。
 class DsaIdsPort : public Logic {
  public:
-  Logic64 stream_id, task_id, user_id, path_id;
+  Logic64 stream_id, task_id, user_id, path_id, vc;
 
   explicit DsaIdsPort(ClockPtr c)
-      : stream_id(c), task_id(c), user_id(c), path_id(c) {
-    Fields(stream_id, task_id, user_id, path_id);
+      : stream_id(c), task_id(c), user_id(c), path_id(c), vc(c) {
+    Fields(stream_id, task_id, user_id, path_id, vc);
   }
 
-  void Drive(uint64_t stream, uint64_t task, uint64_t user, uint64_t path) {
+  void Drive(uint64_t stream, uint64_t task, uint64_t user, uint64_t path,
+             uint64_t vcid = 0) {
     stream_id = stream;
     task_id = task;
     user_id = user;
     path_id = path;
+    vc = vcid;
   }
   uint64_t Stream() const { return stream_id.Get(); }
   uint64_t Task() const { return task_id.Get(); }
   uint64_t User() const { return user_id.Get(); }
   uint64_t Path() const { return path_id.Get(); }
+  uint64_t Vc() const { return vc.Get(); }
 };
 
 // ── dsa_rq 与 lsq → 指令执行器 ──

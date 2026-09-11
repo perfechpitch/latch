@@ -4,7 +4,7 @@
 // C2C Bridge：chip 的四个对外口，每个一座桥。
 //
 // 只做透明传输：左侧收到的包默认发到右侧，右侧收到的包默认发到左侧，Bridge 不
-// 做路由判断。跨 chip 的路由方案都建立在这个前提上 —— 业务上不对 C2C 使用独立
+// 做路由判断。跨 chip 的路由方案都建立在这个前提上：业务上不对 C2C 使用独立
 // 的地址编码，接口处做的是流式通信封装。
 //
 // 四段，各是一个独立打拍的模块：
@@ -15,7 +15,7 @@
 //   RX Engine      按 seq_id 缓存，tail 到齐后还原原始包，位宽 1024 转 2048
 //   AXI Bridge     credit 与 AXI4 的协议转换。出方向按这一段物理链路的延迟
 //                  计时（PCIe C2C 300 ns，按 1 T = 1 ns 折算），入方向只做转
-//                  换不再计时 —— 一段线的时间算在发送侧。Router 到 Router 的
+//                  换不再计时，一段线的时间算在发送侧。Router 到 Router 的
 //                  400 T 含这一段与两侧 Bridge
 //
 // 三类 credit 一律透传：Bridge 自身不建 stream credit 表，也不参与 Reduce 累加。
@@ -72,7 +72,7 @@ struct C2cSeg {
 struct C2cBeat {
   bool is_release = false;
   // 链路层自己的 credit 归还：收方收下一段之后发回给发方，让它的发送额度恢复。
-  // 与上面那三类 release 不同 —— 那三类是 core 之间的事，跨片透传给对侧 core；
+  // 与上面那三类 release 不同：那三类是 core 之间的事，跨片透传给对侧 core；
   // 这一类到对侧的桥为止，不往 core 送。
   bool is_c2c_credit = false;
   C2cSeg seg;
@@ -213,10 +213,12 @@ class C2cRcVaSa : public BachModule {
     return true;
   }
 
+  // 一拍里链路层 credit、core 那一侧的 release 与数据可以同时来，三样都当拍收
+  // 下：release 是 core 那一侧的单拍脉冲，数据按 VC credit 发、没有反压，哪一样
+  // 留到下一拍都会丢。同向的数据与 release 之间小包优先，按进 pipe 的先后排，
+  // TX Engine 一拍取一笔。
   void Take(uint64_t now) {
-    if (SendC2cCredit(now)) return;
-    // 同向的数据与 credit release 之间仲裁，小包优先 —— release 是最小的那种，
-    // 所以它先走。
+    SendC2cCredit(now);
     ReleaseView r = ReadRelease(from_core->release);
     // VC credit 是 flit 粒度，先攒着；业务层那两类照原样走。
     if (r.vc_valid) {
@@ -230,18 +232,17 @@ class C2cRcVaSa : public BachModule {
       b.rel.vc_valid = false;   // VC 那一份走打包的通路
       pipe.push_back({now + kC2cRcStages, b});
       ++grant_cnt;
-      return;
     }
     FlitView f = ReadFlit(from_core->flit);
     // 攒够一个包的量就发一笔。本拍既没有数据要发、也没有新的 credit 进来时，
-    // 不足一个包的余量一并发掉 —— 只看有没有数据的话，credit 一拍一个连着来
+    // 不足一个包的余量一并发掉。只看有没有数据的话，credit 一拍一个连着来
     // 时每一拍都算闲着，就永远攒不成一笔。
-    if (SendPackedCredit(now, !f.valid && !r.vc_valid)) return;
+    SendPackedCredit(now, !f.valid && !r.vc_valid);
     if (!f.valid) return;
     // VA：本级还收不收得下。位置在 flit 离开本级缓冲时才还给 core，所以这里的
-    // 额度与 core 那一侧的 VC credit 是同一个账；对侧还有没有位置是往线上发那
-    // 一步的事。
-    if (pipe.size() + out.size() >= kC2cInCap) {
+    // 额度与 core 那一侧的 VC credit 是同一个账，只数数据：release 与链路层
+    // credit 不占那一份额度。对侧还有没有位置是往线上发那一步的事。
+    if (DataHeld() >= kC2cInCap) {
       ++block_cnt;
       return;
     }
@@ -252,6 +253,18 @@ class C2cRcVaSa : public BachModule {
     b.seg.msg = f.msg;
     pipe.push_back({now + kC2cRcStages, b});
     ++grant_cnt;
+  }
+
+  // 本级缓冲里压着几个数据段。
+  uint64_t DataHeld() const {
+    uint64_t n = 0;
+    for (auto const& p : pipe) {
+      if (!p.second.is_release) ++n;
+    }
+    for (auto const& b : out) {
+      if (!b.is_release) ++n;
+    }
+    return n;
   }
 
   // 攒够 kC2cCreditPackFlits 就打成一笔，或者本拍闲着时把余量发掉。
@@ -516,7 +529,7 @@ struct C2cCfg {
   // 掉，只保留位宽转换与拆包合包。
   bool bypass_business = false;
   // 这一段物理链路一个方向的延迟。到达拍算在发送侧，与链路模型同一条规矩：
-  // 一段线的占用只有一个 owner，对接的两座桥因此不会把同一段各计一次 —— 计
+  // 一段线的占用只有一个 owner，对接的两座桥因此不会把同一段各计一次，计
   // 两次的话 Router 到 Router 就是 600T，超过规格书给的 400T。
   uint64_t axi_latency = kC2cAxiLatency;
 };
@@ -546,7 +559,7 @@ class C2cBridge {
   // ── 对外：chip 的一个 C2C 口 ──
   //
   // 出方向由对端调 TakeOut()，入方向由对端调 PushIn()。两座桥对接就是这两个
-  // 方法互相喂 —— C2C 上传的是段与 release，不是 flit。
+  // 方法互相喂：C2C 上传的是段与 release，不是 flit。
   void AttachToCoreBack(LinkEndPtr p) { rcvasa->AttachToCoreBack(std::move(p)); }
 
   bool HasOut() const { return out_axi->HasBeat(); }

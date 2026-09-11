@@ -7,7 +7,7 @@
 //   Core 先保证不会再有该 UserID 的搬运（全部进核、出核数据搬完，且不再发起新的），
 //   然后才发 Retire；
 //   Router 收到后立即删掉该用户的全部 stream credit 授权表项；
-//   ReduceModule 是延迟回收 —— 先记下 Retire，待相邻下游各方向的 Reduce credit
+//   ReduceModule 是延迟回收：先记下 Retire，待相邻下游各方向的 Reduce credit
 //   全部恢复到分配数量后才删对应用户映射。
 //
 // 顺序反了会让还在路上的 credit 无处归还，或者让表项提前放给别的用户。

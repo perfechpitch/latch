@@ -119,7 +119,7 @@ class MuRegfile : public BachModule {
 
   // boot 期 ctrl_noc 灌配置走这一条。与 RV core 的 dsa_iss 那一条分开：
   // 两条通路同时往一个端口上写就是两个写者，而它们本来就不在同一段时间里用
-  // ——ctrl_noc 是 boot 期，dsa_iss 是业务期。
+  // （ctrl_noc 是 boot 期，dsa_iss 是业务期）。
   void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
 
   DsaCfgPort& CfgPort() { return *cfg_port; }

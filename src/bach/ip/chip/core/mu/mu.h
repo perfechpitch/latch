@@ -36,7 +36,7 @@ struct MuCfg {
 
 // Drain & Trap 的四步。acu 查出越界或不对齐时进第一步，逐步走完再回 kNone。
 //
-// 越界那一笔的数据要丢掉，已经进了脉动通路的合法数据照常算完写回 —— 一并丢掉
+// 越界那一笔的数据要丢掉，已经进了脉动通路的合法数据照常算完写回，一并丢掉
 // 的话执行通路上还挂着半笔，状态机再也回不到默认状态。
 enum class MuDrain : uint32_t {
   kNone = 0,
@@ -232,7 +232,7 @@ class Mu {
       // tile 全部作废，直接算做完。
       if (!f->agu.CheckStep(s, mu.cfg.cmem_size, mu.cfg.mmem_size)) {
         // 越界或不对齐：这一笔余下的 tile 全部作废，进 Drain 的第一步。已经
-        // 发出去的读请求的回复照常收，但不进计算 —— 那是越界任务的数据。
+        // 发出去的读请求的回复照常收，但不进计算，那是越界任务的数据。
         f->dropped = true;
         f->issued = f->computed = f->total;
         f->stored = f->OutTotal();
@@ -315,7 +315,7 @@ class Mu {
 
     void Retire() {
       // 写回队列空了几拍。F41：结果写回 Core Mem 之后才与 issue_q 的 finish
-      // 合成 dsa_done。离开 stq 的写请求还要经端口到存储，所以要空过两拍 ——
+      // 合成 dsa_done。离开 stq 的写请求还要经端口到存储，所以要空过两拍：
       // 报早了下游按完成往下走，读到的是这一段的旧值。
       if (mu.stq->Quiescent()) {
         ++stq_idle;

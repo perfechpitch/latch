@@ -35,7 +35,7 @@ class MemPort : public Logic {
   // 与长度还要给出块内起点，存储只改 [addr + woff, addr + woff + bytes)。
   Logic64 req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff;
   LogicPtr<ByteBlock> req_wdata;
-  // 每发一笔加一。收方按它认这一笔见没见过 —— 两侧各自打拍时，谁先跑决定读到
+  // 每发一笔加一。收方按它认这一笔见没见过：两侧各自打拍时，谁先跑决定读到
   // 的是当拍还是上一拍的值，只看 req_valid 就可能把同一笔收两次或漏掉一次。
   Logic64 req_seq;
   // 存储侧写

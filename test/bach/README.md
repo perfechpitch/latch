@@ -16,7 +16,7 @@ cmake --build build -j
 cd build/test && ctest --output-on-failure
 ```
 
-构建类型不给就是 `Debug`。跑三层整体那几份要给 `Release`：48 颗 chip 那一份要推 45047 拍，`Debug` 下一份就要跑掉好几分钟。这台机器（16 核 32 线程）上 `ctest -j 8` 全量一遍约 9 分钟，其中大半花在 `reference` 那份 Python 自检上，C++ 这一侧最长的 `moe_lpu` 约 2 分钟。
+构建类型不给就是 `Debug`。跑三层整体那几份要给 `Release`：48 颗 chip 那一份要推 39404 拍，`Debug` 下一份就要跑掉好几分钟。这台机器（16 核 32 线程）上 `ctest -j 8` 全量一遍约 9 分钟，其中大半花在 `reference` 那份 Python 自检上，C++ 这一侧最长的 `moe_lpu` 约 2 分钟。
 
 `test/bach/` 下每个 `.cpp` 自动成为一个 CTest 目标，目标名取文件名。跑单个目标：
 
@@ -55,17 +55,17 @@ bundle 下各套配置的目录。镜像不在就跳过，用例自己会报 `ke
 | 目标 | 用例 | 规模与拍数 |
 | - | - | - |
 | `chip_e2e` | `TokenCrossesTwoChips` | 一个 token 过 C2C 从一颗 chip 到另一颗，中间隔一段 300 拍的 PCIe 链路 |
-| `moe_chip` | `BcoreStartsTheBroadcast` | 一颗 chip 八个 core，5154 拍 |
-| `moe_chip` | `OneEpGroupReducesSixtyFourCores` | 一个 EP 组八颗 chip 六十四个 core，14904 拍 |
-| `moe_chip` | `TwoEpGroupsMeetAtTheReductionCore` | 两个 EP 组在 R core 上汇合，8411 拍 |
-| `moe_chip` | `WeightsComeInBeforeTheFirstToken` | 权重先走数据面进 Matrix Mem，切业务模式之后再发 token，12032 拍 |
+| `moe_chip` | `BcoreStartsTheBroadcast` | 一颗 chip 八个 core，5164 拍 |
+| `moe_chip` | `OneEpGroupReducesSixtyFourCores` | 一个 EP 组八颗 chip 六十四个 core，11810 拍 |
+| `moe_chip` | `TwoEpGroupsMeetAtTheReductionCore` | 两个 EP 组在 R core 上汇合，8967 拍 |
+| `moe_chip` | `WeightsComeInBeforeTheFirstToken` | 权重先走数据面进 Matrix Mem，切业务模式之后再发 token，12042 拍 |
 
 ### LPU 层
 
 | 目标 | 用例 | 规模 |
 | - | - | - |
 | `lpu_e2e` | 2 | 一个 token 从入口桩进阵列、穿 15 颗 chip、从出口桩出来。走 `Lpu` 那一层的装配与 PCIe Switch，只验链路不算数 |
-| `moe_lpu` | `OneLayerAcrossFortyEightChips` | 48 颗 chip 三百八十四个 core 摆成 12 层 × 4 列，两层一个 EP 组共 6 组，45047 拍 |
+| `moe_lpu` | `OneLayerAcrossFortyEightChips` | 48 颗 chip 三百八十四个 core 摆成 12 层 × 4 列，两层一个 EP 组共 6 组，39404 拍 |
 
 `moe_chip` 的头一个用例与 `moe_lpu` 的配置不写在用例里：任务链、路由表、TS 的全局项与
 三份 kernel 都由 `LoadBundle()` 装。一份拓扑描述编出一套 bundle，落在
@@ -134,7 +134,29 @@ python3 src/bach/compiler/gen_hwconfig.py --topo src/bach/compiler/topo/moe_lpu.
 ```shell
 python3 -m src.utils.insight serve moe_lpu        # 网页，不给名字就挑当前目录下最新那份
 python3 -m src.utils.insight inspect moe_lpu      # 命令行列模块与信号
+python3 src/bach/replay.py                        # 列出当前目录下的波形挑一份，回放成一页 HTML 动画
 ```
+
+前两条是 latch 通用的读波形工具。第三条 `src/bach/replay.py` 只管 Bach：它认的是 chip 与
+core 的摆法和 `Core::EmitTrace()` 那几个信号名，换个项目不成立，所以放在 bach 这一侧。
+它是一个独立脚本，读波形那一段按 latch 的 `.trace` 格式自己解，不依赖仓库里别的 Python
+代码，也不用装第三方包，从哪个目录执行都行。
+
+`replay.py` 不带参数就把执行时所在目录（连同子目录）下的波形按时间列出来，新的在前，挑一个就生成，产物落在波形旁边、同名换成 `.html`，最后打印它的完整路径。给一截名字就只列名字里带它的；`-o` 另指产物路径。
+
+产出是本地单文件，事件数据内联在里面，不依赖外部资源，双击就能看。四级视图逐级点进去：
+
+| 视图 | 画什么 | 一「步」是 |
+| - | - | - |
+| 阵列 | 所有 chip 排成格子，方块深浅是本拍片内转发的 flit 数，线亮是 C2C 上有数据在途 | 一帧 |
+| chip | 片内 core 与它们之间的 left / right / mid 链路 | 一帧 |
+| core | 上半是 core 内的方框图，正在跑的那一笔点亮它经手的 TS → RV core → DSA；下半是甘特图，DTE / MU / VU 各一行，每笔 task 画成从下发到完成的一段 | TS 下发一笔 task |
+| Router | 在 core 的方框图里点 Router 进来。方框与连线照 `09-router-*.html`：三个 RouterStation、Xbar、CoreStation、ReduceModule、CoreMem 重发、Retire、CoreMemCreditMonitor、RouterTable，每个框写本拍的量，本拍有 flit 经过的线点亮；下面是九个口（进 mid / left / right / core，出 mid / left / right / core / 归约）的逐拍活动条 | 一帧 |
+
+空格播放暂停，左右方向键单步，Esc 退上一级。底下的进度条按住拖动，滚轮单帧。甘特图上按住拖动逐拍走，点一段跳到它下发的那一拍。甘特图的时间轴只铺这个 core 真正活动的那一段。
+
+完成配给下发只在同一时刻最多一笔在飞的 core 上做：`ts_done` 不分路，几笔并发时分不清哪次完成是哪一笔的。B core 与 R core 同时挂着十几个 stream，那种 core 只画下发与完成的刻度。画面与数字全部
+由波形驱动，累计那一类画的是相邻两拍的差。
 
 网页那一侧起来时会建一次索引，之后一直用它，波形换了要重起或者打 `/api/reload`。
 索引缓存在 `/tmp/insight/` 下按文件内容哈希分目录。
@@ -157,24 +179,53 @@ chip0
 
 网页那一侧照这个层次折叠，打开时折在顶层，一颗 chip 一行。
 
-### 一个 core 记哪 13 个信号
+### 一个 core 记哪 27 个信号
 
-一处定完，写在 `Core::EmitTrace()` 里。看的是数据与任务在这个 core 上流没流动、
-堵没堵：
+一处定完，写在 `Core::EmitTrace()` 与它调的 `EmitRouter()`、`EmitIssue()` 里。看的是数据
+与任务在这个 core 上流没流动、堵没堵。Router 那一组照设计文档 `09-router-*.html` 画的方框
+拆，每个方框一两个量：
 
-| 信号 | 是什么 |
+| 单元 | 信号 | 是什么 | 类 |
+| - | - | - | - |
+| RouterStation | `fwd_mid`、`fwd_left`、`fwd_right`、`fwd_core` | 从三个 R2R 方向、以及本 core 的 DTE 出核那一路收进 Router、交给 Xbar 的 flit 数 | 累计 |
+| RouterStation | `occ_mid`、`occ_left`、`occ_right`、`occ_core` | 这四个入口的 VC Buffer 现在占了多少 | 水位 |
+| Xbar | `out_mid`、`out_left`、`out_right`、`out_core` | 往这四个出口各发出的 flit 数 | 累计 |
+| Xbar | `out_rdc` | 送进 ReduceModule 三条 lane 的 flit 数之和 | 累计 |
+| Xbar | `xbar_stall` | 想出去没出去的笔数 | 累计 |
+| CoreStation | `core_in` | 进核那一段现在压着几个 flit | 水位 |
+| CoreStation | `cs_trig` | 发给 TS 的 trigger 数 | 累计 |
+| ReduceModule | `reduce_q` | 累加完等着发出去的笔数 | 水位 |
+| ReduceModule | `rdc_ctx` | 占着几个用户上下文 | 水位 |
+| CoreMem 重发 | `reissue` | 暂存着、还没重发出去的笔数 | 水位 |
+| Retire | `retire` | 广播过的用户数 | 累计 |
+| CoreMemCreditMonitor | `cmcm_q` | 排队等资源的申请数 | 水位 |
+| TS | `ts_issue` | 发给 DTE、MU、VU 的 task 数之和 | 累计 |
+| TS | `ts_done` | 收回的完成数 | 累计 |
+| TS | `ts_inflight` | 手上在飞的 stream 笔数 | 水位 |
+| DTE | `core_out` | 出核那一段的 DTE Buffer 现在占了多少 | 水位 |
+
+RouterTable 是静态配置，不记。
+
+累计那一类在模型里是只加不清零的计数器（`forwarded_pending` 这些），要看「这一拍发生
+了多少」得取相邻两拍的差。水位那一类是队列长度与缓冲占用，直接读。
+
+另有两个打包的，记的是本拍新下发了哪几笔 task：
+
+| 信号 | 编码 |
 | - | - |
-| `fwd_mid`、`fwd_left`、`fwd_right` | 本拍从这三个 R2R 方向转出去几个 flit |
-| `occ_mid`、`occ_left`、`occ_right` | 这三个方向的 VC Buffer 占用 |
-| `xbar_stall` | 本拍有几笔想出去没出去 |
-| `core_in` | 进核那一段还压着几个 flit |
-| `core_out` | 出核那一段的 DTE Buffer 占用 |
-| `ts_inflight` | TS 手上在飞的 stream 笔数 |
-| `ts_issue` | 本拍发给 DTE、MU、VU 的 task 数之和 |
-| `ts_done` | 本拍收回的完成数 |
-| `reduce_q` | ReduceModule 累加完等着发出去的笔数 |
+| `ts_unit` | 位掩码，bit0 DTE、bit1 MU、bit2 VU。0 表示本拍没有新下发 |
+| `ts_task` | 三路的 task 号各占 8 bit：`dte │ mu << 8 │ vu << 16`。那一路本拍没发就填 `0xFF` |
 
-不派角色的 core 只有 Router，记前 9 个。
+认「新的一笔」看的是三条发射通路各自的 `seq`：一笔命令会在端口上连着摆几拍等 RV core
+收下，只看 `cmd_valid` 会把同一笔数很多遍。三条通路各管各的 stream，同一拍可以各发各的，
+所以两个信号都按路分位。
+
+这两个是唯一能把仿真跑出来的次序和 bundle 里 `TCHAIN` 逐项对上的东西。比如 `moe_lpu` 的
+`chip0.core2` 跑出来是第 347 拍 DTE task 0、458 拍 MU task 1、2237 拍 VU task 2、
+2606 拍 MU task 3，3740、6234、7039 拍 DTE task 4、5、6，与
+`awk '$1=="TCHAIN" && $2==0 && $3==2'` 打出来的七项一致。
+
+不派角色的 core 只有 Router，记 Router 那一组 21 个。
 
 chip 这一级另记四座 C2C 桥各 5 个，加 `scp.state` 一个。
 
@@ -189,8 +240,8 @@ chip 这一级另记四座 C2C 桥各 5 个，加 `scp.state` 一个。
 这一层，模块的信号一个不落。
 
 `SetTraceDisabled(true)` 管的是同一件事的另一头，按实例挑：片内那五十多条链路与
-`noc` 端点就是这样关掉的。`moe_lpu` 的 `kTraceChips` 也走它，48 颗全记是 6538 个
-信号、830 KB，所以默认全记；只想看某一段就把这个数调小。
+`noc` 端点就是这样关掉的。`moe_lpu` 的 `kTraceChips` 也走它，48 颗全记是 12538 个
+信号、1.8 MB，所以默认全记；只想看某一段就把这个数调小。
 
 ***
 

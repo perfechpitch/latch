@@ -42,13 +42,16 @@ struct CorePlan {
   bool present = false;
   uint64_t role = 0;              // 0 计算 1 广播 2 归约 3 不派角色
   uint64_t stream_num = 1;
+  bool self_start = false;
   uint64_t bcast_dirs = 0;
   bool trigger_chain_en = true;
   bool has_cfg = false;
   std::map<uint64_t, TaskEntry> chain;
   std::map<uint64_t, RouteEntry> rtab;
   std::vector<uint64_t> dte_rtab;
-  std::map<uint64_t, uint64_t> path_task;
+  std::map<uint64_t, uint64_t> path_task;          // DTE 那一份 path_task_map
+  std::map<uint64_t, std::pair<uint64_t, uint64_t>> ts_route;  // PID → {方向, VCID}
+  std::map<uint64_t, uint64_t> release_route;   // 入口方向 → Release 路由的出方向掩码
   uint64_t datain_pc = 0;
   bool datain_weights = false;
   bool has_datain = false;
@@ -92,8 +95,8 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     std::string const& tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && tok[1] == "6",
-               "LoadBundle: 只认 BACHIR 6 那一版产物。");
+      LOGCHECK(tok.size() == 2 && tok[1] == "8",
+               "LoadBundle: 只认 BACHIR 8 那一版产物。");
       head_ok = true;
       continue;
     }
@@ -125,28 +128,22 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     } else if (tag == "CFGMISC") {
       LOGCHECK(tok.size() == 7, "LoadBundle: CFGMISC 记录要六个字段。");
       c.stream_num = Num(tok[3]);
-      c.role = Num(tok[4]);
+      c.self_start = Num(tok[4]) != 0;
       c.bcast_dirs = Num(tok[5]);
       c.trigger_chain_en = Num(tok[6]) != 0;
       c.has_cfg = true;
     } else if (tag == "TCHAIN") {
-      LOGCHECK(tok.size() == 19, "LoadBundle: TCHAIN 记录要十八个字段。");
+      LOGCHECK(tok.size() == 13, "LoadBundle: TCHAIN 记录要十二个字段。");
       TaskEntry e;
       e.task_pc = Num(tok[4]);
       e.send_unit = SendUnit(Num(tok[5]));
       e.recv_unit = RecvUnit(Num(tok[6]));
-      e.self_start = Num(tok[7]) != 0;
-      e.wait_wake = Num(tok[8]) != 0;
-      e.broadcast_reissue = Num(tok[9]) != 0;
-      e.p2p_reissue = Num(tok[10]) != 0;
-      e.reduce = Num(tok[11]) != 0;
-      e.credit_en = Num(tok[12]) != 0;
-      e.exe_mask = Num(tok[13]) != 0;
-      e.path_id = Num(tok[14]);
-      e.end = Num(tok[15]) != 0;
-      e.dsa_en = Num(tok[16]) != 0;
-      e.reduce_num = Num(tok[17]);
-      e.exe_dest = Num(tok[18]);
+      e.wait_wake = Num(tok[7]) != 0;
+      e.task_type = TaskType(Num(tok[8]));
+      e.p2p_reissue_tid = Num(tok[9]);
+      e.credit_en = Num(tok[10]) != 0;
+      e.path_id = Num(tok[11]);
+      e.end = Num(tok[12]) != 0;
       c.chain[Num(tok[3])] = e;
       ++stat.tasks;
     } else if (tag == "DATAIN") {
@@ -154,14 +151,20 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       c.datain_pc = Num(tok[3]);
       c.datain_weights = Num(tok[4]) != 0;
       c.has_datain = true;
+    } else if (tag == "TSRTAB") {
+      LOGCHECK(tok.size() == 6, "LoadBundle: TSRTAB 记录要五个字段。");
+      c.ts_route[Num(tok[3])] = {Num(tok[4]), Num(tok[5])};
     } else if (tag == "PATHTASK") {
       LOGCHECK(tok.size() == 5, "LoadBundle: PATHTASK 记录要四个字段。");
       c.path_task[Num(tok[3])] = Num(tok[4]);
+    } else if (tag == "RELROUTE") {
+      LOGCHECK(tok.size() == 5, "LoadBundle: RELROUTE 记录要四个字段。");
+      c.release_route[Num(tok[3])] = Num(tok[4]);
     } else if (tag == "RTABDTE") {
       LOGCHECK(tok.size() == 4, "LoadBundle: RTABDTE 记录要三个字段。");
       c.dte_rtab.push_back(Num(tok[3]));
     } else if (tag == "RTAB") {
-      LOGCHECK(tok.size() == 31, "LoadBundle: RTAB 记录要三十个字段。");
+      LOGCHECK(tok.size() == 32, "LoadBundle: RTAB 记录要三十一个字段。");
       RouteEntry e;
       e.valid = true;
       e.op_type = OpType(Num(tok[4]));
@@ -187,6 +190,7 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       e.operation = Operation(Num(tok[28]));
       e.stall_way = Num(tok[29]) != 0;
       e.ext_dst = Num(tok[30]);
+      e.reduce_need = Num(tok[31]) != 0;
       c.rtab[Num(tok[3])] = e;
       ++stat.entries;
     } else {
@@ -221,15 +225,21 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       core.GetDte().Tables().PreloadRtab(path_id, found->second);
     }
     for (auto const& one : it.second.path_task) {
-      core.GetTs().Cfg().WritePathMap(one.first, one.second);
       core.GetDte().Tables().PreloadPathTask(one.first, one.second);
+    }
+    for (auto const& one : it.second.ts_route) {
+      core.GetTs().Cfg().WriteRouterTable(one.first, one.second.first,
+                                          one.second.second);
+    }
+    for (auto const& one : it.second.release_route) {
+      core.GetRouter().SetCreditBypass(one.first, one.second);
     }
     for (auto const& one : it.second.chain) {
       core.GetTs().Cfg().WriteTask(one.first, one.second);
     }
     if (it.second.has_cfg) {
       core.GetTs().Cfg().SetStreamNum(it.second.stream_num);
-      core.GetTs().Cfg().SetCoreType(CoreType(it.second.role));
+      core.GetTs().Cfg().SetSelfStart(it.second.self_start);
       core.GetTs().Cfg().SetBCoreDirection(it.second.bcast_dirs);
       core.GetTs().Cfg().SetTriggerChainEn(it.second.trigger_chain_en);
     }

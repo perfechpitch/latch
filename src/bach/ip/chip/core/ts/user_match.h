@@ -1,18 +1,29 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_TS_USER_MATCH_
 #define _LATCH_BACH_IP_CHIP_CORE_TS_USER_MATCH_
 
-// User_Match 与 DataIn_task_table。
+// User_Match 与 DataIn_task_table，对应详细设计的 DataIn Module。
 //
-// Router 的 trigger 进来时这两件事一起判：拿 user_id 与 stream_table 里的比对，
-// 没匹配上就是新用户、要建表；同一笔请求还要往 DataIn_task_table 登记一格。
-// 两边任一处不接受，这一笔就整体停住。
+// 普通模式下 Router 的 trigger 带 {user_id, path_id, reissue}，这里一起判三件事：
 //
-// trigger 口不设入口队列。四条不全满足时直接拉低 ready，由 CoreStation 保持这一笔，
+//   用户      拿 user_id 与 stream_table 比对，没匹配上是新用户，从 Task 0 开始
+//             建表；匹配上复用原来的 stream_id
+//   搬入任务  按 path_id 在 task_chain 里找 wait_wake 的项，这个用户已经做完的
+//             跳过，取最低的那一项。同一个 PID 可以对多个任务
+//   跳过      按那一项的 TASK_TYPE 与 reissue 定这一次跳过哪几项：Broadcast 重发
+//             的搬入且 reissue=0，搬入照做，配对的搬出跳过；P2P 重发的搬入且
+//             reissue=0，搬入与配对的搬出都跳过，不派 DTE；reissue=1 两种都照做
+//
+// 配对的搬出取自搬入那一项的 TASK_P2P_REISSUE_TID。要派 DTE 的那一笔登记进
+// DataIn_task_table；只跳过的不占它。跳过的位直接并进表项的 done_bitmap。新用户
+// 这一次即使不派 DTE 也照样建表。
+//
+// 自启动 core 与权重加载模式走 Bypass：不查 stream_table、不建表，PC 取
+// DATAIN_TASK，身份用保留的 SID 15 / TID 63。
+//
+// trigger 口不设入口队列。条件不满足时直接拉低 ready，由 CoreStation 保持这一笔，
 // 每拍重判一次，不丢弃、不越过。这条通路上的 trigger 与 token 一一对应，丢一笔就
-// 等于丢一个 token，所以只许反压不许丢。
-//
-// 不设队列的理由：请求的保持责任本来就在 CoreStation 那一侧，加一级队列只是把
-// 同一个反压点往后挪一格，既不改变正确性也不提高吞吐，反而多一处要维护的保序状态。
+// 等于丢一个 token，所以只许反压不许丢。请求的保持责任本来就在 CoreStation 那一
+// 侧，加一级队列只是把同一个反压点往后挪一格。
 
 #include <memory>
 #include <set>
@@ -28,7 +39,7 @@ namespace latch {
 namespace bach {
 
 // DataIn_task_table：只有 1 项。空闲时把 datain 任务信息与 Router 的请求信息
-// 一起登记进去；被占住时不再接收新的 datain 请求。
+// 一起登记进去；被占住时不再接收要派 DTE 的请求。
 struct DatainHold {
   bool valid = false;
   uint64_t task_pc = 0;
@@ -68,7 +79,7 @@ class UserMatch : public BachModule {
 
  protected:
   void Step() override {
-    // 上一笔建表请求还没被 stream_table 收下就原地保持。
+    // 上一笔写表请求还没被 stream_table 收下就原地保持。
     if (pending) {
       if (create_port->Accepted()) {
         pending = false;
@@ -84,9 +95,8 @@ class UserMatch : public BachModule {
     create_port->Idle();
 
     // 自启动 core：表项从队头退休之后再激活一个新的，接着等自启动任务。这一路
-    // 占的是建表口，而这一档 core 上进来的包不建表项、只登记 DataIn_task_table
-    // （F28），两者同一拍互不相干，所以补完表照常往下处理 trigger。挡住的话
-    // stream_num 配大之后补表一直有活干，datain 就再也轮不上。
+    // 占的是建表口，而这一档 core 上进来的包走 Bypass、不写表，两者同一拍互不
+    // 相干，所以补完表照常往下处理 trigger。
     Refill();
 
     bool ok = Handle();
@@ -99,8 +109,29 @@ class UserMatch : public BachModule {
   }
 
  private:
+  // 这一次 trigger 要派哪一项搬入任务、要跳过哪几项。
+  struct Plan {
+    uint64_t task_id = kTaskChainNum;  // kTaskChainNum 表示不派 DTE
+    uint64_t skip = 0;
+  };
+
+  Plan PlanFor(uint64_t path, bool reissue, uint64_t done) const {
+    Plan p;
+    uint64_t t = cfg.MatchDatain(path, done);
+    if (t >= kTaskChainNum) return p;
+    TaskEntry const& in = cfg.Task(t);
+    uint64_t out = 1ull << in.p2p_reissue_tid;
+    if (!reissue && in.task_type == TaskType::kP2pReissueIn) {
+      p.skip = (1ull << t) | out;
+      return p;
+    }
+    if (!reissue && in.task_type == TaskType::kBcastReissueIn) p.skip = out;
+    p.task_id = t;
+    return p;
+  }
+
   // 自启动 core 上在途表项少于 stream_num 时补一个。建表那一刻没有用户信息，
-  // 等自启动任务的 RV core 认出用户之后随完成补进来。
+  // 等 Task 0 的 RV core ACK 带回来。
   bool Refill() {
     if (!cfg.SelfStartCore()) return false;
     StreamSnapshotPtr s = snap->Get();
@@ -119,10 +150,9 @@ class UserMatch : public BachModule {
     StreamEntry& e = w->entry;
     e.valid = true;
     e.user_id_vld = false;
-    e.compute = true;
     e.task_id = 0;
-    e.task_fsm = TaskFsm::kReady;
-    StreamTableApply(e, cfg.Task(0));
+    ApplyTaskAttr(e, cfg.Task(0));
+    e.task_fsm = InitFsmOf(cfg.Task(0));
     create_port->Drive(w);
     pending = true;
     refilled_at = s->tail_ptr;
@@ -132,10 +162,11 @@ class UserMatch : public BachModule {
 
   bool Handle() {
     if (!trigger->Valid()) return true;
+    // 同一笔会连着几拍出现在端口上，按序号认它，已经收下的不再处理。
+    if (trigger->Seq() == last_trigger_seq) return true;
     uint64_t user = trigger->user_id.Get();
     uint64_t path = trigger->path_id.Get();
     bool reissue = trigger->reissue.Get() != 0;
-    bool compute = trigger->compute.Get() != 0;
 
     StreamSnapshotPtr s = snap->Get();
     if (!s) return false;
@@ -146,9 +177,8 @@ class UserMatch : public BachModule {
       if (e.valid && e.user_id_vld) just_created.erase(e.user_id);
     }
 
-    // B core、R core 与 weights 加载模式这三档不建 stream 表项：进来的包只把
-    // datain 任务登记进 DataIn_task_table，PC 取 DATAIN_TASK 那一项。这三档全
-    // 链只有一个 datain 任务，task_chain 里不再配 DTE 的 datain。
+    // Bypass：自启动 core 与权重加载模式不建 stream 表项，进来的包只把 datain
+    // 任务登记进 DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID / TID。
     if (cfg.WeightsMode() || cfg.SelfStartCore()) {
       if (!cfg.DatainValid()) return false;
       if (hold.valid) {
@@ -156,49 +186,52 @@ class UserMatch : public BachModule {
         return false;
       }
       hold.valid = true;
-      hold.task_id = 0;
+      hold.task_id = kBypassTid;
       hold.task_pc = cfg.DatainPc();
       hold.user_id = user;
       hold.path_id = path;
-      // 没有表项，也就没有槽位号。搬到哪由软件自己按包头算，不靠 stream 偏移。
-      hold.stream_id = 0;
+      hold.stream_id = kBypassSid;
+      last_trigger_seq = trigger->Seq();
       return true;
     }
 
-    // 老用户：复用原来的 stream_id，不改它当前的任务、状态、完成位。只有请求
-    // 带着重发标记时才把该项的 reissue 置起来。
+    // 老用户：复用原来的 stream_id。
     for (uint64_t i = 0; i < kStreamNum; ++i) {
       StreamEntry const& e = s->entry[i];
       if (!e.valid || !e.user_id_vld || e.user_id != user) continue;
+      Plan p = PlanFor(path, reissue, e.done_bitmap);
+      if (p.task_id < kTaskChainNum && hold.valid) {
+        ++stall_pending;
+        return false;
+      }
       ++matched_pending;
-      if (reissue) {
+      if (reissue || p.skip != 0) {
         auto w = std::make_shared<StreamWrite>();
         w->valid = true;
         w->stream_id = i;
-        w->set_reissue = true;
+        w->set_reissue = reissue;
+        w->done_mask = p.skip;
         create_port->Drive(w);
         pending = true;
       }
+      Register(p, user, path, i);
+      last_trigger_seq = trigger->Seq();
       return true;
     }
 
-    // 刚建过表但快照还没更新的那一两拍里，同一个 user 会被再判成新用户。
-    // trigger 是 valid/ready 握手，CoreStation 要保持到看见 ready，所以同一笔
-    // 请求本来就会连着几拍出现在端口上 —— 不记这一笔就会建两次表。
-    if (just_created.count(user) != 0) return true;
+    // 刚建过表但快照还没更新的那一两拍里，同一个 user 的另一笔 trigger 算不出
+    // 它做完了哪几项，先等快照跟上。
+    if (just_created.count(user) != 0) return false;
 
-    // 新用户：四条同时满足才建表。
-    if (!cfg.TriggerChainEn()) return false;      // 不允许启动任务链
-    // 在途上限与 Refill() 那一处一样，看 CFG_REG 里软件配的 stream_num，不是
-    // 建 Stream_table 时给的物理表深。
+    // 新用户：两条同时满足才建表。
+    if (!cfg.TriggerChainEn()) return false;  // 不允许启动任务链
+    // 在途上限与 Refill() 那一处一样，看 CFG_REG 里软件配的 stream_num。
     if (s->InFlight() >= cfg.StreamNum()) {
       ++stall_pending;
       return false;
     }
-    // 同一笔请求还要往 DataIn_task_table 登记，那一格占住时整体停住。
-    PathTaskMap const& m = cfg.PathMap(path);
-    bool need_datain = m.valid && cfg.Task(m.task_id).IsDataIn();
-    if (need_datain && hold.valid) {
+    Plan p = PlanFor(path, reissue, 0);
+    if (p.task_id < kTaskChainNum && hold.valid) {
       ++stall_pending;
       return false;
     }
@@ -213,46 +246,28 @@ class UserMatch : public BachModule {
     e.user_id = user;
     e.user_id_vld = true;
     e.reissue = reissue;
-    e.compute = compute;
     e.task_id = 0;
+    e.done_bitmap = p.skip;
     TaskEntry const& t0 = cfg.Task(0);
-    StreamTableApply(e, t0);
-    // Task 0 的初始状态按类型定：datain 或 reissue 置 WAIT，self_start 置 READY。
-    if (t0.IsDataIn() || t0.IsReissue()) {
-      e.task_fsm = TaskFsm::kWait;
-    } else if (t0.self_start) {
-      e.task_fsm = TaskFsm::kReady;
-    } else {
-      e.task_fsm = TaskFsm::kReady;
-    }
+    ApplyTaskAttr(e, t0);
+    e.task_fsm = (p.skip & 1u) ? TaskFsm::kFinish : InitFsmOf(t0);
     create_port->Drive(w);
     pending = true;
     just_created.insert(user);
-
-    // datain 的 task_pc 不取 DATAIN_TASK 那一项：先按 path_id 查出 task_id，
-    // 再取 task_chain[t].TASK_PC。一条链上有多个 datain 任务时靠这一步分开。
-    if (need_datain) {
-      hold.valid = true;
-      hold.task_id = m.task_id;
-      hold.task_pc = cfg.Task(m.task_id).task_pc;
-      hold.user_id = user;
-      hold.path_id = path;
-      hold.stream_id = slot;
-    }
+    Register(p, user, path, slot);
+    last_trigger_seq = trigger->Seq();
     return true;
   }
 
-  // 摊平当前 task 的属性。与 StreamTable::ApplyTaskAttr 同一件事，这里不引它是
-  // 为了不让 UserMatch 依赖 StreamTable 的类型。
-  static void StreamTableApply(StreamEntry& e, TaskEntry const& t) {
-    e.task_unit = t.send_unit;
-    e.task_recv = t.recv_unit;
-    e.task_dsa_en = t.dsa_en;
-    e.task_pc = t.task_pc;
-    e.task_path_id = t.path_id;
-    e.is_reissue = t.IsReissue();
-    e.end = t.end;
-    e.reduce_num = t.reduce ? t.reduce_num : 0;
+  // 要派 DTE 的那一笔登记进 DataIn_task_table，PC 取那一项自己的 TASK_PC。
+  void Register(Plan const& p, uint64_t user, uint64_t path, uint64_t stream) {
+    if (p.task_id >= kTaskChainNum) return;
+    hold.valid = true;
+    hold.task_id = p.task_id;
+    hold.task_pc = cfg.Task(p.task_id).task_pc;
+    hold.user_id = user;
+    hold.path_id = path;
+    hold.stream_id = stream;
   }
 
   CfgReg& cfg;
@@ -266,6 +281,7 @@ class UserMatch : public BachModule {
   bool refilled_vld = false;
   // 已经发出建表请求、但还没在快照里露面的那些 user。
   std::set<uint64_t> just_created;
+  uint64_t last_trigger_seq = 0;
   bool pending = false;
   uint64_t created_pending = 0, matched_pending = 0, stall_pending = 0;
 

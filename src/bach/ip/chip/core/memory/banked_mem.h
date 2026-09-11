@@ -16,7 +16,7 @@
 // 未初始化，模型里给确定值，免得比对结果依赖没写过的那一段。
 //
 // scale 寄存器：Core Mem 每 bank 另有一块寄存器存 scale，与 SRAM 地址一一映射，
-// 128 B 数据配 4 B scale。scale 使能拉高时同时读写对应地址的那一份 —— MU 与 VU
+// 128 B 数据配 4 B scale。scale 使能拉高时同时读写对应地址的那一份：MU 与 VU
 // 访问 CM 按 132 B 读写，读回来的块尾就是这 4 B，写进去的也照这个排。不拉高时
 // 只走 SRAM 那一段，有效带宽 128 B。
 //
@@ -50,7 +50,7 @@ struct BankedMemCfg {
   uint64_t granule = 128;      // 地址粒度，一行的字节数
   uint64_t capacity = 1 << 20;
   // Matrix Mem 的硬约束：同一 bank 不许两个 master 同时访问。撞了不重试、不排队，
-  // 直接断言失败 —— 这是软件排算子时就该保证的事，用重试掩盖会让配置错误一直
+  // 直接断言失败。这是软件排算子时就该保证的事，用重试掩盖会让配置错误一直
   // 查不出来。Core Mem 不设这条，撞了排队。
   bool exclusive_bank = false;
   // exclusive_bank 撞车时是停下还是只记一笔。默认停下：真硬件上被让路的那一笔

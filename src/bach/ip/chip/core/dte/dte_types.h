@@ -70,7 +70,7 @@ constexpr uint64_t kDteDataLenMax = 0xFFFFu;
 // 一个高层任务。Commit 把它劈成一对 RD / WR 子上下文。
 struct Descriptor {
   bool valid = false;
-  // Commit 准入时分配的内部序号。Completion RS 按它把劈开的两半合回来 ——
+  // Commit 准入时分配的内部序号。Completion RS 按它把劈开的两半合回来。
   // 业务上的 task_id 只在一个 stream 内唯一，同一拍在途的两笔任务可以带同一个
   // 值：一笔是 Router 送进来的搬入，另一笔是 RV core 配的搬出。
   uint64_t commit_seq = 0;
@@ -93,7 +93,11 @@ struct Descriptor {
   // 完成后才通知 TS；no_ack 置位的任务不回 Ack。
   bool task_last = true;
   bool no_ack = false;
-  uint64_t reduce_seq = 0;   // reduce 包出核时打上，供 TS 逐包配对
+  // reduce 包的任务边界：发方的 task_id，ReduceModule 靠它分开同一个用户前后
+  // 两笔 reduce 任务。
+  uint64_t reduce_seq = 0;
+  // 走归约路径出核的包，包头打上 reduce_seq。
+  bool reduce_pkt = false;
 
   // shareMem 写：数据搬完之后按这一对写一笔，写出去了才通知 TS。只有 B core
   // 与 R core 用，存的是 user_id 与 token entry 的 valid 标志。

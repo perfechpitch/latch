@@ -5,7 +5,7 @@
 // 与 core/moe.cpp 那一份的区别：那一条只在一个 core 内，专家间的加权求和落在
 // MU 里；这里多出跨 core 与跨 chip 切 K 的那一层归约，加法落在 Router 上。
 //
-// 每个 core 的任务链、kernel 与寄存器配置完全相同 —— EPTP-NN 的特点就在这里，
+// 每个 core 的任务链、kernel 与寄存器配置完全相同，EPTP-NN 的特点就在这里，
 // 差别只在 Matrix Mem 里那一片权重和 Router 表里那两条路由。
 
 #include <iostream>
@@ -71,9 +71,7 @@ TEST(BachMoeChip, BcoreStartsTheBroadcast) {
     std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
     kept = chip.GetCore(0).Mmem().Peek(BcoreLand(0), kBcTokenBytes);
     for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      landed.push_back(chip.GetCore(CoreOfSlot(cfg.shape, slot))
-                           .Cmem()
-                           .Peek(kResultAt, want.out_n * 4));
+      landed.push_back(PartialOf(chip.GetCore(CoreOfSlot(cfg.shape, slot))));
     }
   }
   TraceDone();
@@ -120,7 +118,7 @@ BcastPlan GroupBcast(uint64_t chip) {
 
 // 一个 EP 组的 64 个 core：token 从左上角那颗 chip 的 W 口进，由它的 B core 留
 // 一份再发起广播，一发覆盖 8 颗 chip 的每一个计算 core；64 份部分和沿一条蛇形
-// 链逐跳归约 —— chip 内 8 跳走 core 之间的链路，chip 与 chip 之间那 7 跳走
+// 链逐跳归约：chip 内 8 跳走 core 之间的链路，chip 与 chip 之间那 7 跳走
 // C2C。链尾从最后一颗 chip 的 E 口出来，与参考实现逐 bit 相同。
 TEST(BachMoeChip, OneEpGroupReducesSixtyFourCores) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
@@ -201,10 +199,7 @@ TEST(BachMoeChip, OneEpGroupReducesSixtyFourCores) {
     for (uint64_t i = 0; i < kGroupChips; ++i) {
       ChipShape shape = all[i]->Shape();
       for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        landed.push_back(all[i]
-                             ->GetCore(CoreOfSlot(shape, slot))
-                             .Cmem()
-                             .Peek(kResultAt, want.out_n * 4));
+        landed.push_back(PartialOf(all[i]->GetCore(CoreOfSlot(shape, slot))));
       }
     }
   }
@@ -264,7 +259,7 @@ TEST(BachMoeChip, TwoEpGroupsMeetAtTheReductionCore) {
     c1.shape = ChipShape::kLast;
     c1.gx = 3;
     c1.inbound_flag_base = kRcFlagOff;
-    c1.inbound_entry_bytes = kRcHalfBytes;
+    c1.inbound_entry_bytes = kRcFlagEntryBytes;
     c1.core_tick = kCoreTick;
     c1.chip_tick = kChipTick;
     Chip a(clk, "g0", c0);
@@ -323,13 +318,10 @@ TEST(BachMoeChip, TwoEpGroupsMeetAtTheReductionCore) {
     for (uint64_t g = 0; g < 2; ++g) {
       ChipShape shape = all[g]->Shape();
       for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        landed.push_back(all[g]
-                             ->GetCore(CoreOfSlot(shape, slot))
-                             .Cmem()
-                             .Peek(kResultAt, want.out_n * 4));
+        landed.push_back(PartialOf(all[g]->GetCore(CoreOfSlot(shape, slot))));
       }
     }
-    summed = rc.Cmem().Peek(kRcSumOff + kReduceSwHeaderBytes, want.out_n * 4);
+    summed = GatherPieces(rc.Cmem(), kRcSumOff);
   }
   TraceDone();
   RT::Reset();
@@ -346,7 +338,7 @@ TEST(BachMoeChip, TwoEpGroupsMeetAtTheReductionCore) {
 
 
 // 装模型那一段接在业务前面：权重不经 SCP，走 Host 那条 msg 流从数据面进来。
-// 每个计算 core 的 W1 与 W2 各留一段不预置，改由两个包搬进 Matrix Mem —— 一条
+// 每个计算 core 的 W1 与 W2 各留一段不预置，改由两个包搬进 Matrix Mem，一条
 // path 走遍格子里的 8 个 core，落在哪一个由包头的 path_core_mask 挑，落到哪个
 // 地址由包头的 dst_addr 定。各 core 都收够之后切业务模式，再发 token，结果与
 // 权重全部预置时逐 bit 相同。
@@ -439,7 +431,7 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
       Core& core = chip.GetCore(CoreOfSlot(cfg.shape, slot));
       w1_head.push_back(core.Mmem().Peek(kW1At, kWeightsChunk));
       w2_head.push_back(core.Mmem().Peek(kW2At, kWeightsChunk));
-      landed.push_back(core.Cmem().Peek(kResultAt, want.out_n * 4));
+      landed.push_back(PartialOf(core));
     }
   }
   TraceDone();

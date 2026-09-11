@@ -4,7 +4,7 @@
 // RV core 的装配：TS 与 DSA 之间的桥梁。
 //
 // 从 TS 收 task，按 task_pc 跑 ITCM 里的 kernel，配置 DSA 执行任务，任务发出去
-// 之后立刻交还自己 —— 不等 DSA 执行完，那是「一个 task 的共同形状」里的一步。
+// 之后立刻交还自己，不等 DSA 执行完，那是「一个 task 的共同形状」里的一步。
 //
 // 五个独立打拍的模块：
 //   task_queue  提前接 TS 下发的 task，前一个做完立刻起队头那个
@@ -54,7 +54,7 @@ class RvCore {
   void AttachDsaCfg(std::shared_ptr<DsaCfgPort> p) {
     iss->AttachCfg(std::move(p));
   }
-  // 四个身份信号直连本核那个 DSA，不握手。
+  // 身份信号直连本核那个 DSA，不握手。
   std::shared_ptr<DsaIdsPort> DsaIdsPtr() const { return exec->DsaIdsPtr(); }
   DsaRdataPort& DsaRdata() { return rq->Rdata(); }
   void AttachDsaRdata(std::shared_ptr<DsaRdataPort> p) {

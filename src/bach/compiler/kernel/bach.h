@@ -93,6 +93,8 @@ typedef unsigned long long u64;
 #define MOE_NBLOCK_FC13 (MOE_INTER / MU_TILE_N)
 #define MOE_KBLOCK_FC2  (MOE_INTER / MU_TILE_K)
 #define MOE_NBLOCK_FC2  (MOE_OUT_N / MU_TILE_N)
+/* 一个权重块：K256 × N32 个 BF16。权重按 N 块连着放，一个 N 块占 kblock 个 */
+#define MU_TILE_BYTES   (MU_TILE_K * MU_TILE_N * 2u)
 
 /* Core Mem 上一个 stream 里的摆放。FC1、FC3、激活三段按专家隔开。token 占
  * MOE_K 个 BF16，整段要放得进 CMEM_STREAM_STRIDE */
@@ -104,11 +106,30 @@ typedef unsigned long long u64;
 #define MOE_OUT_OFF       0x9800u
 #define MOE_EXPERT_STRIDE 0x1000u
 
-/* FC2 的结果出核时是一个 reduce 包：最前面 16 B 是软件辅助信息，Router 做加法
- * 时跳过这一段。MU 因此写在这 16 B 之后，DTE 从段首发整包 */
+/* FC2 的结果出核时拆成 MOE_PIECE_NUM 个 reduce 包。一包最长只支持到
+ * (16 K + 32) B（dte.md F69），整份 MOE_OUT_N 个 FP32（24 KiB）装不下；
+ * ReduceModule 给一个用户留 32 KiB（按 FP32 驻留算，03-reduce 第二层那条对
+ * 软件的硬约束），一包累加出来也不能超过它。照这两条约束按 8 KB 数据一包拆，
+ * 任务链上跟着配几项逐级 reduce 任务（task_dte_send_moe_p0～p2），一项一包。
+ *
+ * 每包最前面 16 B 是软件辅助信息，Router 做加法时每包都跳过这一段。所以 Core
+ * Mem 里一包占一格：格首 16 B 留给这一包的头，MU 把这一段结果写在它之后，DTE
+ * 从格首发整包。格距按 128 B 对齐，因为收方按 128 B 对齐检查落点；一包落到
+ * R core 那边也用同一个格距。 */
 #define MOE_SW_HEAD_BYTES 16u
-#define MOE_RESULT_OFF    (MOE_OUT_OFF + MOE_SW_HEAD_BYTES)
-#define MOE_SEND_BYTES    (MOE_SW_HEAD_BYTES + MOE_OUT_N * 4u)
+#define MOE_PIECE_DATA    8192u                                 /* 一包的数据 */
+#define MOE_PIECE_NUM     (MOE_OUT_N * 4u / MOE_PIECE_DATA)     /* 拆成几包 */
+#define MOE_PIECE_N       (MOE_PIECE_DATA / 4u)                 /* 一包几个 FP32 */
+#define MOE_PIECE_NBLOCK  (MOE_PIECE_N / MU_TILE_N)             /* 一包几个 N 块 */
+#define MOE_PIECE_BYTES   (MOE_SW_HEAD_BYTES + MOE_PIECE_DATA)  /* 一包的长度 */
+#define MOE_PIECE_STRIDE  0x2080u                               /* 一格 */
+
+_Static_assert(MOE_PIECE_NUM * MOE_PIECE_DATA == MOE_OUT_N * 4u,
+               "FC2 的结果要正好拆成整数包");
+_Static_assert(MOE_PIECE_STRIDE >= MOE_PIECE_BYTES && MOE_PIECE_STRIDE % 128u == 0,
+               "一格要装得下一包，并且按 128 B 对齐");
+_Static_assert(MOE_OUT_OFF + MOE_PIECE_NUM * MOE_PIECE_STRIDE <= CMEM_STREAM_STRIDE,
+               "出核那几格要放得进一个 stream 的 Core Mem");
 
 /* ===== R core：EP 组间那一层求和 =====
  *
@@ -116,17 +137,18 @@ typedef unsigned long long u64;
  * 上游组送过来的中间结果落后一半。落哪一半由发方在包头的 dst_addr 里指定，槽号
  * 两个发方都按 user_id 取模算，算得一样。
  *
- * 两笔都搬完之后，DTE 各自把那一半的 valid 标志置起来。链二扫到两位都起来就把
- * 整个槽搬进 Core Mem 求和。 */
+ * 一笔是 MOE_PIECE_NUM 包，一半里一包一格，格距与 Core Mem 那边相同。每包搬完
+ * 硬件就把这一包的 valid 标志置起来；链二扫到一个槽两半的标志都齐了，就把整个
+ * 槽搬进 Core Mem 求和。 */
 #define RC_SLOTS       16u
-/* 一笔占的地方：装得下一个出核包（16 B 软件头加 MOE_OUT_N 个 FP32），并且按
- * 128 B 对齐 —— 落点是包头里的 dst_addr，收方按 128 B 对齐检查 */
-#define RC_HALF_BYTES  0x6100u
+/* 一笔占的地方：MOE_PIECE_NUM 格 */
+#define RC_HALF_BYTES  (MOE_PIECE_NUM * MOE_PIECE_STRIDE)
 #define RC_SLOT_BYTES  (2u * RC_HALF_BYTES)        /* 一个用户占的地方 */
 #define RC_MM_BASE     0x000000u                   /* 槽在 Matrix Mem 的起点 */
 
-/* Share Mem 里的两张表。标志表每半笔一项，由 DTE 搬完之后写；用户表每槽一项，
- * 由 datain 那一段写，链二按它认这个槽是哪个用户 */
+/* Share Mem 里的两张表。标志表每包一项：硬件按落点除以格距找项，搬完一包写一
+ * 项，所以第 s 槽第 h 半第 k 包那一项是 (s × 2 + h) × MOE_PIECE_NUM + k。用户
+ * 表每槽一项，由 datain 那一段写，链二按它认这个槽是哪个用户 */
 #define RC_FLAG_OFF    0x0000u
 #define RC_USER_OFF    0x0200u
 #define RC_SLOT_OFF    0x0300u                     /* 链二每 stream 记一个槽号 */
@@ -134,20 +156,26 @@ typedef unsigned long long u64;
  * 一直是 0，加上去不改值，所以它等一笔就走；其余组等两笔。非零表示是链首 */
 #define RC_HEAD_OFF    0x0380u
 
-/* Core Mem 里的摆放。两笔在 Matrix Mem 里连着，搬到 Core Mem 也连着，一笔搬运
- * 就够。段首那 16 B 是软件辅助信息，求和只算数据那一段。求和结果写回第一笔那
- * 一段：VU 读完两笔才写，写的时候第一笔已经进了 VRF；段首那 16 B 原样留着，
- * DTE 从段首发整包 */
+_Static_assert(RC_FLAG_OFF + RC_SLOTS * 2u * MOE_PIECE_NUM * 4u <= RC_USER_OFF,
+               "标志表每包一项，要放得进用户表之前那一段");
+
+/* Core Mem 里的摆放。两笔在 Matrix Mem 里按格连着，搬到 Core Mem 也原样连着，
+ * 一笔搬运就够。每格首那 16 B 是软件辅助信息，求和逐格只算数据那一段。求和结果
+ * 写回第一笔的同一格：VU 读完两边那一格才写，写的时候第一笔那一格已经进了 VRF；
+ * 格首那 16 B 原样留着，DTE 从格首发整包 */
 #define RC_A_OFF   0x0000u
 #define RC_B_OFF   RC_HALF_BYTES
 #define RC_SUM_OFF RC_A_OFF
-/* 两笔求和借用的 VRF 起点。一条 VL 为 MOE_OUT_N 的 FP32 向量占
- * MOE_OUT_N × 4 / 128 个 entry */
+/* 两笔求和借用的 VRF 起点。逐格相加，一条 VL 为 MOE_PIECE_N 的 FP32 向量占
+ * MOE_PIECE_N × 4 / 128 个 entry */
 #define RC_VRF     16u
 
 /* 本组把结果送到 R core 的哪一半：这个用户在本组之前还有别的组时送前一半，
  * 本组是它的第一组时直接送下一组的后一半。boot 期由编译侧写进 Share Mem */
 #define MOE_SEND_HALF_OFF 0x0400u
+
+/* 出核那几格里第 k 格在本 stream 里的起点 */
+static inline u32 moe_piece(u32 k) { return MOE_OUT_OFF + k * MOE_PIECE_STRIDE; }
 
 /* 一个用户在 R core 上的落点。half 为 0 是本组结果，为 1 是上游组的中间结果 */
 static inline u32 rc_land(u32 user, u32 half) {
@@ -354,6 +382,9 @@ static inline u32 vu_static_group(u32 idx) {
  * R core 上软件认出这一笔属于哪个用户之后自己写 */
 #define TC_TASK_DONE     0x10   /* 写 1 通知 TS，写 0 不通知 */
 #define TC_WAIT_TASK     0x14
+/* 当前任务的 PID：TS 随任务送来，可读写。PID 更新任务把新值写进来，随 task_done
+ * 回 TS */
+#define TC_PATH_ID       0x18
 
 static inline void mmio_write(u32 base, u32 off, u32 val) {
   *(volatile u32 *)(base + off) = val;
@@ -366,10 +397,19 @@ static inline u32 mmio_read(u32 base, u32 off) {
 static inline u32 smem_read(u32 off) { return mmio_read(SMEM_BASE, off); }
 static inline void smem_write(u32 off, u32 v) { mmio_write(SMEM_BASE, off, v); }
 
+/* Router I/O reg：DTE core 那一段 Core Mem 往后 1 MB 起，映射到 CoreStation 的
+ * 包头队列。读队头那个包的包头字段，写 ROUTER_HDR_POP 把它弹出，下一个包头映射
+ * 上来。一个进核的包对应一笔 datain 任务，那一笔做完弹它自己的包头 */
+#define ROUTER_IO_BASE 0x00180000u
+#define ROUTER_HDR_POP 32u
+static inline void hdr_pop(void) { mmio_write(ROUTER_IO_BASE, ROUTER_HDR_POP, 1); }
+
 /* 当前 task 的身份，硬件随任务下发写进来 */
 static inline u32 stream_id(void) { return mmio_read(TASK_CTRL_BASE, TC_STREAM_ID); }
 static inline u32 task_id(void)   { return mmio_read(TASK_CTRL_BASE, TC_TASK_ID); }
 static inline u32 user_id(void)   { return mmio_read(TASK_CTRL_BASE, TC_USER_ID); }
+static inline u32 path_id(void)   { return mmio_read(TASK_CTRL_BASE, TC_PATH_ID); }
+static inline void set_path_id(u32 v) { mmio_write(TASK_CTRL_BASE, TC_PATH_ID, v); }
 /* 自启动的 B / R core：软件认出这一笔属于哪个用户后写回来 */
 static inline void set_user_id(u32 v) {
   mmio_write(TASK_CTRL_BASE, TC_USER_ID, v);
@@ -385,7 +425,8 @@ static inline void wait_for_task(void) {
   mmio_write(TASK_CTRL_BASE, TC_TASK_DONE, 0);
 }
 
-/* 交还自己但不通知 TS：这一笔的完成由 DSA 报。配好 DSA 就该这样收尾 */
+/* 交还自己但不通知 TS。自启动 core 上 Bypass 那一路 datain 与权重加载用它：
+ * 这两类不占 stream 表项，完成不回 TS */
 static inline void task_yield(void) {
   mmio_write(TASK_CTRL_BASE, TC_TASK_DONE, 0);
 }

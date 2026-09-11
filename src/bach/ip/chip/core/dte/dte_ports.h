@@ -159,7 +159,7 @@ class DsaRdataPort : public Logic {
 // 搬运一律走端口。
 //
 // ready 是「下一拍一定收得下」的承诺：接收方按当前空位算，而往它队列里放东西的
-// 只有 Commit 一家，所以承诺在下一拍仍然成立。「三样一起拿」因此还是原样 ——
+// 只有 Commit 一家，所以承诺在下一拍仍然成立。「三样一起拿」因此还是原样：
 // 三个口的 ready 都为真才发，谁没准备好就一起等。
 class AdmitPort : public Logic {
  public:

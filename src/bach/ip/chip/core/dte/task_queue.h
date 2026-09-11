@@ -32,6 +32,7 @@ struct ActiveCtx {
   bool issue_done = false;
   bool drained = false;
   uint64_t filled = 0;      // 出核读回来的数据已经填了多少字节进包
+  bool sent_first = false;  // 出核这一包的首拍发出去没有：首拍带 thdr
 };
 
 class TaskQueue {

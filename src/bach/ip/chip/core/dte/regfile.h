@@ -4,7 +4,7 @@
 // DTE 的软件配置寄存器组：RV core 看得见的那一层。
 //
 // 《DTE寄存器配置参数》的地址空间七段。本模块只实现 task 模板那一段与 issue
-// 段的 trigger —— 其余几段是状态、性能计数与 debug dump，不参与起任务。
+// 段的 trigger。其余几段是状态、性能计数与 debug dump，不参与起任务。
 //
 // 起任务的过程（F14）：RV core 一条指令写一个寄存器，最后写 transfer_mode/
 // task_trigger。写 trigger 那一拍把当前模板的十一项与四个直连身份信号一起采
@@ -226,11 +226,12 @@ class DteRegfile : public BachModule {
     DteTemplate const& t = tpl[idx];
     auto d = std::make_shared<Descriptor>();
     d->valid = true;
-    // 四个身份直连采样。
+    // 身份直连采样。出核走哪个 VC 取 TS 随任务下发的 VCID。
     d->stream_id = ids->Stream();
     d->task_id = ids->Task();
     d->user_id = ids->User();
     d->path_id = ids->Path();
+    d->vc = ids->Vc();
     d->route = Route(t.trigger & kDteModeMask);
     // 地址公式 base + streamID * stride + offset。router 作为源或目的时那一端
     // 的地址无意义，硬件也照算，取出来不用。
@@ -238,8 +239,6 @@ class DteRegfile : public BachModule {
     d->src_addr = t.src_addr + shift;
     d->dst_addr = t.dst_addr + shift;
     d->bytes = t.data_len * kDteDataLenGrain;
-    // 出核走哪个 VC 由 path_id 定，与 Router 那一侧同一套编号。
-    d->vc = d->path_id % kVcNum;
     d->task_last = (t.trigger & kDteTaskLast) != 0;
     d->smem_wr = (t.trigger & kDteWrSharememFlag) != 0;
     d->smem_addr = t.sharemem_waddr;

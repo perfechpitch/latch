@@ -83,6 +83,7 @@ RouteEntry Relay(uint64_t in_mask, uint64_t dtype = kReduceFp32,
   e.path_core_bypass = true;
   e.reduce_in_mask = in_mask;
   e.operation = Operation::kReduce1;
+  e.reduce_need = true;
   e.reduce_data_type = dtype;
   e.reduce_outdata_type = out_dtype;
   return e;
@@ -124,6 +125,10 @@ class ReduceHarness : public BachModule {
   uint64_t retire_user = 0, return_dir = 0;
 
   uint64_t granted = 0;
+  // 结果首 flit 与最后一个尾 flit 出现在哪一拍。
+  uint64_t first_head_at = 0, last_tail_at = 0;
+  // ReduceModule 累计挡住了几拍输入。计数是 Logic，要在协程里读。
+  uint64_t stalled = 0;
   std::vector<uint64_t> out_users;
   std::vector<float> out_values;
   std::vector<uint8_t> out_heads;
@@ -138,6 +143,12 @@ class ReduceHarness : public BachModule {
     if (v.valid && v.seq != last_seq) {
       last_seq = v.seq;
       ++granted;
+      if (v.head && first_head_at == 0) first_head_at = now;
+    }
+    // 结果按 flit 发，一个包在尾 flit 那一拍记一条。
+    if (v.valid && v.seq == last_seq && v.tail && v.seq != last_tail_seq) {
+      last_tail_seq = v.seq;
+      last_tail_at = now;
       out_users.push_back(v.user_id);
       if (v.msg) {
         out_values.push_back(WordOf(v.msg->payload));
@@ -155,6 +166,7 @@ class ReduceHarness : public BachModule {
     if (retire_at != 0 && now == retire_at) rm.RetireUser(retire_user);
     if (return_at != 0 && now == return_at) rm.ReturnCredit(retire_user, return_dir);
     rm.RunStep();
+    stalled = rm.Stalled();
   }
 
  private:
@@ -173,7 +185,7 @@ class ReduceHarness : public BachModule {
 
   ReduceModule& rm;
   std::vector<LinkEndPtr> in;
-  uint64_t last_seq = 0;
+  uint64_t last_seq = 0, last_tail_seq = 0;
 };
 
 struct Bench {
@@ -203,7 +215,6 @@ TEST(BachReduce, RmwAccumulatesInPlace) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));  // bit0 mid、bit1 left
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 10.0f)}, {6, 1, Part(77, 9, 5, 32.0f)}};
     clk->Continue(60 * kPeriod);
@@ -227,7 +238,6 @@ TEST(BachReduce, MultiFlitPartIsAccumulatedOnce) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     // 528 B 一份，按 256 B 一个 flit 分三个。
     MessagePtr mid = LongPart(77, 9, 5, 10.0f, 128);
@@ -265,7 +275,6 @@ TEST(BachReduce, WaitsForEveryDirectionInTheMask) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b111));  // 三路都要
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)},
               {4, 1, Part(77, 9, 5, 2.0f)},
@@ -280,7 +289,6 @@ TEST(BachReduce, WaitsForEveryDirectionInTheMask) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b111));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)},
               {4, 1, Part(77, 9, 5, 2.0f)},
@@ -303,7 +311,6 @@ TEST(BachReduce, UpstreamPartWaitsInTheContext) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 100.0f)}, {50, 1, Part(77, 9, 5, 23.0f)}};
     clk->Continue(100 * kPeriod);
@@ -317,119 +324,216 @@ TEST(BachReduce, UpstreamPartWaitsInTheContext) {
   EXPECT_EQ(emit_at, 1u);
 }
 
-// 上下文保护：当前包还没输出时，同一个 user 的下一个包不得覆盖它。
+// 上下文保护：当前任务的结果还没全部发出时，同一个 user 的下一笔不得覆盖它。
+// 挡住的那个包留在输入缓冲里，前一笔的结果发完之后再进来。
 TEST(BachReduce, NextPacketOfTheSameUserDoesNotOverwrite) {
   std::vector<float> values;
+  std::vector<uint64_t> seqs;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
-    // 第一个包只到了一路，第二个包（reduce_seq 不同）就来了。
+    // 第一个包只到了一路，同一路上第二个包（reduce_seq 不同）就来了。
     h.jobs = {{2, 0, Part(77, 9, 5, 10.0f)},
-              {4, 1, Part(77, 9, 6, 999.0f)},
-              {20, 1, Part(77, 9, 5, 32.0f)}};
+              {4, 0, Part(77, 9, 6, 999.0f)},
+              {20, 1, Part(77, 9, 5, 32.0f)},
+              {30, 1, Part(77, 9, 6, 1.0f)}};
+    // 第一个包往右发出去之后，右边还回 release，第二个包才发得出去。
+    h.retire_user = 77;
+    h.return_at = 40;
+    h.return_dir = 2;
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
     values = h.out_values;
+    seqs = h.done_seqs;
   }
   RT::Reset();
-  ASSERT_FALSE(values.empty());
+  ASSERT_EQ(values.size(), 2u) << "两个包都要出来，挡住的那个不能丢";
   EXPECT_FLOAT_EQ(values[0], 42.0f) << "第二个包被挡在外面，没有把 10 覆盖掉";
+  EXPECT_FLOAT_EQ(values[1], 1000.0f) << "第一个包出去之后第二个包再进来";
+  ASSERT_EQ(seqs.size(), 2u);
+  EXPECT_EQ(seqs[0], 5u);
+  EXPECT_EQ(seqs[1], 6u);
 }
 
-// 输出队列满时对输入反压，不绕过 Reduce 降级成直接转发。
-TEST(BachReduce, FullOutputQueueBackpressuresInput) {
+// 分区在用户第一笔任务真正进来时才分配（F-029）：16 个都占着时，第 17 个用户
+// 的分量留在输入缓冲里，等有用户 Retire 放出一个分区再进来。
+uint64_t RunSeventeenUsers(uint64_t retire_at) {
   uint64_t out_num = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    for (uint64_t u = 0; u < 12; ++u) b.rm->AllocContext(100 + u);
     ReduceHarness h(clk, *b.rm, b.wires);
-    // 十二个 user 各两路分量，Xbar 一直不给授予，输出队列只有 8 个位置。
-    for (uint64_t u = 0; u < 12; ++u) {
+    for (uint64_t u = 0; u <= kReduceCtxNum; ++u) {
       h.jobs.push_back({2 + u * 4, 0, Part(100 + u, 9, 1, 1)});
       h.jobs.push_back({3 + u * 4, 1, Part(100 + u, 9, 1, 1)});
     }
-    h.grant_from = 100000;  // 永远不授予
-    clk->Continue(200 * kPeriod);
+    h.retire_at = retire_at;
+    h.retire_user = 100;
+    clk->Continue(300 * kPeriod);
     RT::JoinAll();
     out_num = h.out_values.size();
   }
   RT::Reset();
-  EXPECT_EQ(out_num, 0u) << "发不出去就压着，不绕过 Reduce 直接转发";
+  return out_num;
 }
 
-// 下游 Reduce credit 按 UserID 与目标方向记账：每发一个扣一个，release 回来
-// 才恢复。
-TEST(BachReduce, DownCreditIsPerUserAndDirection) {
-  uint64_t right = 0, mid = 0, after_return = 0;
-  {
+TEST(BachReduce, SeventeenthUserWaitsForAFreePartition) {
+  EXPECT_EQ(RunSeventeenUsers(0), kReduceCtxNum)
+      << "16 个分区都占着，第 17 个用户进不来";
+  EXPECT_EQ(RunSeventeenUsers(150), kReduceCtxNum + 1)
+      << "有用户 Retire 放出分区，第 17 个接着做";
+}
+
+// 分区不预先占：用户第一笔任务进来之前一个都不占，进来了占一个。
+TEST(BachReduce, PartitionIsAllocatedWhenTheFirstTaskEnters) {
+  uint64_t before = 1, after = 0;
+  bool holds = false;
+  for (uint64_t run : {10u, 60u}) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
-    b.tab->Preload(9, Relay(0b011));  // 往右发
-    b.rm->AllocContext(77);
+    b.tab->Preload(9, Relay(0b011));
     ReduceHarness h(clk, *b.rm, b.wires);
-    h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
-    clk->Continue(60 * kPeriod);
+    h.jobs = {{20, 0, Part(77, 9, 5, 1.0f)}, {24, 1, Part(77, 9, 5, 2.0f)}};
+    clk->Continue(run * kPeriod);
     RT::JoinAll();
-    right = b.rm->DownCredit(77, 2);
-    mid = b.rm->DownCredit(77, 0);
-    b.rm->ReturnCredit(77, 2);
-    after_return = b.rm->DownCredit(77, 2);
+    if (run == 10) {
+      before = b.rm->ContextUsed();
+    } else {
+      after = b.rm->ContextUsed();
+      holds = b.rm->HoldsUser(77);
+    }
+    RT::Reset();
   }
-  RT::Reset();
-  EXPECT_EQ(right, kReduceCreditInit - 1) << "往右发一个扣一个";
-  EXPECT_EQ(mid, kReduceCreditInit) << "没往那个方向发就不扣";
-  EXPECT_EQ(after_return, kReduceCreditInit) << "release 回来就补上";
+  EXPECT_EQ(before, 0u) << "第一笔任务进来之前不占分区";
+  EXPECT_EQ(after, 1u);
+  EXPECT_TRUE(holds) << "任务做完分区还留着，等 Retire 才放";
 }
 
-// 上下文与进 core 的 stream 表一一对应：16 项，用光了就是两边分配逻辑不一致。
-TEST(BachReduce, ContextCountMatchesTheStreamTable) {
-  EnsureSlots();
-  ClockPtr clk = MakeClock(0, kPeriod);
-  Bench b(clk);
-  for (uint64_t u = 0; u < kReduceCtxNum; ++u) b.rm->AllocContext(u);
-  EXPECT_EQ(b.rm->ContextUsed(), kReduceCtxNum);
-  // 同一个 user 再来一次不占新的。
-  b.rm->AllocContext(0);
-  EXPECT_EQ(b.rm->ContextUsed(), kReduceCtxNum);
-  EXPECT_DEATH(b.rm->AllocContext(999), "");
-  RT::Reset();
-}
-
-// 退休延迟回收：credit 没全回来之前不删上下文，回来了才删。
-TEST(BachReduce, RetiredContextWaitsForCreditToComeBack) {
-  bool held_before = false;
+// 结果按 flit 出（Router MAS「整包输入输出与结果流水」）：某个结果 flit 要的
+// 操作数都累加完了就发，不等整包。左路后面几个 flit 晚到，结果的首 flit 先出去，
+// 包锁定到尾 flit，后面的等数据到了再接着发。
+TEST(BachReduce, ResultFlitLeavesBeforeTheWholePacketArrives) {
+  uint64_t first_head = 0, tail = 0;
+  std::vector<float> values;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
+    ReduceHarness h(clk, *b.rm, b.wires);
+    // 1040 B 一份：16 B 软件辅助信息加 256 个 FP32，按 256 B 一个 flit 分五个。
+    MessagePtr mid = LongPart(77, 9, 5, 10.0f, 256);
+    MessagePtr left = LongPart(77, 9, 5, 32.0f, 256);
+    h.jobs = {{2, 0, mid, false, true},   {3, 0, mid, false, false},
+              {4, 0, mid, false, false},  {5, 0, mid, false, false},
+              {6, 0, mid, true, false},   {3, 1, left, false, true},
+              {40, 1, left, false, false}, {41, 1, left, false, false},
+              {42, 1, left, false, false}, {43, 1, left, true, false}};
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    first_head = h.first_head_at;
+    tail = h.last_tail_at;
+    values = h.out_values;
+  }
+  RT::Reset();
+  EXPECT_GT(first_head, 0u);
+  EXPECT_LT(first_head, 40u) << "两路的首 flit 到了，结果的首 flit 就发";
+  EXPECT_GT(tail, 43u) << "尾 flit 要等左路的数据都到了";
+  ASSERT_EQ(values.size(), 1u);
+  EXPECT_FLOAT_EQ(values[0], 42.0f);
+}
+
+// 下游 Reduce credit 按 UserID 与目标方向记，粒度是一笔任务：发出去之后那个
+// 方向这个用户就忙着，release 回来才空。
+TEST(BachReduce, DownCreditIsPerUserAndDirection) {
+  bool right = false, mid = true, after_return = true;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(9, Relay(0b011));  // 往右发
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    right = b.rm->DownBusy(77, 2);
+    mid = b.rm->DownBusy(77, 0);
+    b.rm->ReturnCredit(77, 2);
+    after_return = b.rm->DownBusy(77, 2);
+  }
+  RT::Reset();
+  EXPECT_TRUE(right) << "往右发过一笔，右边这个用户就忙着";
+  EXPECT_FALSE(mid) << "没往那个方向发就不占";
+  EXPECT_FALSE(after_return) << "release 回来就空了";
+}
+
+// 同一个用户的下一笔任务要等下游把上一笔的 release 还回来才发。
+std::vector<float> RunTwoTasks(uint64_t return_at) {
+  std::vector<float> values;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(9, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)},
+              {4, 1, Part(77, 9, 5, 2.0f)},
+              {10, 0, Part(77, 9, 6, 10.0f)},
+              {12, 1, Part(77, 9, 6, 20.0f)}};
+    h.retire_user = 77;
+    h.return_at = return_at;
+    h.return_dir = 2;
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    values = h.out_values;
+  }
+  RT::Reset();
+  return values;
+}
+
+TEST(BachReduce, NextTaskWaitsForDownstreamRelease) {
+  std::vector<float> held = RunTwoTasks(0);
+  ASSERT_EQ(held.size(), 1u) << "release 没回来，第二笔发不出去";
+  EXPECT_FLOAT_EQ(held[0], 3.0f);
+  std::vector<float> freed = RunTwoTasks(40);
+  ASSERT_EQ(freed.size(), 2u) << "release 回来之后第二笔接着发";
+  EXPECT_FLOAT_EQ(freed[1], 30.0f);
+}
+
+// User Retire 只放本地分区（F-037）：往右发过的那一笔 release 还没回来，下游
+// 映射留着；回来了才清。
+TEST(BachReduce, RetireFreesThePartitionButKeepsTheDownstreamMap) {
+  bool held = true, right_busy = false;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(9, Relay(0b011));
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
     h.retire_at = 30;
     h.retire_user = 77;
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
-    held_before = b.rm->HoldsUser(77);
+    held = b.rm->HoldsUser(77);
+    right_busy = b.rm->DownBusy(77, 2);
   }
   RT::Reset();
-  EXPECT_TRUE(held_before) << "往右发过一个 flit，credit 还差一个，先记着不删";
+  EXPECT_FALSE(held) << "Retire 之后本地分区当场放";
+  EXPECT_TRUE(right_busy) << "往右那一笔的 release 没回来，下游映射还记着";
 
-  bool held_after = true;
+  bool right_after = true;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
     h.retire_at = 30;
@@ -438,36 +542,65 @@ TEST(BachReduce, RetiredContextWaitsForCreditToComeBack) {
     h.return_dir = 2;
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
-    held_after = b.rm->HoldsUser(77);
+    right_after = b.rm->DownBusy(77, 2);
   }
   RT::Reset();
-  EXPECT_FALSE(held_after) << "credit 全回来了才删";
+  EXPECT_FALSE(right_after) << "release 回来就清了";
 }
 
-// 三路输入进入后锁定到尾 flit：一个包收到一半时别的方向插不进来。
+// 只收一路的中继：灌一份 count 个 FP32 的分量，数出来几个包。
+uint64_t RunOnePart(uint64_t count) {
+  uint64_t out_num = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(9, Relay(0b001));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 0, LongPart(77, 9, 5, 1.0f, count)}};
+    // 结果按 flit 发，装满时 129 个 flit，留够拍数。
+    clk->Continue(400 * kPeriod);
+    RT::JoinAll();
+    out_num = h.out_values.size();
+  }
+  RT::Reset();
+  return out_num;
+}
+
+// 上下文容量：一个包的 FP32 累加结果正好装满一个用户的上下文照常累加，多一个
+// 元素就报错，软件要先按容量拆包。
+TEST(BachReduce, PacketLargerThanTheContextIsAnError) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  uint64_t full = kReduceCtxBytes / 4;
+  EXPECT_EQ(RunOnePart(full), 1u) << "正好装满照常出结果";
+  EXPECT_DEATH(RunOnePart(full + 1), "");
+}
+
+// 三路输入进入后锁定到尾 flit：一个包收到一半时别的方向插不进来，那一路的
+// flit 留在它的输入缓冲里，尾 flit 过了再收。
 TEST(BachReduce, LockedToTailAcrossInputs) {
   std::vector<float> values;
+  uint64_t stalled = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     // lane0 的包分两拍：head 之后隔十拍才来 tail。中间 lane1 想插一笔。
     h.jobs = {{2, 0, Part(77, 9, 5, 10.0f), false},
               {4, 1, Part(77, 9, 5, 1000.0f), true},
-              {12, 0, Part(77, 9, 5, 5.0f), true},
-              {30, 1, Part(77, 9, 5, 32.0f), true}};
+              {12, 0, Part(77, 9, 5, 5.0f), true}};
     clk->Continue(100 * kPeriod);
     RT::JoinAll();
     values = h.out_values;
+    stalled = h.stalled;
   }
   RT::Reset();
+  EXPECT_GT(stalled, 0u) << "锁定期间 lane1 那一笔要被挡住";
   ASSERT_EQ(values.size(), 1u);
-  // 10 + 5 是 lane0 那个包的两拍，32 是 lane1 后来补的那一份。中间被挡住的
-  // 那笔 1000 没有混进来。
-  EXPECT_FLOAT_EQ(values[0], 47.0f) << "锁定期间别的方向插不进来";
+  // 10 + 5 是 lane0 那个包的两拍，1000 是 lane1 那一份，锁定解除后才收进来。
+  EXPECT_FLOAT_EQ(values[0], 1015.0f) << "挡住的那一份不能丢";
 }
 
 // 两个分量任意顺序到齐都算数：先左后中与先中后左结果一样。
@@ -478,7 +611,6 @@ TEST(BachReduce, PartsArriveInEitherOrder) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 7.0f)}, {6, 1, Part(77, 9, 5, 35.0f)}};
     clk->Continue(60 * kPeriod);
@@ -491,7 +623,6 @@ TEST(BachReduce, PartsArriveInEitherOrder) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 1, Part(77, 9, 5, 35.0f)}, {6, 0, Part(77, 9, 5, 7.0f)}};
     clk->Continue(60 * kPeriod);
@@ -511,7 +642,6 @@ TEST(BachReduce, Bf16InFp32AccumBf16Out) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011, kReduceBf16, kReduceBf16));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
 
     // 两份 BF16 分量：0.5 与 0.25，都在 BF16 能精确表示的档上。
@@ -553,7 +683,6 @@ TEST(BachReduce, SoftwareHeaderIsSkippedAndKept) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
-    b.rm->AllocContext(77);
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 3.0f)}, {6, 1, Part(77, 9, 5, 4.0f)}};
     clk->Continue(60 * kPeriod);

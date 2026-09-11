@@ -1,7 +1,7 @@
 // 步 11 · core 层端到端：一个 token 从 Router 进来，走完 TS 建 stream、下发
 // task、RV core 跑 kernel 配 DSA、DSA 搬运并报完成、TS 退休这一整条链。
 //
-// 与各单元自己的测试的区别：那些拿桩喂自己那一段，这一份只在 core 外面接桩 ——
+// 与各单元自己的测试的区别：那些拿桩喂自己那一段，这一份只在 core 外面接桩，
 // 从 Router 的一个入方向灌包，从出方向收包，core 里的每一段都是真模块。
 
 #include <gtest/gtest.h>
@@ -56,7 +56,6 @@ MessagePtr MakeToken(uint64_t path, uint64_t user, uint64_t bytes = 512) {
   m->path_id = path;
   m->user_id = user;
   m->size = bytes;
-  m->compute = 1;
   // 包头带这个用户在本 core 上的槽位与这一笔是链上的第几步。TS 那边环形分配
   // 出来的第一个槽位也是 0。
   m->stream_id = 0;
@@ -176,13 +175,11 @@ void WriteDatainChain(Core& core) {
   TaskEntry t;
   t.send_unit = SendUnit::kDte;
   t.recv_unit = RecvUnit::kDsa;
-  t.dsa_en = true;
   t.end = true;
-  t.exe_mask = true;
   t.path_id = 3;
+  t.wait_wake = true;
   t.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, t);
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -325,23 +322,19 @@ void WriteTwoStepChain(Core& core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = 3;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = 0;
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(1, out);
 
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -401,31 +394,25 @@ void WriteComputeChain(Core& core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = 3;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry mul;
   mul.send_unit = SendUnit::kMu;
   mul.recv_unit = RecvUnit::kDsa;
-  mul.dsa_en = true;
-  mul.exe_mask = true;
   mul.task_pc = SymbolOf("task_mu_compute", "mu");
   core.GetTs().Cfg().WriteTask(1, mul);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = 0;
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(2, out);
 
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -476,39 +463,31 @@ void WriteFullChain(Core& core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = 3;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry mul;
   mul.send_unit = SendUnit::kMu;
   mul.recv_unit = RecvUnit::kDsa;
-  mul.dsa_en = true;
-  mul.exe_mask = true;
   mul.task_pc = SymbolOf("task_mu_compute", "mu");
   core.GetTs().Cfg().WriteTask(1, mul);
 
   TaskEntry vec;
   vec.send_unit = SendUnit::kVu;
   vec.recv_unit = RecvUnit::kDsa;
-  vec.dsa_en = true;
-  vec.exe_mask = true;
   vec.task_pc = SymbolOf("task_vu_compute", "vu");
   core.GetTs().Cfg().WriteTask(2, vec);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = 0;
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(3, out);
 
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -606,31 +585,25 @@ void WriteGemmChain(Core& core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = 3;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry mul;
   mul.send_unit = SendUnit::kMu;
   mul.recv_unit = RecvUnit::kDsa;
-  mul.dsa_en = true;
-  mul.exe_mask = true;
   mul.task_pc = SymbolOf("task_mu_compute", "mu");
   core.GetTs().Cfg().WriteTask(1, mul);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = 0;
   out.task_pc = SymbolOf("task_dte_send_fc1");
   core.GetTs().Cfg().WriteTask(2, out);
 
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -676,7 +649,6 @@ TEST(BachCoreE2e, TokenInResultOutMatchesReference) {
     token->path_id = 3;
     token->user_id = 42;
     token->size = want.token.size();
-    token->compute = 1;
     token->stream_id = 0;
     token->task_id = 0;
     token->payload = want.token;
@@ -717,39 +689,31 @@ void WriteGemmActChain(Core& core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = 3;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry mul;
   mul.send_unit = SendUnit::kMu;
   mul.recv_unit = RecvUnit::kDsa;
-  mul.dsa_en = true;
-  mul.exe_mask = true;
   mul.task_pc = SymbolOf("task_mu_compute", "mu");
   core.GetTs().Cfg().WriteTask(1, mul);
 
   TaskEntry act;
   act.send_unit = SendUnit::kVu;
   act.recv_unit = RecvUnit::kDsa;
-  act.dsa_en = true;
-  act.exe_mask = true;
   act.task_pc = SymbolOf("task_vu_compute", "vu");
   core.GetTs().Cfg().WriteTask(2, act);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = 0;
   out.task_pc = SymbolOf("task_dte_send_act");
   core.GetTs().Cfg().WriteTask(3, out);
 
-  core.GetTs().Cfg().WritePathMap(3, 0);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
@@ -809,7 +773,6 @@ TEST(BachCoreE2e, GemmThenActivationMatchesReference) {
     token->path_id = 3;
     token->user_id = 42;
     token->size = want.token.size();
-    token->compute = 1;
     token->stream_id = 0;
     token->task_id = 0;
     token->payload = want.token;
@@ -924,7 +887,6 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
           m->path_id = 3;
           m->user_id = 100 + idx;
           m->size = want.token[idx].size();
-          m->compute = 1;
           // 槽位按到达顺序环形分配，第 i 个用户落在第 i 格。
           m->stream_id = idx;
           m->task_id = 0;

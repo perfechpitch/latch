@@ -6,7 +6,7 @@
 // 两级夹着执行单元那一段：SMUX 按静态配置给每个单元备好 a、b 与 Mask，DMUX 把
 // 各单元的结果送回 RF 或交给 SU。
 //
-// 执行单元之间的 bypass 与广播不消耗 RF 端口 —— 从产生方的输出直接取。所以
+// 执行单元之间的 bypass 与广播不消耗 RF 端口：从产生方的输出直接取。所以
 // SMUX 读 RF 的次数只由取 kVrf0 / kVrf1 / kSrf 那几路决定，端口上限在 M3 已查过。
 //
 // 一条宏指令内多条并行通路经过的执行分组级数不同时，合并点的两个源操作数会不同
@@ -86,7 +86,7 @@ class VuSmux : public BachModule {
   // 取静态副本还是动态寄存器由 STATIC_DYNAMIC_MASK 决定，那件事收在
   // VuMacroInst 里。
   //
-  // 只有真被某一路 SRC*_SEL 指到的端口才读 —— 端口占用的上限在 M3 已经查过，
+  // 只有真被某一路 SRC*_SEL 指到的端口才读。端口占用的上限在 M3 已经查过，
   // 这里按需读，读了就是占了。
   void Route(VuFlow& f) {
     VuMacroInst const& inst = f.uops.inst;
@@ -227,7 +227,7 @@ class VuDmux : public BachModule {
 
     // 六个 SRF 虚拟写口：bit0 p0(LU ld.s.fp32)、bit1 p1(VALU1 归约 / Top-K)、
     // bit2 p2(MEXE vcpop / vfirst)、bit3～5 p3～p5(SEXE0/1/2)。六个可以在同一条
-    // 宏指令内全部使能 —— 它们落在不同的时间窗口上，时分复用同一组写通路。
+    // 宏指令内全部使能：它们落在不同的时间窗口上，时分复用同一组写通路。
     uint64_t en = c.SrfWtEn();
     const VuOperand* srf_src[kVuSrfWtPorts] = {
         &f.lu, &f.valu[1], &f.mexe, &f.sexe[0], &f.sexe[1], &f.sexe[2]};

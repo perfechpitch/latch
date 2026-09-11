@@ -136,10 +136,10 @@ class VuPipeCtrl : public BachModule {
     holding = false;
   }
 
-  // ready 表示这一拍真的收下了。被 Scoreboard 或 fence 挡住时不能给 ready ——
+  // ready 表示这一拍真的收下了。被 Scoreboard 或 fence 挡住时不能给 ready：
   // 上游看见 ready 就换下一条，被挡住的这一条会静默丢掉。
   void Accept() {
-    // 还压着一条时端口已经由 Drain 驱动过了，这里再写一次会静默盖掉它 ——
+    // 还压着一条时端口已经由 Drain 驱动过了，这里再写一次会静默盖掉它。
     // 同线程同拍两次写同一个 Latch 不触发断言，那一条就永远发不出去。
     if (holding) {
       in->DriveReady(false);
@@ -292,7 +292,7 @@ class VuPipeCtrl : public BachModule {
         c.sexe[0].Active() || c.sexe[1].Active() || c.sexe[2].Active();
   }
 
-  // 单条宏指令的容量上限与配置合法性。违反置 CFG_ERROR，本条照走 —— 硬件不
+  // 单条宏指令的容量上限与配置合法性。违反置 CFG_ERROR，本条照走。硬件不
   // 阻塞流水。
   static bool CheckCaps(VuUops const& u) {
     VuStaticCfg const& c = u.cfg;

@@ -5,12 +5,12 @@
 //
 // 15 条 Mask 指令：八条逻辑运算，vcpop.m 数 1 的个数、vfirst.m 找第一个 1，
 // vmsbf / vmsif / vmsof.m 三条按第一个 1 的位置生成新 Mask，vmiuset.mv 与
-// vmiset.mv 按 16 个 INT16 索引清位或置位 —— 后两条配合 VALU1 的 Top-K 做迭代
+// vmiset.mv 按 16 个 INT16 索引清位或置位。后两条配合 VALU1 的 Top-K 做迭代
 // 查找：取完一轮 Top-16 就把这 16 位清掉，下一轮取的是次大的一批。
 //
 // MEXE 只接受 Mask 数据且位于 VALU 下游，不能取 LU / VALU1 / VALU2 / VSFU /
-// SEXE 的输出，也不能取 VRF / SRF。它的标量输出是整数，所以也不能当 SEXE 的源
-// —— SEXE 只有浮点通路。
+// SEXE 的输出，也不能取 VRF / SRF。它的标量输出是整数，所以也不能当 SEXE 的源，
+// 因为 SEXE 只有浮点通路。
 
 #include <string>
 

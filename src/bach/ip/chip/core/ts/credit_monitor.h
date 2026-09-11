@@ -4,11 +4,13 @@
 // TS 这一侧的 credit 与退休。对应 task_state_update 的 credit 子模块加 retire。
 //
 // MAS 顶层的 Credit_monitor 已划删除线：出核前的资源监听在 Router 的
-// CoreMemCreditMonitor，TS 这侧只做三件事 ——
+// CoreMemCreditMonitor。TS 这侧做四件事：
 //
 //   申请  向 Router 注册资源申请，带 UserID、StreamID、TaskID、PathID
 //   唤醒  Router 申请到后经反向控制通路通知，把对应 task 置 READY
 //   退休  Head-only：只允许 head_ptr 指向的那一项退休
+//   Rmem  本级 Rmem 的 credit 每个用户一份，记在 stream 表项上：reduce 任务停
+//         在 WAIT 时 credit 在就置 READY；发出去占掉，Rmem 做完报回来才还
 //
 // 与 DTE 的分工：业务层的资源在这一级查完，有资源才下发；下发之后 DTE 只查 VC
 // 通路上的 flit credit。
@@ -44,7 +46,8 @@ class TsCreditMonitor : public BachModule {
         wake(std::make_shared<StreamWritePortIf>(clock)),
         retire_wr(std::make_shared<StreamWritePortIf>(clock)),
         woken(clock),
-        retired(clock) {}
+        retired(clock),
+        rmem_admitted(clock) {}
 
   void AttachSnapshot(std::shared_ptr<SnapshotPort> p) { snap = std::move(p); }
   CreditReqPort& Req() { return *req; }
@@ -63,6 +66,7 @@ class TsCreditMonitor : public BachModule {
 
   uint64_t Woken() const { return woken.Get(); }
   uint64_t Retired() const { return retired.Get(); }
+  uint64_t RmemAdmitted() const { return rmem_admitted.Get(); }
 
   bool Quiescent() const override { return !asking && !retiring; }
 
@@ -76,13 +80,14 @@ class TsCreditMonitor : public BachModule {
 
     woken = wake_pending;
     retired = retire_pending;
+    rmem_admitted = rmem_pending;
     TracePerCycle("woken", wake_pending);
     TracePerCycle("retired", retire_pending);
   }
 
  private:
-  // Head-only 退休：只允许 head_ptr 那一项退休，条件是 valid=1 且 end=1 且
-  // task_fsm=FINISH。
+  // Head-only 退休：只允许 head_ptr 那一项退休，条件是 valid=1，且第 0 项到 End
+  // 项的完成位全部置起。End 提前完成、当前任务停在 End 前面的也照样退休。
   void DoRetire() {
     if (retiring) {
       if (!retire_req->Accepted()) return;  // Router 还没收，保持
@@ -117,7 +122,8 @@ class TsCreditMonitor : public BachModule {
       retire_req->Idle();
       return;
     }
-    if (e.valid && e.end && e.task_fsm == TaskFsm::kFinish) {
+    uint64_t through = cfg.ThroughEndMask();
+    if (e.valid && through != 0 && (e.done_bitmap & through) == through) {
       retire_req->Drive(e.user_id);
       retiring = true;
       retire_slot = h;
@@ -159,6 +165,7 @@ class TsCreditMonitor : public BachModule {
       wake_hold = true;
       return;
     }
+    if (AdmitReduce()) return;
     // 没有 credit 要处理时，用这个口把重发完成的那几笔标记清掉。
     if (clear_q.empty()) return;
     StreamSnapshotPtr s = snap->Get();
@@ -180,6 +187,31 @@ class TsCreditMonitor : public BachModule {
     clear_q.pop_front();
   }
 
+  // 本级 Rmem 的 credit：停在 WAIT 的 reduce 任务，这个用户的 credit 在就置
+  // READY。一拍一笔，按年龄选最老的。
+  bool AdmitReduce() {
+    StreamSnapshotPtr s = snap->Get();
+    if (!s) return false;
+    for (uint64_t k = 0; k < kStreamNum; ++k) {
+      uint64_t i = s->AgeOrder(k);
+      StreamEntry const& e = s->entry[i];
+      if (!e.valid || e.task_fsm != TaskFsm::kWait) continue;
+      if (e.task_type != TaskType::kReduce || e.rmem_busy) continue;
+      auto w = std::make_shared<StreamWrite>();
+      w->valid = true;
+      w->stream_id = i;
+      w->set_fsm = true;
+      w->fsm = TaskFsm::kReady;
+      w->fsm_if_current = true;
+      w->from_task_id = e.task_id;
+      wake->Drive(w);
+      wake_hold = true;
+      ++rmem_pending;
+      return true;
+    }
+    return false;
+  }
+
   // 扫 stream_table，给需要 credit 又还在 WAIT 的 task 发申请。
   void DoAsk() {
     if (asking) {
@@ -194,7 +226,8 @@ class TsCreditMonitor : public BachModule {
       StreamEntry const& e = s->entry[i];
       if (!e.valid || e.task_fsm != TaskFsm::kWait) continue;
       TaskEntry const& t = cfg.Task(e.task_id);
-      if (!t.credit_en) continue;
+      // reduce 任务要的是本级 Rmem 的 credit，TS 自己记，不向 Router 要。
+      if (!t.credit_en || t.IsReduce()) continue;
       req->Drive(e.user_id, i, e.task_id, t.path_id);
       asking = true;
       return;  // 一拍一笔
@@ -215,9 +248,9 @@ class TsCreditMonitor : public BachModule {
   bool asking = false, retiring = false, wake_hold = false;
   bool just_retired_vld = false;
   uint64_t retire_slot = 0, just_retired = 0;
-  uint64_t wake_pending = 0, retire_pending = 0;
+  uint64_t wake_pending = 0, retire_pending = 0, rmem_pending = 0;
 
-  Logic64 woken, retired;
+  Logic64 woken, retired, rmem_admitted;
 };
 
 }  // namespace bach

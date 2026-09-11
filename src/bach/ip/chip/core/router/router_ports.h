@@ -26,8 +26,8 @@ namespace bach {
 //
 // 这一路不是 valid/grant 握手，是「下游有位置就发」：Xbar 每拍发布自己那个入口
 // 缓冲还收不收得下（room），station 读上一拍的电平，收得下就把队首交出去并当场
-// 出队。等授予的话一笔要占两拍 —— station 提请求、Xbar 下一拍授予、station 再
-// 下一拍才看得到 —— 单个方向的吞吐就只有每两拍一个 flit，而 VC Buffer 队首每拍
+// 出队。等授予的话一笔要占两拍（station 提请求、Xbar 下一拍授予、station 再
+// 下一拍才看得到），单个方向的吞吐就只有每两拍一个 flit，而 VC Buffer 队首每拍
 // 都能出一个。
 //
 // room 拉低到 station 停下来隔着一拍，所以 Xbar 那边的入口缓冲要比门限多留余量，
@@ -45,7 +45,7 @@ class XbarReqPort : public Logic {
   LogicPtr<Message> msg;
   // Xbar 写、station 读：入口缓冲还收不收得下。
   Logic64 room;
-  // 每交出一笔加一。Xbar 按它认这一笔见没见过 —— 两侧各自打拍，station 一拍
+  // 每交出一笔加一。Xbar 按它认这一笔见没见过：两侧各自打拍，station 一拍
   // 不写端口就会回落成上一拍的值，只看 valid 会把同一笔收两遍。
   Logic64 seq;
 
@@ -200,7 +200,7 @@ class CoreDataPort : public Logic {
   Logic64 tready;
   // 一次握手最少两拍：发送方拉 valid，接收方下一拍拉 ready，发送方再下一拍才
   // 看得到并换下一笔。这中间发送方保持数据不变（或干脆不写、让 Latch 回落），
-  // 接收方会连着两拍看到同一笔 —— 按序号认它，不消费两遍。
+  // 接收方会连着两拍看到同一笔，按序号认它，不消费两遍。
   Logic64 seq;
 
   explicit CoreDataPort(ClockPtr c)
@@ -262,31 +262,36 @@ inline CoreDataView ReadCoreData(CoreDataPort const& p) {
 // 请求发出后保持到 TS 拉 ready；丢一笔 trigger 就等于丢一个 token。
 class TriggerPort : public Logic {
  public:
-  Logic64 valid, user_id, path_id, reissue, compute;
+  Logic64 valid, user_id, path_id, reissue;
   Logic64 ready;
+  // 一笔请求保持到看见 ready，TS 那一侧会连着几拍看到同一笔，按序号认它。
+  Logic64 seq;
 
   explicit TriggerPort(ClockPtr c)
-      : valid(c), user_id(c), path_id(c), reissue(c), compute(c), ready(c) {
-    Fields(valid, user_id, path_id, reissue, compute, ready);
+      : valid(c), user_id(c), path_id(c), reissue(c), ready(c), seq(c) {
+    Fields(valid, user_id, path_id, reissue, ready, seq);
   }
 
-  void Drive(uint64_t user, uint64_t path, bool re, bool comp) {
+  void Drive(uint64_t user, uint64_t path, bool re) {
     valid = 1;
     user_id = user;
     path_id = path;
     reissue = re ? 1 : 0;
-    compute = comp ? 1 : 0;
+    seq = ++issue_seq;
   }
   void Idle() {
     valid = 0;
     user_id = 0;
     path_id = 0;
     reissue = 0;
-    compute = 0;
   }
   void DriveReady(bool ok) { ready = ok ? 1 : 0; }
   bool Ready() const { return ready.Get() != 0; }
   bool Valid() const { return valid.Get() != 0; }
+  uint64_t Seq() const { return seq.Get(); }
+
+ private:
+  uint64_t issue_seq = 0;
 };
 
 // Retire 认定一个 user 退休后，广播给要抹表的那几个模块。

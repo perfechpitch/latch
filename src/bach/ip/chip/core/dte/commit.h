@@ -12,10 +12,11 @@
 //
 // PendingTaskQ 排在 Commit 之前：RV core 配好一个出核任务后，先按 path_id 查出
 // 走哪个 VC 与资源需求，credit 不够的进 PendingTaskQ 等，够了才来 Commit 申请
-// 那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项 ——
+// 那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项。
 // 这是「资源的持有与等待不成环」在 DTE 上的落点。
 
 #include <deque>
+#include <map>
 #include <vector>
 #include <memory>
 #include <string>
@@ -77,7 +78,7 @@ class Commit : public BachModule {
     TryAdmitPending();
     TakeFromRv();
     // 准入的那一笔集中在这里发出去：端口每拍必须驱动一次，散在几处写会互相
-    // 盖掉 —— 同线程同拍两次写同一个 Latch 不触发断言。
+    // 盖掉。同线程同拍两次写同一个 Latch 不触发断言。
     Deliver();
 
     admitted = admit_pending;
@@ -131,29 +132,33 @@ class Commit : public BachModule {
       return;
     }
     // 出核任务先进 PendingTaskQ 等 credit，够了才去 Commit 申请那三样。
-    pending.push_back(*d);
+    Descriptor nd = *d;
+    MarkReducePkt(nd);
+    pending.push_back(nd);
     last_rv_seq = from_rv->Seq();
     from_rv->DriveAccepted(true);
+  }
+
+  // 走归约路径出核的包标成 reduce 包（F74），包头的 reduce_seq 打上发方的
+  // task_id：ReduceModule 靠它分开同一个用户前后两笔 reduce 任务。一条归约链上
+  // 各 core 的任务链一样，同一笔任务的 task_id 也一样。
+  void MarkReducePkt(Descriptor& d) {
+    if (d.route != Route::kCmToRouter && d.route != Route::kMmToRouter) return;
+    if (hmem.Rtab(d.path_id).operation == Operation::kForward) return;
+    d.reduce_pkt = true;
+    d.reduce_seq = d.task_id;
   }
 
   void TryAdmitPending() {
     if (pending.empty()) return;
     Descriptor const& d = pending.front();
-    // 发数据之前实时检查这条 VC 通路上的 flit credit。下游 Stream / Rmem 资源
-    // 不在这里查，TS 下发之前已经申请到。
-    uint64_t flits = FlitsOf(d.bytes);
+    // 发数据之前实时检查这条 VC 通路上的 flit credit。下游 Stream 资源与本级
+    // Rmem 资源不在这里查，TS 下发之前已经申请到；Reduce 包也一样。
     RouteEntry const& e = hmem.Rtab(d.path_id);
     if (!VcOk(d, e)) return;
-    if (e.operation != Operation::kForward &&
-        !hmem.ReduceCreditEnough(d.user_id, flits)) {
-      return;
-    }
     if (!TryAdmit(d)) {
       ++stall_pending;
       return;
-    }
-    if (e.operation != Operation::kForward) {
-      hmem.TakeReduceCredit(d.user_id, flits);
     }
     pending.pop_front();
   }
@@ -193,7 +198,7 @@ class Commit : public BachModule {
   }
 
   // 三样一起拿：读侧 TaskQueue、写侧 TaskQueue、Completion RS。三样都是别的
-  // 模块的队列，所以问的是它们上一拍报的 ready —— 那是「下一拍一定收得下」的
+  // 模块的队列，所以问的是它们上一拍报的 ready，那是「下一拍一定收得下」的
   // 承诺，往它们队列里放东西的只有本模块一家，承诺到下一拍仍然成立。
   bool TryAdmit(Descriptor const& d) {
     if (holding) return false;
@@ -248,6 +253,7 @@ class Commit : public BachModule {
   uint64_t held_lane = 0, admit_seq = 0;
 
   std::deque<Descriptor> pending;
+  // 每个 stream 当前这笔 reduce task 下一包该打几号。
   uint64_t last_parser_seq = 0, last_rv_seq = 0;
   uint64_t admit_pending = 0, stall_pending = 0;
 

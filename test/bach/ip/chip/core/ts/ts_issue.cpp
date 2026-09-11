@@ -1,7 +1,9 @@
-// 三条发射通路的选取与握手。
+// User_Match 与三条发射通路。
 //
-// DTE 那一条要按 Reissue、年龄、DataIn 与 Generated 的规矩选；三条通路各自独立
-// 打拍，同一拍可以并行下发三个 task；选中之后非抢占保持，直到 RV core 回 ACCEPT。
+// User_Match 按 {user_id, path_id, reissue} 判用户、按 PID 找搬入任务、按任务类型
+// 与 reissue 定跳过哪几项。DTE 那一条发射通路里 DataIn 与 Generated 全部按年龄
+// 比；三条通路各自独立打拍，同一拍可以并行下发三个 task；选中之后非抢占保持，
+// 直到 RV core 回 ACCEPT。DTE 命令带的 VCID 取自 ROUTER_TABLE。
 
 #include <gtest/gtest.h>
 
@@ -28,15 +30,14 @@ TaskEntry Step(SendUnit unit, uint64_t pc) {
   TaskEntry t;
   t.send_unit = unit;
   t.recv_unit = RecvUnit::kDsa;
-  t.dsa_en = true;
-  t.exe_mask = true;
   t.task_pc = pc;
   return t;
 }
 
 // 一个停在某一步、状态 READY 的用户。
 std::shared_ptr<StreamWrite> Ready(uint64_t slot, uint64_t user, SendUnit unit,
-                                   uint64_t task_id, bool reissue = false) {
+                                   uint64_t task_id, uint64_t path = 0,
+                                   RecvUnit recv = RecvUnit::kDsa) {
   auto w = std::make_shared<StreamWrite>();
   w->valid = true;
   w->stream_id = slot;
@@ -44,14 +45,12 @@ std::shared_ptr<StreamWrite> Ready(uint64_t slot, uint64_t user, SendUnit unit,
   w->entry.valid = true;
   w->entry.user_id = user;
   w->entry.user_id_vld = true;
-  w->entry.compute = true;
   w->entry.task_id = task_id;
   w->entry.task_fsm = TaskFsm::kReady;
   w->entry.task_unit = unit;
-  w->entry.task_recv = RecvUnit::kDsa;
-  w->entry.task_dsa_en = true;
+  w->entry.task_recv = recv;
+  w->entry.task_path_id = path;
   w->entry.task_pc = 0x1000 + task_id;
-  w->entry.is_reissue = reissue;
   return w;
 }
 
@@ -60,6 +59,7 @@ class IssueBench : public BachModule {
  public:
   struct Trig {
     uint64_t at = 0, user = 0, path = 0;
+    bool reissue = false;
   };
   struct Seed {
     uint64_t at = 0;
@@ -78,7 +78,7 @@ class IssueBench : public BachModule {
   uint64_t ready_from = 0;
 
   struct Got {
-    uint64_t at = 0, stream = 0, task = 0, user = 0;
+    uint64_t at = 0, stream = 0, task = 0, user = 0, vcid = 0, dsa = 0;
   };
   std::vector<Got> dte_log, mu_log, vu_log;
 
@@ -110,14 +110,15 @@ class IssueBench : public BachModule {
       return;
     }
     // 认「这是不是上一笔」要连 path_id 一起看：自启动 core 的 datain 没有
-    // stream，几笔的 stream_id 与 task_id 都是 0，只有 path_id 分得开。
+    // stream，几笔的 stream_id 与 task_id 都一样，只有 path_id 分得开。
     uint64_t key = ((cmd.stream_id.Get() * kTaskChainNum + cmd.task_id.Get()) *
                         kTaskChainNum +
                     cmd.path_id.Get()) +
                    1;
     if (key != last_key) {
       log.push_back({now, cmd.stream_id.Get(), cmd.task_id.Get(),
-                     cmd.user_id.Get()});
+                     cmd.user_id.Get(), cmd.vcid.Get(),
+                     cmd.task_dsa_en.Get()});
       last_key = key;
     }
     cmd.DriveReady(true);
@@ -140,8 +141,10 @@ class IssueBench : public BachModule {
       um.Trigger().Idle();
       return;
     }
-    um.Trigger().Drive(t.user, t.path, /*reissue=*/false, /*compute=*/true);
-    if (sent_at == 0) sent_at = now;
+    if (sent_at == 0) {
+      um.Trigger().Drive(t.user, t.path, t.reissue);
+      sent_at = now;
+    }
   }
 
   CfgReg& cfg;
@@ -166,7 +169,7 @@ struct Bench {
     cfg = std::make_unique<CfgReg>(c, "cfg", 0, false);
     table = std::make_unique<StreamTable>(c, "table", 0, false);
     um = std::make_unique<UserMatch>(c, "um", *cfg, 0, false);
-    dte = std::make_unique<DteArb>(c, "dte", *um, 0, false);
+    dte = std::make_unique<DteArb>(c, "dte", *um, *cfg, 0, false);
     mu = std::make_unique<UnitArb>(c, "mu", SendUnit::kMu, 0, false);
     vu = std::make_unique<UnitArb>(c, "vu", SendUnit::kVu, 0, false);
     auto snap = table->SnapPtr();
@@ -181,10 +184,34 @@ struct Bench {
   }
 };
 
+// 重发配对的一条链：搬入那一项按 PID 7 匹配，配对的搬出是 out_idx 那一项。
+TaskEntry ReissueIn(TaskType type, uint64_t out_idx) {
+  TaskEntry t = Step(SendUnit::kDte, 0x200);
+  t.wait_wake = true;
+  t.path_id = 7;
+  t.task_type = type;
+  t.p2p_reissue_tid = out_idx;
+  return t;
+}
+TaskEntry ReissueOut() {
+  TaskEntry t = Step(SendUnit::kDte, 0x300);
+  t.task_type = TaskType::kReissueOut;
+  t.credit_en = true;
+  t.path_id = 8;
+  return t;
+}
+TaskEntry EndOn(SendUnit unit) {
+  TaskEntry t = Step(unit, 0x400);
+  t.recv_unit = RecvUnit::kRvOnly;
+  t.end = true;
+  return t;
+}
+
 }  // namespace
 
 // R core 与 B core 上进来的包不建 stream 表项：只把 datain 任务登记进
-// DataIn_task_table，PC 取 DATAIN_TASK 那一项，同一个用户来第二次照样登记。
+// DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID 15 / TID 63，同一个
+// 用户来第二次照样登记。
 TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
   std::vector<IssueBench::Got> d;
   uint64_t used = 0;
@@ -194,13 +221,12 @@ TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
     Bench b(clk);
     // R core：task 0 自启动跑在 MU 上，datain 单独配一个 DTE 的 pc。
     TaskEntry t0 = Step(SendUnit::kMu, 0x2000);
-    t0.self_start = true;
-    t0.dsa_en = false;
+    t0.recv_unit = RecvUnit::kRvOnly;
     b.cfg->WriteTask(0, t0);
     TaskEntry t1 = Step(SendUnit::kDte, 0x2100);
     t1.end = true;
     b.cfg->WriteTask(1, t1);
-    b.cfg->SetCoreType(CoreType::kReduction);
+    b.cfg->SetSelfStart(true);
     b.cfg->WriteDatainTask(0x3000, /*weights_mode=*/false);
     b.cfg->SetStreamNum(1);
     b.cfg->SetInitFinish();
@@ -219,7 +245,8 @@ TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
   ASSERT_EQ(d.size(), 2u) << "同一个用户来两次要登记两次";
   for (auto const& one : d) {
     EXPECT_EQ(one.user, 77u);
-    EXPECT_EQ(one.task, 0u);
+    EXPECT_EQ(one.stream, kBypassSid);
+    EXPECT_EQ(one.task, kBypassTid);
   }
 }
 
@@ -251,31 +278,6 @@ TEST(BachTsIssue, ThreeUnitsIssueInTheSameCycle) {
   EXPECT_EQ(m[0].at, v[0].at);
 }
 
-// Reissue 优先级最高：比它更老的普通任务也要让它先走。
-TEST(BachTsIssue, ReissueGoesFirst) {
-  std::vector<IssueBench::Got> d;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
-    // stream0 先出现，会被先锁定；等它被收下之后，stream1（较老、普通）与
-    // stream2（较新、重发）一起在候选里，这时候该轮到重发那个。
-    h.seeds = {{2, Ready(0, 11, SendUnit::kDte, 0)},
-               {3, Ready(1, 12, SendUnit::kDte, 0)},
-               {4, Ready(2, 13, SendUnit::kDte, 0, /*reissue=*/true)}};
-    h.ready_from = 20;
-    clk->Continue(80 * kPeriod);
-    RT::JoinAll();
-    d = h.dte_log;
-  }
-  RT::Reset();
-  ASSERT_GE(d.size(), 3u);
-  EXPECT_EQ(d[0].user, 11u) << "先锁定的那一笔不被抢";
-  EXPECT_EQ(d[1].user, 13u) << "重发的排在更老的普通任务前面";
-  EXPECT_EQ(d[2].user, 12u);
-}
-
 // 同一个单元上有多个候选时选最老的那个 stream。
 TEST(BachTsIssue, OldestStreamGoesFirst) {
   std::vector<IssueBench::Got> d;
@@ -298,7 +300,8 @@ TEST(BachTsIssue, OldestStreamGoesFirst) {
   EXPECT_EQ(d[2].user, 13u);
 }
 
-// 非抢占保持：选中之后命令与字段一直保持，直到 RV core 回 ACCEPT。
+// 非抢占保持：选中之后命令与字段一直保持，直到 RV core 回 ACCEPT。这期间出现
+// 一个更老的候选，也不能把已经锁定的这一笔换掉。
 TEST(BachTsIssue, HeldCommandStaysUntilAccept) {
   std::vector<IssueBench::Got> d;
   {
@@ -306,10 +309,9 @@ TEST(BachTsIssue, HeldCommandStaysUntilAccept) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
-    // 老的那个先被选中；RV core 三十拍里一直不收。这期间来了一个更该先走的
-    // 重发任务，也不能把已经锁定的这一笔换掉。
-    h.seeds = {{2, Ready(0, 11, SendUnit::kDte, 0)},
-               {8, Ready(1, 12, SendUnit::kDte, 0, /*reissue=*/true)}};
+    // stream1 先就绪，先被选中；stream0 离 head 更近、更老，后就绪。
+    h.seeds = {{2, Ready(1, 12, SendUnit::kDte, 0)},
+               {8, Ready(0, 11, SendUnit::kDte, 0)}};
     h.ready_from = 30;
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
@@ -317,9 +319,9 @@ TEST(BachTsIssue, HeldCommandStaysUntilAccept) {
   }
   RT::Reset();
   ASSERT_GE(d.size(), 2u);
-  EXPECT_EQ(d[0].user, 11u) << "锁定的那一笔不被抢";
+  EXPECT_EQ(d[0].user, 12u) << "锁定的那一笔不被抢";
   EXPECT_GE(d[0].at, 30u) << "一直等到 RV core 收";
-  EXPECT_EQ(d[1].user, 12u);
+  EXPECT_EQ(d[1].user, 11u);
 }
 
 // DataIn 与 Generated 按年龄比：DataIn 那一格更老时先发它，不是一律垫底。
@@ -329,7 +331,7 @@ TEST(BachTsIssue, DataInGoesByAgeAgainstGenerated) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
-    // 链：0 普通 DTE、1 datain、2 End。path 7 指向第 1 项。
+    // 链：0 普通 DTE、1 datain（PID 7）、2 End。
     b.cfg->WriteTask(0, Step(SendUnit::kDte, 0x100));
     TaskEntry din = Step(SendUnit::kDte, 0x200);
     din.wait_wake = true;
@@ -338,8 +340,6 @@ TEST(BachTsIssue, DataInGoesByAgeAgainstGenerated) {
     TaskEntry last = Step(SendUnit::kDte, 0x300);
     last.end = true;
     b.cfg->WriteTask(2, last);
-    b.cfg->WritePathMap(7, 1);
-    b.cfg->WriteDatainTask(0x200, false);
     b.cfg->SetInitFinish();
 
     IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
@@ -361,4 +361,132 @@ TEST(BachTsIssue, DataInGoesByAgeAgainstGenerated) {
   // 第二笔应当是那一格 DataIn（stream0，task 1），而不是更新的 stream1。
   EXPECT_EQ(d[1].stream, 0u) << "DataIn 那一格更老，排在 stream1 前面";
   EXPECT_EQ(d[1].task, 1u);
+}
+
+// Broadcast 重发的搬入且 reissue=0：搬入照做，配对的搬出跳过；reissue=1 两者都做。
+TEST(BachTsIssue, BroadcastReissueInSkipsOnlyTheEgress) {
+  std::vector<IssueBench::Got> d0, d1;
+  StreamEntry e0, e1;
+  for (bool re : {false, true}) {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.cfg->WriteTask(0, ReissueIn(TaskType::kBcastReissueIn, 1));
+    b.cfg->WriteTask(1, ReissueOut());
+    b.cfg->WriteTask(2, EndOn(SendUnit::kMu));
+    b.cfg->SetInitFinish();
+    IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
+    h.trigs = {{4, 11, 7, re}};
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    (re ? d1 : d0) = h.dte_log;
+    (re ? e1 : e0) = b.table->Peek(0);
+    RT::Reset();
+  }
+  ASSERT_EQ(d0.size(), 1u);
+  EXPECT_EQ(d0[0].task, 0u) << "搬入照做";
+  EXPECT_EQ(e0.done_bitmap, 0b10u) << "配对的搬出跳过";
+  EXPECT_FALSE(e0.reissue);
+  ASSERT_EQ(d1.size(), 1u);
+  EXPECT_EQ(d1[0].task, 0u);
+  EXPECT_EQ(e1.done_bitmap, 0u) << "reissue=1 不跳";
+  EXPECT_TRUE(e1.reissue);
+}
+
+// P2P 重发的搬入且 reissue=0：搬入与配对的搬出都跳过，不派 DTE，照样建表；
+// reissue=1 派搬入。
+TEST(BachTsIssue, P2pReissueInSkipsBothWithoutDte) {
+  std::vector<IssueBench::Got> d0, d1, m0;
+  StreamEntry e0, e1;
+  bool hold0 = true;
+  for (bool re : {false, true}) {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    TaskEntry t0 = Step(SendUnit::kMu, 0x100);
+    t0.recv_unit = RecvUnit::kRvOnly;
+    b.cfg->WriteTask(0, t0);
+    b.cfg->WriteTask(1, ReissueIn(TaskType::kP2pReissueIn, 2));
+    b.cfg->WriteTask(2, ReissueOut());
+    b.cfg->WriteTask(3, EndOn(SendUnit::kVu));
+    b.cfg->SetInitFinish();
+    IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
+    h.trigs = {{4, 11, 7, re}};
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    if (re) {
+      d1 = h.dte_log;
+      e1 = b.table->Peek(0);
+    } else {
+      d0 = h.dte_log;
+      m0 = h.mu_log;
+      e0 = b.table->Peek(0);
+      hold0 = b.um->Hold().valid;
+    }
+    RT::Reset();
+  }
+  EXPECT_TRUE(d0.empty()) << "不派 DTE";
+  EXPECT_FALSE(hold0);
+  EXPECT_EQ(e0.done_bitmap, 0b110u) << "搬入与搬出都跳过";
+  ASSERT_EQ(m0.size(), 1u) << "照样建表，task 0 照常下发";
+  ASSERT_EQ(d1.size(), 1u);
+  EXPECT_EQ(d1[0].task, 1u);
+  EXPECT_EQ(e1.done_bitmap, 0u);
+}
+
+// 老用户按 PID 找它还没做完的搬入任务，跳过位补进原来那一项。
+TEST(BachTsIssue, ExistingUserMatchesByPid) {
+  std::vector<IssueBench::Got> d;
+  uint64_t bits = 0, used = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    TaskEntry first = Step(SendUnit::kDte, 0x100);
+    first.wait_wake = true;
+    first.path_id = 5;
+    b.cfg->WriteTask(0, first);
+    b.cfg->WriteTask(1, ReissueIn(TaskType::kBcastReissueIn, 2));
+    b.cfg->WriteTask(2, ReissueOut());
+    b.cfg->WriteTask(3, EndOn(SendUnit::kMu));
+    b.cfg->SetInitFinish();
+    IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
+    h.trigs = {{4, 11, 5}, {20, 11, 7}};
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    d = h.dte_log;
+    bits = b.table->Peek(0).done_bitmap;
+    used = b.table->TailPtr() - b.table->HeadPtr();
+  }
+  RT::Reset();
+  EXPECT_EQ(used, 1u) << "同一个用户只建一项";
+  ASSERT_EQ(d.size(), 2u);
+  EXPECT_EQ(d[0].task, 0u);
+  EXPECT_EQ(d[1].task, 1u) << "PID 7 对的是 task 1";
+  EXPECT_EQ(d[1].stream, 0u);
+  EXPECT_EQ(bits, 0b100u) << "配对的搬出跳过";
+}
+
+// DTE 命令带的 VCID 按当前任务的 PID 查 ROUTER_TABLE；DSA 使能看 TASK_RECV_UNIT。
+TEST(BachTsIssue, DteCmdCarriesVcidAndRecvUnit) {
+  std::vector<IssueBench::Got> d;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.cfg->WriteRouterTable(6, 0b0001, 3);
+    IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
+    h.seeds = {{2, Ready(0, 11, SendUnit::kDte, 0, 6, RecvUnit::kDsa)},
+               {3, Ready(1, 12, SendUnit::kDte, 0, 9, RecvUnit::kRvOnly)}};
+    h.ready_from = 10;
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    d = h.dte_log;
+  }
+  RT::Reset();
+  ASSERT_EQ(d.size(), 2u);
+  EXPECT_EQ(d[0].vcid, 3u);
+  EXPECT_EQ(d[0].dsa, 1u);
+  EXPECT_EQ(d[1].vcid, 0u) << "没配的项复位值是 0";
+  EXPECT_EQ(d[1].dsa, 0u);
 }

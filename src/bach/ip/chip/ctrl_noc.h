@@ -10,7 +10,7 @@
 // 看到 ITCM、DTCM、Share Mem、Core Mem 与对应 DSA 的 IO reg；SCP 看到 core 内
 // 全部地址空间，所以端点这一层放行的范围比任何一个 RV core 都宽。
 //
-// core_id 是只读寄存器，SCP 经 ctrl_noc 读 MMIO 取得，软件不可修改 —— weights
+// core_id 是只读寄存器，SCP 经 ctrl_noc 读 MMIO 取得，软件不可修改。weights
 // 落到哪个 core 全靠它。
 //
 // 广播开关默认关：关时 SCP 依次配每个 core，开时只发一次给 core0 由它依次广播。

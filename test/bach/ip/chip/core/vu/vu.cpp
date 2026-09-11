@@ -1,7 +1,7 @@
 // VU DSA 的行为基线。
 //
 // 步 8 的判据：逐条计算原语与参考实现逐 bit 比对。参考实现写在这个文件里，按
-// 硬件的顺序算 —— 归约是 LANES 内先加再走树，换成整条顺序加就不是同一个 bit。
+// 硬件的顺序算：归约是 LANES 内先加再走树，换成整条顺序加就不是同一个 bit。
 //
 // 除计算原语外，另外五件事各有用例：trigger 写一次执行一次、静态配置组被引用时
 // 配置写阻塞、Scoreboard 挡住有依赖的宏指令、MACRO_INST_FENCE 与 DATA_BROADCAST
@@ -385,7 +385,7 @@ TEST(Vu, Valu0MaccUsesThreeOperands) {
   std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, kVl * 4));
   ASSERT_EQ(got.size(), in.size());
   for (size_t i = 0; i < in.size(); ++i) {
-    // 乘积先算出来再加，不写成一句 —— 写成一句编译器会合成 FMA，少一次舍入。
+    // 乘积先算出来再加，不写成一句，因为写成一句编译器会合成 FMA，少一次舍入。
     float prod = in[i] * in[i];
     float want = numeric::ClampNanInf(prod + acc[i]);
     EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want)) << "i=" << i;
@@ -428,7 +428,7 @@ TEST(Vu, VsfuSigmoid) {
 
 TEST(Vu, Valu1ReduceSumFollowsTreeOrder) {
   // vfredusum.vs：标量初值在 src1，结果走 SRF 虚拟写口 p1。参考实现按 LANES
-  // 内先加再走树 —— 换成整条顺序加就不是同一个 bit。
+  // 内先加再走树，换成整条顺序加就不是同一个 bit。
   Rig rig;
   std::vector<float> in = Tame(kVl, 0x204);
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
@@ -774,7 +774,7 @@ TEST(Vu, ScoreboardStallsOnOverlap) {
 
 TEST(Vu, FenceWaitsForAllPrior) {
   // MACRO_INST_FENCE 的那一条等此前全部宏指令完成才派发，哪怕两条读写的段
-  // 完全不相干 —— CM 访存冲突硬件不追踪，靠的就是这一位。
+  // 完全不相干。CM 访存冲突硬件不追踪，靠的就是这一位。
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x307)));
   SetupChain(rig, 0, 0, kSrcLu);

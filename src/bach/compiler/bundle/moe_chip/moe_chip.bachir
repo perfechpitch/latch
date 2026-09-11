@@ -1,4 +1,4 @@
-BACHIR 6
+BACHIR 8
 SOURCE src/bach/compiler/topo/moe_chip.json
 NAME moe_chip
 # CHIP <chip> <形状 0 中间 1 第一列 2 最后一列>
@@ -14,7 +14,7 @@ CORE 0 6 0
 CORE 0 7 0
 CORE 0 8 0
 CORE 0 9 0
-# CFGMISC <chip> <core> <stream_num> <core_type> <b_core_dir> <trigger_chain_en>
+# CFGMISC <chip> <core> <stream_num> <self_start> <b_core_dir> <trigger_chain_en>
 CFGMISC 0 0 16 1 0x5 1
 CFGMISC 0 1 16 0 0x0 1
 CFGMISC 0 2 16 0 0x0 1
@@ -24,80 +24,123 @@ CFGMISC 0 6 16 0 0x0 1
 CFGMISC 0 7 16 0 0x0 1
 CFGMISC 0 8 16 0 0x0 1
 CFGMISC 0 9 16 0 0x0 1
-# TCHAIN <chip> <core> <idx> <task_pc> <unit> <recv_unit> <self_start> <wait_wake> <b_reissue> <p2p_reissue> <reduce> <credit_en> <exe_mask> <path_id> <end> <dsa_en> <reduce_num> <exe_dest>
-TCHAIN 0 0 0 0x340 2 0 1 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 0 1 0x3b4 0 1 0 0 0 0 0 1 1 4 1 1 0 0
-TCHAIN 0 1 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 1 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 1 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 1 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 1 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 2 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 2 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 2 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 2 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 2 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 3 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 3 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 3 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 3 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 3 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 4 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 4 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 4 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 4 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 4 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 6 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 6 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 6 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 6 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 6 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 7 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 7 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 7 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 7 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 7 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 8 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 8 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 8 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 8 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 8 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
-TCHAIN 0 9 0 0x28 0 1 0 0 0 0 0 0 1 4 0 1 0 0
-TCHAIN 0 9 1 0x174 1 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 9 2 0xc8 2 0 0 0 0 0 0 0 1 0 0 0 0 0
-TCHAIN 0 9 3 0x1f8 1 1 0 0 0 0 0 0 1 0 0 1 0 0
-TCHAIN 0 9 4 0x204 0 1 0 0 0 0 1 0 1 7 1 1 1 0
+# TCHAIN <chip> <core> <idx> <task_pc> <unit> <recv_unit> <wait_wake> <task_type> <p2p_reissue_tid> <credit_en> <path_id> <end>
+TCHAIN 0 0 0 0x36c 2 0 0 0 0 0 0 0
+TCHAIN 0 0 1 0x588 0 1 0 0 0 1 4 1
+TCHAIN 0 1 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 1 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 1 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 1 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 1 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 1 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 1 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 2 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 2 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 2 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 2 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 2 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 2 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 2 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 3 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 3 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 3 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 3 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 3 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 3 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 3 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 4 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 4 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 4 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 4 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 4 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 4 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 4 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 6 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 6 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 6 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 6 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 6 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 6 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 6 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 7 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 7 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 7 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 7 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 7 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 7 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 7 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 8 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 8 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 8 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 8 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 8 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 8 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 8 6 0x3c8 0 1 0 4 0 1 7 1
+TCHAIN 0 9 0 0xa8 0 1 1 0 0 0 4 0
+TCHAIN 0 9 1 0x1c8 1 0 0 0 0 0 0 0
+TCHAIN 0 9 2 0xd0 2 0 0 0 0 0 0 0
+TCHAIN 0 9 3 0x230 1 0 0 0 0 0 0 0
+TCHAIN 0 9 4 0x378 0 1 0 4 0 1 7 0
+TCHAIN 0 9 5 0x3a0 0 1 0 4 0 1 7 0
+TCHAIN 0 9 6 0x3c8 0 1 0 4 0 1 7 1
+# TSRTAB <chip> <core> <pid> <dir bit0 上下 bit1 左 bit2 右 bit3 本 core> <vcid>
+TSRTAB 0 0 0 0 0
+TSRTAB 0 0 4 5 0
+TSRTAB 0 1 0 0 0
+TSRTAB 0 1 4 12 0
+TSRTAB 0 1 7 1 3
+TSRTAB 0 2 0 0 0
+TSRTAB 0 2 4 12 0
+TSRTAB 0 2 7 4 3
+TSRTAB 0 3 0 0 0
+TSRTAB 0 3 4 12 0
+TSRTAB 0 3 7 1 3
+TSRTAB 0 4 0 0 0
+TSRTAB 0 4 4 8 0
+TSRTAB 0 4 7 4 3
+TSRTAB 0 6 0 0 0
+TSRTAB 0 6 4 12 0
+TSRTAB 0 6 7 4 3
+TSRTAB 0 7 0 0 0
+TSRTAB 0 7 4 12 0
+TSRTAB 0 7 7 1 3
+TSRTAB 0 8 0 0 0
+TSRTAB 0 8 4 12 0
+TSRTAB 0 8 7 4 3
+TSRTAB 0 9 0 0 0
+TSRTAB 0 9 4 8 0
+TSRTAB 0 9 7 1 3
 # DATAIN <chip> <core> <task_pc> <weights_mode>
-DATAIN 0 0 0x378 0
-DATAIN 0 1 0x28 0
-DATAIN 0 2 0x28 0
-DATAIN 0 3 0x28 0
-DATAIN 0 4 0x28 0
-DATAIN 0 6 0x28 0
-DATAIN 0 7 0x28 0
-DATAIN 0 8 0x28 0
-DATAIN 0 9 0x28 0
-# RTAB <chip> <core> <path> <op_type> <flow_dir> <cur_vc> <nxt_vc×5> <mask_en> <mask_idx> <bypass> <need_buffer> <stream_tab_en> <cur_cr_type> <cur_cr_req> <nxt_cr_type×3> <nxt_cr_req×3> <rdc_dtype> <rdc_odtype> <rdc_in_mask> <operation> <stall_way> <ext_dst>
-RTAB 0 0 4 1 5 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 0 5 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 1 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 1 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0
-RTAB 0 2 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 2 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
-RTAB 0 3 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 3 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
-RTAB 0 4 4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 4 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
-RTAB 0 5 4 1 4 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 5 5 1 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 6 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 6 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
-RTAB 0 7 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 7 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
-RTAB 0 8 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 8 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
-RTAB 0 9 4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-RTAB 0 9 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0
+DATAIN 0 0 0x540 0
+DATAIN 0 1 0xa8 0
+DATAIN 0 2 0xa8 0
+DATAIN 0 3 0xa8 0
+DATAIN 0 4 0xa8 0
+DATAIN 0 6 0xa8 0
+DATAIN 0 7 0xa8 0
+DATAIN 0 8 0xa8 0
+DATAIN 0 9 0xa8 0
+# RTAB <chip> <core> <path> <op_type> <flow_dir> <cur_vc> <nxt_vc×5> <mask_en> <mask_idx> <bypass> <need_buffer> <stream_tab_en> <cur_cr_type> <cur_cr_req> <nxt_cr_type×3> <nxt_cr_req×3> <rdc_dtype> <rdc_odtype> <rdc_in_mask> <operation> <stall_way> <ext_dst> <rdc_need>
+RTAB 0 0 4 1 5 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 0 5 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 1 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 1 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 1 1 0 0 1
+RTAB 0 2 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 2 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 1
+RTAB 0 3 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 3 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 1
+RTAB 0 4 4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 4 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 0
+RTAB 0 5 4 1 4 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 5 5 1 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 6 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 6 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 1
+RTAB 0 7 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 7 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 1
+RTAB 0 8 4 1 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 8 7 2 12 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 1
+RTAB 0 9 4 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+RTAB 0 9 7 2 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 1 1 3 2 0 0 1
 # RTABDTE <chip> <core> <path>　DTE 里那份副本，内容与 RTAB 同
 RTABDTE 0 0 4
 RTABDTE 0 1 7
@@ -108,7 +151,7 @@ RTABDTE 0 6 7
 RTABDTE 0 7 7
 RTABDTE 0 8 7
 RTABDTE 0 9 7
-# PATHTASK <chip> <core> <path> <task_id>
+# PATHTASK <chip> <core> <path> <task_id>　DTE 那一份 path_task_map
 PATHTASK 0 1 4 0
 PATHTASK 0 2 4 0
 PATHTASK 0 3 4 0
@@ -117,6 +160,14 @@ PATHTASK 0 6 4 0
 PATHTASK 0 7 4 0
 PATHTASK 0 8 4 0
 PATHTASK 0 9 4 0
+# RELROUTE <chip> <core> <入口方向 0 mid 1 left 2 right> <出方向掩码 bit0 mid bit1 left bit2 right bit3 本级>
+RELROUTE 0 1 0 8
+RELROUTE 0 2 2 8
+RELROUTE 0 3 0 8
+RELROUTE 0 6 2 8
+RELROUTE 0 7 0 8
+RELROUTE 0 8 2 8
+RELROUTE 0 9 0 8
 # KERNEL <rv_core 0 DTE 1 MU 2 VU> <镜像>
 KERNEL 0 kernel_dte.hex
 KERNEL 1 kernel_mu.hex

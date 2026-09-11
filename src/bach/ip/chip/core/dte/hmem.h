@@ -1,7 +1,7 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_HMEM_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_HMEM_
 
-// Hmem、Fast LUT、RouterTable 副本、本级 Reduce credit 表、stream_cache。
+// Hmem、Fast LUT、RouterTable 副本、stream_cache。
 //
 // 这几张表都是 DTE 自己持有、按索引直接读的静态或半静态内容，收在一个模块里。
 //
@@ -14,7 +14,7 @@
 // hw_header_addr 这个地址本身选，不另设开关。
 //
 // Fast LUT：从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE
-// Setup Time，目标压到 10T 以内。常规任务不走 RV core 的配置 kernel —— task_id
+// Setup Time，目标压到 10T 以内。常规任务不走 RV core 的配置 kernel：task_id
 // 命中 Fast LUT 后硬件拿表项内容与 user_id 索引到的 User Base Register 拼出
 // descriptor，直接推进 TaskQueue，命中路径 4T；未命中才启动 RV core 的 kernel，
 // 代价是 Core Latency + 4T。它只加速任务配置，不改路由定义、数据通路和完成条件。
@@ -38,7 +38,7 @@ namespace bach {
 struct HmemEntry {
   uint64_t core_mask = 0;                 // 2 B，硬件改
   std::array<uint8_t, 16> sw_header{};    // 16 B，RV core 改
-  // DPU 写的那一对自定义包头。进核那一笔记在这里，出核造包时原样带上 —— 出口
+  // DPU 写的那一对自定义包头。进核那一笔记在这里，出核造包时原样带上，出口
   // 桩按它认这是哪个 GPU 的第几个 token，中途丢掉就分不清了。
   uint64_t gpu_id = 0, token_id = 0;
 };
@@ -110,32 +110,6 @@ class Hmem : public BachModule {
     return rtab_copy.at(path_id);
   }
 
-  // ── 本级 Reduce credit：每用户一个 entry，flit 粒度 ──
-  // 某个用户建 stream credit 表项时给这个用户分配一个 entry 的 credit 数量。
-  void AllocReduceCredit(uint64_t user, uint64_t n) {
-    reduce_credit[user % kStreamCacheEntries] = n;
-    reduce_user[user % kStreamCacheEntries] = user;
-  }
-  uint64_t ReduceCredit(uint64_t user) const {
-    uint64_t i = user % kStreamCacheEntries;
-    return reduce_user[i] == user ? reduce_credit[i] : 0;
-  }
-  // 搬 Reduce 包前先检查本级 credit 是否够整包。
-  bool ReduceCreditEnough(uint64_t user, uint64_t flits) const {
-    return ReduceCredit(user) >= flits;
-  }
-  void TakeReduceCredit(uint64_t user, uint64_t flits) {
-    uint64_t i = user % kStreamCacheEntries;
-    LOGCHECK(reduce_user[i] == user && reduce_credit[i] >= flits,
-             "Hmem: 本级 Reduce credit 不够就发了。");
-    reduce_credit[i] -= flits;
-  }
-  // ReduceModule 每完成一次并把 flit 发给下游就释放一个，经独立通道送回。
-  void ReturnReduceCredit(uint64_t user) {
-    uint64_t i = user % kStreamCacheEntries;
-    if (reduce_user[i] == user) ++reduce_credit[i];
-  }
-
   // ── stream_cache：只跟随，不分配 ──
   void FollowStreamCredit(uint64_t dir, uint64_t user) {
     LOGCHECK(dir < kR2RNum, "Hmem: 方向越界。");
@@ -182,7 +156,6 @@ class Hmem : public BachModule {
   std::array<FastLutEntry, kPathNum> lut{};
   std::vector<RouteEntry> rtab_copy;
   std::vector<uint64_t> path_task;
-  std::array<uint64_t, kStreamCacheEntries> reduce_credit{}, reduce_user{};
   std::array<std::array<bool, kStreamCacheEntries>, kR2RNum> cache_valid{};
   std::array<std::array<uint64_t, kStreamCacheEntries>, kR2RNum> cache_user{};
   uint64_t hit_pending = 0, miss_pending = 0;

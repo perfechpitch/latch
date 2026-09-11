@@ -6,13 +6,13 @@
 // 进 core 与出 core 两条数据通路完全并行，互不共享仲裁状态。
 //
 // 进 core（M7、M8）：
-//   三态准入 —— UserID 已分配则直接收；未分配但 stream credit 表有空项则记录
+//   三态准入：UserID 已分配则直接收；未分配但 stream credit 表有空项则记录
 //   占用后收；无空项时该 VC 不能向 Core 发数据，但 VC 还有空位时仍可继续从上游
 //   收。已通过 Stream 检查的包进 core 不再查 Core 方向的 VC credit，一定有
 //   Core Mem 空间。
 //
 //   Header 写进 HeaderFIFO，Payload 写进 OutputBuffer，两者保持同一包的顺序与
-//   边界。Header 就绪即通知 TS，不等整包收完 —— OutputBuffer 因此是流水缓冲
+//   边界。Header 就绪即通知 TS，不等整包收完，OutputBuffer 因此是流水缓冲
 //   而不是整包缓冲，进 core 的包长不受它的容量约束。
 //
 //   trigger 请求发出后保持到 TS 拉 ready。TS 入口占满时本笔原地保持，不发下一笔，
@@ -23,7 +23,7 @@
 //
 // 包头读口：DTE RV core 经 cm_lsq 映射到 Router I/O reg 的地址段读队头那个包的
 // 包头，读完往弹出地址写 1，队头出队、下一个包头映射上来。core 内不另设第二条
-// 读包头的通路。队列满时对进 core 的数据反压 —— 丢一个包头就等于丢一个 token
+// 读包头的通路。队列满时对进 core 的数据反压：丢一个包头就等于丢一个 token
 // 的搬运任务。
 
 #include <deque>
@@ -54,7 +54,6 @@ enum HdrRegOffset : uint64_t {
   kHdrCoreMask = 12,
   kHdrStreamId = 16,
   kHdrTaskId = 20,
-  kHdrCompute = 24,
   kHdrReissue = 28,
   kHdrPopOffset = 32,
   kHdrRegBytes = 36,
@@ -93,6 +92,15 @@ class CoreStation : public BachModule {
   // 出核数据交给 core 方向的 RouterStation。
   void AttachToStation(LinkEndPtr wire) { to_station = std::move(wire); }
   LinkEnd& ToStation() { return *to_station; }
+  // core 方向那个站的 release 回线。
+  void AttachStationBack(LinkEndPtr wire) { station_back = std::move(wire); }
+  // core 方向那个站的 VC 深度，与站上配的一致。
+  void SetVcDepth(VcDepth const& priv, uint64_t shared) {
+    priv_depth = priv;
+    shared_depth = shared;
+    private_cr = priv;
+    shared_cr = shared;
+  }
 
   // 包头读口，接 DTE RV core 的 cm_lsq。本模块是从端。
   MemPort& Hdr() { return *hdr; }
@@ -103,7 +111,7 @@ class CoreStation : public BachModule {
   uint64_t OutBufDepth() const { return out_buf.size(); }
   uint64_t Popped() const { return pop_cnt; }
 
-  // 进 core 的 stream credit 表：16 项，与 ReduceModule 的用户上下文一一对应。
+  // 进 core 的 stream credit 表：16 项。
   bool HoldsUser(uint64_t user) const { return stream_tab.count(user) != 0; }
   uint64_t StreamUsed() const { return stream_tab.size(); }
   // Retire 从这个口广播退休的 user。表由本模块的协程改，Retire 只送号。
@@ -117,8 +125,13 @@ class CoreStation : public BachModule {
   uint64_t Rejected() const { return rejected.Get(); }
   uint64_t Triggers() const { return triggers.Get(); }
 
-  // Xbar 读它决定 core 方向能不能收。电平每拍发布，Xbar 读上一拍的值。
-  bool CoreReady() const { return out_buf.size() < kOutBufFlits; }
+  // Xbar 读它决定 core 方向能不能收。电平每拍发布，Xbar 读上一拍的值，所以拉高
+  // 之后路上最多还有两个 flit：一个上一拍已经发出，一个照着这一拍的电平发。两处
+  // 缓冲都要留得出这两格，包头队列按每个 flit 都是头 flit 算。
+  bool CoreReady() const {
+    return out_buf.size() + 2 <= kOutBufFlits &&
+           hdr_fifo.size() + 2 <= kHeaderFifoDepth;
+  }
   std::shared_ptr<ReadyLevelPort> LevelPtr() const { return level; }
 
   bool Quiescent() const override {
@@ -133,10 +146,12 @@ class CoreStation : public BachModule {
     DrainToDte();
     PushTrigger();
     AcceptFromXbar();
+    ReturnCredit();
     AcceptFromDte();
 
     // 准入电平：本拍末算出来，Xbar 下一拍读到。
     level->Drive(CoreReady());
+    from_dte->DriveReady(DteReady());
     admitted = admitted_pending;
     rejected = rejected_pending;
     triggers = trigger_pending;
@@ -158,7 +173,7 @@ class CoreStation : public BachModule {
 
   struct Pending {
     uint64_t user_id = 0, path_id = 0;
-    bool reissue = false, compute = false;
+    bool reissue = false;
   };
 
   // 包头读口的从端：读队头那个包的包头，写 kHdrPopOffset 把它弹出。
@@ -203,7 +218,6 @@ class CoreStation : public BachModule {
       case kHdrCoreMask: v = m->path_core_mask; break;
       case kHdrStreamId: v = m->stream_id; break;
       case kHdrTaskId: v = m->task_id; break;
-      case kHdrCompute: v = m->compute; break;
       case kHdrReissue: v = m->reissue; break;
       default: v = 0; break;
     }
@@ -231,7 +245,7 @@ class CoreStation : public BachModule {
       ++rejected_pending;
       return;
     }
-    // 头 flit 要占一个包头槽。队列满就整笔不收 —— 丢一个包头就等于丢一个
+    // 头 flit 要占一个包头槽。队列满就整笔不收：丢一个包头就等于丢一个
     // token 的搬运任务，DTE RV core 再也拿不到它。
     if (f.head && hdr_fifo.size() >= kHeaderFifoDepth) {
       ++rejected_pending;
@@ -242,8 +256,7 @@ class CoreStation : public BachModule {
     // 头 flit 同时进 HeaderFIFO，并排一笔 trigger。
     if (f.head) {
       hdr_fifo.push_back(f.msg);
-      trig_q.push_back({user, f.msg->path_id, f.msg->reissue != 0,
-                        f.msg->compute != 0});
+      trig_q.push_back({user, f.msg->path_id, f.msg->reissue != 0});
     }
   }
 
@@ -264,7 +277,7 @@ class CoreStation : public BachModule {
     }
     Pending p = trig_q.front();
     trig_q.pop_front();
-    trigger->Drive(p.user_id, p.path_id, p.reissue, p.compute);
+    trigger->Drive(p.user_id, p.path_id, p.reissue);
     trig_hold = true;
   }
 
@@ -291,21 +304,58 @@ class CoreStation : public BachModule {
     sent_hold = true;
   }
 
-  // M9：出 core 拆包，按 Header 的 VC 号写进 core 方向的输入 VC。
+  // M9：出 core 拆包，按 Header 的 VC 号写进 core 方向的输入 VC。那个站的 VC
+  // 槽按 credit 记账，与 Xbar 记下一跳的规则相同：发一个 flit 扣一个，站里的
+  // flit 走了回一个 release 补一个。DTE 那一侧按 tready 发，停在端口上的那一
+  // 笔按序号认，只收一次。
   void AcceptFromDte() {
+    to_station->release.Idle();
     CoreDataView d = ReadCoreData(*from_dte);
-    if (!d.valid) {
+    if (!d.valid || d.seq == last_dte_seq || !VcRoom(d.vc)) {
       to_station->flit.Idle();
-      to_station->release.Idle();
-      from_dte->DriveReady(true);
       return;
     }
+    last_dte_seq = d.seq;
+    if (private_cr[d.vc] > 0) {
+      --private_cr[d.vc];
+    } else {
+      --shared_cr;
+    }
     to_station->flit.Drive(d.vc, d.hdr, d.last, d.bytes, d.msg);
-    to_station->release.Idle();
-    from_dte->DriveReady(true);
   }
 
-  LinkEndPtr from_xbar, to_station;
+  bool VcRoom(uint64_t v) const {
+    LOGCHECK(v < kVcNum, "CoreStation: 出核那一笔的 VC 号越界。");
+    return private_cr[v] > 0 || shared_cr > 0;
+  }
+
+  // 出核的 tready：每个 VC 都还有一格才拉高。DTE 那一侧看的是上一拍的值，一次
+  // 只压一笔在端口上，所以一格就够。
+  bool DteReady() const {
+    for (uint64_t v = 0; v < kVcNum; ++v) {
+      if (!VcRoom(v)) return false;
+    }
+    return true;
+  }
+
+  // core 方向那个站的 flit 离开 VC Buffer 就还一个 credit。回填与占用对称：
+  // private 没满补 private，满了补 shared。
+  void ReturnCredit() {
+    if (!station_back) return;
+    ReleaseView r = ReadRelease(station_back->release);
+    if (!r.vc_valid) return;
+    uint64_t v = r.vc_id;
+    LOGCHECK(v < kVcNum, "CoreStation: 归还的 VC 号越界。");
+    if (private_cr[v] < priv_depth[v]) {
+      ++private_cr[v];
+    } else {
+      LOGCHECK(shared_cr < shared_depth,
+               "CoreStation: credit 归还超过初值，两边规则漂了。");
+      ++shared_cr;
+    }
+  }
+
+  LinkEndPtr from_xbar, to_station, station_back;
   std::shared_ptr<MemPort> hdr;
   std::shared_ptr<CoreDataPort> to_dte, from_dte;
   std::shared_ptr<TriggerPort> trigger;
@@ -320,6 +370,12 @@ class CoreStation : public BachModule {
   ByteBlockPtr hdr_rsp;
   uint64_t hdr_rsp_at = 0, last_hdr_seq = 0, pop_cnt = 0;
   uint64_t admitted_pending = 0, rejected_pending = 0, trigger_pending = 0;
+  // 出核那一侧对 core 方向那个站的 VC credit。
+  VcDepth priv_depth = kVcPrivateDepthDefault;
+  uint64_t shared_depth = kVcSharedDepth;
+  VcDepth private_cr = kVcPrivateDepthDefault;
+  uint64_t shared_cr = kVcSharedDepth;
+  uint64_t last_dte_seq = 0;
 
   Logic64 admitted, rejected, triggers;
 };

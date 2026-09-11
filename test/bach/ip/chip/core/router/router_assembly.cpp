@@ -209,6 +209,7 @@ RouteEntry ReduceRelay(uint64_t in_mask) {
   e.path_core_bypass = true;
   e.reduce_in_mask = in_mask;
   e.operation = Operation::kReduce1;
+  e.reduce_need = true;
   e.reduce_data_type = kReduceFp32;
   e.reduce_outdata_type = kReduceFp32;
   return e;
@@ -240,7 +241,7 @@ TEST(BachRouterAsm, ForwardsAcrossAssembly) {
   EXPECT_EQ(users[0], 42u);
 }
 
-// A9：进核由包头 path_core_mask 的第 idx 位定 —— 该位为 1 时进核，为 0 时
+// A9：进核由包头 path_core_mask 的第 idx 位定，该位为 1 时进核，为 0 时
 // 只转发。位到 core 的对应不是固定编码，每个 core 在自己的表项里指定看哪一位。
 TEST(BachRouterAsm, CoreMaskBitDecidesEntry) {
   uint64_t flits = 0, forwarded = 0;
@@ -346,7 +347,6 @@ TEST(BachRouterAsm, ReduceClosesTheLoop) {
     Router rt(clk, "router", RouterCfg{});
     // bit0 mid、bit1 left
     rt.Preload(9, ReduceSink(0b011));
-    rt.AllocUser(77);
 
     auto m0 = MakeMsg(9, 77);
     m0->reduce_seq = 5;
@@ -458,7 +458,6 @@ TEST(BachRouterAsm, SelfPartTakesTheLaneFlowDirNames) {
     RouteEntry e = ReduceRelay(0b011);
     e.flow_dir |= kFlowReduce1;
     rt.Preload(9, e);
-    rt.AllocUser(77);
 
     auto up = MakeMsg(9, 77);
     up->payload = ReducePayload(7.0f);
@@ -481,17 +480,16 @@ TEST(BachRouterAsm, SelfPartTakesTheLaneFlowDirNames) {
       << "上游那一份与本 core 那一份都进了 ReduceModule";
 }
 
-// 中继累加：收齐后按 flow_dir 往右发，扣的是右方向的下游 Reduce credit。
+// 中继累加：收齐后按 flow_dir 往右发，占的是右方向这个用户的下游 Reduce 资源。
 TEST(BachRouterAsm, ReduceRelayForwardsDownstream) {
   uint64_t got = 0;
   std::vector<uint8_t> payload;
-  uint64_t credit_left = 0;
+  bool right_busy = false;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Router rt(clk, "router", RouterCfg{});
     rt.Preload(9, ReduceRelay(0b011));
-    rt.AllocUser(77);
 
     auto m0 = MakeMsg(9, 77);
     m0->payload = ReducePayload(7.0f);
@@ -505,13 +503,12 @@ TEST(BachRouterAsm, ReduceRelayForwardsDownstream) {
     RT::JoinAll();
     got = down.got;
     payload = down.last_payload;
-    credit_left = rt.GetReduce().DownCredit(77, 2);
+    right_busy = rt.GetReduce().DownBusy(77, 2);
   }
   RT::Reset();
   EXPECT_EQ(got, 1u);
   EXPECT_FLOAT_EQ(ReduceValueOf(payload), 12.0f);
-  // 右方向的下游 Reduce credit 扣掉一个
-  EXPECT_EQ(credit_left, kReduceCreditInit - 1);
+  EXPECT_TRUE(right_busy) << "右方向这个用户忙着，等下游还 release";
 }
 
 // 溢流：下游 credit 耗光且 stall_way 选转存，包落进 CoreMemReissue，
@@ -528,7 +525,7 @@ TEST(BachRouterAsm, OverflowGoesToReissue) {
                           /*stall_way=*/true));
 
     // 灌 24 笔：private 20 加 shared 20 共 40 个 credit 用不完，所以先把
-    // 下游堵死 —— Downstream 不回 release，20 笔之后 private 见底。
+    // 下游堵死，Downstream 不回 release，20 笔之后 private 见底。
     std::vector<Pusher::Job> jobs;
     for (uint64_t i = 0; i < 24; ++i) {
       jobs.push_back({1 + i, MakeMsg(3, 500 + i)});
@@ -559,7 +556,7 @@ TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterCfg cfg;
-    // 要转存 10 笔，暂存区就得配得下 10 笔。配少了 CoreMemReissue 会直接停 ——
+    // 要转存 10 笔，暂存区就得配得下 10 笔。配少了 CoreMemReissue 会直接停。
     // 那是设计要的行为：不覆盖已暂存的包，也不退回「留在当前 VC 等」，免得同一个
     // stall_way 配置在两种容量下走出两种行为。
     cfg.reissue_pkts_per_vc = 16;
@@ -626,7 +623,7 @@ TEST(BachRouterAsm, PassThroughRouterKeepsNoState) {
 //
 // 这是建模计划里对规模那条风险的应对：48 chip × 10 core 每个 core 五十来个模块
 // 是两万多个协程，槽位不够就卡死。因为跨模块信号全部打拍，谁来推这一拍不影响
-// 各模块读到什么，所以两种驱动方式必须给出同一个答案 —— 这个用例就是守这条。
+// 各模块读到什么，所以两种驱动方式必须给出同一个答案。这个用例就是守这条。
 TEST(BachRouterAsm, DrivenByParentMatchesSelfTicked) {
   auto run = [](bool tick) {
     struct Result {

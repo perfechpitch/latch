@@ -1,7 +1,7 @@
 // MU DSA 的行为基线。
 //
 // 步 8 的判据：逐条计算原语与参考实现逐 bit 比对。参考实现就写在这个文件里，
-// 按硬件的累加顺序算 —— 浮点加法不结合，顺序是结果的一部分，换一个顺序比对就
+// 按硬件的累加顺序算：浮点加法不结合，顺序是结果的一部分，换一个顺序比对就
 // 过不去，所以参考实现不能图省事写成 std::inner_product。
 //
 // 三种输入格式各一条：BF16 无 block scale 走顺序加，MXFP8 与 MXFP4 走按块分组
@@ -55,7 +55,7 @@ std::vector<float> Reference(MuTaskCfg const& cfg,
     std::vector<float> b = numeric::Decode(cfg.dtype_ab, col, k);
 
     // 乘积先逐个算出来存下，再加。写成 acc += a[i] * b[i] 的话编译器会合成
-    // FMA，中间那一次舍入就没了，与硬件先乘后加的结果差一个 bit —— 逐 bit
+    // FMA，中间那一次舍入就没了，与硬件先乘后加的结果差一个 bit，逐 bit
     // 比对下这不是等价变形。
     std::vector<float> prod(k, 0.0f);
     for (uint64_t i = 0; i < k; ++i) prod[i] = a[i] * b[i];
@@ -99,7 +99,7 @@ std::vector<uint8_t> TamePattern(numeric::DataType t, uint64_t count,
   std::vector<uint8_t> v = Pattern(count * bits / 8, seed);
   if (t == numeric::DataType::kMxfp8) {
     // E4M3 里指数与尾数都到顶那一格是 NaN。NaN 一进累加链，结果就只剩 Clamp
-    // 后的那个最大值，符号还随传播路径变 —— 比对的是位，得先把它排除掉。
+    // 后的那个最大值，符号还随传播路径变。比对的是位，得先把它排除掉。
     for (uint8_t& b : v) {
       if ((b & 0x7Fu) == 0x7Fu) b = uint8_t(b & 0xFEu);
     }
@@ -471,7 +471,7 @@ class MuMem : public BachModule {
 
     // 不按 (addr, bytes) 去重：master 每拍要么发一笔要么 IdleReq，端口上不会
     // 回落成上一拍的值，所以每一拍的 req_valid 都是一笔真请求。同一个地址连着
-    // 写两拍是两笔 —— 同一个 tile_N 的几个 tile 就是这样叠写同一段的。
+    // 写两拍是两笔，同一个 tile_N 的几个 tile 就是这样叠写同一段的。
     if (port.req_valid.Get() == 0) return;
     uint64_t addr = port.req_addr.Get();
     uint64_t n = port.req_bytes.Get();

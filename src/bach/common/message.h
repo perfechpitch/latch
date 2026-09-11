@@ -51,12 +51,11 @@ struct Message {
   uint64_t size = 0;           // payload 字节数，收齐判定按它（F29）
   uint64_t vc = 0;             // 每一跳被改写（F92）
   uint64_t reduce_seq = 0;     // TS 按它给 reduce task 配对（F48）
-  uint64_t compute = 0;        // 取自软件 payload 的一位，CoreStation 原样转给 TS（F30）
   uint64_t reissue = 0;        // 这一笔是不是 Core Mem 重发出来的
   // 这个用户在目的 core 上占的槽位。各 core 按到达顺序环形分配，分出来的号
   // 因此一致，收方的 DTE 解析出来直接用。
   uint64_t stream_id = 0;
-  // 发方那一笔是它自己任务链上的第几步。收方不用它 —— 收方按 path_id 查自己
+  // 发方那一笔是它自己任务链上的第几步。收方不用它：收方按 path_id 查自己
   // 的 path_task_map 得出这一笔在本地链上的位置。
   uint64_t task_id = 0;
 

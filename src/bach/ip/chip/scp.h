@@ -8,7 +8,7 @@
 // 与三个 DSA。
 //
 // Router 那一段排在最前，而且全 chip 一个 core 不落：漏掉任何一个 core 的 Router，
-// 经过它的 path 就全断。不派角色的 core 只配 Router 那两样 —— TS、RV core 与 DSA
+// 经过它的 path 就全断。不派角色的 core 只配 Router 那两样，TS、RV core 与 DSA
 // 本来就没构造。
 //
 // 每个 core 的初始化五步按序做完：RV core firmware 写进 ITCM → 配置 Bach core

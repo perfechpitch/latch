@@ -15,10 +15,9 @@ from gen_hwconfig import build_topo     # noqa: E402
 
 TOPO = HERE / "topo"
 
-# 每份产物至少要有的记录，缺一样就说明那一层没生成出来
 # 每份产物至少要有的记录，缺一样就说明那一层没产出来
-REQUIRED = ("CHIP", "CORE", "CFGMISC", "TCHAIN", "DATAIN", "RTAB", "RTABDTE",
-            "PATHTASK", "KERNEL")
+REQUIRED = ("CHIP", "CORE", "CFGMISC", "TCHAIN", "TSRTAB", "DATAIN", "RTAB",
+            "RTABDTE", "PATHTASK", "KERNEL")
 
 
 def kinds_of(lines):

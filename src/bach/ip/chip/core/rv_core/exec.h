@@ -9,14 +9,14 @@
 //
 // gpr 就绪表是这一层的核心：发出访存或 DSA 读时把目的寄存器标成未就绪，指令
 // 读到未就绪的源寄存器就等，等到写回才继续。延迟因此记在这张表上而不是记在
-// 「停多少拍不取指」上 —— 后者会把「读了别的寄存器可以先走」那点重叠也吃掉。
+// 「停多少拍不取指」上，因为后者会把「读了别的寄存器可以先走」那点重叠也吃掉。
 //
 // 数据与时序分开：功能模型的 load 是同步返回的，指令执行那一刻数据就落进了
 // gpr；就绪表管的是「这个值从哪一拍起算数」。对顺序单发射的核，两者合起来就是
 // 真实行为。
 //
 // 自定义指令走 MMIO：rv32 的功能模型认标准 RV32IM，加 custom-0 那一组要动 gen/
-// 里 codegen 出来的解码表。改成往约定地址写一笔，行为等价 —— 都是「往一个约定
+// 里 codegen 出来的解码表。改成往约定地址写一笔，行为等价：都是「往一个约定
 // 地址写一笔就触发」，kernel 那边本来也是用 store 配 DSA 寄存器的。
 
 #include <array>
@@ -46,7 +46,7 @@ enum class RvUnit : uint32_t {
 };
 
 // 一条指令用到哪几个通用寄存器。RV32 的字段位置是定长的，按 opcode 判断哪几个
-// 字段有效就够 —— 不必去动 gen/ 里 codegen 出来的解码表。
+// 字段有效就够，不必去动 gen/ 里 codegen 出来的解码表。
 struct RvRegUse {
   bool has_rs1 = false, has_rs2 = false, has_rd = false;
   uint32_t rs1 = 0, rs2 = 0, rd = 0;
@@ -102,7 +102,7 @@ class MmioSink : public systeml::MemoryPort {
   };
 
   // 自定义 CSR 那一档是同步返回的：读它就该当场拿到当前这一笔 task 的身份。
-  // 没有这个回调时读回的是上一次写进来的值，那对应 DSA 寄存器读的语义 ——
+  // 没有这个回调时读回的是上一次写进来的值，那对应 DSA 寄存器读的语义：
   // 发出去就走，数据由 dsa_rq 按记录的顺序写回。
   using ReadFn = std::function<uint64_t(uint64_t offset)>;
 
@@ -211,9 +211,10 @@ class RvExec : public BachModule {
 
     if (!dsa_used) dsa_req->Idle();
     if (!lsq_used) lsq_req->Idle();
-    // 四个身份信号直连本核那个 DSA，每拍驱动。软件改 user_id 或 task_id 之后，
-    // 下一次写 trigger 采到的就是新值。
-    dsa_ids->Drive(cur.stream_id, cur.task_id, cur.user_id, cur.path_id);
+    // 身份信号直连本核那个 DSA，每拍驱动。软件改 user_id 或 task_id 之后，
+    // 下一次写 trigger 采到的就是新值。vcid 是 TS 随 DTE 任务下发的 VCID。
+    dsa_ids->Drive(cur.stream_id, cur.task_id, cur.user_id, cur.path_id,
+                   cur.vcid);
 
     insts = inst_cnt;
     waits = wait_cnt;
@@ -266,7 +267,7 @@ class RvExec : public BachModule {
   }
 
   // firmware 的 _start 头两条做的事：栈顶与全局指针。模型里 RV core 不跑
-  // firmware —— TS 下发任务时直接跳到那一笔的 task_pc —— 所以这两个寄存器在
+  // firmware（TS 下发任务时直接跳到那一笔的 task_pc），所以这两个寄存器在
   // 这里给初值。不给的话 kernel 里但凡用一次栈，地址就落到 0 减去帧长那里。
   //
   // 栈顶取 DTCM 的顶，往下长；全局指针取链接脚本里 .data 起点加 0x800，与
@@ -311,6 +312,7 @@ class RvExec : public BachModule {
     cur.user_id = start->user_id.Get();
     cur.path_id = start->path_id.Get();
     cur.dsa_en = start->dsa_en.Get() != 0;
+    cur.vcid = start->vcid.Get();
     sys->SetPC(cur.task_pc, 0);
     sys->SetHaltState(false, 0);
     running = true;
@@ -330,7 +332,7 @@ class RvExec : public BachModule {
       return;
     }
     // DSA 那条通路还没收走上一笔就不取指。这一条要是也访问 DSA 寄存器，发出去
-    // 会把上一笔盖掉 —— 配 DSA 是一串连着的写，盖掉一笔那一笔就没配上。
+    // 会把上一笔盖掉。配 DSA 是一串连着的写，盖掉一笔那一笔就没配上。
     if (!dsa_req->Ready()) {
       ++wait_cnt;
       return;
@@ -369,7 +371,13 @@ class RvExec : public BachModule {
     while (!core_mem->Empty()) {
       MmioSink::Req r = core_mem->Front();
       core_mem->Pop();
-      SendLsq(LsqTarget::kCoreMem, r, u, r.addr - core_mem->Base());
+      uint64_t at = r.addr - core_mem->Base();
+      // Router I/O reg 复用这一段的高地址，出口换成 CoreStation 的包头读口。
+      if (at >= kRouterIoOffset) {
+        SendLsq(LsqTarget::kRouterIo, r, u, at - kRouterIoOffset);
+      } else {
+        SendLsq(LsqTarget::kCoreMem, r, u, at);
+      }
     }
     while (!task_ctrl->Empty()) {
       MmioSink::Req r = task_ctrl->Front();
@@ -398,6 +406,7 @@ class RvExec : public BachModule {
     if (at == kCsrStreamId) return cur.stream_id;
     if (at == kCsrTaskId) return cur.task_id;
     if (at == kCsrUserId) return cur.user_id;
+    if (at == kCsrPathId) return cur.path_id;
     return 0;
   }
 
@@ -416,11 +425,18 @@ class RvExec : public BachModule {
       cur.task_id = r.data;
       return;
     }
+    if (at == kCsrPathId) {
+      // PID 更新任务：软件把新 PID 写进来，随 task_done 回 TS。
+      cur.path_id = r.data;
+      return;
+    }
     if (at == kRegTaskDone) {
       // 交还自己。带 TS 标志时另外通知 TS。
       bool to_ts = r.data != 0;
       finish->Drive(to_ts, ++finish_seq);
-      if (to_ts) done->Drive(cur.stream_id, cur.task_id, 0, cur.user_id);
+      if (to_ts) {
+        done->Drive(cur.stream_id, cur.task_id, cur.user_id, cur.path_id);
+      }
       sys->SetHaltState(true, 0);
       running = false;
     }

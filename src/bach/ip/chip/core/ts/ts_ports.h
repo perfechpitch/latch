@@ -22,16 +22,20 @@ class TaskCmdPort : public Logic {
   // 一笔命令连着几拍出现在端口上，收方按序号认它。B core 与 R core 的 datain
   // 任务不占 stream 表项，几笔的 stream_id 与 task_id 都是 0，只有序号分得开。
   Logic64 seq;
+  // DTE 任务的 VCID：按当前任务的 PID 查 ROUTER_TABLE 得到，DTE 出核用它选 VC。
+  // MU、VU 任务不带。
+  Logic64 vcid;
 
   explicit TaskCmdPort(ClockPtr c)
       : cmd_valid(c), task_pc(c), stream_id(c), task_id(c), user_id(c),
-        path_id(c), task_dsa_en(c), cmd_ready(c), seq(c) {
+        path_id(c), task_dsa_en(c), cmd_ready(c), seq(c), vcid(c) {
     Fields(cmd_valid, task_pc, stream_id, task_id, user_id, path_id,
-           task_dsa_en, cmd_ready, seq);
+           task_dsa_en, cmd_ready, seq, vcid);
   }
 
   void Drive(uint64_t pc, uint64_t stream, uint64_t task, uint64_t user,
-             uint64_t path, bool dsa_en, uint64_t issue_seq) {
+             uint64_t path, bool dsa_en, uint64_t issue_seq,
+             uint64_t vc = 0) {
     cmd_valid = 1;
     task_pc = pc;
     stream_id = stream;
@@ -40,6 +44,7 @@ class TaskCmdPort : public Logic {
     path_id = path;
     task_dsa_en = dsa_en ? 1 : 0;
     seq = issue_seq;
+    vcid = vc;
   }
   void Idle() {
     cmd_valid = 0;
@@ -49,6 +54,7 @@ class TaskCmdPort : public Logic {
     user_id = 0;
     path_id = 0;
     task_dsa_en = 0;
+    vcid = 0;
   }
   uint64_t Seq() const { return seq.Get(); }
   void DriveReady(bool ok) { cmd_ready = ok ? 1 : 0; }
@@ -61,28 +67,31 @@ class TaskCmdPort : public Logic {
 // 接收方一旦拒收就等于把那个 stream 永远停在当前 task。
 class DonePort : public Logic {
  public:
-  Logic64 valid, stream_id, user_id, task_id, reduce_seq, event;
+  // pid：RV core 的 ACK 带回的 PID。只有 PID 更新任务用它，DSA 的 ACK 不带。
+  // event：VU 的 DSA ACK 上 EVENT_EN 置位时随完成一起拉高，是 VU 向 TS 发的
+  // Event 同步信号。TS 这一侧不消费它。
+  Logic64 valid, stream_id, user_id, task_id, pid, event;
 
   explicit DonePort(ClockPtr c)
-      : valid(c), stream_id(c), user_id(c), task_id(c), reduce_seq(c),
-        event(c) {
-    Fields(valid, stream_id, user_id, task_id, reduce_seq, event);
+      : valid(c), stream_id(c), user_id(c), task_id(c), pid(c), event(c) {
+    Fields(valid, stream_id, user_id, task_id, pid, event);
   }
 
-  void Drive(uint64_t stream, uint64_t task, uint64_t seq = 0,
-             uint64_t user = 0) {
+  void Drive(uint64_t stream, uint64_t task, uint64_t user = 0,
+             uint64_t path = 0) {
     valid = 1;
     stream_id = stream;
     task_id = task;
-    reduce_seq = seq;
     user_id = user;
+    pid = path;
+    event = 0;
   }
   void Idle() {
     valid = 0;
     stream_id = 0;
     user_id = 0;
     task_id = 0;
-    reduce_seq = 0;
+    pid = 0;
     event = 0;
   }
   bool Valid() const { return valid.Get() != 0; }
@@ -113,6 +122,16 @@ struct StreamWrite {
   uint64_t user_id = 0;
   // Router 的 CoreMem 重发完成后清掉这一项的重发标记。
   bool clear_reissue = false;
+  // reduce 任务发出去：占掉本级 Rmem 的 credit。
+  bool take_rmem = false;
+  // Rmem 做完：还回本级 Rmem 的 credit。
+  bool give_rmem = false;
+  // 一次把几项的完成位并进 done_bitmap：User_Match 算出来的跳过位走这一条。其中
+  // 含当前任务的，当前任务同时置 FINISH。
+  uint64_t done_mask = 0;
+  // PID 更新任务完成：带回的新 PID 写进表项，等紧邻后继继承。
+  bool set_pid = false;
+  uint64_t pid = 0;
   bool clear_valid = false;
   // completion 口专用：只有这一笔的 task_id 等于该 stream 当前的 task_id 时
   // 才改 task_fsm，否则只亮 done_bitmap 一位。
@@ -132,7 +151,7 @@ class StreamWritePortIf : public Logic {
   Logic64 accepted;
   // 一次握手最少两拍：请求方拉 valid，Stream_table 下一拍写 accepted，请求方
   // 再下一拍才看得到并撤 valid。这中间请求方那一拍不重写端口，Latch 就回落成
-  // 上一拍的值，Stream_table 会把同一笔再执行一遍 —— 建表就变成推两次 tail。
+  // 上一拍的值，Stream_table 会把同一笔再执行一遍，建表就变成推两次 tail。
   // 按序号认它。
   Logic64 seq;
 
@@ -162,7 +181,7 @@ class StreamWritePortIf : public Logic {
 };
 
 // Stream_table 每拍末发布的整表快照。别的模块读上一拍的它来做判断，不去碰
-// Stream_table 的内部容器 —— 那些只由它自己的 Step() 触碰。
+// Stream_table 的内部容器，那些只由它自己的 Step() 触碰。
 struct StreamSnapshot {
   std::array<StreamEntry, kStreamNum> entry;
   uint64_t head_ptr = 0;

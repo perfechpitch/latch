@@ -3,13 +3,14 @@
 
 // M1 · task_queue 出队。
 //
-// 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个 —— 用户
+// 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个。用户
 // 之间的切换因此没有 bubble。队列深 2：一个在跑，一个等着。
 //
 // cmd_ready 就是「队列还有空槽」。拉低时 TS 不能释放这个 task 跳到下一个，所以
 // 这一根线是 TS 侧那条链的闸门。
 //
-// 下发信息里 stream_id 与 task_id、user_id 由硬件写进自定义 CSR 供软件读。
+// 下发信息里 stream_id、task_id、user_id 与 path_id 由硬件写进自定义 CSR 供软件
+// 读。
 // user_id 那一个可读写：自启动的 B core 与 R core 上 TS 下发时还没有用户身份，
 // 软件在 flag_check 认出这一笔属于哪个用户之后自己写进来。
 
@@ -34,6 +35,8 @@ struct RvTask {
   // DSA 出核时包头里的 path 字段用它。TS 随 task 一起送来。
   uint64_t path_id = 0;
   bool dsa_en = false;
+  // DTE 任务的 VCID，经身份口带给 DTE。
+  uint64_t vcid = 0;
 };
 
 class RvTaskQueue : public BachModule {
@@ -82,14 +85,14 @@ class RvTaskQueue : public BachModule {
 
   // 前一个做完了就把队头那个交给执行器。ready 是执行器上一拍报的。
   //
-  // 握手那一支排在最前：这一笔已经从队列里取出来放在 held 上了，队列这时是空的
-  // ——若先按「队列空就 Idle」判，正在握手的那一笔会被覆盖成 Idle，执行器再也
+  // 握手那一支排在最前：这一笔已经从队列里取出来放在 held 上了，队列这时是空的。
+  // 若先按「队列空就 Idle」判，正在握手的那一笔会被覆盖成 Idle，执行器再也
   // 收不到它。
   void Launch() {
     if (driving) {
       if (!start->Ready()) {
         start->Drive(held.task_pc, held.stream_id, held.task_id, held.user_id,
-                     held.path_id, held.dsa_en, start_seq);
+                     held.path_id, held.dsa_en, start_seq, held.vcid);
         return;
       }
       driving = false;
@@ -107,7 +110,7 @@ class RvTaskQueue : public BachModule {
     driving = true;
     ++start_seq;
     start->Drive(held.task_pc, held.stream_id, held.task_id, held.user_id,
-                 held.path_id, held.dsa_en, start_seq);
+                 held.path_id, held.dsa_en, start_seq, held.vcid);
   }
 
   // cmd_ready = 队列有空槽。未被接收时 TS 不能释放该 task。
@@ -125,6 +128,7 @@ class RvTaskQueue : public BachModule {
     t.user_id = cmd->user_id.Get();
     t.path_id = cmd->path_id.Get();
     t.dsa_en = cmd->task_dsa_en.Get() != 0;
+    t.vcid = cmd->vcid.Get();
     q.push_back(t);
   }
 

@@ -101,7 +101,8 @@ class DteOutArb : public BachModule {
 
   void Forward() {
     if (holding) {
-      out->Drive(held.bytes, held.last, held.hdr, held.vc, held.msg);
+      // 上一笔还没被收下：端口不重写，Latch 原样保持，序号不变，接收方按序号
+      // 认出是同一笔。
       return;
     }
     for (uint64_t k = 0; k < kOutNum; ++k) {

@@ -26,7 +26,7 @@ constexpr uint64_t kLpuChips = kLpuCols * kLpuRows;
 constexpr uint64_t kLpuGroups = 6;
 
 constexpr uint64_t kRcHeadOff = 0x0380;
-// 记波形的 chip 数，从第 0 颗数起。48 颗全记是六千五百个信号，扛得住；只想看
+// 记波形的 chip 数，从第 0 颗数起。48 颗全记是一万二千五百个信号，扛得住；只想看
 // 某一段就把这个数调小、把那一段的头一颗挪到 0 号位。
 constexpr uint64_t kTraceChips = kLpuChips;
 
@@ -93,7 +93,7 @@ TEST(BachMoeLpu, OneLayerAcrossFortyEightChips) {
         cfg.inbound_entry_bytes = kBcTokenBytes;
       } else {
         cfg.inbound_flag_base = kRcFlagOff;
-        cfg.inbound_entry_bytes = kRcHalfBytes;
+        cfg.inbound_entry_bytes = kRcFlagEntryBytes;
       }
       cfg.core_tick = kCoreTick;
       cfg.chip_tick = kChipTick;
@@ -137,10 +137,7 @@ TEST(BachMoeLpu, OneLayerAcrossFortyEightChips) {
     for (uint64_t i = 0; i < kLpuChips; ++i) {
       ChipShape shape = all[i]->Shape();
       for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        landed.push_back(all[i]
-                             ->GetCore(CoreOfSlot(shape, slot))
-                             .Cmem()
-                             .Peek(kResultAt, want.out_n * 4));
+        landed.push_back(PartialOf(all[i]->GetCore(CoreOfSlot(shape, slot))));
       }
     }
   }

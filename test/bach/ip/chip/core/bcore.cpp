@@ -84,7 +84,6 @@ MessagePtr MakeToken(uint64_t seq, uint64_t user,
   m->user_id = user;
   m->gpu_id = 2;
   m->token_id = user;
-  m->compute = 1;
   m->stream_id = 0;
   m->task_id = 0;
   m->dst_addr = Land(seq);
@@ -98,26 +97,23 @@ void WriteBcoreChains(Core& core) {
   TaskEntry wait;
   wait.send_unit = SendUnit::kVu;
   wait.recv_unit = RecvUnit::kRvOnly;
-  wait.self_start = true;
-  wait.exe_mask = true;
   wait.task_pc = SymbolOf("task_bc_wait", "vu");
   core.GetTs().Cfg().WriteTask(0, wait);
 
   TaskEntry send;
   send.send_unit = SendUnit::kDte;
   send.recv_unit = RecvUnit::kDsa;
-  send.dsa_en = true;
   send.end = true;
-  send.exe_mask = true;
   send.path_id = kOutPath;
   send.credit_en = true;
   send.task_pc = SymbolOf("task_dte_bc_send", "dte");
   core.GetTs().Cfg().WriteTask(1, send);
+  core.GetTs().Cfg().WriteRouterTable(kOutPath, 0, kOutPath % kVcNum);
 
   // 链一：只有一个 datain 任务，手动配，不进 task_chain。
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_bc_datain", "dte"),
                                      /*weights_mode=*/false);
-  core.GetTs().Cfg().SetCoreType(CoreType::kBroadcast);
+  core.GetTs().Cfg().SetSelfStart(true);
   // 广播只往中间那一路发，TS 下发搬出之前查的就是这个方向的下游资源。
   core.GetTs().Cfg().SetBCoreDirection(kFlowMid);
   core.GetTs().Cfg().SetStreamNum(kStreamNum);

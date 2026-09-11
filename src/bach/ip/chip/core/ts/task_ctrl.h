@@ -1,23 +1,22 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_TS_TASK_CTRL_
 #define _LATCH_BACH_IP_CHIP_CORE_TS_TASK_CTRL_
 
-// Task_ctrl：当前任务做完之后生成后继。
+// Task_ctrl：当前任务做完之后生成后继，对应详细设计的 Task Generator。
 //
-// 每个 stream 独立推进，不需要全局 Task Pointer。从 head_ptr 开始环形扫描，只选
-// valid=1 且 task_fsm=FINISH 且 end=0 的 stream。
+// 每个 stream 独立推进，不需要全局 Task Pointer。只选 valid=1 且 task_fsm=FINISH
+// 且 end=0 的 stream。
 //
-// 跳过用一次 64 bit 优先编码一拍算完，连续 skip 的数量不增加周期：
+// 后继是当前任务之后、THROUGH_END_MASK 以内、done_bitmap 还没置位的最低一项：
 //
-//   GROUP_SKIP = stream.compute ? 0 : ~EXE_MASK
-//   SKIP_MASK  = ~END_MASK & ( (DATA_IN_MASK & done_bitmap)
-//                            | (stream.reissue ? 0 : REISSUE_MASK)
-//                            | GROUP_SKIP )
+//   search = after_current & THROUGH_END_MASK & ~done_bitmap
 //
-// 四种可跳过的场景：异步 datain 已提前完成；B reissue 不需要重发；P2P 不需要
-// 重发；DP+P2P 下有些用户只有 P2P 无计算 task。
+// done_bitmap 里既有做完的也有跳过的，异步 datain 提前完成、重发任务被跳过都落
+// 在这里。一次优先编码一拍选出，连续跳过的数量不增加周期。搜索不回绕、不越过
+// End；End 提前完成、End 以前也没有剩下的，就不生成后继，由退休那一侧收尾。
 //
-// End task 即使已提前完成也不能被跳过，并且不会再生成后继 —— 所以 SKIP_MASK
-// 最外面那个 ~END_MASK 是硬的。
+// 后继的初始状态由 wait_wake 与 credit_en 定。PID：上一笔是 PID 更新任务、带回的
+// 新 PID 还没被继承，而后继正好紧邻它，就继承那个新值；跳过了紧邻的那一项，就用
+// 所选任务自己的 PID。
 //
 // 新任务的 task_id、task_fsm、end 与全部下发属性必须一起原子写入才算生成成功，
 // 所以走的是整项写那个口。
@@ -81,9 +80,12 @@ class TaskCtrl : public BachModule {
       StreamEntry const& e = s->entry[i];
       if (!e.valid || e.task_fsm != TaskFsm::kFinish || e.end) continue;
 
-      uint64_t skip = SkipMaskOf(e);
-      uint64_t next = NextTask(e.task_id, skip, e.done_bitmap);
-      if (next >= kTaskChainNum) continue;  // 后面没有可做的了
+      uint64_t after =
+          e.task_id + 1 >= kTaskChainNum ? 0 : ~0ull << (e.task_id + 1);
+      uint64_t search = after & cfg.ThroughEndMask() & ~e.done_bitmap;
+      if (search == 0) continue;  // End 以前没有剩下的
+      uint64_t next = uint64_t(__builtin_ctzll(search));
+      skip_pending += next - e.task_id - 1;
 
       TaskEntry const& t = cfg.Task(next);
       auto w = std::make_shared<StreamWrite>();
@@ -92,60 +94,16 @@ class TaskCtrl : public BachModule {
       w->whole = true;
       w->entry = e;
       w->entry.task_id = next;
-      w->entry.task_fsm = InitFsm(t);
-      ApplyAttr(w->entry, t);
+      ApplyTaskAttr(w->entry, t);
+      if (e.pid_pending && next == e.task_id + 1) {
+        w->entry.task_path_id = e.task_path_id;
+      }
+      w->entry.pid_pending = false;
+      w->entry.task_fsm = InitFsmOf(t);
       install->Drive(w);
       pending = true;
       return;  // 一拍只装一个
     }
-  }
-
-  uint64_t SkipMaskOf(StreamEntry const& e) const {
-    // compute = 1 的用户一个都不跳；compute = 0 的跳过所有 TASK_EXE_MASK = 0
-    // 的 task。EXE_MASK 全 1 时这一项恒为 0。
-    uint64_t group_skip = e.compute ? 0 : ~cfg.ExeMask();
-    // 这个用户不需要重发时，所有 reissue 任务都跳过。
-    uint64_t reissue_skip = e.reissue ? 0 : cfg.ReissueMask();
-    uint64_t skip = (cfg.DataInMask() & e.done_bitmap) | reissue_skip |
-                    group_skip;
-    // End task 不能被跳过。
-    return skip & ~cfg.EndMask();
-  }
-
-  // 从当前 task 的下一项开始找第一个不跳的 valid 项。一拍算完，连续 skip 不
-  // 增加周期。
-  uint64_t NextTask(uint64_t cur, uint64_t skip, uint64_t done) {
-    for (uint64_t i = cur + 1; i < kTaskChainNum; ++i) {
-      if (!cfg.Task(i).valid) return kTaskChainNum;
-      if ((skip >> i) & 1u) {
-        ++skip_pending;
-        continue;
-      }
-      return i;
-    }
-    return kTaskChainNum;
-  }
-
-  // 生成后的初始状态按类型分：普通 Generated 置 READY，DataIn 置 WAIT 等 ack，
-  // Reissue 置 WAIT 等 credit。
-  static TaskFsm InitFsm(TaskEntry const& t) {
-    if (t.IsDataIn() || t.IsReissue()) return TaskFsm::kWait;
-    if (t.credit_en) return TaskFsm::kWait;
-    return TaskFsm::kReady;
-  }
-
-  static void ApplyAttr(StreamEntry& e, TaskEntry const& t) {
-    e.task_unit = t.send_unit;
-    e.task_recv = t.recv_unit;
-    e.task_dsa_en = t.dsa_en;
-    e.task_pc = t.task_pc;
-    e.task_path_id = t.path_id;
-    e.is_reissue = t.IsReissue();
-    e.end = t.end;
-    e.reduce_num = t.reduce ? t.reduce_num : 0;
-    e.reduce_issued = 0;
-    e.dte_ack_map = 0;
-    e.router_done_map = 0;
   }
 
   CfgReg& cfg;

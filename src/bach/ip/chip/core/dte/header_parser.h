@@ -59,7 +59,7 @@ class HeaderParser : public BachModule {
     inbound = r;
   }
   // B core 与 R core 的 token entry valid 标志表。搬完之后由 Completion RS 写
-  // 出去，写出去了才通知 TS —— 软件自己写会写在数据落地之前。
+  // 出去，写出去了才通知 TS。软件自己写会写在数据落地之前。
   // B core 与 R core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的
   // 对象，不回 Ack。
   void SetInboundNoAck(bool on) { inbound_no_ack = on; }
@@ -120,7 +120,7 @@ class HeaderParser : public BachModule {
       return;
     }
 
-    // Buffer 满时通过 TREADY 向 Router 反压，本拍不收 —— 这一步要排在
+    // Buffer 满时通过 TREADY 向 Router 反压，本拍不收。这一步要排在
     // 「记下已见过这一笔」之前，否则这一笔会被当成收过了，上游换下一笔，
     // 数据就丢了。下游收不下由 payload 口的 ready 反映。
     if (in_frame && !payload->Ready()) {
@@ -168,7 +168,7 @@ class HeaderParser : public BachModule {
     desc->user_id = d.msg->user_id;
     desc->path_id = d.msg->path_id;
     // stream_id 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，
-    // 各 core 分出来的号一致。task_id 按 path_id 查本地的 path_task_map ——
+    // 各 core 分出来的号一致。task_id 按 path_id 查本地的 path_task_map：
     // 那一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号。
     desc->stream_id = d.msg->stream_id;
     desc->task_id = path_task ? path_task(d.msg->path_id) : d.msg->task_id;

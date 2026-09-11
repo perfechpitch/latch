@@ -15,7 +15,7 @@
 // 都不重排。跨 VC、跨 input port 之间不保证顺序。
 //
 // 队首在四个 VC 之间轮询选一个交给 Xbar。Xbar 每拍发布它那个入口还收不收得下，
-// 收得下就发，发了当场出队并归还 VC credit —— 等授予的话一笔要占两拍，一个方向
+// 收得下就发，发了当场出队并归还 VC credit。等授予的话一笔要占两拍，一个方向
 // 的吞吐就只剩每两拍一个 flit。credit 不足的 VC 被跳过，同一个 input port 的其他
 // VC 不受影响。
 //
@@ -223,7 +223,7 @@ class RouterStation : public BachModule {
     up_back->release.Drive(true, v, false, 0, false, 0);
   }
 
-  // 这一笔在下游要占多少 credit。多个出方向时取第一个置位方向那一份 —— 多播
+  // 这一笔在下游要占多少 credit。多个出方向时取第一个置位方向那一份，多播
   // 在各方向上的额度由编译侧填成一样的。
   static uint64_t RequireOf(RouteEntry const& e, uint64_t mask) {
     if (mask & (1ull << kOutMid)) return e.nxt_credit_require[0];
@@ -245,7 +245,7 @@ class RouterStation : public BachModule {
   //
   // 进不进 ReduceModule 由 operation 决定，不由 flow_dir：flow_dir 管的是这条
   // path 从本级「往哪几个方向发」，是归约算完之后的事；operation 管的是本级在
-  // 这条 path 上的角色。两者混用会成环 —— 归约结果回注时用同一个 path_id 查表，
+  // 这条 path 上的角色。两者混用会成环：归约结果回注时用同一个 path_id 查表，
   // 若按 flow_dir 判就会被再次送进 ReduceModule。
   //
   // 本级要做归约时这一笔只进 ReduceModule，不同时往下游发；下游那一段由

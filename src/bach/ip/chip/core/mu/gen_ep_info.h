@@ -4,7 +4,7 @@
 // gen_ep_info：把 topK 里的全局专家号翻成组内序号。
 //
 // topK 存的是 global index，算 weight 访存地址要的是 local index，中间隔着
-// local_ep_table —— 它记录当前 EP Group 内有哪些专家、各自在组内第几个。
+// local_ep_table，它记录当前 EP Group 内有哪些专家、各自在组内第几个。
 //
 // topK_ep_table 是 MU 自己从 Core Mem 载入的一份副本：DTE 进核时把 topK 写进
 // Core Mem 的 topK 区，MU 在 task 启动时按 topk_base + stream_id × 256 B 读进来。
@@ -53,7 +53,7 @@ class GenEpInfo : public BachModule {
   void Invalidate() { loaded = false; }
   bool Ready() const { return loaded; }
 
-  // 全局专家号翻成组内序号。不在本组里就返回 false —— 那说明 topK 与
+  // 全局专家号翻成组内序号。不在本组里就返回 false，那说明 topK 与
   // local_ep_table 对不上，是配置错误，不是正常工作点。
   bool ToLocal(uint64_t global, uint64_t* local) {
     ++lookup_pending;

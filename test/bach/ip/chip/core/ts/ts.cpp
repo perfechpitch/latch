@@ -1,10 +1,8 @@
 // TS 的行为基线。
 //
-// 步 6 的判据在头两个用例：单 stream 单 task 从 trigger 到 retire 走完，
-// 以及六个写口的冲突。
-//
-// 其余覆盖 SKIP_MASK 一拍跳过、reduce 两半按 reduce_seq 配对、Head-only 退休、
-// 表满时反压 trigger 这几条最容易实现错的。
+// 头两个用例看整条通路：单 stream 单 task 从 trigger 走到退休，三步的链逐步推进。
+// 其余覆盖写口冲突、提前完成的 datain 被跳过、表满时反压 trigger、逐级 reduce
+// 任务一项一项下发、配置检查这几条最容易实现错的。
 
 #include <gtest/gtest.h>
 
@@ -25,13 +23,11 @@ constexpr Time kPeriod = 1;
 // TS 是九个模块，加驱动就超过默认的 8 个协程槽位。
 void EnsureSlots() { RT::Reset(8, 8); }
 
-TaskEntry MakeTask(SendUnit unit, bool end, bool dsa_en = true) {
+TaskEntry MakeTask(SendUnit unit, bool end, bool dsa = true) {
   TaskEntry t;
   t.send_unit = unit;
-  t.recv_unit = dsa_en ? RecvUnit::kDsa : RecvUnit::kRvOnly;
-  t.dsa_en = dsa_en;
+  t.recv_unit = dsa ? RecvUnit::kDsa : RecvUnit::kRvOnly;
   t.end = end;
-  t.exe_mask = true;   // 不按用户区分，所有用户都做
   t.task_pc = 0x100;
   return t;
 }
@@ -53,7 +49,7 @@ class RouterSide : public BachModule {
   void Step() override {
     uint64_t now = CycleNow();
     if (!sent && now >= at) {
-      ts.Trigger().Drive(user, path, /*reissue=*/false, /*compute=*/true);
+      ts.Trigger().Drive(user, path, /*reissue=*/false);
       if (ts.Trigger().Ready()) sent = true;
     } else {
       ts.Trigger().Idle();
@@ -86,7 +82,7 @@ class RouterSide : public BachModule {
   uint64_t at, user, path;
 };
 
-// 扮演三个 RV core：收 task，隔几拍报完成。
+// 扮演三个 RV core 与它们的 DSA：收 task，隔几拍两路 ACK 一起报。
 class UnitSide : public BachModule {
  public:
   UnitSide(ClockPtr c, Ts& sched, uint64_t lat, uint64_t at = 0,
@@ -104,15 +100,17 @@ class UnitSide : public BachModule {
     Serve(ts.MuCmd(), 1, mu_cmds, now, nullptr);
     Serve(ts.VuCmd(), 2, vu_cmds, now, nullptr);
     for (uint64_t u = 0; u < 3; ++u) {
-      ts.RvDone(u).Idle();
       // 注入一笔「这个 task 已经完成」：datain 任务的完成与主线走到哪无关，
       // 数据到了就报，所以它可以在主线还没走到那一项时先回来。
       if (u == 0 && inject_at != 0 && now == inject_at) {
+        ts.RvDone(0).Drive(0, inject_task);
         ts.DsaDone(0).Drive(0, inject_task);
       } else if (fire[u] != 0 && now >= fire[u]) {
+        ts.RvDone(u).Drive(stream[u], task[u]);
         ts.DsaDone(u).Drive(stream[u], task[u]);
         fire[u] = 0;
       } else {
+        ts.RvDone(u).Idle();
         ts.DsaDone(u).Idle();
       }
     }
@@ -268,7 +266,7 @@ TEST(BachTs, WritePortPriorityOnSameStream) {
   EXPECT_EQ(conflicts, 1u);
 }
 
-// SKIP_MASK：异步 datain 已经提前完成时，主线走到那一项直接跳过。
+// 找后继只看完成位图：异步 datain 已经提前完成时，主线走到那一项直接跳过。
 TEST(BachTs, SkipsCompletedDatainTask) {
   std::vector<uint64_t> tasks;
   {
@@ -278,7 +276,8 @@ TEST(BachTs, SkipsCompletedDatainTask) {
     // task0 普通、task1 是 datain、task2 普通收尾
     ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, false));
     TaskEntry din = MakeTask(SendUnit::kDte, false);
-    din.wait_wake = true;   // 这一项是 datain
+    din.wait_wake = true;   // 这一项是 datain，PID 与 trigger 带的不同
+    din.path_id = 9;
     ts.Cfg().WriteTask(1, din);
     ts.Cfg().WriteTask(2, MakeTask(SendUnit::kDte, true));
     ts.Cfg().SetInitFinish();
@@ -321,7 +320,7 @@ TEST(BachTs, BackpressuresTriggerWhenTableIsFull) {
      protected:
       void Step() override {
         if (sent < 4) {
-          ts.Trigger().Drive(100 + sent, 0, false, true);
+          ts.Trigger().Drive(100 + sent, 0, false);
           if (ts.Trigger().Ready()) ++sent;
         } else {
           ts.Trigger().Idle();
@@ -356,70 +355,89 @@ TEST(BachTs, BackpressuresTriggerWhenTableIsFull) {
   EXPECT_EQ(created, 2u);
 }
 
-// reduce 的两半按 reduce_seq 一一配对：N=2 时两张位图的低 2 位都满才 FINISH。
-TEST(BachTs, ReducePairsBySeq) {
-  uint64_t finished_early = 0, finished_late = 0;
+// 逐级 reduce 任务一项一项下发：本级 Rmem 的 credit 每个用户一份，发出一项占
+// 掉，Router 按用户号报回这一项做完才还，下一项才发。本地两路 ACK 只算搬完。
+TEST(BachTs, ReduceIssuesOneTaskAtATime) {
+  std::vector<uint64_t> tasks, at;
+  uint64_t finished = 0, admitted = 0, finished_at_25 = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
-    TaskEntry red = MakeTask(SendUnit::kDte, true);
-    red.reduce = true;
-    red.reduce_num = 2;
-    red.recv_unit = RecvUnit::kDteDsaRmem;
-    ts.Cfg().WriteTask(0, red);
+    for (uint64_t k = 0; k < 3; ++k) {
+      TaskEntry red = MakeTask(SendUnit::kDte, k == 2);
+      red.task_type = TaskType::kReduce;
+      red.credit_en = true;
+      ts.Cfg().WriteTask(k, red);
+    }
     ts.Cfg().SetInitFinish();
 
     class ReduceDriver : public BachModule {
      public:
-      ReduceDriver(ClockPtr c, Ts& sched)
-          : BachModule(c, "rd"), ts(sched) {}
-      uint64_t at_15 = 0, at_60 = 0;
+      ReduceDriver(ClockPtr c, Ts& sched) : BachModule(c, "rd"), ts(sched) {}
+      std::vector<uint64_t> tasks, at;
+      uint64_t finished = 0, admitted = 0, finished_at_25 = 0;
 
      protected:
       void Step() override {
         uint64_t now = CycleNow();
-        // 先建表
-        if (now < 4) {
-          ts.Trigger().Drive(55, 0, false, true);
-        } else {
-          ts.Trigger().Idle();
-        }
+        // trigger 驱一次，按序号认，保持几拍再撤。
+        if (now == 2) ts.Trigger().Drive(55, 0, false);
+        if (now == 8) ts.Trigger().Idle();
         ts.Credit().RetireReq().DriveAccepted(true);
         ts.Credit().Req().DriveReady(true);
         ts.Credit().Grant().Idle();
         ts.DteCmd().DriveReady(true);
         ts.MuCmd().DriveReady(true);
         ts.VuCmd().DriveReady(true);
-        for (uint64_t u = 0; u < 3; ++u) ts.RvDone(u).Idle();
 
-        // 第 10 拍：DTE ack seq0；第 12 拍：Router done seq0
-        // 第 40 拍：DTE ack seq1；第 45 拍：Router done seq1
-        ts.DsaDone(0).Idle();
+        TaskCmdPort& cmd = ts.DteCmd();
+        if (cmd.Valid() && cmd.Seq() != last_seq) {
+          last_seq = cmd.Seq();
+          tasks.push_back(cmd.task_id.Get());
+          at.push_back(now);
+        }
+
+        // 第 k 项：本地两路 ACK 在 20 + 30k 拍，Router 的 Reduce Done 在
+        // 30 + 30k 拍。
+        for (uint64_t u = 0; u < 3; ++u) {
+          ts.RvDone(u).Idle();
+          ts.DsaDone(u).Idle();
+        }
         ts.Done().RdcDone().Idle();
-        if (now == 10) ts.DsaDone(0).Drive(0, 0, /*seq=*/0);
-        if (now == 12) ts.Done().RdcDone().Drive(55, 0);
-        if (now == 40) ts.DsaDone(0).Drive(0, 0, /*seq=*/1);
-        if (now == 45) ts.Done().RdcDone().Drive(55, 1);
-
-        if (now == 30) at_15 = ts.Done().Finished();
-        if (now == 70) at_60 = ts.Done().Finished();
+        for (uint64_t k = 0; k < 3; ++k) {
+          if (now == 20 + 30 * k) {
+            ts.RvDone(0).Drive(0, k);
+            ts.DsaDone(0).Drive(0, k);
+          }
+          if (now == 30 + 30 * k) ts.Done().RdcDone().Drive(55, k);
+        }
+        if (now == 25) finished_at_25 = ts.Done().Finished();
+        finished = ts.Done().Finished();
+        admitted = ts.Credit().RmemAdmitted();
       }
 
      private:
       Ts& ts;
+      uint64_t last_seq = 0;
     };
     ReduceDriver rd(clk, ts);
-    clk->Continue(100 * kPeriod);
+    clk->Continue(140 * kPeriod);
     RT::JoinAll();
-    finished_early = rd.at_15;
-    finished_late = rd.at_60;
+    tasks = rd.tasks;
+    at = rd.at;
+    finished = rd.finished;
+    admitted = rd.admitted;
+    finished_at_25 = rd.finished_at_25;
   }
   RT::Reset();
-  // 只配上第 0 笔时还不算完成
-  EXPECT_EQ(finished_early, 0u);
-  // 第 1 笔也配上之后才 FINISH
-  EXPECT_EQ(finished_late, 1u);
+  ASSERT_EQ(tasks.size(), 3u) << "三项各下发一次";
+  EXPECT_EQ(tasks, (std::vector<uint64_t>{0, 1, 2}));
+  EXPECT_GT(at[1], 30u) << "第 1 项等第 0 项的 Reduce Done 之后才发";
+  EXPECT_GT(at[2], 60u) << "第 2 项等第 1 项的 Reduce Done 之后才发";
+  EXPECT_EQ(finished_at_25, 0u) << "本地两路 ACK 只算搬完";
+  EXPECT_EQ(finished, 3u);
+  EXPECT_EQ(admitted, 3u);
 }
 
 // 配置检查：一条链上出现两个 TASK_END 是错的。

@@ -292,7 +292,7 @@ def encode_scale(dtype, scale):
 def make_scale(dtype, values):
     """按 block 算各块的 scale：块内绝对值最大的那个定阶。
 
-    算出来的 raw 还要编回 scale 自己那一档再解出来 —— 真正生效的是能表示的
+    算出来的 raw 还要编回 scale 自己那一档再解出来：真正生效的是能表示的
     那个值，不是 raw。
     """
     block = SCALE_BLOCK[dtype]

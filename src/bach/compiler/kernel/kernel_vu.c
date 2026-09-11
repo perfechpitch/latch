@@ -30,14 +30,14 @@ static void vu_launch(u32 config_idx, u32 ld, u32 st, u32 fence) {
 TASK void task_vu_compute(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   vu_launch(0, base + CMEM_FC1_OFF, base + CMEM_ACT_OFF, 0);
-  task_yield();
+  task_done();
 }
 
 /* 专家间求和。与前一笔有 Core Mem 访存冲突，置 fence */
 TASK void task_vu_reduce(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   vu_launch(1, base + CMEM_ACT_OFF, base + CMEM_FC1_OFF, 1);
-  task_yield();
+  task_done();
 }
 
 /* ===== SwiGLU 的门控 =====
@@ -133,7 +133,7 @@ TASK void task_vu_gate(void) {
  *
  * 向量长度是 MOE_OUT_N，与门控那三条的 MOE_INTER 不同，所以另占两组静态配置。 */
 static void add_setup(void) {
-  u32 type_vl = MOE_OUT_N;   /* FP32、RNE 都是 0 */
+  u32 type_vl = MOE_PIECE_N;   /* 逐格相加，一格的数据；FP32、RNE 都是 0 */
 
   vu_static(3, VU_LU_OP, op_word(VU_LU_LD_FP32, 0, 0));
   vu_static(3, VU_SU_OP, op_word(VU_SU_NOP, 0, 0));
@@ -152,13 +152,18 @@ static void add_setup(void) {
 
 /* R core 链二的求和那一步：本组结果与上游组送来的那一份逐元素相加。
  *
- * 与门控同一档：一个 task 发了两条宏指令，收尾靠软件轮询在飞条数。 */
+ * 两半都按格摆，一格一包（bach.h）。逐格相加，格首那 16 B 是软件辅助信息，跳过；
+ * 结果写回前一半的同一格。与门控同一档：一个 task 发了几条宏指令，收尾靠软件轮
+ * 询在飞条数。 */
 TASK void task_vu_add(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
-  u32 sum = base + RC_SUM_OFF + MOE_SW_HEAD_BYTES;
+  u32 k;
   add_setup();
-  vu_fire(3, base + RC_A_OFF + MOE_SW_HEAD_BYTES, sum);
-  vu_fire(4, base + RC_B_OFF + MOE_SW_HEAD_BYTES, sum);
+  for (k = 0; k < MOE_PIECE_NUM; ++k) {
+    u32 at = k * MOE_PIECE_STRIDE + MOE_SW_HEAD_BYTES;
+    vu_fire(3, base + RC_A_OFF + at, base + RC_SUM_OFF + at);
+    vu_fire(4, base + RC_B_OFF + at, base + RC_SUM_OFF + at);
+  }
   while (mmio_read(VU_IO_BASE, VU_MACRO_INST_LEFT) != 0) {
   }
   task_done();

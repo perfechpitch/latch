@@ -171,7 +171,7 @@ class Xbar : public BachModule {
   }
 
   // Retire 的动作只有一条：删掉这个用户在各方向上的 stream credit 授权。
-  // 已经进了本级、正在等仲裁的包照发 —— 「停止新发送」说的是新包要重新申请
+  // 已经进了本级、正在等仲裁的包照发。「停止新发送」说的是新包要重新申请
   // 授权，而 Retire 之后本来就不会再有新包。挡住在途的那些包会把出核的最后
   // 一笔卡死在 Router 里。
   void RetireUser(uint64_t user) {
@@ -273,10 +273,16 @@ class Xbar : public BachModule {
       if (in_q[in].empty()) continue;
       XbarReqView const& v = in_q[in].front();
 
-      // 多播全有全无：先看所有目标出口是不是都空着、资源都够。
-      bool ok = true;
+      // 多播全有全无：先看所有目标出口是不是都空着、资源都够。另一个入口的包
+      // 正占着这个出口的这个 VC 时只能等，不算资源不够，不走转存。
+      bool ok = true, owner_busy = false;
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
+        if (!OwnerOk(o, v.vc, in)) {
+          owner_busy = true;
+          ok = false;
+          break;
+        }
         if (taken[o] || !ResourceOk(o, v)) {
           ok = false;
           break;
@@ -288,10 +294,10 @@ class Xbar : public BachModule {
         // 再来），或转进本地 Core Mem 由 DTE 重发。
         //
         // 走转存这一档时这一笔就算处理完了：交给 CoreMemReissue，同时给 station
-        // 发 grant 把 VC 槽腾出来 —— 不腾的话这一笔既在暂存区里、又占着 VC，
+        // 发 grant 把 VC 槽腾出来，不腾的话这一笔既在暂存区里、又占着 VC，
         // 同一份数据记了两处。Router 上的 Bypass 因此被映射成「进 core 加出 core」
         // 两段。每拍最多转存一笔，因为端口一拍只搬一个 flit。
-        if (v.stall_way && !overflow_used) {
+        if (v.stall_way && !owner_busy && !overflow_used) {
           FlitView f;
           f.valid = true;
           f.vc = v.vc;
@@ -312,6 +318,7 @@ class Xbar : public BachModule {
         taken[o] = true;
         Consume(o, v);
         Emit(o, v);
+        vc_owner[o][v.vc] = v.tail ? 0 : in + 1;
       }
 
       ++granted_pending;
@@ -323,10 +330,11 @@ class Xbar : public BachModule {
       continue;
     }
     // 没人用的出口置 idle。
+    // 出线的 release 上只写 VC 那一类：Reduce 那一类由 ReduceModule 写。
     for (uint64_t o = 0; o < kR2RNum; ++o) {
       if (!taken[o]) {
         out_link[o]->flit.Idle();
-        out_link[o]->release.Idle();
+        out_link[o]->release.DriveVc(false, 0);
       }
     }
     if (!taken[kOutCore]) {
@@ -364,6 +372,13 @@ class Xbar : public BachModule {
     }
     rr_last = (rr_last + 1) % kXbarInNum;
     return order;
+  }
+
+  // 同一出口同一 VC 上一个包从首 flit 到尾 flit 独占：包中间隔了几拍，别的入口
+  // 也不能在这个 VC 上插进来，否则下游按首尾拼包会拼乱。
+  bool OwnerOk(uint64_t o, uint64_t vc, uint64_t in) const {
+    LOGCHECK(vc < kVcNum, "Xbar: VC 号越界。");
+    return vc_owner[o][vc] == 0 || vc_owner[o][vc] == in + 1;
   }
 
   bool ResourceOk(uint64_t o, XbarReqView const& v) const {
@@ -422,7 +437,11 @@ class Xbar : public BachModule {
       dst = reduce_out[o - kOutReduce0].get();
     }
     dst->flit.Drive(v.vc, v.head, v.tail, v.bytes, v.msg);
-    dst->release.Idle();
+    if (o < kR2RNum) {
+      dst->release.DriveVc(false, 0);
+    } else {
+      dst->release.Idle();
+    }
   }
 
   void PublishLevel() {
@@ -461,6 +480,8 @@ class Xbar : public BachModule {
   std::array<std::deque<XbarReqView>, kXbarInNum> in_q;
   std::array<uint64_t, kXbarInNum> last_seq{};
   std::array<bool, kXbarInNum> in_packet{};
+  // 各出口各 VC 正被哪个入口的包占着：入口号加一，0 表示空着。
+  std::array<std::array<uint64_t, kVcNum>, kXbarOutNum> vc_owner{};
   uint64_t rr_last = 0;
   uint64_t granted_pending = 0, stalled_pending = 0, overflow_pending = 0;
 

@@ -10,7 +10,7 @@
 //   HeaderParser   1 个，Router 入站帧的第一道
 //   DteRegfile     1 个，RV core 写的软件配置寄存器，写 trigger 起一笔任务
 //   Commit         1 个，两个任务入口在这里汇成同一套内部任务模型
-//   Hmem           1 个，含 Fast LUT、RouterTable 副本、Reduce credit、stream_cache
+//   Hmem           1 个，含 Fast LUT、RouterTable 副本、stream_cache
 //   Lane           5 个：in_ch 加 out_ch[0..3]
 //   DteXbar        1 个，五个通道与两块存储之间的仲裁
 //   DteOutArb      1 个，四个出核通道与 Router 那一个口之间的仲裁

@@ -1,7 +1,7 @@
 // LPU 层端到端：一个 token 从入口桩进阵列，穿过阵列走到出口那一颗 chip，从
 // 出口桩出来。
 //
-// 与 chip 层那条跨 chip 的区别：这一条从片外进、从片外出 —— 入口桩封包、PCIe
+// 与 chip 层那条跨 chip 的区别：这一条从片外进、从片外出，入口桩封包、PCIe
 // Switch 按 dst 查目的端口、chip 边缘口把段折成 flit，回来时再折回去，出口桩
 // 按 (gpu_id, token_id) 重组并与期望逐字节比对。
 //
@@ -109,7 +109,7 @@ std::vector<Hop> RoutePlan() {
 // 一颗 chip 上从进口那颗 core 到出口那颗 core 的一条路。
 //
 // 四个口各挂在一颗 core 上：N 在行 0 左端、E 在行 0 右端、W 在行 1 左端、S 在
-// 行 1 右端。两个出口都在各自那行的最右，所以走法只有一种 —— 先沿进口那一行
+// 行 1 右端。两个出口都在各自那行的最右，所以走法只有一种：先沿进口那一行
 // 一直往右，要换行就在最右那颗转 mid 过去。
 std::vector<uint64_t> CorePath(ChipShape s, uint64_t in_port,
                                uint64_t out_port) {
@@ -154,23 +154,20 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
-  in.dsa_en = true;
-  in.exe_mask = true;
   in.path_id = in_path;
+  in.wait_wake = true;
   in.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, in);
 
   TaskEntry out;
   out.send_unit = SendUnit::kDte;
   out.recv_unit = RecvUnit::kDsa;
-  out.dsa_en = true;
   out.end = true;
-  out.exe_mask = true;
   out.path_id = out_path;
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(1, out);
 
-  core.GetTs().Cfg().WritePathMap(in_path, 0);
+  core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().Cfg().SetInitFinish();
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
@@ -290,7 +287,7 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
     Lpu lpu(clk, "lpu", Tables(), TickingCfg(want));
 
     // 三个 path：3 号进入口那颗，4 号穿过中间那十三颗，5 号从出口那颗出到片外。
-    // 一颗 core 上进核与出核是两条不同的 path —— 同一个号只能配一种走法。
+    // 一颗 core 上进核与出核是两条不同的 path，因为同一个号只能配一种走法。
     constexpr uint64_t kInPath = 3, kMidPath = 4, kOutPath = 5;
     std::vector<Core*> landing;
     for (uint64_t k = 0; k < plan.size(); ++k) {

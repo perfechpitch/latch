@@ -5,7 +5,7 @@
 //
 // 从 Core Mem 读向量、Mask 与标量，顺带做格式转换。CM 侧有 FP8_e4m3 / MXFP8 /
 // BF16 / FP32 四种，向量通路内部只有 BF16 与 FP32 两种，所以低转高一律是精确
-// 扩宽，只有 ld.fp32.vm 在 DATA_TYPE=BF16 下是高转低 —— 那一档按 ROUND_MODE
+// 扩宽，只有 ld.fp32.vm 在 DATA_TYPE=BF16 下是高转低。那一档按 ROUND_MODE
 // 窄化，结果为 NaN 时置 DATA_CVT_ERROR。
 //
 // CM 接口一次固定 1024 bit，不支持 burst，请求地址按 128 B 对齐。向量按 32 B
@@ -124,7 +124,7 @@ class VuLu : public BachModule {
 
     uint64_t addr = inst.LdAddr();
     // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。违反置 CM_ADDR_ERROR，
-    // 本条照走 —— 硬件只自检对齐、不做长度检查，不阻塞流水。
+    // 本条照走。硬件只自检对齐、不做长度检查，不阻塞流水。
     uint64_t grain = op == LuOp::kLdSFp32 ? kVuScalarAlign : kVuCmAlign;
     if (addr % grain != 0) flow->error |= kVuErrCmAddr;
     // 请求地址向下对齐到 128 B 块，前面多出来的那一截收齐后截掉。

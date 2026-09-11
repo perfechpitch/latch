@@ -112,7 +112,7 @@ RouteEntry ReduceEntry(uint64_t in_mask) {
 
 }  // namespace
 
-// A2：中间核只做 bypass —— 不占该核的用户坑，cur_credit_require 为 0。
+// A2：中间核只做 bypass，不占该核的用户坑，cur_credit_require 为 0。
 TEST(BachRouterScenario, A2BypassDoesNotTakeSlot) {
   uint64_t stream_used = 0, got = 0;
   {
@@ -140,7 +140,7 @@ TEST(BachRouterScenario, A2BypassDoesNotTakeSlot) {
   EXPECT_EQ(stream_used, 0u);  // bypass 不占坑
 }
 
-// A15：单个只透传的 core —— 只转发不记账，stream 表全空、不发 trigger。
+// A15：单个只透传的 core，只转发不记账，stream 表全空、不发 trigger。
 TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
   uint64_t got = 0, stream_used = 0, triggers = 0;
   {
@@ -181,7 +181,7 @@ TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
   EXPECT_EQ(triggers, 0u);     // 不投递本 core
 }
 
-// A16：两个只透传的 core 串联 —— 逐跳链式透传，时延是逐跳累加而不是单跳。
+// A16：两个只透传的 core 串联，逐跳链式透传，时延是逐跳累加而不是单跳。
 TEST(BachRouterScenario, A16ChainedPassThroughAccumulatesHops) {
   uint64_t one_hop = 0, two_hop = 0;
   auto run = [&](uint64_t hops) -> uint64_t {
@@ -333,8 +333,9 @@ TEST(BachRouterScenario, ReissueKeepsOrderWithinVc) {
   EXPECT_EQ(users[2], 302u);
 }
 
-// Retire 的三方时序：Router 立即删 stream 授权，ReduceModule 等 credit 全回来。
-TEST(BachRouterScenario, RetireIsImmediateOnXbarDelayedOnReduce) {
+// Retire 的广播一根线同时到 Xbar 与 ReduceModule：Router 立即删 stream 授权；
+// ReduceModule 上这个用户没有在做的任务，本地分区也不留。
+TEST(BachRouterScenario, RetireReachesXbarAndReduceAtOnce) {
   bool xbar_holds = true, rdc_holds = true, rdc_after = true;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -344,7 +345,6 @@ TEST(BachRouterScenario, RetireIsImmediateOnXbarDelayedOnReduce) {
     ReduceModule rdc(clk, "rdc", rtab, 0);
     Retire rt(clk, "retire");
 
-    rdc.AllocContext(88);
     // 退休广播走一根线：Retire 送号，两张表各由自己的模块改。
     auto bcast = rt.BroadcastPtr();
     xb.AttachRetire(bcast);
@@ -389,7 +389,6 @@ TEST(BachRouterScenario, RetireIsImmediateOnXbarDelayedOnReduce) {
   }
   RT::Reset();
   EXPECT_FALSE(xbar_holds);  // Router 立即删
-  // ReduceModule 的 credit 一直是初值，所以下一拍就能回收
   EXPECT_FALSE(rdc_after);
 }
 

@@ -73,7 +73,7 @@ class Router {
     rtab = std::make_unique<RouterTable>(clock, "rtab", gid, setting.tick);
 
     // 四个入口站：三个 R2R 加 core 方向。各读一份副本。ReduceModule 的结果
-    // 直接给 Xbar 提请求，不再走一遍站 —— 方向在它那里已经算好了。
+    // 直接给 Xbar 提请求，不再走一遍站，因为方向在它那里已经算好了。
     static const char* kStationName[] = {"st_mid", "st_left", "st_right",
                                          "st_core"};
     static const uint64_t kStationDir[] = {kDirMid, kDirLeft, kDirRight,
@@ -92,6 +92,7 @@ class Router {
     xbar->SetVcDepth(cfg.vc_private_depth, cfg.vc_shared_depth);
     core_station = std::make_unique<CoreStation>(clock, "core_station",
                                                  gid, setting.tick);
+    core_station->SetVcDepth(cfg.vc_private_depth, cfg.vc_shared_depth);
     reduce = std::make_unique<ReduceModule>(clock, "reduce", *rtab, 4,
                                             gid, setting.tick);
     reissue = std::make_unique<CoreMemReissue>(clock, "reissue",
@@ -116,7 +117,7 @@ class Router {
   // 业务 credit 的回程（stream release）另走一根，由 Retire 写。
   //
   // 分成两根不是实现上的将就：链路那一份说的就是「数据与三种 release 各走各的
-  // 实例，参数相同」。合在一根上会出现两个模块同一拍写同一个 Latch —— VC credit
+  // 实例，参数相同」。合在一根上会出现两个模块同一拍写同一个 Latch。VC credit
   // 是 flit 一进一出就还的快通道，stream release 要等那个用户在下游 core 上跑完
   // 整条任务链，两者的产生点本来就不是一处。
   LinkEndPtr UpReleaseWire(uint64_t d) const { return up_release_wire.at(d); }
@@ -162,8 +163,11 @@ class Router {
   void Preload(uint64_t path_id, RouteEntry const& e) {
     rtab->Preload(path_id, e);
   }
-  // 用户建 stream credit 表项时，ReduceModule 的上下文同时占用。两者一一对应。
-  void AllocUser(uint64_t user) { reduce->AllocContext(user); }
+  // Release 静态路由（RTR_RELEASE_ROUTE）：从方向 d 进来的业务 credit release
+  // 按 out_mask 走，掩码的写法见 kReleaseSelf。
+  void SetCreditBypass(uint64_t d, uint64_t out_mask) {
+    rtab->SetCreditBypass(d, out_mask);
+  }
 
   // ── 观测 ──
   // B core：搬出之前要查哪几个方向的下游资源。方向在 TS 的 B_CORE_DIRECTION
@@ -175,6 +179,8 @@ class Router {
   std::shared_ptr<MemPort> HdrPtr() const { return core_station->HdrPtr(); }
   ReduceModule& GetReduce() { return *reduce; }
   CoreMemReissue& GetReissue() { return *reissue; }
+  Retire& GetRetire() { return *retire; }
+  CreditMonitor& GetMonitor() { return *monitor; }
   RouterStation& Station(uint64_t i) { return *stations.at(i); }
   // Xbar 每拍发布的各方向各 VC 可发标志。DTE 出核前读它。
   std::shared_ptr<CreditLevelPort> CreditLevelPtr() const {
@@ -215,6 +221,10 @@ class Router {
       up_release_wire.push_back(MakeWire(clk));
       stations[d]->AttachUp(in_wire[d]);
       stations[d]->AttachUpBack(up_back_wire[d]);
+      // Reduce release 与数据反向走：还给上游的写在往上游去的出线上，下游还回来
+      // 的从下游来的进线上读。链路与 C2C bridge 都按这一套透传。
+      reduce->AttachUpRelease(d, out_wire[d]);
+      reduce->AttachDownRelease(d, in_wire[d]);
       xbar->AttachOutLink(d, out_wire[d]);
       xbar->AttachBackLink(d, back_wire[d]);
     }
@@ -235,7 +245,9 @@ class Router {
     LinkEndPtr out_core = MakeWire(clk);
     core_station->AttachToStation(out_core);
     stations[3]->AttachUp(out_core);
-    stations[3]->AttachUpBack(MakeWire(clk));
+    LinkEndPtr core_back = MakeWire(clk);
+    stations[3]->AttachUpBack(core_back);
+    core_station->AttachStationBack(core_back);
     xbar->AttachCoreLevel(core_station->LevelPtr());
 
     // 三路 reduce 出口进 ReduceModule，结果经第五个站重新参与仲裁。
@@ -243,7 +255,7 @@ class Router {
       LinkEndPtr w = MakeWire(clk);
       xbar->AttachReduceOut(r, w);
       reduce->AttachIn(r, w);
-      xbar->AttachReduceLevel(r, reduce->LevelPtr());
+      xbar->AttachReduceLevel(r, reduce->LevelPtr(r));
     }
     // 溢流：Xbar 判定转存后把 flit 交给 CoreMemReissue。
     reissue->AttachOverflow(xbar->OverflowPtr());
@@ -272,9 +284,6 @@ class Router {
       }
       return core_station->HoldsUser(user) ||
              core_station->StreamUsed() < kStreamTabEntries;
-    });
-    monitor->SetTake([this](uint64_t user, uint64_t) {
-      reduce->AllocContext(user);
     });
   }
 

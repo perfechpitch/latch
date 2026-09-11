@@ -25,7 +25,7 @@ namespace numeric {
 // MU 的 CSA 树：按 scale block 分组累加。
 //
 // 一个 block 内的元素共用一个 scale，所以先把块内的乘积加完再乘 scale，比
-// 逐个乘 scale 再加少一轮舍入。块间用顺序加 —— CSA 树的形状 MAS 没给，顺序加
+// 逐个乘 scale 再加少一轮舍入。块间用顺序加：CSA 树的形状 MAS 没给，顺序加
 // 与平衡树加出来的位不一样，这里取顺序加并标为待定。
 inline float AccumByScaleBlock(std::vector<float> const& prods,
                                std::vector<float> const& block_scale,
