@@ -439,7 +439,7 @@
   * Router 路由表换业务路径：token 广播、逐级 reduce 等
   * TS：`datain_task` 的 pc 指向 token 搬移，`trigger_task_chain_en = 1`；`task_chain` 配成本 core 角色的业务任务链（也可在 weights 模式就配好）
   * DSA 写业务场景的静态配置；DTE 的进核那一笔改回本 core 角色的落点，计算 core 是 Core Mem
-  * TS 配置的写入顺序：全局项 `CORE_TYPE`、`STREAM_NUM`、`B_CORE_DIRECTION` → 逐项 `task_chain[i]`（硬件自动置 `TASK_VALID`）→ `DATAIN_TASK` → `TS_INIT_FINISH`；硬件随即查五项合规性写 `TS_STATE`，B / R core 自启动 16 项
+  * TS 配置的写入顺序：`STREAM_NUM`、`SELF_START`（读回核对）→ B / R core 重写 `DATAIN_TASK_PC` → 逐项 `task_chain[i]`，每项先 PC 后 ATTR（写 ATTR 时硬件置 `TASK_VALID`）→ `TS_INIT_FINISH`；硬件随即查配置写 `TS_STATE`，有错软件清掉 `TS_INIT_FINISH`、改链重来；B / R core 自启动 16 项
 * ④ SCP 经 PCIe 通知 launch 完成；此后 token 进来才会算
 
 weights 加载模式的三处配置：

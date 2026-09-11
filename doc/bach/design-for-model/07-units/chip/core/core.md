@@ -64,14 +64,14 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <rect x="234" y="130" width="1200" height="114" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="246" y="151" font-size="11" fill="#111827" font-weight="600">TS 任务调度器（九个逐拍推进的模块）</text>
 <text x="246.0" y="168.0" font-size="8.5" fill="#475569">CFG_REG：task_chain 64 项 · datain_task 1 项 · stream_num</text>
-<text x="246.0" y="181.5" font-size="8.5" fill="#475569">　CORE_TYPE · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
+<text x="246.0" y="181.5" font-size="8.5" fill="#475569">　SELF_START · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
 <text x="246.0" y="195.0" font-size="8.5" fill="#475569">User_Match · DataIn_task_table（只有 1 项，占住就反压 Router）</text>
 <text x="246.0" y="208.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 六个写口</text>
-<text x="834.0" y="168.0" font-size="8.5" fill="#475569">Task_ctrl：SKIP_MASK 一拍跳过 · 原子安装后继 · End task 不可跳</text>
+<text x="834.0" y="168.0" font-size="8.5" fill="#475569">Task_ctrl：按完成位图一拍找后继 · 原子安装 · 不越过 End</text>
 <text x="834.0" y="181.5" font-size="8.5" fill="#475569">DTE_Arb（reissue 最高）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
 <text x="834.0" y="195.0" font-size="8.5" fill="#475569">credit 子模块：注册 / 唤醒 · retire：Head-only 退休</text>
 <text x="834.0" y="208.5" font-size="8.5" fill="#475569">Task_done：七路完成合流，reduce 拆成 DTE ack 与 Router Done 两半</text>
-<text x="1422" y="235" font-size="8.5" fill="#9ca3af" text-anchor="end">四种工作模式由 CORE_TYPE 与 WEIGHTS_MODE 选定</text>
+<text x="1422" y="235" font-size="8.5" fill="#9ca3af" text-anchor="end">三种工作模式由 SELF_START 与 WEIGHTS_MODE 选定</text>
 <rect x="1524" y="130" width="300" height="86.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
 <text x="1536" y="151" font-size="11" fill="#111827" font-weight="600">ctrl_noc 端点</text>
 <text x="1536.0" y="168.0" font-size="8.5" fill="#475569">按 addr_map 分发到 core 内各模块的 cfg 口</text>
@@ -130,7 +130,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
 <text x="1116.0" y="608.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
 <text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 288 B（16 项 × {core_mask, sw_header}）· Fast LUT 64 项</text>
-<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · 本级 Reduce credit 表 · PendingTaskQ</text>
+<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · PendingTaskQ</text>
 <text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
 <rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
 <text x="336" y="751" font-size="11" fill="#111827" font-weight="600">Matrix Mem</text>
@@ -160,7 +160,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="246.0" y="1105.0" font-size="8.5" fill="#475569">　Stream Resource Table · VC Credit 计数器 · Credit Release 静态旁路</text>
 <text x="246.0" y="1118.5" font-size="8.5" fill="#475569">Xbar 5 入 7 出：按输出 RoundRobin，贪婪整包，多播全有全无</text>
 <text x="1029.0" y="1078.0" font-size="8.5" fill="#475569">CoreStation：HeaderFIFO · OutputBuffer · 三态准入 · 进出 core 并行</text>
-<text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 16 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
+<text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 32 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
 <text x="1029.0" y="1105.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
 <text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
 <text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份，不派角色的 core 也有</text>

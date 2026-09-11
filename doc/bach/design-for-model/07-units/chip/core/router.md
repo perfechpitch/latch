@@ -31,11 +31,11 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | | VC credit | stream credit（CoreMem credit） | Reduce credit |
 | - | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
-| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID，flit |
-| 谁维护 | RouterStation 的独立计数器，硬件自动维护；每个 VC 的深度由软件经 ctrl_noc 静态配置，取够覆盖 credit 往返延迟即可，不必装得下整包 | Router 是唯一有效状态；DTE 持一份 cache；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | DTE 维护本级的，ReduceModule 维护相邻下游各方向的，Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
-| 何时还 | flit 离开下游 VC Buffer 就归还 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release，逐跳传到上游 | 输出 flit 被下游接受后产生携带 UserID 的 release，经静态旁路返回上游 |
-| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按 flit 还但要等下游 Reduce 完成 |
+| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID 加目标方向，一笔 Reduce 任务 |
+| 谁维护 | RouterStation 的独立计数器，硬件自动维护；每个 VC 的深度由软件经 ctrl_noc 静态配置，取够覆盖 credit 往返延迟即可，不必装得下整包 | Router 是唯一有效状态；DTE 持一份 cache；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | 本级由 TS 按用户记，下发一笔 reduce 占掉、Rmem 做完才还，ReduceModule 维护相邻下游各方向的，Router 不维护 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | `reduce_need` 置位时，一笔任务头一次向目标方向提交前取得准入，后面的 Packet 与 flit 不再扣 |
+| 何时还 | flit 离开下游 VC Buffer 就归还 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release，逐跳传到上游 | 下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，经静态旁路返回上游 |
+| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按任务还，要等下游这一笔做完 |
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2240 1150" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Router 第 0 层">
@@ -90,8 +90,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <text x="1212.0" y="212.0" font-size="8.5" fill="#475569">　目标的该用户包</text>
 <text x="1212.0" y="225.5" font-size="8.5" fill="#475569">Router 的动作：停止该 UserID 的新发送，删除其全部</text>
 <text x="1212.0" y="239.0" font-size="8.5" fill="#475569">　stream credit 授权表项</text>
-<text x="1212.0" y="252.5" font-size="8.5" fill="#475569">ReduceModule 的动作：延迟回收。先记录 Retire，待相邻</text>
-<text x="1212.0" y="266.0" font-size="8.5" fill="#475569">　下游各方向的 Reduce credit 全恢复到初值才删映射</text>
+<text x="1212.0" y="252.5" font-size="8.5" fill="#475569">ReduceModule 的动作：本地分区当场放；下游映射</text>
+<text x="1212.0" y="266.0" font-size="8.5" fill="#475569">　等在途任务的 Reduce release 都回来才清</text>
 <text x="1212.0" y="279.5" font-size="8.5" fill="#475569">本级 core 与所有下级出口的 release 经 core credit crossbar</text>
 <text x="1212.0" y="293.0" font-size="8.5" fill="#475569">　汇总，发往除来向外的另两个 R2R port，逐跳传到上游</text>
 <rect x="1560" y="120" width="400" height="195.0" rx="4" fill="#f8fafc" stroke="#374151"/>
@@ -155,9 +155,9 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <text x="1312.0" y="487.0" font-size="8.5" fill="#475569">RMW 管线：首份输入建上下文，后续输入原位累加，80 GFLOPS</text>
 <text x="1312.0" y="500.5" font-size="8.5" fill="#475569">User Context Table：UserID · 包状态 · 输入完成 · 输出状态 · Retire</text>
 <text x="1312.0" y="514.0" font-size="8.5" fill="#475569">RouterTable Copy：输出方向 · 下一跳 VC · operation · 输出精度</text>
-<text x="1312.0" y="527.5" font-size="8.5" fill="#475569">结果生成与发送：全部输入完成 → 输出队列 → 转 FP32 / BF16</text>
+<text x="1312.0" y="527.5" font-size="8.5" fill="#475569">结果流水：元素加完就发，整包锁定到尾 flit</text>
 <text x="1312.0" y="541.0" font-size="8.5" fill="#475569">　发送前查目标 VC credit 与该方向的下游 Reduce credit</text>
-<text x="1312.0" y="554.5" font-size="8.5" fill="#475569">Downstream Reduce Credit Map：按 UserID 加方向，逐 flit 扣、</text>
+<text x="1312.0" y="554.5" font-size="8.5" fill="#475569">Downstream Reduce Credit Map：按 UserID 加方向，每笔任务准入一次、</text>
 <text x="1312.0" y="568.0" font-size="8.5" fill="#475569">　按 release 恢复</text>
 <text x="1312.0" y="581.5" font-size="8.5" fill="#475569">三条硬约束：必须执行 Reduce 不许降级 · 上下文保护 ·</text>
 <text x="1312.0" y="595.0" font-size="8.5" fill="#475569">　中间累加固定 FP32</text>
@@ -252,7 +252,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <path d="M1400.1 314.5 L1400.0 394.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
 <rect x="1402.8" y="302.4" width="10.5" height="104.6" fill="#ffffff" opacity="0.92"/>
 <text transform="rotate(-90 1408 354.75)" x="1408" y="357.7" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#b45309" text-anchor="middle">Retire 广播 → 延迟回收</text>
-<text x="20" y="1074" font-size="10.5" fill="#374151" text-anchor="start">通路载荷：in / out_core_data_ch 是 AXI-Stream-Like，对本 core 的 DTE DSA 走 VC credit 协议；router2ts_trigger_ch = user_id · path_id · 重发标记；router2ts_credit_ch = stream_id · task_id · path_id；rmem2ts_done_ch = UserID（reduce 整包完成）；ts2router 资源注册 = UserID · StreamID · TaskID · PathID。</text>
+<text x="20" y="1074" font-size="10.5" fill="#374151" text-anchor="start">通路载荷：in / out_core_data_ch 是 AXI-Stream-Like，对本 core 的 DTE DSA 走 VC credit 协议；router2ts_trigger_ch = user_id · path_id · 重发标记；router2ts_credit_ch = stream_id · task_id · path_id；rmem2ts_done_ch = UserID · PathID（reduce 整包完成）；ts2router 资源注册 = UserID · StreamID · TaskID · PathID。</text>
 <text x="20" y="1094" font-size="10.5" fill="#374151" text-anchor="start">CoreMem 重发 ↔ CoreStation：stall_way = 转存时整包重定向到本地 Core Mem；Retire → CoreStation：停发该 UserID。</text>
 <path d="M271.0 315.0 L272.0 394.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
 <rect x="440.7" y="377.5" width="238.6" height="10.5" fill="#ffffff" opacity="0.92"/>
@@ -261,7 +261,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <rect x="230.7" y="88.5" width="338.5" height="10.5" fill="#ffffff" opacity="0.92"/>
 <text x="400" y="96" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">cfg 写事务 → RouterTable / CSR、Credit Bypass Route、各 Station 静态配置</text>
 <text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；stream credit 管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
-<text x="20" y="1134" font-size="10.5" fill="#374151" text-anchor="start">Reduce credit 管下游 ReduceModule 的上下文（DTE 管本级，ReduceModule 管相邻下游，Router 不维护）。ReduceModule 输入三路各 160 GB/s，输出 160 GB/s。</text>
+<text x="20" y="1134" font-size="10.5" fill="#374151" text-anchor="start">Reduce credit 管下游 ReduceModule 的用户上下文（本级由 TS 按用户记，ReduceModule 管相邻下游，Router 不维护）。ReduceModule 输入三路各 160 GB/s，输出 160 GB/s。</text>
 </svg>
 ```
 
@@ -302,7 +302,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F20 | 仲裁不是纯 RoundRobin，是贪婪整包。优先级由高到低：接口传输 priority → 当前输入是否有整包 → 当前请求是否为上一包的 body → 正常 RoundRobin |
 | F21 | 多播同一拍 1 到 N 复制，每个 output 的 Mux 独立控制，多个 output 可选同一个 input；任一目标没握手就不推进任何分支 |
 | F22 | 握手成功后统一扣各目标的 credit、更新包上下文 |
-| F23 | 交织粒度分两种：Router 到 Router 的通路允许在 flit 边界切换包，需保存 VC、输出方向、剩余长度和包边界上下文；包一旦开始进入 Core 或 ReduceModule 就锁定到尾 flit。两种粒度不能混用 |
+| F23 | 交织粒度分两种：Router 到 Router 的通路允许在 flit 边界换到另一个 VC 的包，需保存 VC、输出方向、剩余长度和包边界上下文，同一出口同一 VC 上一个包从首 flit 占到尾 flit，中间断拍时别的包也不能插进这个 VC；包一旦开始进入 Core 或 ReduceModule 就锁定到尾 flit。两种粒度不能混用 |
 
 ### CoreStation
 
@@ -312,10 +312,9 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F25 | 已通过 Stream 检查，进 core 不再检查对 Core 方向的 VC credit，一定有 Core Mem 空间 |
 | F26 | Header 写入 HeaderFIFO，Payload 写入 OutputBuffer（in_core_fifo），两者保持同一包顺序与边界 |
 | F27 | Core 入口以整包为单位，不支持包间交织，必须发完一个整包再发下一个 |
-| F28 | 按接收包头的顺序经 `router2ts_trigger_ch` 直接通知 TS，**Header 就绪即通知，不等整包收完**，请求里带 `user_id`、`path_id`、这一笔要不要重发的标记，以及这个用户要不要做计算的 `compute` 位。这条通路硬件直连，不经 RV core，也不经任何软件环节 |
+| F28 | 按接收包头的顺序经 `router2ts_trigger_ch` 直接通知 TS，**Header 就绪即通知，不等整包收完**，请求里带 `user_id`、`path_id` 与这一笔要不要重发的标记。这条通路硬件直连，不经 RV core，也不经任何软件环节 |
 | F29 | 判定一个包收完的依据：比较已接收数据量与包头里的 payload 大小。这个判定用于确定包边界，据此开始接收下一个包 |
 | F112 | Header 就绪即通知，OutputBuffer 因此是流水缓冲而不是整包缓冲：DTE 被调度后按 AXI-Stream-Like 的 valid 边收边搬，数据没到就停在原拍等，恢复后从同一 flit 继续。进 core 的包长不受 OutputBuffer 容量约束 |
-| F30 | `compute` 取自包头软件 payload 里的一位，CoreStation 原样转给 TS，不做解释。DP+P2P 场景下 TS 用它跳过与本用户无关的那一半任务（**待定**：这一位在包头里的位置等 Router 接口规范定下包头位域后回填） |
 | F31 | 请求发出后保持到 TS 拉 `ready`。TS 的 trigger 入口占满时本笔请求原地保持，CoreStation 不发下一笔，也不清 HeaderFIFO 的队头。请求不允许丢弃：丢一笔 trigger 就等于丢一个 token |
 | F32 | DTE RV core 经 `cm_lsq` 映射到 Router I/O reg 的地址段读包头生成搬运任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头。Router 侧的 `hdr_rd` 是这条通路的从端，core 内不另设第二条读包头的通路 |
 | F33 | 被反压时保持 valid、当前 Header、Payload、首尾 flit 标志与有效字节信息不变，传输位置不得前移；反压解除后从同一 flit 继续握手，保证包不丢拍、不重拍、不跨包、不串包 |
@@ -328,28 +327,28 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - |
 | F36 | 三路输入仲裁 SRAM、Bank 与计算资源；进入后锁定当前包直至尾 flit |
 | F37 | 输入精度处理：BF16 扩展为 FP32，FP32 直接进入，数据面统一 FP32 |
-| F38 | 同一 User 同一包的第一份输入分配上下文并写入 FP32 数据，后续方向的输入读出当前值、累加、写回，原位 Read-Modify-Write |
+| F38 | 同一 User 同一包的第一份输入写进这个用户的分区（FP32），后续方向的输入读出当前值、累加、写回，原位 Read-Modify-Write |
 | F39 | 上下文保护：当前包的全部输入完成并输出前，同一 User 的下一个包不得覆盖该上下文 |
 | F40 | 必须执行 Reduce：SRAM、Bank 或计算单元暂不可用时对输入反压，不允许绕过 Reduce 降级为直接存储或转发 |
 | F41 | 精度：中间累加固定 FP32，输出按 RouterTable 的 `reduce_outdata_type` 转成 FP32 或 BF16 |
-| F42 | 全部方向输入完成后结果进输出队列，发送前查目标 VC credit 与该方向的下游 Reduce credit，作为 Xbar 的第五路输入重新参与仲裁 |
+| F42 | 结果按 flit 出：某个结果 flit 所需的各方向操作数都累加完了，这个 flit 就能发，不等整包；一个包发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等。发送前查目标 VC credit，表项 `reduce_need` 置位时一笔任务头一个 flit 还查该方向的下游 Reduce credit，作为 Xbar 的第五路输入参与仲裁 |
 | F43 | `op_type` 分 reduce 与 reduce_twice 两档：reduce 第一次收到就写入上下文，reduce_twice 要到第二次或第三次收到才与上下文里的值相加。两个源允许都来自本 core 的 DTE，即用 Router 完成 core 内两个 token 的 reduce 再发出 |
-| F44 | “全部方向”取自 RouterTable 的 `reduce_in_mask`：按包头的 `path_id` 查 `rdc_rtab[path_id].reduce_in_mask`，得到这条 path 在本级会有哪几个相邻方向送来分量。`all_in = (in_done_mask == reduce_in_mask)`。首份输入建上下文时把这个集合一并记进 `rdc_user_tab`，本包收齐前不再重查 |
+| F44 | “全部方向”取自 RouterTable 的 `reduce_in_mask`：按包头的 `path_id` 查 `rdc_rtab[path_id].reduce_in_mask`，得到这条 path 在本级会有哪几个相邻方向送来分量。某个结果元素要等集合里各方向对应的那个元素都进来。一笔任务的首份输入进来时把这个集合一并记进 `rdc_user_tab`，这笔任务做完前不再重查 |
 | F45 | `reduce_in_mask` 为 0 表示本级不做累加：不派角色的 core 与纯透传的中继核都是这一档，包按 `flow_dir` 直接转发，不进 ReduceModule |
-| F46 | 每发一个 flit 扣一个下游 Reduce credit；下游每发出一个 flit 产生携带 UserID 的 release，经 Router 的静态旁路返回上游 |
-| F47 | Downstream Reduce Credit Map 按 UserID 加目标方向维护相邻下游的 Reduce credit，逐 flit 扣减、按 release 恢复 |
-| F48 | 整包发出后经 `rmem2ts_done_ch` 向 core 返回 UserID 与该包包头里的 `reduce_seq`。TS 只认这一路把 reduce task 置 FINISH，并按 `reduce_seq` 与 DTE 的那一半配对 |
+| F46 | 下游 Reduce credit 以一笔 Reduce 任务为粒度：表项 `reduce_need` 置位时，一笔任务头一次向某个方向提交前要取得那个方向这个用户的准入，这笔任务后面的 Packet 与 flit 复用这次准入，逐 flit 只受 VC credit 约束。下游做完这笔任务、结果全部交付后生成一次携带 UserID 的 release，经 Router 的静态旁路返回相关上游 |
+| F47 | Downstream Reduce Credit Map 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：取得准入时置忙，收到 release 时放开 |
+| F48 | 整包发出后经 `rmem2ts_done_ch` 向 core 返回 UserID、PathID 与该包包头里的 `reduce_seq`。TS 只认这一路把逐级 reduce 任务置 FINISH：按 UserID 找到那个用户，完成的是它的当前任务 |
 | F49 | 输入侧只有 VC credit 准入，`credit > 0` 即收；Reduce credit 是另一张网，与数据面分离 |
-| F50 | 表项的建与删：用户建 stream credit 表项时分配一个 entry 的 credit 数量；收到本级 core 该 UserID 的 Retire 且相邻下游各方向的 credit 全部恢复到分配数量后，才删掉这一项给其他用户用 |
-| F51 | 16 个用户上下文与进 core 的 stream credit 表项**一一对应**，同为 16 项，同在用户建 stream credit 表项时占用、同在 Retire 时回收。因此不会出现 Stream 已授权而 ReduceModule 没有上下文的情况，反压只覆盖 SRAM、Bank 与计算单元三种暂时不可用，不必覆盖上下文耗尽 |
+| F50 | 表项的建与删：收到本级 core 该 UserID 的 Retire 后本地分区可以回收；相邻下游各方向在途任务的 release 全部回来之后，才删掉这个用户的映射给其他用户用 |
+| F51 | 16 个用户分区在用户第一笔 Reduce 任务真正进来时分配，后面的任务接着用，收到这个用户的 User Retire 才释放。新用户进来时 16 个分区都占着，就对那一路输入反压，等有用户 Retire 放出一个 |
 | F52 | 链上没有同步点：上游分量到达时不必等本 core 算完，先存进上下文，本地出核的分量出来时再加 |
-| F113 | 三路输入与 `reduce_in_mask` 同一套编号：bit0 上下、bit1 左、bit2 右。本 core 自己那一份分量从 core 方向进来，也占其中一路，走哪一路由本表项 `flow_dir` 的 reduce1 与 reduce2 两位指定 —— 两位都不置走 bit0，置 reduce1 走 bit1，置 reduce2 走 bit2。既收上游分量又出自己那一份的 core 靠这两位把两者错开 |
+| F113 | 三路输入与 `reduce_in_mask` 同一套编号：bit0 上下、bit1 左、bit2 右。本 core 自己那一份分量从 core 方向进来，也占其中一路，走哪一路由本表项 `flow_dir` 的 reduce1 与 reduce2 两位指定：两位都不置走 bit0，置 reduce1 走 bit1，置 reduce2 走 bit2。既收上游分量又出自己那一份的 core 靠这两位把两者错开 |
 
 ### RouterTable / CSR
 
 | 编号 | 功能 |
 | - | - |
-| F53 | 64 条表项，按 `path_id` 索引。字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`：<br>`op_type` 2 bit（0 = kernel / weight 搬运、1 = transfer、2 = reduce、3 = reduce_twice）<br>`flow_dir` 5 bit 出方向掩码（bit0 上下、bit1 左、bit2 右、bit3 reduce1、bit4 reduce2）<br>`cur_vc` 2 bit、`nxt_vc` 五个出方向各 2 bit<br>`path_core_mask_enable` 1 bit、`path_core_mask_idx` 4 bit、`path_core_bypass` 1 bit（0 进 core、1 bypass）<br>`need_buffer` 1 bit（这条 path 允许进 core 缓存，即溢流使能）<br>`stream_table_enable` 1 bit（这个包要不要查输出端的 stream credit table）<br>`cur_credit_type` 1 bit（0 广播 / 1 P2P）、`cur_credit_require` 6 bit<br>`nxt_credit_type` 3 bit（三个 R2R 方向各一位）、`nxt_credit_require` 三个 R2R 方向各 6 bit<br>`reduce_data_type` 3 bit（输入精度 BF16 / FP32）、`reduce_outdata_type` 1 bit（输出精度）<br>`reduce_in_mask` 3 bit、`operation` 2 bit（0 转发、1 Reduce0、2 Reduce1、3 Reduce2）、`stall_way` 1 bit |
+| F53 | 64 条表项，按 `path_id` 索引。字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`：<br>`op_type` 2 bit（0 = kernel / weight 搬运、1 = transfer、2 = reduce、3 = reduce_twice）<br>`flow_dir` 5 bit 出方向掩码（bit0 上下、bit1 左、bit2 右、bit3 reduce1、bit4 reduce2）<br>`cur_vc` 2 bit、`nxt_vc` 五个出方向各 2 bit<br>`path_core_mask_enable` 1 bit、`path_core_mask_idx` 4 bit、`path_core_bypass` 1 bit（0 进 core、1 bypass）<br>`need_buffer` 1 bit（这条 path 允许进 core 缓存，即溢流使能）<br>`stream_table_enable` 1 bit（这个包要不要查输出端的 stream credit table）<br>`cur_credit_type` 1 bit（0 广播 / 1 P2P）、`cur_credit_require` 6 bit<br>`nxt_credit_type` 3 bit（三个 R2R 方向各一位）、`nxt_credit_require` 三个 R2R 方向各 6 bit<br>`reduce_data_type` 3 bit（输入精度 BF16 / FP32）、`reduce_outdata_type` 1 bit（输出精度）<br>`reduce_in_mask` 3 bit、`operation` 2 bit（0 转发、1 reduce0 单流，经 Rmem 不计算、2 reduce1 两流、3 reduce2 三流）、`stall_way` 1 bit、`reduceNeedMask` 1 bit（结果往下游发时查不查下游 ReduceModule 这个用户空不空） |
 | F54 | 进不进本 core 由两个字段二选一决定：`path_core_mask_enable = 0` 时按 `path_core_bypass` 定，适用于普通广播与 P2P；`= 1` 时取 MSG 里 `path_core_mask` 的第 `path_core_mask_idx` 位，适用于 EP 广播。**位到 core 的对应关系不是固定编码**，每个 core 在自己的表项里指定看哪一位 |
 | F54a | 开了 `path_core_mask` 的那条 path 走遍一串 core，包落在哪几个由包头挑。走到既不进本 core 又没有出方向的那一跳，这一笔就在那里终止。`path_core_mask_enable = 0` 的表项进不进核与包无关，那时候没有出方向是表项配错 |
 | F55 | `reduce_data_type` 配在表里而不是由 TS 给，是因为 `reduce_twice` 时 Router 可能先收到两个远程的 Reduce Token 而不是本 core 发出的那一份，那时 TS 还没有介入 |
@@ -360,7 +359,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F60 | 内部多副本：所有需要并行查询的位置各持一份，由 Router 的配置入口统一接收写事务 |
 | F61 | 更新状态机把同一笔写依次写入全部副本并记录完成状态；全部副本写完才向软件返回完成，禁止暴露部分新部分旧的状态 |
 | F62 | 外部两份副本由 DTE 与 ReduceModule 各自维护，软件负责写入相同配置并保证三方一致，Router 硬件不同步外部副本；软件只能在 Router 提交完成后再写它们 |
-| F63 | Credit Bypass Route：软件经 CSR 为每个业务 credit 输入端口配置静态输出方向 Mask，可指定一个或多个 R2R 方向与 Core 方向；跨过不落地的 core 时切换 credit 路径靠的就是改这组配置 |
+| F63 | Credit Bypass Route（寄存器 `RTR_RELEASE_ROUTE`）：软件经 CSR 为每个业务 credit 输入端口配置静态输出方向 Mask，可指定一个或多个 R2R 方向与 Core 方向；跨过不落地的 core 时切换 credit 路径靠的就是改这组配置 |
 | F64 | 中间节点可以按表改写 VC |
 
 ### CoreMem 重发
@@ -369,7 +368,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - |
 | F65 | `stall_way` 选转存时把整包重定向到本地 Core Mem 缓存，Router 上的 Bypass 操作被映射成“进 core 加出 core”两段 |
 | F66 | Core Mem 中只保存包，包头含 UserID、PathID、size；重发时用 PathID 重新查 RouterTable，不重复保存 VC 和路由信息 |
-| F67 | 暂存空间由软件在 Core Mem 里预留，容量与项数取自 `cmem_part` 的 `reissue_base` 与 `reissue_pkts_per_vc`，每 VC 至少容得下一个整包。`pending_reinject` 计数到这个上限说明配少了，**模型直接断言失败**：不覆盖已暂存的包，不丢包，也不退回“留在当前 VC 等” —— 那条路会让同一个 `stall_way` 配置在两种容量下走出两种行为，掩盖配置错误 |
+| F67 | 暂存空间由软件在 Core Mem 里预留，容量与项数取自 `cmem_part` 的 `reissue_base` 与 `reissue_pkts_per_vc`，每 VC 至少容得下一个整包。`pending_reinject` 计数到这个上限说明配少了，**模型直接断言失败**：不覆盖已暂存的包，不丢包，也不退回“留在当前 VC 等”，因为那条路会让同一个 `stall_way` 配置在两种容量下走出两种行为，掩盖配置错误 |
 | F68 | 同 VC 保序：同一 VC 存在未完成的 CoreMem 重发包时，后续包不得越过；按 VC 粒度维护 `pending_reinject` 计数器防超车 |
 | F69 | 包进 core 暂存时改写 `overflow_reinject = 1`，出 core 重发时 Router 改回 0；Output Port 识别到重注入标记才扣减 credit |
 | F70 | 不派角色的 core 不接收溢流：Router 对它不发起进 core 缓存处理，此时 coremem credit 直接 bypass |
@@ -382,7 +381,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F72 | ReduceModule 完成计算并发出全部包后向 Core 返回 UserID；Core 判定任务链结束后向 Router 和 ReduceModule 广播 User Retire |
 | F73 | Core 的保证：仅可在该 UserID 的全部进 core、出 core 数据搬运完成，且不会再发起新搬运之后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包 |
 | F74 | Router 的动作：删除该 UserID 在各方向上的全部 stream credit 授权表项。已经进了本级、正在等仲裁的包照发；「停止新发送」说的是新包要重新申请授权，而 Retire 之后本来就不会再有新包 |
-| F75 | ReduceModule 的动作是延迟回收，先记录 Retire，待相邻下游各方向的 Reduce credit 全部恢复到初始值后才删除对应用户映射 |
+| F75 | ReduceModule 的动作：本地分区当场放，这个用户还有在做的任务就等结果交付完再放；相邻下游 Reduce 资源映射与本地分区分开清，在途任务的 Reduce release 都回来后才清掉这个用户的映射 |
 | F76 | Stream credit 的回程：每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 |
 
 ### CoreMemCreditMonitor
@@ -417,7 +416,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | 编号 | 功能 |
 | - | - |
 | F94 | 逐级的 reduce / concat 在 Router 里按序执行，只缓存最老那个用户的数据，最多支持 3 个数据源同时参与：两个上游 core 的分量加一个本 core 的分量 |
-| F95 | 非逐级的 reduce / concat **必须进 core 内执行**：数据在 Core Mem 里等其他来源到达后再算，支持不同用户之间的数据乱序到达。原因是非逐级汇聚时用户间会乱序 —— chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到汇聚点 |
+| F95 | 非逐级的 reduce / concat **必须进 core 内执行**：数据在 Core Mem 里等其他来源到达后再算，支持不同用户之间的数据乱序到达。原因是非逐级汇聚时用户间会乱序：chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到汇聚点 |
 | F96 | ReduceBuffer 要装得下一个完整 Token：Core 必须一次性把 Reduce Token 完整发进 Router 的 ReduceBuffer，不能分段传输，否则效率严重下降。中间结果按 FP32 存，8192 个元素就是 32 KB，每个用户一格 |
 | F97 | ReduceBuffer 不得用作流量控制的缓存。“Reduce 完成后不切 `path_id`，直接从 ReduceBuffer 发 P2P”这种把两条 path 合并的做法，只在后续 P2P 能立即发出时才允许；发不出去就让 Reduce 结果先进本 core 的 Core Mem，用 Core Mem 做流控缓冲 |
 
@@ -428,7 +427,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F98 | 两个通信事务满足任一条时必须分配新的 `path_id`：一是涉及的 R2R 路径有重叠但后续传播节点不完全一致，例如广播到 core01 与广播到 core0123；二是在同一个 core 上做的操作不同，例如 core0123 上的 broadcast 与 reduce |
 | F99 | 两条反例，路径不冲突时可以共用同一个 `path_id`：分别在 core01 和 core23 上广播，路径完全无关；分别在 core03 和 core23 上做 P2P，路径重叠但后半部分完全一致 |
 | F100 | `path_core_mask` 16 bit 理论上最大支持 EP16；组合数溢出时由 DTE core 的软件程序换一个新的 `path_id` 解决，硬件不做处理 |
-| F101 | `path_core_mask` 的第二种用法：DP 广播固定广播到每个 core，靠 mask 判断该 core 做不做计算。好处是只占 1 项 RouterTable，代价是浪费总线带宽 —— core0 做计算时，core0 之后那段广播传输其实是多余的 |
+| F101 | `path_core_mask` 的第二种用法：DP 广播固定广播到每个 core，靠 mask 判断该 core 做不做计算。好处是只占 1 项 RouterTable，代价是浪费总线带宽：core0 做计算时，core0 之后那段广播传输其实是多余的 |
 | F102 | EP 多播两种编码方式的表项数对比：纯 `path_id` 编码要 2^K − 1 项；`path_id` 加 `path_core_mask` 编码只要 K 项 `path_id`，配 2^K 种 mask |
 
 ### 包格式与透传
@@ -472,12 +471,12 @@ port hdr_rd (slave, AXI-Full 类, clk)                 // DTE RV core 的 cm_lsq
   in  araddr[31:0] · arvalid · awaddr[31:0] · wvalid · wdata[31:0]
   out arready · rvalid · rdata[255:0] · awready · wready
 port router2ts_trigger_ch (master, valid/ready, clk)  // CoreStation → TS：Header 就绪即通知
-  out valid · user_id[15:0] · path_id[7:0] · reissue · compute
+  out valid · user_id[15:0] · path_id[7:0] · reissue
   in  ready                                               // = TS 的 trigger 入口队列有空项；拉低时 CoreStation 保持本笔请求，不发下一笔
 port router2ts_credit_ch (master, 脉冲, clk)          // CoreMemCreditMonitor → TS：资源到手
   out valid · stream_id[3:0] · task_id[5:0] · path_id[7:0]
 port rmem2ts_done_ch (master, 脉冲, clk)              // ReduceModule → TS：一个整包 reduce 完成
-  out valid · user_id[15:0] · reduce_seq[5:0]           // reduce_seq 原样取自包头，供 TS 逐包配对
+  out valid · user_id[15:0] · path_id[7:0] · reduce_seq[5:0]   // reduce_seq 原样取自包头
 port ts2router_req (slave, valid/ready, clk)          // TS → CoreMemCreditMonitor：注册资源申请
   in  req_valid · user_id[15:0] · stream_id[3:0] · task_id[5:0] · path_id[7:0]
   out req_ready                                           // = 监听事件队列有空项
@@ -499,10 +498,10 @@ port cfg (slave, ctrl_noc 写事务, clk)                // RouterTable、CSR、
 ## 4　存储器
 
 ```
-mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0], nxt_vc[4:0][1:0], path_core_mask_enable, path_core_mask_idx[3:0], path_core_bypass, need_buffer, stream_table_enable, cur_credit_type, cur_credit_require[5:0], nxt_credit_type[2:0], nxt_credit_require[2:0][5:0], reduce_data_type[2:0], reduce_outdata_type, reduce_in_mask[2:0], operation[1:0], stall_way, ext_dst[5:0]}  1R1W  多副本，逐份写  复位 全条目 bypass / no-op
+mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0], nxt_vc[4:0][1:0], path_core_mask_enable, path_core_mask_idx[3:0], path_core_bypass, need_buffer, stream_table_enable, cur_credit_type, cur_credit_require[5:0], nxt_credit_type[2:0], nxt_credit_require[2:0][5:0], reduce_data_type[2:0], reduce_outdata_type, reduce_in_mask[2:0], operation[1:0], stall_way, ext_dst[5:0], reduce_need}  1R1W  多副本，逐份写  复位 全条目 bypass / no-op
 mem skip_mask         FF        10 b，per-core 一位，按 chip 里最大的那种形状定宽             1R1W  与 RouterTable 分开配     复位 0
 mem rtab_commit       FF        {副本写入游标, 完成状态}                                    1RW   更新状态机                复位 空闲
-mem credit_bypass     FF 阵列   每个业务 credit 输入端口一个 {out_mask[6:0]}                1R1W  CSR 配置                  复位 0
+mem credit_bypass     FF 阵列   每个业务 credit 输入端口一个 {out_mask[3:0]}：mid、left、right、本 core                1R1W  CSR 配置                  复位 0
 mem vc_buf[d][v]      FIFO      private 每 VC 20 flit                                       1W1R  满且 shared 也满 → 不再收上游  复位空    // d ∈ {left,right,mid,core}，v ∈ 0..3
 mem vc_shared[d]      FIFO      每方向 20 flit，四个 VC 先到先得                             1W1R  private 满时借用           复位空
 mem pkt_ctx[d][v]     FF 阵列   {vc[1:0], out_mask[6:0], remain_len[15:0], head, tail, locked}  1RW  队首上下文             复位空
@@ -515,8 +514,8 @@ mem hdr_fifo          FIFO      16 × 256 B 包头                              
 mem out_buf           FIFO      60 flit（in_core_fifo）                                     1W1R  整包写入，不交织          复位空
 mem rdc_ctx           SRAM      16 用户 × 32 KiB，FP32 中间累加结果                          1R1W  RMW 原位累加              复位未定义
 mem rdc_user_tab      FF 阵列   16 × {user_id[15:0], path_id[7:0], pkt_state[2:0], in_done_mask[2:0], expect_mask[2:0], out_state[1:0], retired}  1RW  建上下文时记下 expect_mask = rdc_rtab[path_id].reduce_in_mask  复位空
-mem rdc_down_credit   FF 阵列   16 用户 × 3 方向 × 计数器                                    1RW   发 flit 扣 1，release 加 1  复位 分配值
-mem rdc_out_q         FIFO      8 flit                                                      1W1R  满 → 停止 RMW 输出         复位空
+mem rdc_down_credit   FF 阵列   16 用户 × 3 方向 × 忙标志                                    1RW   任务头一次提交时置忙，release 放开  复位 空闲
+mem rdc_out_q         队列      每个在做的任务一项，最多 16 项                               1W1R  队头发出首 flit 后锁定到尾 flit  复位空
 mem rdc_rtab          FF 阵列   64 项，RouterTable 的外部副本                                1R1W  软件写                    复位 0
 mem reissue_tab       FF 阵列   每 VC 一项 {pending_reinject[7:0]}                           1RW   进 core 暂存加 1，重发减 1  复位 0
 mem monitor_q         FF 阵列   16 项全相连 × {user_id[15:0], stream_id[3:0], task_id[5:0], path_id[7:0], need_mask[6:0]}  1RW  —  复位空
@@ -543,10 +542,11 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 | `nxt_credit_type` / `nxt_credit_require` | 三个 R2R 方向各一份。某方向 `nxt_credit_require` 为 0 表示该方向不查 credit，只受链路反压；`flow_dir` 置位而 require 为 0 的方向随原子发送一起放行 |
 | `reduce_data_type` / `reduce_outdata_type` | reduce 加法的输入精度与输出精度，各自取 BF16 或 FP32。中间累加固定 FP32，不受这两项影响 |
 | `reduce_in_mask` | 这条 path 在本级要收哪几路分量。相邻方向那几路按拓扑推导：在这条 path 的图上，把本核作为下一跳、且操作是 reduce 的那些相邻核，它们所在的方向就置位。本核自己出一份分量时，还要把 `flow_dir` 给它挑的那一路也置位。不派角色的 core 与纯透传的中继核填 0 |
-| `operation` | 本级在这条 path 上的角色：0 普通转发、1 Reduce0、2 Reduce1、3 Reduce2 |
+| `operation` | 本级在这条 path 上收几路分量：0 普通转发、1 reduce0 单流（经 Rmem 不计算）、2 reduce1 两流、3 reduce2 三流 |
+| `reduce_need` | 结果往下游发之前查不查下游 ReduceModule 这个用户空不空；下一跳不再做归约的那一跳填 0 |
 | `stall_way` | 留在当前 VC 等，或转 Core Mem 暂存由 DTE 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务 |
 
-`reduce_in_mask` 与 `operation` 的三档 reduce 取值，Router MAS 的 `Table Entry` 与 DATA_NOC HAS 的 `Routing table field` 都没有（**待确认**）。前者是逐级归约判断收齐所必需的，后者的 Reduce0 / Reduce1 / Reduce2 含义原始文档未定义，本文档按源分量 / 中继累加 / 最终汇聚给。`flow_dir` 的 reduce1 与 reduce2 两位原始文档只给了名字，本文档按“本 core 那一份分量走哪一路输入”给（**待确认**）。
+`reduce_in_mask` Router MAS 的 `Table Entry` 与 DATA_NOC HAS 的 `Routing table field` 都没有（**待确认**），它是逐级归约判断收齐所必需的。`operation` 的三档 reduce 取值与 `reduce_need` 照 Router MAS 的 `Table Entry`。`flow_dir` 的 reduce1 与 reduce2 两位原始文档只给了名字，本文档按“本 core 那一份分量走哪一路输入”给（**待确认**）。
 
 ### 一套可直接照抄的实例：最后一列 chip 的 core4 不派角色
 
@@ -564,13 +564,13 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 | C3 | Path2 | 右 | 1 不进核 | 0 | Reduce1 | 留在 VC |
 | C4 不派角色 | Path0 / Path1 / Path2 | 上下 | 1 不进核 | 0 | 转发（Path2 也只透传，不累加） | 只能留在 VC |
 | C9 | Path0 / Path1 | 全不置位 | 0 进核 | 0 | 转发 | 末端 |
-| C9 | Path2 | 全不置位 | 0 进核 | 0 | Reduce2 | 末端 |
+| C9 | Path2 | 全不置位 | 0 进核 | 0 | Reduce1 | 末端 |
 
 同一个 core 上不同 path 的表项互相独立：C4 三条填法相同，仍然要三个表项。
 
 两列各看各的：`flow_dir` 只管往外发哪几个方向，进不进本核看 `path_core_bypass`，所以 C1 与 C3 的 Path0 是“往右发同时进本核”，C9 是“不再外发只进本核”。`stream_table_enable` 看的是下一跳会不会把数据落进它的 core：C4 不派角色，数据不在它那里落地，所以 C3 查的是跨过 C4 之后 C9 的坑，C4 自己不查。
 
-这张表没列 `reduce_in_mask`：它按上面那条纯拓扑规则从 Path2 的图推出来，C4 不派角色填 0，C9 由上排经 mid 与同排左邻两路汇入，所以置 bit0 与 bit1。逐核的完整取值等 `operation` 的 Reduce0 / Reduce1 / Reduce2 含义定下来后一并回填（**待定**）。
+这张表没列 `reduce_in_mask` 与 `reduce_need`，两者按上面的规则从 Path2 的图推出来。`reduce_in_mask`：C0 只出本 core 那一份，置 bit0；C1、C3 收左邻上游与本 core 两路，置 bit0 与 bit1；C4 不派角色填 0；C9 由上排经 mid 与同排左邻两路汇入，置 bit0 与 bit1。`reduce_need`：C0、C1、C3 的下游还要累加，填 1；C9 是末端，填 0。
 
 ### 一层里 path 怎么分
 
@@ -1025,13 +1025,13 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
   <text x="795" y="79" font-size="10.5" fill="#374151" text-anchor="middle">router2ts_trigger_ch</text>
   <text x="795" y="97" font-size="9.5" fill="#6b7280" text-anchor="middle">valid · user_id[15:0]</text>
   <text x="795" y="115" font-size="9.5" fill="#6b7280" text-anchor="middle">path_id[7:0] · reissue</text>
-  <text x="795" y="133" font-size="9.5" fill="#6b7280" text-anchor="middle">compute · ready</text>
+  <text x="795" y="133" font-size="9.5" fill="#6b7280" text-anchor="middle">ready</text>
   <rect x="232" y="20" width="431" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M8</text>
   <text x="649" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="56" font-size="12" fill="#111827">CoreStation · 判收完并 trigger TS</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. recv_bytes += flit_bytes；done = (recv_bytes == hdr.payload_size)</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. done → trigger = {user_id, path_id, reissue, compute}</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. done → trigger = {user_id, path_id, reissue}</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. router2ts_trigger_ch.valid = trigger 有效</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. !ready → 保持 trigger 与 hdr_fifo 队头，不发下一笔</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">trigger 与 token 一一对应，只许反压不许丢</text>
@@ -1131,7 +1131,7 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
   <rect x="654" y="47" width="176" height="70" fill="#f1f5f9" stroke="#334155"/>
   <rect x="654" y="47" width="176" height="18" fill="#334155"/>
   <text x="742" y="60" font-size="10.5" fill="#ffffff" text-anchor="middle">RDC_OUT</text>
-  <text x="742" y="87" font-size="10" fill="#334155" text-anchor="middle">all_in</text>
+  <text x="742" y="87" font-size="10" fill="#334155" text-anchor="middle">ready_elem</text>
   <text x="742" y="109" font-size="10" fill="#334155" text-anchor="middle">user_id[15:0]</text>
   <rect x="654" y="129" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="658" y="133" width="168" height="34" fill="none" stroke="#374151"/>
@@ -1144,8 +1144,8 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
   <text x="250" y="98" font-size="10.5" fill="#475569">2. first_in ? rdc_ctx[user][offset] = a</text>
   <text x="262" y="118" font-size="10.5" fill="#475569">: rdc_ctx[user][offset] = rdc_ctx[user][offset] + a（FP32）</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">3. in_done_mask |= 1&lt;&lt;src</text>
-  <text x="250" y="158" font-size="10.5" fill="#475569">4. all_in = (in_done_mask == expect_mask)</text>
-  <text x="250" y="182" font-size="10" fill="#9ca3af">同一 User 的下一个包在 all_in 输出前不得覆盖该上下文</text>
+  <text x="250" y="158" font-size="10.5" fill="#475569">4. ready_elem = min(各路已进来的元素数)，收齐的那一路不算</text>
+  <text x="250" y="182" font-size="10" fill="#9ca3af">同一 User 的下一笔在结果全部发出前不得覆盖该分区</text>
   <path d="M188 82 L231 82" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
   <path d="M188 172 L231 172" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
   <path d="M610 82 L653 82" stroke="#475569" marker-end="url(#arrb)" fill="none"/>
@@ -1153,7 +1153,7 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
 </svg>
 ```
 
-### M12 · 输出准入与发送
+### M12 · 结果流水与发送
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 950 198" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -1163,14 +1163,14 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
   <rect x="20" y="37" width="168" height="70" fill="#f1f5f9" stroke="#334155"/>
   <rect x="20" y="37" width="168" height="18" fill="#334155"/>
   <text x="104" y="50" font-size="10.5" fill="#ffffff" text-anchor="middle">RDC_OUT</text>
-  <text x="104" y="77" font-size="10" fill="#334155" text-anchor="middle">all_in</text>
+  <text x="104" y="77" font-size="10" fill="#334155" text-anchor="middle">ready_elem</text>
   <text x="104" y="99" font-size="10" fill="#334155" text-anchor="middle">user_id[15:0]</text>
   <rect x="20" y="119" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="123" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="140" font-size="10" fill="#374151" text-anchor="middle">rdc_down_credit · FF 16×3 · 1RW</text>
   <rect x="754" y="51" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="758" y="55" width="168" height="34" fill="none" stroke="#374151"/>
-  <text x="842" y="72" font-size="10" fill="#374151" text-anchor="middle">rdc_out_q · FIFO 8 flit · 1W</text>
+  <text x="842" y="72" font-size="10" fill="#374151" text-anchor="middle">rdc_out_q · 在做的任务 ≤ 16 · 1W</text>
   <polygon points="764,105 930,105 920,145 754,145" fill="#f8fafc" stroke="#374151"/>
   <text x="842" y="124" font-size="10.5" fill="#374151" text-anchor="middle">rmem2ts_done_ch</text>
   <text x="842" y="142" font-size="9.5" fill="#6b7280" text-anchor="middle">valid · user_id[15:0]</text>
@@ -1179,10 +1179,10 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
   <text x="696" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="56" font-size="12" fill="#111827">ReduceModule · 转精度后回注 Xbar</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. out = (reduce_outdata_type==BF16) ? FP32toBF16(rdc_ctx[user]) : rdc_ctx[user]</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. send_ok = vc_credit[o][nxt_vc] &gt; 0 &amp;&amp; rdc_down_credit[user][o] &gt; 0</text>
-  <text x="250" y="118" font-size="10.5" fill="#475569">3. send_ok → {rdc_out_q.push(out); rdc_down_credit[user][o] −= 1}</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. 整包发完 → rmem2ts_done_ch.valid = 1, user_id = user</text>
-  <text x="250" y="162" font-size="10" fill="#9ca3af">输出队列满时停止 RMW 输出，回压到 M10</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 首 flit：reduce_need → rdc_down_credit[user][o] 空闲才发，发了置忙</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. 每个 flit：vc_credit[o][nxt_vc] &gt; 0 且本 flit 的元素都 &lt; ready_elem</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 尾 flit 发完 → rmem2ts_done_ch.valid = 1，给上游还 release</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等</text>
   <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
   <path d="M188 140 L231 140" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
   <path d="M710 72 L753 72" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
@@ -1317,11 +1317,11 @@ chip 上同一批 core 正跑着它们自己那一组的归约链。
   <rect x="232" y="20" width="412" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M16</text>
   <text x="630" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="250" y="56" font-size="12" fill="#111827">Retire · 立即删表项，延迟回收上下文</text>
+  <text x="250" y="56" font-size="12" fill="#111827">Retire · 立即删表项，本地分区当场放</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. ts2router_retire.accepted = retire_pend 有空项</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 立即：∀d: stream_tab[d] 删除该 user_id 的全部授权</text>
-  <text x="250" y="118" font-size="10.5" fill="#475569">3. 记录 retire_pend[user].to_rdc = 1，不立即删 ReduceModule 映射</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. rdc_down_credit[user][*] 全部回到分配值 → 删 rdc_user_tab[user]</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. ReduceModule：该 user 没有在做的任务 → 当场放分区</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. rdc_down_credit[user][*] 等在途任务的 release 回来才清</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Core 保证发 Retire 前该 user 不再有进出 core 的搬运</text>
   <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
   <path d="M188 133 L231 133" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
@@ -1380,19 +1380,19 @@ VC                  每输入方向 4 类（VC0～3），输出方向不设 VC B
 credit 记账单位      1 KB；广播一次扣的量含提前预留的输出结果空间（原文例：8 KB 广播 + 24 KB 输出 = 扣 32）
 VC Buffer           private 每 VC 深度 20（覆盖 RTT，软件可配，防死锁下限 2）加每方向一个 shared pool 20 flit（覆盖 credit 往返），一个方向合计 100 flit ≈ 25 KB
                     private 那 20 flit 任何时候都只归本 VC，shared pool 先到先得。建模按这个结构建，不摊平成每 VC 一个独立深度
-                    另一份口径：《通信机制（分析过程）》按容量记 —— reduce 专用 VC3 是 16 KB、三个共享 VC 各 8 KB、三方向各一套，
+                    另一份口径：《通信机制（分析过程）》按容量记，reduce 专用 VC3 是 16 KB、三个共享 VC 各 8 KB、三方向各一套，
                     合计 (16 + 8×3) × 3 = 120 KB。两份口径未对齐，见第 8 章
 Stream Resource Table  每方向 16 项（待定）
 VC credit 初值      private 每 VC 20，shared 每方向 20；发送先扣 private 再扣 shared，归还先补 private 再补 shared
                     一个方向的 credit 总量 4 × 20 + 20 = 100，等于下游该方向的 VC Buffer 容量，不超发，链路上不需要 ready
 Reduce 输入 / 输出   三路各 160 GB/s / 160 GB/s；算力 80 GFLOPS（FP32 / BF16）
-ReduceModule 上下文  16 用户 × 32 KiB，合计 512 KiB；一个用户占满一格这个下界来自“Core 必须一次性整包发进 ReduceBuffer，不能分段”
-ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度   64 flit、4、2、8（待定）
+ReduceModule 上下文  16 用户 × 32 KiB，按 FP32 驻留算，合计 512 KiB；一个用户占满一格这个下界来自“Core 必须一次性整包发进 ReduceBuffer，不能分段”
+ReduceModule bank 数、RMW 拍数、每路输入缓冲   4、2、32 flit（待定）
 CoreStation HeaderFIFO / OutputBuffer 深度   16 / 60 flit；OutputBuffer 取 DATA_NOC HAS「Router 外（每 Core）」表的
                     DTE-local 桥接 Router→DTE 60 flits ≈ 16.9 KB，HeaderFIFO 仍无出处
 监听事件队列        16 项全相连
 Xbar 与 ReduceModule 三路输入的仲裁算法      轮询（待定）
-operation 的 Reduce0 / Reduce1 / Reduce2     源分量 / 中继累加 / 最终汇聚（待定，原文未定义）
+operation 的 reduce0 / reduce1 / reduce2     单流经 Rmem 不计算 / 两流 / 三流（Router MAS）
 包结构              硬件包头 16 B：Reserved 7 B · Hardware Used 1 B（Bypass 即 overflow_reinject、Bad packet）· UserID 2 B · Reserved 1 B
                   · PathID 1 B（有效 6 bit）· CoreMask 2 B · size 2 B（含包头）
                   软件包头固定 16 B；业务数据 0 B～(64 KB − 32 B)；reduce_seq 6 bit 占 Reserved 位
@@ -1438,13 +1438,12 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | reduce 包最前面 16 B 是软件辅助信息，加法跳过、输出照抄 | F105 | `reduce_hdr_skip_16b` |
 | 每 output 独立 RoundRobin，不跨拍锁定 | F19 | `xbar_rr` |
 | 贪婪整包的四级优先级 | F20 | `xbar_greedy_packet` |
-| 进 core 后锁定到尾 flit，R2R 可在 flit 边界切换包 | F23 | `interleave_grain` |
+| 进 core 后锁定到尾 flit，R2R 可在 flit 边界换 VC，同一 VC 上包不交织 | F23 | `interleave_grain` |
 | 进 core 三态准入 | F24 | `corestation_admit` |
 | 进 core 不再查 VC credit | F25 | `no_vc_check_into_core` |
 | Core 入口整包，不支持包间交织 | F27 | `no_packet_interleave` |
 | CoreStation 按包头顺序直接通知 TS，不经软件 | F28 | `trigger_to_ts` |
 | 按已接收字节数与包头 payload 大小判 token 收完 | F29 | `token_complete` |
-| compute 位原样转给 TS，Router 不解释 | F30 | `trigger_compute_bit` |
 | TS 的 trigger 入口占满时请求原地保持，不丢 trigger | F31 | `trigger_backpressure` |
 | DTE RV core 经 cm_lsq 读包头后写 1 弹出，映射出下一个包头 | F32 | `header_pop` |
 | 反压时数据保持，解除后从同一 flit 继续 | F33 | `backpressure_hold` |
@@ -1453,14 +1452,14 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | ReduceModule 三路输入仲裁，进入后锁定到尾 flit | F36 | `reduce_input_arb` |
 | BF16 扩 FP32，中间累加固定 FP32，输出可配 | F37、F41 | `reduce_precision` |
 | 首份输入建上下文，后续原位 RMW 累加 | F38 | `reduce_rmw` |
-| 收齐判据取自 RouterTable 的 reduce_in_mask，建上下文时记进 expect_mask | F46 | `reduce_in_mask` |
+| 收齐判据取自 RouterTable 的 reduce_in_mask，任务开始时记进 expect_mask | F46 | `reduce_in_mask` |
 | 本 core 那一份分量走哪一路输入由 flow_dir 的 reduce1 / reduce2 指定 | F113 | `reduce_self_lane` |
 | reduce_in_mask 为 0 的核不累加，只按 flow_dir 转发 | F47 | `reduce_passthrough` |
 | 上下文保护：同一 User 的下一个包不得覆盖 | F39 | `reduce_ctx_protect` |
 | 必须执行 Reduce，不允许降级 | F40 | `reduce_no_bypass` |
-| Reduce 上下文与 Stream 表项一一对应，不会出现上下文耗尽 | F51 | `reduce_ctx_pairing` |
-| 输出前查目标 VC credit 与下游 Reduce credit | F42、F47 | `reduce_out_credit` |
-| 每发一 flit 扣一个，按 UserID release 恢复 | F46 | `reduce_credit_flit` |
+| 分区在用户第一笔任务进来时分配，用光了对输入反压，Retire 才放 | F51 | `reduce_ctx_on_demand` |
+| 结果按 flit 出，整包锁定到尾 flit；首 flit 前查下游 Reduce credit，每 flit 查 VC credit | F42、F47 | `reduce_out_credit` |
+| 一笔任务每个方向准入一次，下游做完还一次 release | F46、F47 | `reduce_credit_task` |
 | 只有 Router Reduce Done 才能把 reduce task 置 FINISH | F48 | `reduce_done_owner` |
 | 链上没有同步点，流着加 | F52 | `reduce_streaming` |
 | RouterTable 内部多副本，全部写完才返回完成 | F60、F61 | `router_table_commit` |
@@ -1470,7 +1469,7 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 同 VC 有未重发完的包时后续包不得越过 | F68、F82 | `reissue_order` |
 | overflow_reinject 标记，Output Port 识别到才扣 credit | F69 | `reinject_flag` |
 | 完成后向 TS 回 UserID + PathID | F71 | `reissue_done` |
-| Retire 的三方时序：Core 保证 → Router 立即删表项 → ReduceModule 延迟回收 | F72～F75 | `retire_three_party` |
+| Retire 的三方时序：Core 保证 → Router 立即删表项 → ReduceModule 当场放分区、下游映射等 release | F72～F75 | `retire_three_party` |
 | Stream credit 经 core credit crossbar 逐跳传到上游 | F76 | `stream_credit_hop` |
 | 监听事件队列 16 项全相连，按 StreamID 选最老通知 TS | F77～F80 | `credit_monitor_q` |
 | 进 core 重发的任务也注册到监听队列 | F81 | `reissue_register` |
@@ -1534,9 +1533,15 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
   * 一起等的代价是性能，各自走的代价是状态爆炸
 * **为什么 Reduce 不允许降级**
   * 若允许绕过 Reduce 直接存储或转发，下游收到的是未归约的原始数据，且并不知道这件事，也没有补做归约的机会。宁可反压
-* **为什么退休时 ReduceModule 要延迟回收**
-  * Retire 只说明 core 侧的搬运结束了，而 ReduceModule 发往相邻下游的 flit 可能还在路上
-  * 等下游各方向的 Reduce credit 全部恢复到初始值，才能确认这些 flit 都已被接收
+* **为什么退休时 ReduceModule 的下游映射要等 release 回来才清**
+  * Retire 只说明 core 侧的搬运结束了，而 ReduceModule 发往相邻下游的任务可能还没做完
+  * 本地分区当场放，只留下游映射；等下游各方向在途任务的 Reduce release 都回来才清，旧 release 才不会落到复用这个 UserID 的新用户上
+* **为什么分区在用户第一笔任务进来时才分配**
+  * 只有真做 reduce 的用户才占分区，只收发普通数据的用户不占
+  * 代价是 16 个分区用光时要对新用户的输入反压，等别的用户 Retire
+* **为什么结果按 flit 出，不等整包**
+  * 逐级 reduce 的每一跳不必等整包收齐，各路首 flit 到了结果首 flit 就能往下一跳走，每跳省掉一整包的收包时间
+  * 代价是包发出首 flit 后要占着出口等后面的结果：Xbar 上同一出口同一 VC 被这个包独占到尾 flit
 * **为什么出核前的资源监听放在 Router 而不是 TS**
   * 若改由 TS 监听，大量通信信息要塞进 TS 任务链，计算与通信不再解耦
 * **为什么不用标准 AXI4 而自研 flit 级协议**

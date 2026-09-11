@@ -149,9 +149,9 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <rect x="560" y="960" width="400" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="572" y="981" font-size="11" fill="#111827" font-weight="600">出核前的资源与流控</text>
 <text x="572.0" y="998.0" font-size="8.5" fill="#475569">RouterTable 副本：按 PathID 查到 VC 与资源需求，软件写，三方一致</text>
-<text x="572.0" y="1011.5" font-size="8.5" fill="#475569">本级 Reduce credit 表：每用户一个 entry，flit 粒度</text>
-<text x="572.0" y="1025.0" font-size="8.5" fill="#475569">　用户建 stream credit 表项时分配 credit 数量</text>
-<text x="572.0" y="1038.5" font-size="8.5" fill="#475569">　发 Reduce 包前要求本级 credit 够整包，否则在 PendingTaskQ 等</text>
+<text x="572.0" y="1011.5" font-size="8.5" fill="#475569">Reduce 包与其他出核包一样只查 VC credit</text>
+<text x="572.0" y="1025.0" font-size="8.5" fill="#475569">　本级 Rmem 资源由 TS 在下发前申请</text>
+<text x="572.0" y="1038.5" font-size="8.5" fill="#475569">　VC credit 不够就在 PendingTaskQ 等</text>
 <text x="572.0" y="1052.0" font-size="8.5" fill="#475569">　ReduceModule 每完成一次 Reduce 并把 flit 发给下游就还一个</text>
 <text x="572.0" y="1065.5" font-size="8.5" fill="#475569">PendingTaskQ：没申请到下游 Stream 或 Reduce 资源的任务在这里等</text>
 <text x="572.0" y="1079.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4：按 VC0～3 多线程调度，单 VC 阻塞只阻塞该 buffer</text>
@@ -260,7 +260,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F1 | 首拍锁存 Header，检查 opcode / route、长度、身份字段和帧格式 |
 | F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
 | F3 | 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配 TaskQueue 项和完成跟踪项 |
-| F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map` 副本，与 TS 那一份同源：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号 |
+| F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map`，由软件配成收方链上那一项搬入任务的下标：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号。一个 `path_id` 只能对一项 |
 | F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。`route` 这一项由 SCP 配：业务模式下计算 core 落 Core Mem，B core 与 R core 落 Matrix Mem；weights 加载阶段进来的都是权重，计算 core 上也落 Matrix Mem。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
 | F3d | B core 与 R core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象，因此不回 Ack |
 | F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
@@ -280,7 +280,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F12 | 两个配置 Bank，Bank0 优先于 Bank1：都空闲时 Router 的配置进 Bank0、RV core 的配置进 Bank1；只剩一个 Bank 而两者竞争时优先配置 Router 信息 |
 | F13 | 两个任务入口在 Commit 边界汇成同一套内部任务模型 |
 | F14 | RV core 侧的配置序列：用 `dsawi` / `dsaw` 写 `TASK_CFG_ADDR` 与 `TASK_CFG_TD` 两个寄存器，一条指令写一个，再写 Trigger（`TASK_CFG_TRG`），`TASK_CFG_PACK` 随之自动写入。必须最后写 Trigger |
-| F14a | 写 Trigger 那一拍把当前模板的十一项与四个直连身份信号一起采下来拼成 Descriptor。四个身份不由软件写：`streamID` / `taskID` / `userID` / `pathID` 从 RV core 的 CSR 直连过来 |
+| F14a | 写 Trigger 那一拍把当前模板的十一项与五个直连身份信号一起采下来拼成 Descriptor。五个身份不由软件写：`streamID` / `taskID` / `userID` / `pathID` / `vcid` 从 RV core 直连过来，前四项取自 CSR，`vcid` 是 TS 随任务下发的 |
 | F14b | 一笔配置写在被收下之前一直保持同一个序号。每拍换号的话 DSA 按序号去重就把同一笔认成好几笔，写一次执行一次的 Trigger 会被执行好几遍 |
 
 **Fast LUT**：从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE Setup Time，目标是压到 10T 以内。办法是常规任务不走 RV core 的配置 kernel：TS 给的 `task_id` 命中 Fast LUT 后，硬件拿表项内容（`length`、控制位）与 `user_id` 索引到的 User Base Register 拼出 task descriptor，直接推进对应通道的 TaskQueue，命中路径 4T；未命中才转发信息、重设 PC、启动 RV core 的 kernel，代价是 Core Latency + 4T。Fast LUT 只加速任务配置，不改路由定义、数据通路和完成条件。
@@ -360,7 +360,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 ### 出核前的资源与流控
 
-**分工**：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查：TS 查 RouterTable 与对应的 stream 资源，有资源才把任务下发下来；**DTE 这一侧只查 VC 通路上的 flit credit**，外加发往本 core ReduceModule 时的本级 Reduce credit（F56、F57）。这样划分是因为业务层资源以 stream 为单位、生命期跨整条任务链，而 flit credit 是逐拍变化的，只有真正要发数据的那一刻才知道够不够。
+**分工**：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查：TS 查 RouterTable 与对应的 stream 资源，有资源才把任务下发下来；**DTE 这一侧只查 VC 通路上的 flit credit**，发往本 core ReduceModule 的 Reduce 包也一样（F56）。这样划分是因为业务层资源以 stream 为单位、生命期跨整条任务链，而 flit credit 是逐拍变化的，只有真正要发数据的那一刻才知道够不够。
 
 **`stream_cache`**：DTE 里另存一份 Router 那张 stream 表的副本（`User Resource Cache Table`），3 方向各 16 项 `{valid, user_id}`，形状与 Router 的 `stream_tab[d]` 一致。它是**只跟随、不分配**的：真正建表项只有 Router 能做（F53 的分工），这份副本靠 Router 各方向送回的 `stream_credit_vld` 与 release 里的 action 位同步（F62），用处是包要重发时本地先记账（F63），以及判断某个包该不该重注入。
 
@@ -368,16 +368,14 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F52 | DTE 内维护一份 RouterTable 副本，按 PathID 查到 VC 与资源需求；软件负责写入并保证与 Router、ReduceModule 三方一致 |
 | F53 | 发数据之前实时检查该任务所属 VC 通路上的 flit credit，不够就让任务在 `PendingTaskQ` 等；下游 Stream / Rmem 资源不在这里查，TS 下发之前已经申请到 |
-| F54 | `PendingTaskQ` 排在 Commit **之前**：RV core 配好一个出核任务后，先按 `path_id` 查出走哪个 VC 与资源需求，credit 不够的进 `PendingTaskQ` 等，够了才去 Commit 申请那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项 |
+| F54 | `PendingTaskQ` 排在 Commit **之前**：RV core 配好一个出核任务后，VC 取 TS 随任务下发的 `vcid`，资源需求按 `path_id` 查，credit 不够的进 `PendingTaskQ` 等，够了才去 Commit 申请那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项 |
 | F55 | `PendingTaskQ` 满时拉低 `dsa_cfg` 的 `req_ready`，反压 DTE RV core，该 RV core 不能参与下一个用户的搬运。反压只落到出核这条链上，进核那条链的 Commit 资源不受影响 |
 | F55a | 五个通道对每块存储的读与写各只有一个 master 口，由 DMA_XBAR 轮转仲裁。读与写各走各的口、各有各的轮转，一拍可以同时发一读一写。通道在入口各占几格，按序号把请求放进来；`req_ready` 报的是那几格还收不收得下 |
 | F55b | 四个出核通道对 Router 只有一个 `out_core_data_ch`，同样轮转仲裁。授权粘在一个通道上直到它把带 `tlast` 的那一拍发完，一个包的几拍中间不会插进别的包 |
-| F56 | 本级 Reduce credit 表：每用户一个 entry，flit 粒度。某个用户建 stream credit 表项时给这个用户分配一个 entry 的 credit 数量 |
-| F57 | 搬 Reduce 包前先检查本级 Reduce credit 是否够整包，再在 VC credit 满足的前提下发到 ReduceModule |
-| F58 | ReduceModule 每完成一次 Reduce 并把 flit 发给下游就释放一个 credit，经独立的释放通道把 Valid 加 UserID 送回 DTE |
+| F56 | Reduce 包与其他出核包一样只查 VC 通路上的 flit credit；本级 Rmem 的 credit 由 TS 按用户记，有 credit 才下发 reduce 任务 |
 | F59 | 出方向按 VC0～3 多线程调度维护多个 VC buffer，某个 VC 阻塞只阻塞对应的那个 buffer；用它吸收整包流量，完成 core 与 Router 之间的协议转换 |
 | F60 | 进方向 Router 与 core 之间只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化完成；DTE 侧感知单 VC buffer 的缓存状态并据此启动搬运，解析包信息，搬完按 flit 释放 VC credit |
-| F61 | 两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 routing table 定；这两类由 TS 在下发前查（见 TS 一节 F60～F63、F69）。DTE 只负责 credit 回程：把 Router 各方向送回来的 release 解析出来更新本地的表 |
+| F61 | 两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 routing table 定；这两类由 TS 在下发前查（见 TS 一节“credit 与退休”）。DTE 只负责 credit 回程：把 Router 各方向送回来的 release 解析出来更新本地的表 |
 | F62 | credit 回程：解析本级 Router 各方向传进来的 core credit release，按其中的 action 信息决定是否同步更新 core 内的 stream 表状态。action 三种：1 credit release only（下游发起 release，本级 port 的 credit 更新）、2 bypass only（本级发生 bypass 而下游没有 release，传的是消耗信息，单 port 实现不复用）、3 bypass + credit release（两者同时发生，同步传两个 user_id 与 path_id，只发生在 router → core 场景） |
 | F63 | 进 core 缓存的包要重发时，**core 内先同步更新本地的 core credit table**，之后 Router 的 output 检索到该重发包时再更新自己那一份 |
 
@@ -400,7 +398,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F71 | reduce 包的软件辅助信息长度**必须固定 16 B**，Router 做 reduce 加法时固定跳过这 16 B。软件层面 reduce 包只需要传 `user_id` 加操作类型（如 concat idx），16 B 够用。非 reduce 包的软件辅助信息长度由软件自定，Router 完全不感知内容和长度 |
 | F72 | Router 把数据送给 DTE 时**不剥离任何数据**，DTE 的软件能看到包头、路由信息在内的全部内容。其中 VC 字段每一跳 Router 都会改写，每个 core 看到的内容不完全一致 |
 | F73 | 软件处理一个包用两条通路：包头的路由信息与软件辅助信息用标量 store / load 指令生成和读取，实际的用户 token 数据用 DMA 搬。两条通路对延迟与吞吐的需求不同，而且非 reduce 包的软件辅助信息长度不固定，硬件实现要按两条通路分别优化 |
-| F74 | reduce 包出核时 DTE 在硬件字段里打上 `reduce_seq`：一个 stream 的 `reduce_num = N` 笔按 0～N−1 顺序编号，同一笔的 `dsa_done` 带回同一个 `reduce_seq`。Router 的 Reduce Done 原样带这个号回 TS，TS 靠它把两半逐包配对 |
+| F74 | reduce 包出核时 DTE 在硬件字段里打上 `reduce_seq`，取的是发这一包的 `task_id`；Router 的 Reduce Done 原样带回。TS 按 `user_id` 找 stream 完成当前任务，不看这个号 |
 
 ***
 
@@ -423,9 +421,9 @@ port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss
 port dsa_rdata (master, 脉冲, clk)                    // 读寄存器的异步返回
   out valid · rdata[31:0]
 port dsa_ids (slave, 电平, clk)                       // DTE RV core 的 CSR 直连；写 task_trigger 那一拍采样
-  in  stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0]
+  in  stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · vcid[1:0]
 port dsa_done (master, 脉冲, clk)                     // → TS：task_last 的那一笔完成时报
-  out valid · stream_id[3:0] · task_id[5:0] · reduce_seq[5:0]   // reduce 任务才有效，供 TS 逐包配对
+  out valid · stream_id[3:0] · task_id[5:0]
 port cmem_rd / cmem_wr (master, valid/ready, clk)     // 经 DMA_XBAR，256 B
   out req_valid · req_addr[17:0] · req_wdata[2047:0] · req_be[255:0]
   in  req_ready · rsp_valid · rsp_rdata[2047:0] · rsp_scale[63:0]
@@ -456,8 +454,7 @@ mem done_pend        FIFO      16 × {stream_id[3:0], task_id[5:0]}             
 mem hmem             FF 阵列   16 项 × {core_mask 2 B, sw_header 16 B} = 288 B         1R1W  按 stream_id 索引；硬件写 core_mask，RV core 写 sw_header  复位 0
 mem fast_lut         FF 阵列   64 × {valid, length[15:0], ctrl_flags}                 1R    boot 期经 ctrl_noc 配好，按 task_id 索引  复位 valid=0   // 只加速任务配置，不改路由定义、数据通路和完成条件
 mem rtab_copy        FF 阵列   64 项，RouterTable 的外部副本                           1R1W  软件写，三方一致        复位 0
-mem path_task_copy   FF 阵列   64 × task_id[5:0]，TS 那张 path_task_map 的副本         1R1W  boot 期配成与 TS 一致    复位 0
-mem reduce_credit    FF 阵列   16 用户 × 计数器（flit 粒度）                           1RW   建 stream credit时分配，release 恢复  复位 0
+mem path_task_map    FF 阵列   64 × task_id[5:0]，按 path_id 索引                      1R1W  boot 期由软件配          复位 0
 mem stream_cache     FF 阵列   3 方向 × 16 项 × {valid, user_id[15:0]}                 1R1W  Router 的 User Resource Allocation Table 的 cache，只跟随不分配  复位空
 mem pending_taskq    FIFO      16 × Descriptor                                        1W1R  排在 Commit 之前，资源没申请到的出核任务在这里等；满则拉低 dsa_cfg 的 req_ready  复位空
 mem out_vc_buf[4]    FIFO      每 VC 一个，深度按整包容量                              1W1R  某 VC 阻塞只阻塞该 buffer  复位空
@@ -855,7 +852,7 @@ stall_cycles  = cycles(valid && !ready)
   <text x="250" y="78" font-size="10.5" fill="#475569">1. done_pend 非空 &amp;&amp; !no_ack → dsa_done = {valid=1, stream_id, task_id}</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 发出后 done_pend.pop()，同一 task_id 不再上报第二次</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. no_ack 置位的任务直接出队，不回 Ack</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. reduce task：本路只代表搬运完成，TS 侧执行 consume_only</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 逐级 reduce 任务：本路只代表搬运完成，TS 收下不置 FINISH</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">把任务置 FINISH 的权力在 Router 的 Reduce Done</text>
   <path d="M188 99 L231 99" stroke="#475569" marker-end="url(#are8)" fill="none"/>
   <path d="M679 98 L727 98" stroke="#475569" marker-end="url(#are8)" fill="none"/>
@@ -878,7 +875,7 @@ stall_cycles  = cycles(valid && !ready)
   <text x="104" y="111" font-size="10" fill="#374151" text-anchor="middle">rtab_copy · FF 64 项 · 1R</text>
   <rect x="20" y="144" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="148" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="165" font-size="10" fill="#374151" text-anchor="middle">reduce_credit · FF 16 项 · 1RW</text>
+  <text x="104" y="165" font-size="10" fill="#374151" text-anchor="middle"></text>
   <rect x="20" y="198" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="202" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="219" font-size="10" fill="#374151" text-anchor="middle">stream_cache · FF 3×16 项 · 1R1W</text>
@@ -894,9 +891,9 @@ stall_cycles  = cycles(valid && !ready)
   <text x="250" y="41" font-size="8.5" fill="#6b7280">M9</text>
   <text x="673" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
   <text x="250" y="61" font-size="12" fill="#111827">PendingTaskQ · 出核任务先拿授权</text>
-  <text x="250" y="83" font-size="10.5" fill="#475569">1. e = rtab_copy[path_id]，取这条 path 走哪个 VC、是不是 Reduce</text>
-  <text x="250" y="103" font-size="10.5" fill="#475569">2. 查 vc_credit[e.vc] 够不够整包；下游 stream / Rmem 资源不查，TS 下发前已拿到</text>
-  <text x="250" y="123" font-size="10.5" fill="#475569">3. reduce 包另要求 reduce_credit[user] ≥ 整包 flit 数</text>
+  <text x="250" y="83" font-size="10.5" fill="#475569">1. e = rtab_copy[path_id]，取这条 path 是不是 Reduce；VC 取 desc.vcid</text>
+  <text x="250" y="103" font-size="10.5" fill="#475569">2. 查 vc_credit[desc.vcid] 够不够整包；下游 stream / Rmem 资源不查，TS 下发前已拿到</text>
+  <text x="250" y="123" font-size="10.5" fill="#475569">3. reduce 包同样只看 VC credit，本级 Rmem 资源 TS 下发前已拿到</text>
   <text x="250" y="143" font-size="10.5" fill="#475569">4. 不够 → pending_taskq.push(desc)，不进 M2；router_credit 到 → 出队进 M2</text>
   <text x="250" y="163" font-size="10.5" fill="#475569">5. stream_credit_vld 回来时按 action 更新 stream_cache；重发前本地先记账</text>
   <text x="250" y="187" font-size="10" fill="#9ca3af">反压只落在出核这条链，进核的 Commit 资源不受影响</text>
@@ -929,7 +926,7 @@ DTE Setup Time     目标 < 10T：Fast LUT 命中 4T，未命中 Core Latency + 
 单任务最大搬运量    32 KB（256 B × 128 拍）
 内部启动延迟        85T（流水启动 5T + 50 条指令算地址 75T + core 发射 5T）
 MSG 包结构          包头标记 2 B + Router 信息 4 B（path_id 1 B + path_core_mask 2 B + rsv 1 B）+ 包长度 2 B + 软件辅助信息 0～16 B + 业务数据 0～(64 K − 24) B
-                   reduce 包另在硬件字段里带 reduce_seq 6 bit，由 DTE 发出时按 stream 内的第几笔 reduce 打上
+                   reduce 包另在硬件字段里带 reduce_seq 6 bit，取发这一包的 task_id
 包长范围            最短 16 B，最长 64 KB、实际支持到 (16 K + 32) B；不设包尾，结束靠包长度计数
 reduce 包           软件辅助信息固定 16 B，Router 做加法时跳过这 16 B
 scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 stream 上限 256 B
@@ -960,7 +957,7 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | 通道内顺序激活，向 TS 反馈按下发顺序 | F18 | `channel_inorder` |
 | issue_done 就允许该侧走下一个任务 | F19 | `issue_done_release` |
 | reduce 包软件辅助信息固定 16 B | F71 | `reduce_hdr_fixed_16b` |
-| reduce 包出核打 reduce_seq，ack 原样带回 | F74 | `reduce_seq_stamp` |
+| reduce 包出核打 reduce_seq，Router 原样带回 | F74 | `reduce_seq_stamp` |
 | Router 送 DTE 时不剥离任何数据 | F72 | `no_strip_from_router` |
 | 包头走标量 load / store，数据走 DMA | F73 | `header_vs_data_path` |
 | read-ahead 领先量的三项约束 | F20 | `read_ahead_limit` |
@@ -994,8 +991,7 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | 出核前置申请，没拿到就在 PendingTaskQ 等 | F53 | `dte_pending_taskq` |
 | PendingTaskQ 排在 Commit 之前，等资源的任务不占 Completion RS | F54 | `pending_before_commit` |
 | PendingTaskQ 满只反压出核这条链，不影响进核 | F55 | `pending_full_backpressure` |
-| Reduce credit 够整包才发 | F56、F57 | `dte_reduce_credit` |
-| ReduceModule 每完成一次 Reduce 还一个 credit | F58 | `reduce_credit_release` |
+| Reduce 包只查 VC credit，本级 Rmem 资源由 TS 申请 | F56 | `dte_reduce_vc_only` |
 | 出方向 4 个 VC buffer，单 VC 阻塞不影响其他 | F59 | `dte_vc_buffers` |
 | 进方向单 VC，搬完按 flit 释放 VC credit | F60 | `dte_single_vc_in` |
 | 两类业务层 credit 都分方向，先查 routing table | F61 | `credit_by_direction` |

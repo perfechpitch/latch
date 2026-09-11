@@ -111,7 +111,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 <rect x="260" y="660" width="690" height="70" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="270" y="677" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router　片上交换与归约中心</text>
 <text x="270" y="692" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 7 出 · ReduceModule · CoreMemCreditMonitor</text>
-<text x="270" y="705" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每方向 256 B/T，进 core 与出 core 通路完全并行 · Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 16 KiB</text>
+<text x="270" y="705" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每方向 256 B/T，进 core 与出 core 通路完全并行 · Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 32 KiB</text>
 <text x="270" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">三层 credit：VC 按 flit · stream 按 UserID + 方向 · reduce 按 UserID　VC Buffer 100 flit/port ≈ 25 KB ×3，flit 级仲裁</text>
 <path d="M935 438.7 L935 659.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#keabs)" marker-end="url(#keab)"/>
 <text x="944" y="470" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">256 B/T ×2</text>
@@ -304,7 +304,7 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 
 * 上电时由 SCP 经 `ctrl_noc` 把 64 项的 `task_chain` 与几个全局寄存器配好
 * 写 `TS_INIT_FINISH` 之后就按固定逻辑跑，运行时不接受软件干预
-* `CORE_TYPE` 与 `WEIGHTS_MODE` 两个配置项选定四种工作模式：weights 加载、普通计算 core、B core、R core
+* `SELF_START` 与 `WEIGHTS_MODE` 两个配置项选定三种工作模式：weights 加载、普通、自启动（B core 与 R core）
 * **数据进来由 Router 经 `router2ts_trigger_ch` 直接通知它**，这是它被激活的入口
 
 运行时用 16 项的 `stream_table` 记录每个在途用户走到哪一步，做四件事：

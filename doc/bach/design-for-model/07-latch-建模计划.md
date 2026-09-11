@@ -275,17 +275,16 @@ src/bach/
           xbar.h                   按输出仲裁、多播全有全无、入口锁定
           core_station.h           HeaderFIFO、OutputBuffer、三态准入、TS 通知、出 core VC 流控
           coremem_reissue.h        stall_way、Bypass 映射成进核加出核、同 VC 保序
-          reduce_module.h          16 用户上下文、RMW 累加、Reduce credit、输出队列
+          reduce_module.h          16 用户分区、RMW 累加、结果流水、Reduce credit
           retire.h                 Retire 广播与两处回收
           credit_monitor.h         监听事件队列 16 项全相连
         ts/
-          cfg_reg.h                task_chain 64 项、datain_task、stream_num、Task LUT
-          user_match.h
-          datain_task_table.h      Depth-1 Hold
-          stream_table.h           16 项 FIFO、task_fsm、六个写端口
-          task_ctrl.h              SKIP_MASK 一拍跳过、原子安装
+          cfg_reg.h                task_chain 64 项、datain_task、ROUTER_TABLE、配置检查、按 PID 找搬入任务
+          user_match.h             判用户、找搬入任务、定跳过，含 DataIn_task_table
+          stream_table.h           16 项 FIFO、task_fsm、八个写口
+          task_ctrl.h              按完成位图一拍找后继、原子安装
           dte_arb.h  mu_vu_arb.h
-          credit_monitor.h         Reissue 唤醒、Head-only 退休、credit 申请
+          credit_monitor.h         credit 申请与唤醒、Rmem credit、Head-only 退休
           task_done.h              七路完成合流
         rv_core/
           rv_core.h                驱动 src/rv32 的 SystemRv32 逐条执行；task_queue、dsa_iss、dsa_rq、lsq、gpr 就绪表、自定义 CSR
@@ -389,7 +388,7 @@ LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章
 | 类 | 内容 | 来源 |
 | - | - | - |
 | 拓扑与部署 | chip 数 48、tray 数 3（编译器叫 rack）、tray 形状 4 层 × 4 chip、chip 形状（中间列 2×4、两侧 2×5）、全局进出口位置（`global_top_left` / `global_bottom_right`）、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、GPU 数与每 GPU 的 batch | 编译侧 |
-| 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项，含软件属性 `exe_dest` / `reduce_num`）、datain_task、`stream_num`、`CORE_TYPE`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
+| 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项）、datain_task、TS 的 ROUTER_TABLE、`stream_num`、`SELF_START`、`B_core_direction`、`trigger_task_chain_en`、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 27 MiB 权重分片（含共享专家）与落 Matrix Mem 的地址；注入表（每 token 的 6368 B 级联包与注入拍）；参考实现的期望输出 | 编译侧 + `reference/` |
 
@@ -407,7 +406,7 @@ chip_shape    48 × {中间列 2×4, 第一列 2×5, 最后一列 2×5}         
 logical_map   48 × 10 × {logical_core, role}                                    LPU
 split_param   {ep, tp, pp, dp, mode, gpu_num, batch}                            LPU
 core_cfg      48 × 10 × {rtab 64 项, skip_mask, credit_bypass, task_chain 64 项,
-                         sw_attr 64 项, path_task_map 64 项, datain_task, cfg_misc,
+                         ts_route 64 项, path_task_map 64 项（DTE）, datain_task, cfg_misc,
                          cmem_part, lut 64 项, local_ep_table, vu_static 8 组}   各单元
 credit_init   48 × 10 × 每 {path_id, stream_id} 一个初值                        TS
 kernel_img    每类 core 一个 {itcm 字节流, dtcm 字节流, task_pc 表 64 项}        RV core
@@ -418,12 +417,12 @@ expect_out    N_token × 12 KiB                                                 
 
 ### 读入时的跨表自洽检查
 
-这些断言在构造期做完，不逐拍。它们查的是**跨表**的一致性 —— 单张表内部的合规性由持有它的单元自己查（例如 `task_chain` 的四项检查在 TS 写 `TS_INIT_FINISH` 时做）。跨表这一层没有哪个单元能独自看到，因此收在这里：
+这些断言在构造期做完，不逐拍。它们查的是**跨表**的一致性；单张表内部的合规性由持有它的单元自己查（例如 `task_chain` 的四项检查在 TS 写 `TS_INIT_FINISH` 时做）。跨表这一层没有哪个单元能独自看到，因此收在这里：
 
 1. `grid` 覆盖 48 项且 `(gx, gy)` 无重复；`gx ∈ {0, 3}` 的 chip 是 2×5、其余是 2×4；每 chip 都是 8 个计算 core
 2. 每 chip 的 `logical_map` 里逻辑 0～7 各出现一次，逻辑 8 只在 `gx ∈ {0, 3}` 出现，且 special 与 compute 的物理 core 集合不相交
 3. `cmem_part` 的各分区互不重叠，且都落在 Core Mem 的 1 MB 之内
-4. `task_chain` 里出现的每个 `path_id`，在本 core 的 `rtab` 与 `path_task_map` 里都有 valid 表项，且 `path_task_map[path_id].task_id` 指回配它的那一项
+4. `task_chain` 里出现的每个 `path_id`，在本 core 的 `rtab` 与 `ts_route` 里都有表项；`WAIT_WAKE` 那几项的 `path_id` 在 DTE 的 `path_task_map` 里指回配它的那一项
 5. `rtab` 里 `stall_way` 选转存的表项，本 core 的 `task_chain` 里必须有对应的 reissue 任务，且 `cmem_part` 里 `reissue_pkts_per_vc` 不为 0
 6. 不派角色的 core 的 `rtab` 表项一律不置 Core 位、`stream_table_enable` 全不置位、`stall_way` 只能是留在 VC
 
@@ -632,7 +631,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 * **TS 直接启动 DTE、DTE 的 3 Lane 方案、DSA-RF 调试通路不建**。
 * **Router 的输出移位拼接不建**：flit 定长 256 B，尾 flit 带有效字节数。
 * **一个 token、每个 EP 组内两个激活专家**：分片的方向与尺寸都照真实的来：K 是完整的 embedding 6144，中间维是 2048 按 TP8 切下来的那 256，输出维 6144，每 core 装两个专家的 W1 / W3 / W2 共 18 MiB。共享专家、多个 token 连着跑与派遣那一档不在里面。
-* **权重走数据面只建一颗 chip 那一档**：weights 加载模式的一整段照真实的建 —— 配 `WEIGHTS_MODE`、包按 `path_core_mask` 落进指定 core、loader 数搬进来几笔、数够了切业务模式。更大规模那两份的权重用后门铺进 Matrix Mem：三百八十四个 core 合 6.9 GiB，按一包 16 KB 是 45 万个包，逐包搬跑不完。
+* **权重走数据面只建一颗 chip 那一档**：weights 加载模式的一整段照真实的建：配 `WEIGHTS_MODE`、包按 `path_core_mask` 落进指定 core、loader 数搬进来几笔、数够了切业务模式。更大规模那两份的权重用后门铺进 Matrix Mem：三百八十四个 core 合 6.9 GiB，按一包 16 KB 是 45 万个包，逐包搬跑不完。
 * **时间常数未校准**：第 5 章标“偏小”“带问号”的值与第 8 章的冲突项都是配置值，支持同参数下的相对比较，不是绝对性能预测。
 
 ### 设计未给值、本章填了默认值的参数
@@ -646,22 +645,19 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | VC credit 初值 | private 每 VC 20，shared 每方向 20，先扣 private 再扣 shared |
 | RouterTable 表项数、副本数、每副本写入拍数 | 64、5、1 |
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
-| ReduceModule Entry credit、bank 数、RMW 拍数、输出队列深度 | 64 flit、4、2、8 |
+| ReduceModule bank 数、RMW 拍数、每路输入缓冲深度 | 4、2、32 flit（每路输入缓冲取 DATA_NOC HAS 面积预算的每口 32 flit，与同一份 HAS ASM-07 的 128 flit 没对齐） |
 | CoreStation HeaderFIFO、OutputBuffer 深度 | 16、60 flit（OutputBuffer 取 DATA_NOC HAS 的 DTE-local 桥接 Router→DTE 60 flits；HeaderFIFO 无出处，16 这个值与 60 flit 装得下的包数不匹配）|
 | DTE TaskQueue、Buffer、Completion RS、Done Pending 深度 | 16、16 × 256 B × 2、16、16 |
 | VU ISQ 深度 | 8 |
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
-| RV core task_queue 深度 | 2 |
+| RV core task_queue 深度、dsa_iss 收请求的队列深度 | 2、3（执行器按上一拍的 req_ready 决定发不发，req_ready 拉高后路上最多还有两笔，队列留出这两笔的位置） |
 | TS stream_table 六个写口的优先级 | retire > done > install > issue > wake > create |
-| `reduce_in_mask` 的逐核取值 | 按 path 图推导；`core4` 不派角色那个例子里的值等 Reduce0 / 1 / 2 含义定下后回填 |
+| `reduce_in_mask` 的逐核取值 | 按 path 图推导；`core4` 不派角色那个例子里的逐核取值还没回填 |
 | Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
-| trigger 请求里 `compute` 位在包头中的位置 | 等 Router 接口规范定下包头位域后回填 |
 | `dsar` 与 `dsari` 的区分位 | 《ISA 描述表》给了九条自定义指令的完整编码，逐条见 RV core 那一份文档。只有这两条的编码在表里完全相同，模型按其余四条的规律用 bit31 区分 |
 | MU、DTE 的寄存器地址映射 | `regmap.h` 临时映射 |
 | Mmem MU 读延迟 | 8T |
 | Cmem 的 MU 写延迟 | 16T |
-| `operation` 的 Reduce0 / Reduce1 / Reduce2 含义 | 源分量 / 中继累加 / 最终汇聚 |
-| `exe_dest`、`reduce_num` 的承载 | task_chain 的软件侧属性 |
 
 ### 风险
 

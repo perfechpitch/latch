@@ -275,7 +275,7 @@
 <text x="990.0" y="578" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#2563eb" font-weight="700" text-anchor="middle">ReduceModule</text>
 <rect x="835" y="590" width="150" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
 <text x="843" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">ReduceMemory</text>
-<text x="843" y="619" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">16 KB × 16 entry（用户上下文）</text>
+<text x="843" y="619" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">32 KiB × 16 entry（用户上下文）</text>
 <text x="843" y="631" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">FP32 中间累加结果</text>
 <rect x="995" y="590" width="150" height="48" rx="5" fill="#fed7aa" stroke="#d97706" stroke-width="1.3"/>
 <text x="1003" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Adder + Convert</text>
@@ -325,13 +325,13 @@
 <rect x="835" y="702" width="112" height="13" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="0.9" stroke-dasharray="2 2"/>
 <text x="891.0" y="712" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#0d9488" font-weight="400" text-anchor="middle">只转发 release，不计数</text>
 <rect x="590" y="49" width="236" height="13" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.2"/>
-<text x="708.0" y="59" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#0d9488" font-weight="700" text-anchor="middle">Reduce credit 计数实体（本级）·stream credit cache</text>
+<text x="708.0" y="59" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#0d9488" font-weight="700" text-anchor="middle">stream credit cache</text>
 <rect x="30" y="866" width="1140" height="110" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="883" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">口径：三个 R2R 方向本文档记 left / right / mid，MAS Block Diagram 记 E / W / S/N，S/N 是一个端口；通道名照 MAS 的写法 &lt;方向&gt;_data_in_ch / _data_out_ch / _credit_release_ch_in / _out。</text>
 <text x="46" y="899" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">带宽：每方向 256 B 宽，相邻 Router 双向各 256 GB/s @1GHz；进 core 与出 core 各 256 GB/s，完全并行。Header 与 Payload 走两根独立总线（hflit 256-bit，pflit 2048-bit）。</text>
 <text x="46" y="915" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">CoreMemCreditMonitor 在 MAS 的模块说明里列为独立模块，Block Diagram 里没有单独画，本图按模块说明补画在 Stream Resource Map 下方，细节见“出核前的资源监听”。</text>
 <text x="46" y="931" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">credit 的计数实体（实心标签）：VC credit 在发送侧各 RouterStation 的计数器（每个下游方向 × VC 一个）；stream credit在 Stream Resource Map 的表（唯一有效状态，DTE 另持一份 cache）；</text>
-<text x="46" y="947" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">Reduce credit 在 ReduceModule 的 ResourceMap（相邻下游）与 DTE（本级）。</text>
+<text x="46" y="947" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">Reduce credit 在 ReduceModule 的 ResourceMap（相邻下游）；本级那一段由 TS 按用户记。</text>
 <text x="46" y="963" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">虚线标签的位置只做加减或转发，本地没有计数：接收侧的 Credit Release 只归还，RouterStation 的 Stream 映射只查询，CreditBypass XBar 只按静态 Mask 转发 release。</text>
 </svg>
 ```
@@ -507,7 +507,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **Reduce**
 
-10. operation 是 Reduce 的包由 CrossBar 导向 ReduceModule（Data ×3）。同一 User 同一包的第一份输入分配上下文并写入 FP32 数据，后续方向的输入读出当前值、累加、写回；全部输入完成后结果进输出队列，发送前查目标 VC credit 与该方向的下游 Reduce credit，结果作为 CrossBar 的第五路输入重新参与仲裁。整包发出后向 Core 返回 UserID 作为完成信息。
+10. operation 是 Reduce 的包由 CrossBar 导向 ReduceModule（Data ×3）。同一 User 同一包的第一份输入写进这个用户的分区（用户第一笔任务进来时分配），后续方向的输入读出当前值、累加、写回；某个结果 flit 所需的操作数都加完就发，不等整包，发送前查目标 VC credit，一笔任务头一个 flit 还查该方向的下游 Reduce credit，结果作为 CrossBar 的第五路输入参与仲裁，包发出首 flit 后锁定到尾 flit。整包发出后向 Core 返回 UserID 作为完成信息。
 
 ### 按任务类型分的走法
 
@@ -517,7 +517,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 多播 | 同上，flow_dir 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
 | 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
 | 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | DTE 查这条 VC 通路的 flit credit；下游 Stream / Rmem 资源由 TS 在下发前查好 | 下一个 Router；发完向 TS 返回 UserID + PathID |
-| Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Reduce credit 够整包（DTE 查）；输出时查目标 VC credit 与下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
+| Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Rmem 资源由 TS 在下发前申请；输出时查目标 VC credit，`reduceNeedMask` 置位的方向还查下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
 
@@ -584,14 +584,14 @@ DTE 取数这一步分三段，只有两头带地址：
 
 #### Reduce
 
-Reduce 包从 core 出发这一段由 DTE 管 credit，进了 ReduceModule 之后由 ReduceModule 管：
+Reduce 包从 core 出发这一段的本级资源由 TS 管，进了 ReduceModule 之后往下游那一段由 ReduceModule 管：
 
-* DTE 持有本级 ReduceModule 每一项的 credit，粒度是一个 flit。某个用户建 stream credit 表项时，给这个用户分配一个 entry 的 credit 数量
+* TS 为每个用户记一份本级 Rmem 的 credit，不向 Router 申请：reduce 任务下发一笔就占掉，ReduceModule 做完这一笔报回来才还；一笔 reduce 拆成链上几项时，一项做完再下发下一项
 * DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC
-* DTE 搬 Reduce 包前先检查本级 Reduce credit 是否够整包，再在 VC credit 满足的前提下发到 ReduceModule
-* ReduceModule 每完成一次 Reduce 并把 flit 发给下游，就释放一个 credit，经独立的释放通道把 Valid + UserID 送回 DTE
-* ReduceModule 之间同样按 credit 走：每完成一个 flit 就可以向下级发一个 flit，发前要同时查下游的 Reduce credit 与 VC credit；上游 ReduceModule 维护所有下游 UserID 与 credit 数量的映射表，按 flit 申请、按 UserID 释放
-* 表项的删除：收到本级 core 某个 UserID 的 Retire，且 credit 恢复到分配数量后，删掉这一项给其他用户用
+* DTE 搬 Reduce 包与其他出核包一样只查 VC 通路上的 flit credit
+* ReduceModule 做完一笔任务、结果全部交付后经 `rmem2ts_done_ch` 向 TS 报完成，TS 据此推进这个用户的下一笔 reduce 任务
+* ReduceModule 之间按用户、按任务走：`reduceNeedMask` 置位时，一笔任务头一次向某个方向发之前要取得那个方向这个用户的准入，这笔任务后面的 Packet 与 flit 复用这次准入，逐 flit 只受 VC credit 约束；下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，上游据此放开这个用户在那个方向的资源
+* 表项的删除：收到本级 core 某个 UserID 的 Retire 后本地分区回收；相邻下游各方向在途任务的 release 都回来之后，才删掉这个用户的映射给其他用户用
 
 累加本身怎么做、上下文怎么保护、精度怎么定，在“归约”一节。
 
@@ -672,8 +672,8 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <rect x="30" y="542" width="150" height="226" rx="8" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.0"/>
 <text x="105" y="572" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#0d9488" font-weight="700" text-anchor="middle">Reduce credit</text>
 <text x="105" y="594" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">下游 ReduceModule 有没有上下文空间</text>
-<text x="105" y="608" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">按 UserID，flit 粒度</text>
-<text x="105" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#0d9488" font-weight="600" text-anchor="middle">中：按 flit 还，但要等 Reduce 完成</text>
+<text x="105" y="608" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">按 UserID 加方向，一笔任务</text>
+<text x="105" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#0d9488" font-weight="600" text-anchor="middle">中：按任务还，要等下游这一笔做完</text>
 <rect x="210" y="100" width="150" height="60" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="218" y="115" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" font-weight="700" text-anchor="start">本级 Router</text>
 <text x="218" y="129" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation[方向]</text>
@@ -760,12 +760,12 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <text x="748" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 另输出 per-port 的 stream_credit 同步信息给 core 与 DTE，用于判断重注入</text>
 <rect x="195" y="564" width="120" height="66" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="203" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">本 core 的 DTE</text>
-<text x="203" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">查本级 Reduce credit</text>
-<text x="203" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">够整包才发，还要有 VC credit</text>
+<text x="203" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 credit 由 TS 按用户记</text>
+<text x="203" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">DTE 只查 VC credit</text>
 <rect x="195" y="638" width="120" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="203" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">DTE 持本级表</text>
-<text x="203" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">每用户一个 entry 的 credit</text>
-<text x="203" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建 stream credit 表项时分配</text>
+<text x="203" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">本级由 TS 申请</text>
+<text x="203" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">链上逐项顺序申请</text>
+<text x="203" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">做完经 rmem2ts_done_ch 报 TS</text>
 <rect x="345" y="564" width="170" height="66" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="353" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">本级 ReduceModule</text>
 <text x="353" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">首份输入建上下文，后续 RMW</text>
@@ -778,44 +778,44 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <rect x="545" y="564" width="170" height="66" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="553" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">下游 ReduceModule</text>
 <text x="553" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">每收一个 flit 累加一次</text>
-<text x="553" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">每发出一个 flit 就 release 一个</text>
+<text x="553" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">做完一笔任务就 release 一次</text>
 <path d="M315 597 L344.3 597" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiab)"/>
 <rect x="322" y="606" width="16" height="16" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
 <text x="330" y="617.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">扣</text>
 <path d="M515 597 L544.3 597" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiab)"/>
 <rect x="522" y="606" width="16" height="16" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
 <text x="530" y="617.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">扣</text>
-<text x="200" y="702" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">扣：每发一个 flit 扣一个。DTE 发往本级 ReduceModule 扣 DTE 持有的；ReduceModule 发往下游扣 ResourceMap 里该 UserID 该方向的</text>
+<text x="200" y="702" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">扣：一笔任务每个方向准入一次。本级由 TS 按用户记，下发即占；ReduceModule 发往下游占 ResourceMap 里该 UserID 该方向的</text>
 <path d="M700 630 L700 664" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M700 680 L700 718 L430 718" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
 <rect x="692" y="664" width="16" height="16" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.2"/>
 <text x="700" y="675.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">还</text>
 <path d="M430 718 L400 718 L400 686.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
 <path d="M400 718 L255 718 L255 686.7" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<text x="328" y="714" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="middle">Valid + UserID，独立释放通道</text>
+<text x="328" y="714" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="middle">做完一笔，Reduce Done 报 TS</text>
 <text x="200" y="734" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">还：release 携带 UserID，走业务 credit 的静态旁路：按 CSR 配的方向 Mask 转发，不查 RouterTable，可多播</text>
-<text x="200" y="748" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">上游按 UserID 恢复指定用户的 credit；收到 Retire 且 credit 恢复到分配数量后才删该用户的表项</text>
+<text x="200" y="748" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">上游按 UserID 放开这个用户在那个方向的资源；收到 Retire 且在途任务的 release 都回来后才删该用户的表项</text>
 <rect x="740" y="564" width="420" height="66" rx="5" fill="#ffffff" stroke="#0d9488" stroke-width="1.3"/>
 <text x="748" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">谁维护 · 表项</text>
-<text x="748" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">DTE 维护本级 ReduceModule 的 credit（按 user 分配 entry，粒度 flit）</text>
+<text x="748" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">本级由 TS 按用户记（rmem_busy）</text>
 <text x="748" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">ReduceModule 维护相邻下游各方向的 credit 映射（UserID + 方向）</text>
 <text x="748" y="617" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Router 只负责把 release 按静态 Mask 转发</text>
 <rect x="740" y="638" width="420" height="48" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="748" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">建与删</text>
-<text x="748" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：用户建 stream credit 表项时分配一个 entry 的 credit 数量</text>
-<text x="748" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">删：延迟回收，收到 Retire 后待相邻下游各方向 credit 全部恢复到初始值</text>
+<text x="748" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：与用户的 ReduceModule 上下文一起建</text>
+<text x="748" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">删：延迟回收，收到 Retire 后待相邻下游各方向在途任务的 release 都回来</text>
 </svg>
 ```
 
 | | VC credit | stream credit（CoreMem credit） | Reduce credit |
 | - | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
-| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | **core ↔ Rmem 按 UserID；Rmem ↔ Rmem 按 flit 加 UserID 双粒度** |
-| 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router 是唯一有效状态（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table）；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | DTE 维护本级 ReduceModule 的；ReduceModule 维护相邻下游各方向的；Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | 每发一个 flit 扣一个；DTE 发 Reduce 包前要求本级 credit 够整包 |
-| 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 输出 flit 被下游接受后产生携带 UserID 的 release，经业务 credit 的静态旁路路径返回上游 |
-| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到 release，或收到 Retire 后删该用户全部授权表项 | 建：用户建 stream credit 表项时分配一个 entry 的 credit；删：收到 Retire 且 credit 恢复到分配数量 |
-| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按 flit 还但要等下游 Reduce 完成 |
+| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID 加目标方向，一笔 Reduce 任务 |
+| 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router 是唯一有效状态（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table）；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | 本级由 TS 按用户记，下发一笔 reduce 占掉、Rmem 做完才还；ReduceModule 维护相邻下游各方向的；Router 不维护 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | `reduceNeedMask` 置位时，一笔任务头一次向目标方向提交前取得准入，后面的 Packet 与 flit 不再扣 |
+| 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，经业务 credit 的静态旁路返回上游 |
+| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到 release，或收到 Retire 后删该用户全部授权表项 | 建：与用户的 ReduceModule 上下文一起建；删：收到 Retire 且相邻下游各方向在途任务的 release 都回来 |
+| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按任务还，要等下游这一笔做完 |
 
 stream credit的两条硬规则：
 
@@ -887,7 +887,8 @@ RouterTable 是路径解析与资源判定的唯一依据，**只描述静态路
 | `nxt_credit_type` / `nxt_credit_require` | 3 bit 加三个 R2R 方向各 6 bit：各出方向的 credit 池类型与需求，某方向为 0 表示不查 credit | CoreMem credit |
 | `reduce_data_type` / `reduce_outdata_type` | 3 / 1 bit：Reduce 的输入精度与输出精度，各取 BF16 或 FP32，**中间累加固定 FP32** | ReduceModule |
 | `reduce_in_mask` | 3 bit：这条 path 在本级会有哪几个相邻方向送来分量 | ReduceModule 收齐判据 |
-| `operation` | 2 bit：0 普通转发、1 Reduce0、2 Reduce1、3 Reduce2 | 路径选择、ReduceModule |
+| `operation` | 2 bit：0 普通转发、1 reduce0 单流（经 Rmem 不计算）、2 reduce1 两流、3 reduce2 三流 | 路径选择、ReduceModule |
+| `reduceNeedMask` | 1 bit：结果往下游发之前查不查下游 ReduceModule 这个用户空不空 | ReduceModule |
 | `stall_way` | 资源不足时留在当前 VC 等待，还是转入 CoreMem 暂存由 DTE 重发 | 阻塞处理 |
 
 字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`，两个 credit require 照《Top 模拟器详设》。`reduce_in_mask` 与 `operation` 的三档 reduce 取值这三份都没有（**待确认**）。
@@ -920,7 +921,7 @@ mask 还有第二种用法，与压 path 数无关：**DP 广播固定广播到�
 
 反过来，路径不冲突时可以共用同一个 `path_id`：
 
-* 分别在 core01 和 core23 上广播 —— 路径完全无关
+* 分别在 core01 和 core23 上广播，路径完全无关
 * 分别在 core03 和 core23 上做 P2P：路径重叠但后半部分完全一致（可以共用，但没必要，原文只作为辅助理解的例子）
 
 ### 第二关：拿资源才放行
@@ -963,7 +964,7 @@ VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC �
 <rect x="1080" y="92" width="220" height="74" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
 <text x="1190.0" y="113" font-size="12" fill="#111827" font-weight="600" text-anchor="middle">ReduceModule</text>
 <text x="1190.0" y="130" font-size="9.5" fill="#475569" text-anchor="middle">Router B 内</text>
-<text x="1190.0" y="143" font-size="9.5" fill="#475569" text-anchor="middle">16 用户 × 16 KiB</text>
+<text x="1190.0" y="143" font-size="9.5" fill="#475569" text-anchor="middle">16 用户 × 32 KiB</text>
 <path d="M224 129 L279.5 129" fill="none" stroke="#6b7280" stroke-width="1.6" marker-end="url(#ag)"/>
 <path d="M484 129 L559.5 129" fill="none" stroke="#6b7280" stroke-width="1.6" marker-end="url(#ag)"/>
 <path d="M764 129 L839.5 129" fill="none" stroke="#6b7280" stroke-width="1.6" marker-end="url(#ag)"/>
@@ -1001,10 +1002,10 @@ VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC �
 <path d="M666.0 541 L1184.0 541" fill="none" stroke="#0d9488" stroke-width="1.5" marker-end="url(#ar)" marker-start="url(#ars)"/>
 <text x="925.0" y="530" font-size="9" fill="#0d9488" text-anchor="middle">管住的这一段</text>
 <text x="40" y="572" font-size="9.5" fill="#475569">管什么：下游 ReduceModule 的上下文有没有空间</text>
-<text x="40" y="585" font-size="9.5" fill="#475569">粒度：flit 粒度，按 UserID</text>
+<text x="40" y="585" font-size="9.5" fill="#475569">粒度：按 UserID 加方向，一笔任务</text>
 <text x="40" y="598" font-size="9.5" fill="#475569">谁维护：ReduceModule 维护相邻下游各方向，Router 不维护</text>
-<text x="40" y="611" font-size="9.5" fill="#475569">怎么释放：输出 flit 被下游接受后产生携带 UserID 的 release</text>
-<text x="40" y="624" font-size="9.5" fill="#475569">用户退休时延迟回收：等相邻下游各方向的 credit 全部恢复到初始值，才删对应用户映射</text>
+<text x="40" y="611" font-size="9.5" fill="#475569">怎么释放：下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release</text>
+<text x="40" y="624" font-size="9.5" fill="#475569">用户退休时延迟回收：等相邻下游各方向在途任务的 release 都回来，才删对应用户映射</text>
 <text x="24" y="672" font-size="10.5" fill="#475569">三者互不复用。业务层的 Stream 与 Reduce credit 的 release 走静态 Bypass：软件为每个输入端口配好输出方向 Mask，转发时不查 RouterTable，也不做动态路径选择</text>
 </svg>
 ```
@@ -1143,13 +1144,13 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | 组件 | 职责 |
 | - | - |
 | User Context Table | 记录 UserID、当前包状态、输入完成情况、输出状态与 Retire 状态 |
-| Reduce Context SRAM | 16 用户 × 16 KiB，保存当前包的 FP32 中间累加结果 |
+| Reduce Context SRAM | 16 用户 × 32 KiB，保存当前包的 FP32 中间累加结果 |
 | RMW Pipeline | 首份输入建立上下文，后续方向输入执行 Read-Modify-Write **原位**累加 |
 | Precision Convert | BF16 输入扩展为 FP32；输出按 RouterTable 配置转 FP32 或 BF16 |
-| Downstream Reduce Credit Map | 按 UserID 加目标方向维护相邻下游 Reduce Credit，逐 flit 扣减、按 release 恢复 |
+| Downstream Reduce Credit Map | 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：一笔任务每个方向准入一次，按 release 放开 |
 | 循环队列 | ReduceBuffer 本质是一个循环队列：算完的数据从队头搬走，待算的从队尾进；多个用户的数据可以在传输与计算过程中同时存在 |
 | 两种 action | ReduceBuffer ⇒ ReduceBuffer，以及 Core ⇒ 本级 ReduceBuffer |
-| 分段传输 | ReduceBuffer 之间把 packet 拆成更小的 segment，一个 segment 够 credit 就能发，用来掩盖 R2R 延迟。**Core 到 ReduceBuffer 相反，要等整包备齐再发**，因为这一段延迟本来就小 |
+| 分段传输 | ReduceBuffer 之间把 packet 拆成更小的 segment，一个 segment 下一跳 VC 收得下就能发，用来掩盖 R2R 延迟。**Core 到 ReduceBuffer 相反，要等整包备齐再发**，因为这一段延迟本来就小 |
 | release 时机 | ReduceBuffer 发出一笔就向上游返回一笔 credit release |
 | 输出 VC | Rmem 允许改写输出的 `vc_id`。改写的落点是包头里那个“下一跳 VC”字段，下一跳 Router 解包直接取，不再查表 |
 | 边缘压缩 | 跨 chip 的边缘 Rmem 自己做精度压缩，减少 PCIe 带宽 |
@@ -1191,8 +1192,8 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 3. **Core 的保证**：仅可在该 UserID 的全部进 core、出 core 数据搬运完成、
    且不会再发起新搬运后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包
 4. **Router 的动作**：停止该 UserID 的新发送，删除其全部 stream credit 授权表项
-5. **ReduceModule 的动作**：**延迟回收**，先记录 Retire，
-   待相邻下游各方向 Reduce Credit 全部恢复到初始值后才删除对应用户映射
+5. **ReduceModule 的动作**：本地分区当场放，这个用户还有在做的任务就等结果交付完再放；
+   相邻下游映射等在途任务的 Reduce Release 都回来后才清
 
 ***
 
@@ -1291,7 +1292,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | 全 chip 广播延迟 | 82 ns（两行并行，Row 0 七跳 82 ns 是关键路径） |
 | 单 VC 传输效率 | 每包额外开销 2 cycles（RC 与 VA 不传 flit）：8 KB 包 94%、16 KB 97%、32 KB 98.5%；多输入竞争时按 80% 折算 |
 | Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |
-| ReduceBuffer 容量 | 通信机制记 8K × FP32 = 32 KB，正反双份 64 KB；Router MAS 记 16 用户 × 16 KiB，**未解** |
+| ReduceBuffer 容量 | 通信机制记 8K × FP32 = 32 KB，正反双份 64 KB；Router MAS F-044 记 16 用户 × 32 KiB，按 FP32 驻留算，一个分区最多 8192 个 FP32。按 MAS |
 | Reduce 加法器 | 256 B × 1 GHz × 2 输入 = 512 GB/s |
 | 进核数据缓冲（in_core_fifo / OutputBuffer） | Router → DTE 方向 60 flits ≈ 16.9 KB；HAS 把它记在 Router 外的 DTE-local 桥接，本套文档放在 CoreStation |
 | CTRL_NOC 配置时钟 | 800 MHz（R2CU 接口，APB / AXI-lite，32 bit） |
@@ -1299,7 +1300,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | Reduce 输入 | 三路各 160 GB/s |
 | Reduce 输出 | 160 GB/s |
 | Reduce 算力 | 80 GFLOPS（FP32 / BF16） |
-| ReduceModule 上下文 | 16 用户 × 16 KiB |
+| ReduceModule 上下文 | 16 用户 × 32 KiB |
 | 监听事件队列 | 16 项全相连 |
 | C2C Bridge | 全 chip 4 个，VC Buffer 合计约 138.7 KB |
 | 不派角色的 core | 边界 chip 各 1 个，中间列没有 |
@@ -1326,7 +1327,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 本文其余各节用到的两个包头位，落在上表的哪里：
 
 * `overflow_reinject` 就是 `Hardware Used` 里的 `Bypass` 位。包进 core 暂存时置 1，出 core 重发时改回 0，Router 靠它给 reissue 保序
-* `reduce_seq`（6 bit，逐包配对用）占 Reserved 那 8 B 里的位，源文档的字段表没有单列
+* `reduce_seq`（6 bit，Reduce Done 原样带回）占 Reserved 那 8 B 里的位，源文档的字段表没有单列
 
 Header 与 Payload 走**两根独立并行总线**：
 
@@ -1341,7 +1342,7 @@ Header 与 Payload 走**两根独立并行总线**：
 | - | - | - |
 | R2R 方向端口 | 三个：left / right / mid（HAS） | MAS 写“上、下、左、右及 Core 五个方向” |
 | Reduce 做在哪 | Router 内的 ReduceModule（MAS） | HAS 写 Router 内不设 Reduce Buffer，累加由独立的 Rmem 子系统完成，经 reduce_0/1/2 三端口接入 |
-| Reduce credit 谁维护 | ReduceModule 维护相邻下游各方向，Router 不维护（MAS） | HAS 写 reduce credit 是单独的流控网络，core 与 reduce 之间按 user 粒度、reduce 之间按 flit 加 user 双粒度 |
+| Reduce credit 谁维护、什么粒度 | 本级由 TS 按用户记，ReduceModule 按 UserID 加方向、按任务维护相邻下游，Router 不维护（MAS） | HAS 写 reduce credit 是单独的流控网络，core 与 reduce 之间按 user 粒度、reduce 之间按 flit 加 user 双粒度 |
 | stream credit 表 | Router 是唯一有效状态，DTE 持 cache（MAS） | HAS 写 Router 输出单元与 core 内各持一份 credit table，靠 credit release 接口同步 |
 | 资源监听队列 | 在 Router，16 项全相连（MAS） | 同一份 MAS 另一处写“功能已转移到 DTE 中” |
 | 仲裁粒度 | flit 级，整包只作为贪婪仲裁的优先级偏好 | MAS 有一节“Interleave 和整包的对比”只列两案优劣、未给结论；MAS 正文与 HAS 都是 flit 级 |
@@ -1367,9 +1368,12 @@ Header 与 Payload 走**两根独立并行总线**：
 * **为什么 Reduce 不允许降级**
   * 若允许绕过 Reduce 直接存储或转发，下游收到的是未归约的原始数据
   * 下游并不知道这件事，也没有补做归约的机会。宁可反压
-* **为什么退休时 ReduceModule 要延迟回收**
-  * Retire 只说明 core 侧的搬运结束了，而 ReduceModule 发往相邻下游的 flit 可能还在路上
-  * 等下游各方向的 Reduce Credit 全部恢复到初始值，才能确认这些 flit 都已被接收
+* **为什么退休时 ReduceModule 的下游映射要等 Release 回来才清**
+  * Retire 只说明 core 侧的搬运结束了，而 ReduceModule 发往相邻下游的任务可能还没做完
+  * 本地分区当场放，只留下游映射；等下游各方向在途任务的 Reduce Release 都回来才清，旧 Release 才不会落到复用这个 UserID 的新用户上
+* **为什么结果按 flit 出，不等整包**
+  * 逐级 reduce 的每一跳不必等整包收齐，各路首 flit 到了结果首 flit 就能往下一跳走，每跳省掉一整包的收包时间
+  * 代价是包发出首 flit 后要占着出口等后面的结果
 
 ***
 

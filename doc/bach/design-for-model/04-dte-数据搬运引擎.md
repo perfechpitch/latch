@@ -1077,7 +1077,7 @@ Router 与 core 之间**不做独立的桥接模块**，按耦合关系把逻辑
   * 解析包信息，搬完按 flit 释放 VC credit
 * **出去的方向**：DTE 侧按 VC0～3 多线程调度维护多个 VC buffer
   * 用它吸收整包流量，完成 core 与 Router 之间的协议转换
-  * 出去之前只查这条 VC 通路上的 flit credit；发往本 core ReduceModule 的还要看本级 Reduce credit 够不够整包
+  * 出去之前只查这条 VC 通路上的 flit credit，发往本 core ReduceModule 的 Reduce 包也一样；本级 Rmem 资源由 TS 在下发前申请
   * 两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 routing table 定，但这两类由 TS 在下发前查，不在 DTE 这一级
 * **credit 回程**：解析本级 Router 各方向传进来的 core credit release，按其中的 action 信息决定是否同步更新 core 内的 stream 表状态
   * DTE 里存的这份叫 `stream_cache`，是 Router 那张 stream 表的**只读副本**，3 方向各 16 项 `{valid, user_id}`
