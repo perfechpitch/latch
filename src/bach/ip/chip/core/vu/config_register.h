@@ -77,9 +77,10 @@ class VuConfigRegister : public BachModule {
   // core 直连过来，每拍有效。STREAM_ID_OVERRIDE 只改 stream_id。
   void AttachIds(std::shared_ptr<DsaIdsPort> p) { ids = std::move(p); }
   // 单模块测试里没接直连线时用这个直接给。
-  void SetCoreIds(uint64_t stream, uint64_t task) {
+  void SetCoreIds(uint64_t stream, uint64_t task, uint64_t user = 0) {
     fixed_stream = stream;
     fixed_task = task;
+    fixed_user = user;
     has_fixed = true;
   }
 
@@ -143,6 +144,12 @@ class VuConfigRegister : public BachModule {
   uint64_t CoreTaskId() const {
     if (has_fixed) return fixed_task;
     return ids ? ids->Task() : 0;
+  }
+  // 用户号也走这根直连线。宏指令本身不带它，写 trigger 那一拍采下来存进指令里，
+  // 随这条指令一起进 ISQ、一起退休，波形与 dsa_done 才认得是哪一笔 task 的。
+  uint64_t CoreUserId() const {
+    if (has_fixed) return fixed_user;
+    return ids ? ids->User() : 0;
   }
 
   void Drain() {
@@ -303,6 +310,7 @@ class VuConfigRegister : public BachModule {
     inst->stream_id = inst->sid_override ? ((v >> kVuTrigSidShift) & 0xFu)
                                          : CoreStreamId();
     inst->task_id = CoreTaskId();
+    inst->user_id = CoreUserId();
 
     held = inst;
     pending = true;
@@ -352,7 +360,7 @@ class VuConfigRegister : public BachModule {
   uint64_t status = 0, macro_inst_left = 0, error_code = 0, profile_ctrl = 0;
   uint64_t rf_addr = 0;
   std::shared_ptr<DsaIdsPort> ids;
-  uint64_t fixed_stream = 0, fixed_task = 0;
+  uint64_t fixed_stream = 0, fixed_task = 0, fixed_user = 0;
   bool has_fixed = false;
   std::array<uint64_t, kVuCfgPathNum> last_seq{};
 

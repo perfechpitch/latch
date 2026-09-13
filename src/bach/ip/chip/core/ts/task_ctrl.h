@@ -49,6 +49,12 @@ class TaskCtrl : public BachModule {
   uint64_t Installed() const { return installed.Get(); }
   uint64_t Skipped() const { return skipped.Get(); }
 
+  // 刚装进去的那一步的身份。Core 层拿 Installed() 认「本拍装了一笔后继」，与
+  // 它下发那一拍对起来就是这一步在 TS 里等的时间。
+  uint64_t NextTask() const { return next_task; }
+  uint64_t NextUser() const { return next_user; }
+  bool NextUserValid() const { return next_user_vld; }
+
   bool Quiescent() const override { return !pending; }
 
  protected:
@@ -102,6 +108,10 @@ class TaskCtrl : public BachModule {
       w->entry.task_fsm = InitFsmOf(t);
       install->Drive(w);
       pending = true;
+      // 装的是哪一步、哪个用户，留下来给 Core 层发波形。
+      next_task = next;
+      next_user = e.user_id;
+      next_user_vld = e.user_id_vld;
       return;  // 一拍只装一个
     }
   }
@@ -112,6 +122,11 @@ class TaskCtrl : public BachModule {
 
   bool pending = false;
   uint64_t install_pending = 0, skip_pending = 0;
+
+  // 刚装进去的那一步的身份，供 Core 层发波形。自启动 core 上表项可能还没有用户
+  // 身份，user 由 next_user_vld 说是真值还是占位。
+  uint64_t next_task = 0, next_user = 0;
+  bool next_user_vld = false;
 
   Logic64 installed, skipped;
 };

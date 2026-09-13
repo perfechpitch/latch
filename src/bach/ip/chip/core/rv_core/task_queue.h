@@ -58,8 +58,17 @@ class RvTaskQueue : public BachModule {
   std::shared_ptr<TaskDonePort> FinishPtr() const { return finish; }
 
   uint64_t QueueLen() const { return q.size(); }
+  // 起/完的笔数，单调。Core 层拿它当序号认「本拍新发生的那一笔」。
   uint64_t Started() const { return start_cnt; }
   uint64_t Finishes() const { return finish_cnt; }
+  // 最近一笔起/完的身份。Core 层发波形要用：这一层自己的信号在建出来时就被
+  // TraceOffScope 关掉了，只能由 Core 统一发。
+  uint64_t StartStream() const { return run_stream; }
+  uint64_t StartTask() const { return run_task; }
+  uint64_t StartUser() const { return run_user; }
+  uint64_t DoneStream() const { return done_stream; }
+  uint64_t DoneTask() const { return done_task; }
+  uint64_t DoneUser() const { return done_user; }
   bool Busy() const { return running; }
   bool Quiescent() const override { return q.empty() && !running; }
 
@@ -81,6 +90,11 @@ class RvTaskQueue : public BachModule {
     last_finish_seq = finish->Seq();
     running = false;
     ++finish_cnt;
+    // 交还的是刚刚还在跑的那一笔。kernel 写 task_done 就交还，通不通知 TS 由写
+    // 进去的那个值定，与这里无关。
+    done_stream = run_stream;
+    done_task = run_task;
+    done_user = run_user;
   }
 
   // 前一个做完了就把队头那个交给执行器。ready 是执行器上一拍报的。
@@ -99,6 +113,10 @@ class RvTaskQueue : public BachModule {
       running = true;
       ++start_cnt;
       start->Idle();
+      // 这一笔就要开始跑了，身份留下来给 Core 层发波形。
+      run_stream = held.stream_id;
+      run_task = held.task_id;
+      run_user = held.user_id;
       return;
     }
     if (running || q.empty()) {
@@ -139,6 +157,11 @@ class RvTaskQueue : public BachModule {
   std::deque<RvTask> q;
   RvTask held;
   bool running = false, driving = false;
+  // 正在跑的那一笔与刚交还的那一笔。只有 running 那一笔在执行，而 Step() 里
+  // TakeFinish() 排在 Launch() 前面，所以同一拍「一笔结束、下一笔开始」时两边
+  // 各记各的，不会串。
+  uint64_t run_stream = 0, run_task = 0, run_user = 0;
+  uint64_t done_stream = 0, done_task = 0, done_user = 0;
   uint64_t last_cmd_seq = 0, last_finish_seq = 0;
   uint64_t start_seq = 0, start_cnt = 0, finish_cnt = 0;
 

@@ -351,6 +351,8 @@ struct VuMacroInst {
   bool broadcast = false;
   uint64_t stream_id = 0;
   uint64_t task_id = 0;
+  // 用户号与 stream/task 一样，写 trigger 那一拍从 VU-Core 的身份直连线上采。
+  uint64_t user_id = 0;
   uint64_t seq = 0;
 
   uint64_t TypeVl() const {

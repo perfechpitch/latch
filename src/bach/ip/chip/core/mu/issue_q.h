@@ -86,6 +86,8 @@ class MuIssueQ : public BachModule {
     f.seq = next_seq++;
     q.push_back(f);
     ++issue_pending;
+    start_task = cfg.task_id;
+    start_user = cfg.user_id;
   }
 
   // 取第一笔还停在某个阶段的任务。顺序执行：只看队头那几笔。
@@ -132,6 +134,11 @@ class MuIssueQ : public BachModule {
   bool Empty() const { return q.empty(); }
   uint64_t Size() const { return q.size(); }
   uint64_t Issued() const { return issued.Get(); }
+  // 刚进队列那一笔的身份。进队列就是这一笔过门槛、真正开始算的那一拍 —— 写
+  // trigger 只是把任务收进寄存器，还要等 drain 结束、队列有空位。Core 层发波形
+  // 要用：这一层自己的信号在 chip 级被 TraceOffScope 关掉了。
+  uint64_t StartTask() const { return start_task; }
+  uint64_t StartUser() const { return start_user; }
 
   bool Quiescent() const override { return q.empty(); }
 
@@ -145,6 +152,9 @@ class MuIssueQ : public BachModule {
  private:
   std::deque<MuInflight> q;
   uint64_t next_seq = 0, issue_pending = 0;
+
+  // 刚进队列那一笔的身份，供 Core 层发波形。
+  uint64_t start_task = 0, start_user = 0;
 
   Logic64 depth, issued;
 };

@@ -230,6 +230,9 @@ class Core : public BachModule {
                                   ts->VuArbiter().Issued());
     TracePerCycle("ts_done", ts->Done().Finished());
     EmitIssue();
+    EmitStep();
+    EmitDsa();
+    EmitRv();
   }
 
   // Router 里设计文档画出来的那几个方框，各记一两个量：
@@ -259,7 +262,7 @@ class Core : public BachModule {
     TracePerCycle("cmcm_q", router->GetMonitor().QueueLen());
   }
 
-  // 本拍新下发的那几笔 task，落成两个信号。
+  // 本拍新下发的那几笔 task，落成三个信号。
   //
   // 认「新的一笔」看的是三条发射通路各自的 seq：一笔命令会在端口上连着摆几拍
   // 等 RV core 收下，只看 cmd_valid 会把同一笔数很多遍。
@@ -267,24 +270,169 @@ class Core : public BachModule {
   //   ts_unit  位掩码，bit0 DTE、bit1 MU、bit2 VU。0 表示本拍没有新下发。
   //   ts_task  三路的 task 号各占 8 bit：dte | mu << 8 | vu << 16。
   //            那一路本拍没发就填 0xFF。
+  //   ts_user  三路的 user_id 各占 16 bit：dte | mu << 16 | vu << 32。
+  //            那一路本拍没发就填 0xFFFF。
   //
-  // 三条通路各管各的 stream，同一拍可以各发各的，所以两个信号都按路分位，不能
+  // 三条通路各管各的 stream，同一拍可以各发各的，所以三个信号都按路分位，不能
   // 只留一路。
   void EmitIssue() {
     TaskCmdPort* cmd[3] = {&ts->DteCmd(), &ts->MuCmd(), &ts->VuCmd()};
-    uint64_t mask = 0, pack = 0;
+    uint64_t mask = 0, pack = 0, users = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       uint64_t s = cmd[u]->Seq();
-      uint64_t id = 0xFFu;
+      uint64_t id = 0xFFu, user = 0xFFFFu;
       if (s != issue_seq[u]) {
         issue_seq[u] = s;
         mask |= 1ull << u;
         id = cmd[u]->task_id.Get() & 0xFFu;
+        user = cmd[u]->user_id.Get() & 0xFFFFu;
       }
       pack |= id << (8 * u);
+      users |= user << (16 * u);
     }
     TracePerCycle("ts_unit", mask);
     TracePerCycle("ts_task", pack);
+    TracePerCycle("ts_user", users);
+  }
+
+  // 本拍 TS 里新出现的这一步，与它被下发那一拍。
+  //
+  //   ts_create   建表笔数（单调）：新用户到了建一个表项，或自启动 core 补一项。
+  //   ts_install  装后继笔数（单调）：上一步做完，TaskCtrl 把下一项写进表项。
+  //
+  // 两者是同一件事的两种来源 —— 第一个 task 走 create，其余走 install —— 都是
+  // 「这一步进入 TS、可以被下发了」。与 ts_unit/ts_task/ts_user 里那一笔下发对
+  // 起来，差值就是这一步在 TS 里等的时间：等 credit、等发射通路空出来、等前一笔
+  // 从 RV core 那边腾出槽位。不含 RV core 与 DSA 的任何时间。
+  //
+  // 身份与 ts_task / ts_user 同宽：task 8 bit、user 16 bit，本拍没有就填
+  // 0xFF / 0xFFFF。自启动 core 建表时还没有用户身份，user 也填 0xFFFF。
+  //
+  // DataIn 任务（Bypass 档从 DataIn_task_table 直接下发的那一路）既没有建表也没
+  // 有装后继，它在 ts_unit 上出现时配不上这两个信号。
+  //
+  // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 不建 TS。
+  void EmitStep() {
+    uint64_t made = ts->Matcher().Made();
+    bool fresh = made != ts_create_seq;
+    ts_create_seq = made;
+    TracePerCycle("ts_create", made);
+    TracePerCycle("ts_create_task",
+                  fresh ? (ts->Matcher().MadeTask() & 0xFFu) : 0xFFu);
+    TracePerCycle("ts_create_user",
+                  (fresh && ts->Matcher().MadeUserValid())
+                      ? (ts->Matcher().MadeUser() & 0xFFFFu)
+                      : 0xFFFFu);
+
+    uint64_t install = ts->Ctrl().Installed();
+    bool next = install != ts_install_seq;
+    ts_install_seq = install;
+    TracePerCycle("ts_install", install);
+    TracePerCycle("ts_install_task",
+                  next ? (ts->Ctrl().NextTask() & 0xFFu) : 0xFFu);
+    TracePerCycle("ts_install_user",
+                  (next && ts->Ctrl().NextUserValid())
+                      ? (ts->Ctrl().NextUser() & 0xFFFFu)
+                      : 0xFFFFu);
+  }
+
+  // 三个 DSA 各自对一笔 task 的执行时间，两个端点各发三个信号。
+  //
+  //   dsa_start  位掩码，bit0 DTE、bit1 MU、bit2 VU —— 与 ts_unit 同位序。
+  //   dsa_done   位掩码，同上。这是 DSA 自己的完成脉冲，也就是它发给 TS 的那一路。
+  //
+  // 起点取的是「过门槛」那一拍，不是写 trigger 那一拍。写 trigger 只是把任务收
+  // 进各自的寄存器，真正开始还要过一道闸，而且三个单元的闸门各不相同：
+  //   DTE  过 Commit 准入，Lane 与 Completion RS 三样资源都拿得到。之前还要在
+  //        PendingTaskQ 里等 VC credit。只算 RV core 那一路，Router 入站那一路
+  //        不算一笔 DTE task。
+  //   MU   进 issue_q，drain 走完且队列有空位。
+  //   VU   被 ISQ 收下，静态配置已释放、上一条已被取走。
+  // 这三个闸门等多久都可能，所以「收下任务」与「开始算」不能混为一谈。
+  //
+  // 终点是各家把完成报回来的那一拍：
+  //   DTE  两侧完成条件配齐、且带 task_last 的那一笔报到 TS，no_ack 的不报。
+  //   MU   整个 task 的 tile 都写回、写回落地后再空两拍。
+  //   VU   每条宏指令退休报一次，与它发给 TS 的是同一拍同一笔。一个 task 发几条
+  //        就会报几次 —— VU 不知道 task 的边界，那是软件的事。要「这笔 task 从下
+  //        发到最后一条宏指令做完」的整段，看 TS 那一行：它会把这一笔的几段并起来。
+  //        配了 kRvOnly 的档上 TS 收的是 RV core 轮询之后的 ACK，那一路在 rv_done 里。
+  //
+  // 身份与 ts_task / ts_user 同宽：task 8 bit、user 16 bit，本拍没有就填
+  // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
+  // 这里填的是各单元侧存下来的那一份：MU 与 DTE 取自 RV core 写进 DSA 的 user，
+  // VU 取自写 trigger 那一拍从身份直连线上采下来、随宏指令一路带到退休的 user。
+  //
+  // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 不建 DSA。
+  void EmitDsa() {
+    uint64_t start_mask = 0, start_task = 0, start_user = 0;
+    uint64_t done_mask = 0, done_task = 0, done_user = 0;
+    for (uint64_t u = 0; u < 3; ++u) {
+      DsaEv s = DsaStartOf(u);
+      if (s.seq != dsa_start_seq[u]) {
+        dsa_start_seq[u] = s.seq;
+        start_mask |= 1ull << u;
+        start_task |= (s.task & 0xFFu) << (8 * u);
+        start_user |= (s.user & 0xFFFFu) << (16 * u);
+      }
+      DsaEv d = DsaDoneOf(u);
+      if (d.seq != dsa_done_seq[u]) {
+        dsa_done_seq[u] = d.seq;
+        done_mask |= 1ull << u;
+        done_task |= (d.task & 0xFFu) << (8 * u);
+        done_user |= (d.user & 0xFFFFu) << (16 * u);
+      }
+    }
+    TracePerCycle("dsa_start", start_mask);
+    TracePerCycle("dsa_start_task", start_task);
+    TracePerCycle("dsa_start_user", start_user);
+    TracePerCycle("dsa_done", done_mask);
+    TracePerCycle("dsa_done_task", done_task);
+    TracePerCycle("dsa_done_user", done_user);
+  }
+
+  // 三个 RV core 各自对一笔 task 的执行时间，两个端点各发三个信号。
+  //
+  //   rv_start  位掩码，bit0 DTE、bit1 MU、bit2 VU —— 与 ts_unit 同位序。
+  //             1 表示这一拍执行器接下了队头那笔，PC 跳到了 task_pc。
+  //   rv_done   位掩码，同上。1 表示这一拍那笔 task 从 kernel 交还了。
+  //
+  // 起点的判据是 RvTaskQueue::Launch() 里握手完成那一拍；终点是 kernel 执行
+  // task_done 那一拍。两端都带身份，相减就是这个 RV core 对这笔 task 的执行
+  // 时间。交还是一定发生的，通不通知 TS 由 kernel 写进 task_done 的值定，波形
+  // 上以交还为准，这样不通知 TS 的那几档也有闭合点。
+  //
+  // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()、VU 轮询 MACRO_INST_LEFT），
+  // 不含 DSA 自己的执行时间。
+  //
+  // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 只建
+  // Router，rv 是空的。
+  void EmitRv() {
+    uint64_t start_mask = 0, start_task = 0, start_user = 0;
+    uint64_t done_mask = 0, done_task = 0, done_user = 0;
+    for (uint64_t u = 0; u < 3; ++u) {
+      RvTaskQueue& tq = rv[u]->TaskQueue();
+      uint64_t s = tq.Started();
+      if (s != rv_start_seq[u]) {
+        rv_start_seq[u] = s;
+        start_mask |= 1ull << u;
+        start_task |= (tq.StartTask() & 0xFFu) << (8 * u);
+        start_user |= (tq.StartUser() & 0xFFFFu) << (16 * u);
+      }
+      uint64_t d = tq.Finishes();
+      if (d != rv_done_seq[u]) {
+        rv_done_seq[u] = d;
+        done_mask |= 1ull << u;
+        done_task |= (tq.DoneTask() & 0xFFu) << (8 * u);
+        done_user |= (tq.DoneUser() & 0xFFFFu) << (16 * u);
+      }
+    }
+    TracePerCycle("rv_start", start_mask);
+    TracePerCycle("rv_start_task", start_task);
+    TracePerCycle("rv_start_user", start_user);
+    TracePerCycle("rv_done", done_mask);
+    TracePerCycle("rv_done_task", done_task);
+    TracePerCycle("rv_done_user", done_user);
   }
 
   bool Quiescent() const override {
@@ -414,8 +562,45 @@ class Core : public BachModule {
   }
 
   CoreContext ctx;
+  // 三个 DSA 的两个端点各要从一家的访问器上读。u：0 DTE、1 MU、2 VU。
+  struct DsaEv {
+    uint64_t seq = 0, task = 0, user = 0xFFFFu;
+  };
+
+  DsaEv DsaStartOf(uint64_t u) {
+    if (u == 0) {
+      Commit& c = dte->Committer();
+      return {c.RvAdmitted(), c.StartTask(), c.StartUser()};
+    }
+    if (u == 1) {
+      MuIssueQ& iq = mu->IssueQ();
+      return {iq.Issued(), iq.StartTask(), iq.StartUser()};
+    }
+    VuIsq& isq = vu->Isq();
+    return {isq.Started(), isq.StartTask(), isq.StartUser()};
+  }
+
+  DsaEv DsaDoneOf(uint64_t u) {
+    if (u == 0) {
+      CompletionRs& c = dte->Completion();
+      return {c.Reported(), c.DoneTask(), c.DoneUser()};
+    }
+    if (u == 1) {
+      return {mu->DoneCnt(), mu->DoneTask(), mu->DoneUser()};
+    }
+    // VU 每条宏指令退休报一次，与它发给 TS 的是同一拍。
+    return {vu->Retire().MacroDoneCnt(), vu->Retire().MacroDoneTask(),
+            vu->Retire().MacroDoneUser()};
+  }
+
   // 三条发射通路上一次见到的 seq，EmitIssue() 用它认新下发的那一笔。
   std::array<uint64_t, 3> issue_seq{};
+  // 三个 DSA 上一次见到的起/完笔数，EmitDsa() 用它认本拍新发生的那一笔。
+  std::array<uint64_t, 3> dsa_start_seq{}, dsa_done_seq{};
+  // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
+  std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
+  // 上一次见到的建表 / 装后继笔数，EmitStep() 用它认本拍新出现的那一步。
+  uint64_t ts_create_seq = 0, ts_install_seq = 0;
   std::unique_ptr<Router> router;
   std::unique_ptr<Ts> ts;
   std::array<std::unique_ptr<RvCore>, 3> rv;

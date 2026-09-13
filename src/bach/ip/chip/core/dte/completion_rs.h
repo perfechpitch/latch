@@ -82,6 +82,10 @@ class CompletionRs : public BachModule {
   uint64_t Joined() const { return joined.Get(); }
   uint64_t Reported() const { return reported.Get(); }
   uint64_t Used() const { return used.Get(); }
+  // 刚报到 TS 的那一笔的身份，供 Core 层发波形。完成脉冲本身只带 stream 与
+  // task（Drive 的第三参默认 0），user 取自描述符里 RV core 采下来的那一份。
+  uint64_t DoneTask() const { return done_task; }
+  uint64_t DoneUser() const { return done_user; }
 
   bool Quiescent() const override { return rs.empty() && pend.empty(); }
 
@@ -108,7 +112,7 @@ class CompletionRs : public BachModule {
     bool rd_drained = false, wr_drained = false;
   };
   struct Pend {
-    uint64_t stream_id = 0, task_id = 0, reduce_seq = 0;
+    uint64_t stream_id = 0, task_id = 0, user_id = 0, reduce_seq = 0;
     bool notify = true;   // task_last 且非 no_ack 的那一笔才通知 TS
     bool smem = false;
     uint64_t smem_addr = 0, smem_data = 0;
@@ -166,9 +170,9 @@ class CompletionRs : public BachModule {
       // 只有带 task_last 的那一笔完成后才通知 TS；no_ack 的不回 Ack。
       bool notify = e.desc.task_last && !e.desc.no_ack;
       if (notify || e.desc.smem_wr) {
-        pend.push_back({e.desc.stream_id, e.desc.task_id, e.desc.reduce_seq,
-                        notify, e.desc.smem_wr, e.desc.smem_addr,
-                        e.desc.smem_data});
+        pend.push_back({e.desc.stream_id, e.desc.task_id, e.desc.user_id,
+                        e.desc.reduce_seq, notify, e.desc.smem_wr,
+                        e.desc.smem_addr, e.desc.smem_data});
       }
       it = rs.erase(it);
     }
@@ -202,6 +206,8 @@ class CompletionRs : public BachModule {
       return;
     }
     to_ts->Drive(p.stream_id, p.task_id);
+    done_task = p.task_id;
+    done_user = p.user_id;
     pend.pop_front();
     ++report_pending;
   }
@@ -221,6 +227,9 @@ class CompletionRs : public BachModule {
   std::map<uint64_t, Entry> rs;
   std::deque<Pend> pend;
   uint64_t join_pending = 0, report_pending = 0;
+
+  // 刚报到 TS 那一笔的身份，供 Core 层发波形。
+  uint64_t done_task = 0, done_user = 0;
 
   Logic64 joined, reported, used;
 };

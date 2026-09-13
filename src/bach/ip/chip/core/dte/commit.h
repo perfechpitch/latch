@@ -64,6 +64,12 @@ class Commit : public BachModule {
   std::shared_ptr<AdmitPort> RsPortPtr() const { return to_rs; }
 
   uint64_t Admitted() const { return admitted.Get(); }
+  // 出核那一路（RV core 写 trigger 起的任务）过准入的笔数与身份。只数这一路：
+  // Router 入站那一路由 HeaderParser 直接送进来，不算一笔 DTE task。过准入就是
+  // 这一笔过门槛、真正开始搬的那一拍，之前还要在 PendingTaskQ 里等 VC credit。
+  uint64_t RvAdmitted() const { return rv_admit_cnt; }
+  uint64_t StartTask() const { return start_task; }
+  uint64_t StartUser() const { return start_user; }
   uint64_t Stalled() const { return stalled.Get(); }
   uint64_t PendingLen() const { return pending_len.Get(); }
 
@@ -160,6 +166,10 @@ class Commit : public BachModule {
       ++stall_pending;
       return;
     }
+    // 出核这一笔过门槛了。身份要在 pop_front 之前取，d 就指着队头那一项。
+    start_task = d.task_id;
+    start_user = d.user_id;
+    ++rv_admit_cnt;
     pending.pop_front();
   }
 
@@ -256,6 +266,8 @@ class Commit : public BachModule {
   // 每个 stream 当前这笔 reduce task 下一包该打几号。
   uint64_t last_parser_seq = 0, last_rv_seq = 0;
   uint64_t admit_pending = 0, stall_pending = 0;
+  // 出核那一路过准入的笔数与刚过的那一笔的身份，供 Core 层发波形。
+  uint64_t rv_admit_cnt = 0, start_task = 0, start_user = 0;
 
   Logic64 admitted, stalled, pending_len;
 };

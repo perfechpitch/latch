@@ -75,6 +75,16 @@ class UserMatch : public BachModule {
   uint64_t Matched() const { return matched.Get(); }
   uint64_t Stalls() const { return stalls.Get(); }
 
+  // 建表的笔数与最近建出来的那一步的身份。Created() 数的是 create 口写成功的
+  // 次数，老用户那条重发/跳过的支也走同一个口，所以不能拿它当建表的序号。
+  // Core 层拿 Made() 认「本拍新建了一个表项」，与它下发那一拍对起来就是这一步
+  // 在 TS 里等的时间。
+  uint64_t Made() const { return made_cnt; }
+  uint64_t MadeTask() const { return made_task; }
+  uint64_t MadeUser() const { return made_user; }
+  // 自启动 core 建表时还没有用户身份，软件在 flag_check 之后才写进来。
+  bool MadeUserValid() const { return made_user_vld; }
+
   bool Quiescent() const override { return !hold.valid && !pending; }
 
  protected:
@@ -157,7 +167,17 @@ class UserMatch : public BachModule {
     pending = true;
     refilled_at = s->tail_ptr;
     refilled_vld = true;
+    NoteMade(e);
     return true;
+  }
+
+  // 建表这一笔记下来：笔数加一，身份留下。只在这两处建表的地方调，老用户那条
+  // 重发/跳过的写不算。
+  void NoteMade(StreamEntry const& e) {
+    ++made_cnt;
+    made_task = e.task_id;
+    made_user = e.user_id;
+    made_user_vld = e.user_id_vld;
   }
 
   bool Handle() {
@@ -253,6 +273,7 @@ class UserMatch : public BachModule {
     e.task_fsm = (p.skip & 1u) ? TaskFsm::kFinish : InitFsmOf(t0);
     create_port->Drive(w);
     pending = true;
+    NoteMade(e);
     just_created.insert(user);
     Register(p, user, path, slot);
     last_trigger_seq = trigger->Seq();
@@ -284,6 +305,10 @@ class UserMatch : public BachModule {
   uint64_t last_trigger_seq = 0;
   bool pending = false;
   uint64_t created_pending = 0, matched_pending = 0, stall_pending = 0;
+
+  // 建表的笔数与最近建出来的那一步的身份，供 Core 层发波形。
+  uint64_t made_cnt = 0, made_task = 0, made_user = 0;
+  bool made_user_vld = false;
 
   Logic64 created, matched, stalls;
 };

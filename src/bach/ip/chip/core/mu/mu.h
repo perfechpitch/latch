@@ -117,6 +117,11 @@ class Mu {
   MuStq& Stq() { return *stq; }
   MuDrain DrainState() const { return ctrl->State(); }
   uint64_t Drains() const { return ctrl->Drains(); }
+  // 上一笔宣告完成时的笔数与身份，供 Core 层发波形。完成脉冲本身只带 stream 与
+  // task（Drive 的第三参默认 0），user 取自 RV core 写进 kMuUserId 的那一份。
+  uint64_t DoneCnt() const { return ctrl->DoneCnt(); }
+  uint64_t DoneTask() const { return ctrl->DoneTask(); }
+  uint64_t DoneUser() const { return ctrl->DoneUser(); }
 
   void RunStep() {
     // 软件轮询 SYS_STATUS 等一笔任务做完，忙不忙由这里每拍写进去。空的判据与
@@ -156,6 +161,9 @@ class Mu {
 
     MuDrain State() const { return drain; }
     uint64_t Drains() const { return drain_cnt; }
+    uint64_t DoneCnt() const { return done_cnt; }
+    uint64_t DoneTask() const { return done_task; }
+    uint64_t DoneUser() const { return done_user; }
 
    protected:
     void Step() override {
@@ -334,6 +342,9 @@ class Mu {
       }
       // 全部 tile 都写回后与 issue_q 的 finish 合成 dsa_done。
       mu.done->Drive(f->cfg.stream_id, f->cfg.task_id);
+      done_task = f->cfg.task_id;
+      done_user = f->cfg.user_id;
+      ++done_cnt;
       f->stage = MuStage::kFinished;
       mu.iq->RetireFront();
     }
@@ -342,6 +353,8 @@ class Mu {
     MuDrain drain = MuDrain::kNone;
     uint64_t drain_cnt = 0;
     uint64_t stq_idle = 0;
+    // 宣告完成的笔数与身份，供 Core 层发波形。
+    uint64_t done_cnt = 0, done_task = 0, done_user = 0;
   };
 
   ClockPtr clk;

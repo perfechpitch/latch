@@ -43,6 +43,20 @@ class VuRetire : public BachModule {
   void AttachDone(std::shared_ptr<DonePort> p) { done = std::move(p); }
 
   uint64_t Retired() const { return retired.Get(); }
+  // 刚退休那一条宏指令的笔数与身份。一条宏指令退休就报一次 dsa_done，这与硬件
+  // 发给 TS 的是同一拍、同一笔。Core 层发波形要用：这一层自己的信号在 chip 级被
+  // TraceOffScope 关掉了，只能由 Core 统一发。
+  //
+  // 不按「在飞归零」记 —— VU 不知道 task 的边界（那是软件的事），实测同一笔 task
+  // 里 ISQ 会真的空好几次，按归零记会漏掉终点、段一路拉到波形末尾。一笔 task 的
+  // 「最后一条宏指令完成」由波形那一侧把这些段并起来表达。
+  //
+  // 注意：配了 kRvOnly 的档上，TS 收到的 task_done 不是这一路，而是 RV core 轮询
+  // macro_inst_left 到 0 之后的 ACK —— 那个已经由 rv_done 记着。
+  uint64_t MacroDoneCnt() const { return retire_cnt; }
+  uint64_t MacroDoneTask() const { return done_task; }
+  uint64_t MacroDoneStream() const { return done_stream; }
+  uint64_t MacroDoneUser() const { return done_user; }
   bool Quiescent() const override { return true; }
 
  protected:
@@ -80,6 +94,10 @@ class VuRetire : public BachModule {
     done->Drive(inst.stream_id, inst.task_id);
     if (inst.event_en) done->event = 1;
     ++retire_cnt;
+    // 报给 TS 的那一拍就是它，身份从指令上取。
+    done_stream = inst.stream_id;
+    done_task = inst.task_id;
+    done_user = inst.user_id;
   }
 
   VuConfigRegister& cfg_reg;
@@ -88,6 +106,8 @@ class VuRetire : public BachModule {
   std::shared_ptr<VuFlowPort> in;
   std::shared_ptr<DonePort> done;
   uint64_t last_seq = 0, retire_cnt = 0;
+  // 最后一条宏指令退休的笔数与身份，供 Core 层发波形。
+  uint64_t done_stream = 0, done_task = 0, done_user = 0;
 
   Logic64 retired;
 };

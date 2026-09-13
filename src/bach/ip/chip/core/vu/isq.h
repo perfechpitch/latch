@@ -44,6 +44,14 @@ class VuIsq : public BachModule {
     ++retire_cnt;
   }
   uint64_t Retired() const { return retire_cnt; }
+  // 被 ISQ 收下的宏指令笔数。收下这一拍就是它过门槛、真正开始算的那一拍 ——
+  // 写 trigger 只是把它放进 held，还要等静态配置释放、上一条被取走。Core 层发
+  // 波形要用：这一层自己的信号在 chip 级被 TraceOffScope 关掉了。
+  uint64_t Started() const { return accept_cnt; }
+  // 刚收下那一条的身份。三项都是写 trigger 那一拍从身份直连线上采的。
+  uint64_t StartStream() const { return start_stream; }
+  uint64_t StartTask() const { return start_task; }
+  uint64_t StartUser() const { return start_user; }
 
   bool Full() const { return q.size() >= kVuIsqDepth; }
   bool Empty() const { return q.empty(); }
@@ -99,6 +107,10 @@ class VuIsq : public BachModule {
     if (!inst) return;
     q.push_back(inst);
     ++macro_left;
+    ++accept_cnt;
+    start_stream = inst->stream_id;
+    start_task = inst->task_id;
+    start_user = inst->user_id;
     // 压进来就算引用了这一组静态配置，配置写从这一刻起被阻塞。
     cfg_reg.HoldCfg(inst->cfg_idx);
   }
@@ -121,6 +133,8 @@ class VuIsq : public BachModule {
   bool holding = false;
   uint64_t out_seq = 0, last_seq = 0;
   uint64_t macro_left = 0, inflight = 0, retire_cnt = 0;
+  // 收下的笔数与刚收下那一条的身份，供 Core 层发波形。
+  uint64_t accept_cnt = 0, start_stream = 0, start_task = 0, start_user = 0;
 
   Logic64 depth, left;
 };
