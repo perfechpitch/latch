@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>Tracetto</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1 id="title">Tracetto</h1>
+  <span id="sub"></span>
+  <span id="spacer"></span>
+  <button id="fit" type="button" title="看全（F）">看全</button>
+  <button id="reload" type="button" title="重新读一遍波形">重新读</button>
+</header>
+
+<div id="banner" hidden></div>
+
+<main>
+  <div id="scroll">
+    <div id="side"><div id="side-inner"></div></div>
+    <div id="right">
+      <div id="right-inner"></div>
+      <canvas id="lane-canvas"></canvas>
+    </div>
+  </div>
+</main>
+
+<section id="bottom">
+  <div id="props">点一个段看它的来龙去脉</div>
+  <div id="legend"></div>
+</section>
+
+<div id="tip" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
