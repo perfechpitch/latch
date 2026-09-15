@@ -234,22 +234,21 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     for (auto const& one : it.second.release_route) {
       core.GetRouter().SetCreditBypass(one.first, one.second);
     }
-    for (auto const& one : it.second.chain) {
-      core.GetTs().Cfg().WriteTask(one.first, one.second);
-    }
     if (it.second.has_cfg) {
       core.GetTs().Cfg().SetStreamNum(it.second.stream_num);
       core.GetTs().Cfg().SetSelfStart(it.second.self_start);
       core.GetTs().Cfg().SetBCoreDirection(it.second.bcast_dirs);
       core.GetTs().Cfg().SetTriggerChainEn(it.second.trigger_chain_en);
     }
+    for (auto const& one : it.second.chain) {
+      core.GetTs().Cfg().WriteTask(one.first, one.second);
+    }
     if (it.second.has_datain) {
       core.GetTs().Cfg().WriteDatainTask(it.second.datain_pc,
                                          it.second.datain_weights);
     }
-    core.GetTs().Cfg().SetInitFinish();
-    // B core 与 R core 复位后直接建满表项，不等 Router trigger。
-    if (core.GetTs().Cfg().SelfStartCore()) core.GetTs().SelfStart();
+    // 写 TS_INIT_FINISH：查整张配置表，自启动的 core 随即建满表项。
+    core.GetTs().InitFinish();
   }
   return stat;
 }

@@ -8,10 +8,14 @@
 //
 // 三条发射通路各自独立打拍，同一拍可以并行下发 3 个 task。RV core 按 task_queue
 // 是否有空槽产生 task_ack；未被接收时不能释放该 task 跳到下一个。
+//
+// 自启动 core 上 Task 0 一次只放一笔：有一条链的 Task 0 下发之后、完成之前，别
+// 的链的 Task 0 不下发。
 
 #include <memory>
 #include <string>
 
+#include "bach/ip/chip/core/ts/cfg_reg.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -21,9 +25,10 @@ namespace bach {
 class UnitArb : public BachModule {
  public:
   UnitArb(ClockPtr clock, const std::string& name, SendUnit which,
-          uint64_t parent = 0, bool tick = true)
+          CfgReg& reg, uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         unit(which),
+        cfg(reg),
         cmd(std::make_shared<TaskCmdPort>(clock)),
         snap(std::make_shared<SnapshotPort>(clock)),
         issue(std::make_shared<StreamWritePortIf>(clock)),
@@ -98,12 +103,18 @@ class UnitArb : public BachModule {
         issued_stream = kStreamNum;
       }
     }
+    // 自启动 core：Task 0 一次只放一笔。有一条链的 Task 0 发出去还没完成时，
+    // 别的链的 Task 0 都等着；刚发出、快照上还是 READY 的那两拍也算。
+    bool task0_busy = cfg.SelfStartCore() &&
+                      (s->Task0Infly() ||
+                       (issued_stream < kStreamNum && issued_task == 0));
     for (uint64_t k = 0; k < kStreamNum; ++k) {
       uint64_t i = s->AgeOrder(k);
       StreamEntry const& e = s->entry[i];
       if (!e.valid || e.task_fsm != TaskFsm::kReady || e.task_unit != unit) {
         continue;
       }
+      if (task0_busy && e.task_id == 0) continue;
       // 刚发出去的那一笔，表里的 READY → INFLY 还没落下来：写口一拍、快照一
       // 拍，这两拍里快照上它仍是 READY。不挡住的话同一个 task 会被下发两次。
       if (i == issued_stream && e.task_id == issued_task) continue;
@@ -118,6 +129,7 @@ class UnitArb : public BachModule {
   }
 
   SendUnit unit;
+  CfgReg& cfg;
   std::shared_ptr<TaskCmdPort> cmd;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<StreamWritePortIf> issue;

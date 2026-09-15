@@ -239,7 +239,7 @@ TEST(BachStreamTable, SkipMaskFinishesOnlyTheCurrentTask) {
   EXPECT_EQ(fsm_b, TaskFsm::kWait) << "当前任务不在跳过的里面，状态机不动";
 }
 
-// 自启动的 core 复位后直接建满表项，此时还没有用户信息。
+// 自启动的 core 上电配完直接建满表项，此时还没有用户信息。
 TEST(BachStreamTable, SelfStartFillsEveryEntry) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);

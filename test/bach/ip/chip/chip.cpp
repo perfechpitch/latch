@@ -748,7 +748,7 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
   core.GetTs().Cfg().WriteTask(1, out);
 
   core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   // DTE 的 path_task_map：进核搬运报完成时按它填 task_id。
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }

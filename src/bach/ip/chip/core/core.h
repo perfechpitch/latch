@@ -273,6 +273,9 @@ class Core : public BachModule {
   //   ts_user  三路的 user_id 各占 16 bit：dte | mu << 16 | vu << 32。
   //            那一路本拍没发就填 0xFFFF。
   //
+  // 波形只在值变了的那一拍记一个事件。同一路连着几拍都下发时 ts_unit 几拍同值，
+  // 事件只落在头一拍；三个信号每拍都发，数下发要把非零的那一段逐拍展开。
+  //
   // 三条通路各管各的 stream，同一拍可以各发各的，所以三个信号都按路分位，不能
   // 只留一路。
   void EmitIssue() {
@@ -297,7 +300,8 @@ class Core : public BachModule {
 
   // 本拍 TS 里新出现的这一步，与它被下发那一拍。
   //
-  //   ts_create   建表笔数（单调）：新用户到了建一个表项，或自启动 core 补一项。
+  //   ts_create   建表笔数（单调）：新用户到了建一个表项，或自启动 core 上一条链
+  //               退休后原地重新激活。
   //   ts_install  装后继笔数（单调）：上一步做完，TaskCtrl 把下一项写进表项。
   //
   // 两者是同一件事的两种来源 —— 第一个 task 走 create，其余走 install —— 都是
@@ -313,12 +317,18 @@ class Core : public BachModule {
   //
   // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 不建 TS。
   void EmitStep() {
+    // 自启动 core 上的重新激活不经 User_Match，笔数从 credit 与退休那一侧取。
+    // 那一步是 Task 0，还没有用户身份。
     uint64_t made = ts->Matcher().Made();
+    uint64_t again = ts->Credit().Reactivated();
     bool fresh = made != ts_create_seq;
+    bool renewed = again != ts_reactivate_seq;
     ts_create_seq = made;
-    TracePerCycle("ts_create", made);
+    ts_reactivate_seq = again;
+    TracePerCycle("ts_create", made + again);
     TracePerCycle("ts_create_task",
-                  fresh ? (ts->Matcher().MadeTask() & 0xFFu) : 0xFFu);
+                  fresh ? (ts->Matcher().MadeTask() & 0xFFu)
+                        : (renewed ? 0u : 0xFFu));
     TracePerCycle("ts_create_user",
                   (fresh && ts->Matcher().MadeUserValid())
                       ? (ts->Matcher().MadeUser() & 0xFFFFu)
@@ -599,8 +609,8 @@ class Core : public BachModule {
   std::array<uint64_t, 3> dsa_start_seq{}, dsa_done_seq{};
   // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
-  // 上一次见到的建表 / 装后继笔数，EmitStep() 用它认本拍新出现的那一步。
-  uint64_t ts_create_seq = 0, ts_install_seq = 0;
+  // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。
+  uint64_t ts_create_seq = 0, ts_reactivate_seq = 0, ts_install_seq = 0;
   std::unique_ptr<Router> router;
   std::unique_ptr<Ts> ts;
   std::array<std::unique_ptr<RvCore>, 3> rv;

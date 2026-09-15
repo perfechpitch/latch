@@ -168,7 +168,7 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
   core.GetTs().Cfg().WriteTask(1, out);
 
   core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
 

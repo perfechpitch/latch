@@ -82,7 +82,7 @@ class UserMatch : public BachModule {
   uint64_t Made() const { return made_cnt; }
   uint64_t MadeTask() const { return made_task; }
   uint64_t MadeUser() const { return made_user; }
-  // 自启动 core 建表时还没有用户身份，软件在 flag_check 之后才写进来。
+  // 建出来的那一项有没有用户身份。
   bool MadeUserValid() const { return made_user_vld; }
 
   bool Quiescent() const override { return !hold.valid && !pending; }
@@ -103,11 +103,6 @@ class UserMatch : public BachModule {
       }
     }
     create_port->Idle();
-
-    // 自启动 core：表项从队头退休之后再激活一个新的，接着等自启动任务。这一路
-    // 占的是建表口，而这一档 core 上进来的包走 Bypass、不写表，两者同一拍互不
-    // 相干，所以补完表照常往下处理 trigger。
-    Refill();
 
     bool ok = Handle();
     trigger->DriveReady(ok);
@@ -140,39 +135,8 @@ class UserMatch : public BachModule {
     return p;
   }
 
-  // 自启动 core 上在途表项少于 stream_num 时补一个。建表那一刻没有用户信息，
-  // 等 Task 0 的 RV core ACK 带回来。
-  bool Refill() {
-    if (!cfg.SelfStartCore()) return false;
-    StreamSnapshotPtr s = snap->Get();
-    // 在途上限取 CFG_REG 里软件配的那个 stream_num，自启动建满的也是它。
-    if (!s || s->InFlight() >= cfg.StreamNum()) {
-      refilled_vld = false;
-      return false;
-    }
-    // 刚补过但快照还没更新的那一两拍里会被再判成缺一项，记住上一次补在哪。
-    if (refilled_vld && refilled_at == s->tail_ptr) return false;
-
-    auto w = std::make_shared<StreamWrite>();
-    w->valid = true;
-    w->stream_id = s->tail_ptr;
-    w->whole = true;
-    StreamEntry& e = w->entry;
-    e.valid = true;
-    e.user_id_vld = false;
-    e.task_id = 0;
-    ApplyTaskAttr(e, cfg.Task(0));
-    e.task_fsm = InitFsmOf(cfg.Task(0));
-    create_port->Drive(w);
-    pending = true;
-    refilled_at = s->tail_ptr;
-    refilled_vld = true;
-    NoteMade(e);
-    return true;
-  }
-
-  // 建表这一笔记下来：笔数加一，身份留下。只在这两处建表的地方调，老用户那条
-  // 重发/跳过的写不算。
+  // 建表这一笔记下来：笔数加一，身份留下。老用户那条重发/跳过的写不算；自启动
+  // core 上的原地重新激活不经这里，由 credit 与退休那一侧计数。
   void NoteMade(StreamEntry const& e) {
     ++made_cnt;
     made_task = e.task_id;
@@ -245,7 +209,7 @@ class UserMatch : public BachModule {
 
     // 新用户：两条同时满足才建表。
     if (!cfg.TriggerChainEn()) return false;  // 不允许启动任务链
-    // 在途上限与 Refill() 那一处一样，看 CFG_REG 里软件配的 stream_num。
+    // 在途上限看 CFG_REG 里软件配的 stream_num。
     if (s->InFlight() >= cfg.StreamNum()) {
       ++stall_pending;
       return false;
@@ -298,8 +262,6 @@ class UserMatch : public BachModule {
 
   // Step 独占。
   DatainHold hold;
-  uint64_t refilled_at = 0;
-  bool refilled_vld = false;
   // 已经发出建表请求、但还没在快照里露面的那些 user。
   std::set<uint64_t> just_created;
   uint64_t last_trigger_seq = 0;

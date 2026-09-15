@@ -33,7 +33,7 @@ TS 是 core 的控制单元，一块配好就按固定逻辑跑的硬件，不�
 | - | - | - |
 | 权重加载 | `DATAIN_TASK_ATTR` 的 `WEIGHTS_MODE = 1` | 不启动任务链，不查配置。Router 来了数据就按 `DATAIN_TASK_PC` 派 DTE 搬运，不建 stream 表项；这期间回来的完成事件全部丢掉 |
 | 普通 | `SELF_START = 0` | 完整的四个动作：Router trigger 建表、按 `task_chain` 逐项推进、三条通路发射、完成后推进度并退休 |
-| 自启动 | `SELF_START = 1`，只有 B core 与 R core 用 | 配好之后直接建 `stream_num` 个表项，Task 0 不等 trigger 就发。进来的数据走 Bypass，不建表，数据收齐的标志由软件维护在 Share Mem 里；Task 0 循环查那个标志，查到才往下走 |
+| 自启动 | `SELF_START = 1`，只有 B core 与 R core 用 | 配好之后直接建 `stream_num` 个表项，Task 0 不等 trigger 就发，一次只发一笔。进来的数据走 Bypass，不建表，数据收齐的标志由软件维护在 Share Mem 里；Task 0 循环查那个标志，查到才往下走 |
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1720 850" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="TS 第 0 层">
@@ -67,7 +67,7 @@ TS 是 core 的控制单元，一块配好就按固定逻辑跑的硬件，不�
 <text x="1104" y="153" font-size="9.5" fill="#475569">　下发占掉，Reduce Done 还</text>
 <text x="1104" y="168" font-size="9.5" fill="#475569">Head-only 退休：第 0 项到 End 全部完成</text>
 <text x="1104" y="183" font-size="9.5" fill="#475569">先发退休请求，Router 收下才清 valid</text>
-<text x="1104" y="198" font-size="9.5" fill="#475569">自启动模式退休后补一个表项</text>
+<text x="1104" y="198" font-size="9.5" fill="#475569">自启动模式 Router 收下后原地重新激活</text>
 <rect x="230" y="320" width="400" height="130" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="244" y="340" font-size="12" font-weight="700" fill="#111827">完成事件合流</text>
 <text x="244" y="358" font-size="9.5" fill="#475569">七路：三个 RV core、三个 DSA、Reduce Done</text>
@@ -273,7 +273,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | F29 | `task_path_id` 取自那一项的 `TASK_PATH_ID`；上一项是 PID 更新任务、这一项又紧邻它时，取它完成时带回的新 PID。`pid_pending = 1` 表示 `task_path_id` 里存的是还没被继承的新 PID |
 | F30 | `rmem_busy` 是本级 Rmem 的 credit，每个用户一份：发出一笔逐级 reduce 就占掉，Router 报回这一笔做完才还 |
 | F31 | `task_fsm` 五个状态：IDLE、WAIT（等 Router 送数据，或等 credit）、READY、INFLY、FINISH |
-| F32 | **八个写口**，按来源命名，固定优先级仲裁，每口一拍一笔，请求保持到 `accepted` 才算生效。优先级由高到低：`retirement`（清 `valid` 并推 `head_ptr`）、`completion`（完成事件）、`install`（Task_ctrl 生成后继，整项写）、三个 `issue`（三条发射通路收到 ACCEPT 后置 INFLY）、`credit_wake`（credit 到了置 READY）、`create`（User_Match 建表或补跳过位）。落到不同 stream 的写同一拍都做 |
+| F32 | **八个写口**，按来源命名，固定优先级仲裁，每口一拍一笔，请求保持到 `accepted` 才算生效。优先级由高到低：`retirement`（清 `valid` 并推 `head_ptr`；自启动模式原地重新激活）、`completion`（完成事件）、`install`（Task_ctrl 生成后继，整项写）、三个 `issue`（三条发射通路收到 ACCEPT 后置 INFLY）、`credit_wake`（credit 到了置 READY）、`create`（User_Match 建表或补跳过位）。落到不同 stream 的写同一拍都做 |
 | F33 | 写失败分两种：整项写（新用户建表、`install`）失败后要重读最新表内容再来；只改几个字段的写失败后只重试这一笔，不能重新下发已经被 RV core 接收的任务 |
 | F34 | `completion` 口的写：`done_bitmap[task_id]` 无条件置位；`task_fsm` 只有这一笔的 `task_id` 等于当前 `task_id` 时才改成 FINISH。同一笔还可以带三样：自启动 core 补 `user_id`、PID 更新任务写新 PID、逐级 reduce 还 Rmem credit |
 | F35 | `credit_wake` 口：Router 授予 credit 时置 READY 并把 `reissue` 置起来；Rmem credit 到位时只置 READY |
@@ -335,8 +335,8 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | F66 | 广播任务的 `CreditCounter[path_id][stream_id]` 初值等于目的 core 数量，P2P 任务初值为 1；够了一次扣掉全部目的数再下发，不够就等 credit 释放 |
 | F67 | 不派角色的 core 只按路由表透传，不检查 credit；上游要查的 credit 对应它之后那个落地的 core |
 | F68 | Head-only 退休：只有 `head_ptr` 那一项能退休，条件是 `valid = 1` 且第 0 项到 End 的完成位全部置起。End 提前完成、当前任务停在 End 前面的也照样退休 |
-| F69 | 退休顺序：先向 Router 持续发退休请求（带 `user_id`），Router 收下后才清 `valid`、推 `head_ptr`；退休请求经本 core 的 Router 通知上游，让上游的 credit 加一 |
-| F70 | 自启动模式下表项从队头退休后，在 `tail_ptr` 补一个新表项：Task 0 的属性、没有用户号，接着等自启动任务 |
+| F69 | 退休顺序：先向 Router 持续发退休请求（带 `user_id`），Router 收下后才动表项，普通模式清 `valid`、推 `head_ptr`；退休请求经本 core 的 Router 通知上游，让上游的 credit 加一 |
+| F70 | 自启动模式下 Router 收下退休请求后不清 `valid`：这条链在同一个 stream 上原地重新激活成自启动任务链（Task 0 的属性、没有用户号、`done_bitmap` 清零），`head_ptr` 与 `tail_ptr` 各推一格、按 `stream_num` 环回，这条链排到队尾。在途表项一直是 `stream_num` 个 |
 
 ### Except Check
 
@@ -348,10 +348,10 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 
 | 编号 | 功能 |
 | - | - |
-| F72 | `SELF_START = 1` 时写完配置就建 `stream_num` 个表项，每项按 Task 0 的属性建、`task_fsm` 按 F38 定，激活这些表项的 Task 0 参与仲裁。B core 与 R core 的 Task 0 既不标 `WAIT_WAKE` 也不标 `TASK_CREDIT_EN`，所以一建好就是 READY。两者的 `stream_num` 配 16，自启动数因此是 16 |
-| F73 | 进来的数据走 Bypass（F19），数据收齐的标志由软件维护，不在 TS 里更新 |
-| F74 | 查标志的那一项占着一个 RV core 长期工作，不调 DSA（`TASK_RECV_UNIT = 00`）。它在这类 core 的链上没有别的活：B core 的链是 VU 查标志与 DTE 搬出，下面还有 EP 组时再加一项转发；R core 的链是 MU 查标志、DTE 搬入、VU 求和、DTE 搬出 |
-| F75 | 表项按 stream 顺序激活查标志的任务；前一个 stream 查到之后软件清掉那个用户的标志，下一个 stream 才能接着查 |
+| F72 | `SELF_START = 1` 时写完配置就建 `stream_num` 个表项（权重加载模式下写 `TS_INIT_FINISH` 不建），每项是一条自启动任务链，按 stream 编号称 taskchain0～15；每项按 Task 0 的属性建、`task_fsm` 按 F38 定。B core 与 R core 的 Task 0 既不标 `WAIT_WAKE` 也不标 `TASK_CREDIT_EN`，所以一建好就是 READY。两者的 `stream_num` 配 16，自启动数因此是 16 |
+| F73 | 进来的数据走 Bypass（F19），数据收齐的标志由软件维护，不在 TS 里更新。上电后 datain 那一路与自启动任务链同时启动，并行执行互不干扰 |
+| F74 | 查标志的那一项占着 MU RV core 长期工作，不调 DSA（`TASK_RECV_UNIT = 00`）。它在这类 core 的链上没有别的活：B core 的链是 MU 查标志与 DTE 搬出，下面还有 EP 组时再加一项转发；R core 的链是 MU 查标志、DTE 搬入、VU 求和、DTE 搬出 |
+| F75 | Task 0 一次只下发一笔：一条链的 Task 0 下发之后、执行完成之前，三条发射通路都不下发其余链的 Task 0。上电后先下发 taskchain0 的 Task 0，它执行完成后才下发 taskchain1 的，此时 taskchain0 在执行第 2 个任务，两条链并行。软件在 Task 0 里认下数据时清掉那个用户的标志，下一条链的 Task 0 查不到同一笔 |
 
 ### 超前发送窗口
 
@@ -380,7 +380,7 @@ port router2ts_credit_ch (slave, 脉冲, clk)            // Router 的 CoreMemCr
   in  valid · stream_id[3:0] · task_id[5:0] · path_id[7:0]
 port ts2router_credit_release_ch (master, valid/ready, clk)   // 用户退休，经 Router 给上游还 credit
   out valid · user_id[15:0]
-  in  ready                                             // Router 收下后 TS 才清 valid 并推 head_ptr
+  in  ready                                             // Router 收下后 TS 才动表项：普通模式清 valid 并推 head_ptr，自启动模式原地重新激活
 port ts2<u>core_task_ch (master, valid/ready, clk)     // u ∈ {dte, mu, vu}：task 下发
   out valid · task_pc[31:0] · stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · vcid[1:0] · seq
   in  ready                                             // = 该 RV core 的 task_queue 有空槽（raw ACCEPT）；vcid 只在 u = dte 时有效
@@ -407,7 +407,7 @@ mem cfg_misc       FF        {stream_num[4:0], self_start, init_finish, ts_state
 mem task_masks     FF        {THROUGH_END_MASK[63:0], DATA_IN_MASK[63:0]}                             1R1W  写 TS_INIT_FINISH 时由 task_chain 派生  复位 0
 mem path_flowctl   FF 阵列   64 × {flowctl_en, window_n[7:0]}，按 PID 索引                            1R1W  软件逐项写                    复位 0    // 超前发送窗口，配在哪一张表见 F80
 mem stream_table   FF 阵列   16 × {valid, user_id[15:0], user_id_vld, reissue, task_id[5:0], task_fsm[2:0], done_bitmap[63:0], task_unit[1:0], task_recv[1:0], task_type[2:0], task_pc[31:0], task_path_id[7:0], pid_pending, end, rmem_busy}  8W 多读  八个写口按固定优先级仲裁  复位空
-mem stream_ptr     FF        {head_ptr[4:0], tail_ptr[4:0]}                                           1RW   建表推 tail，退休推 head       复位 0
+mem stream_ptr     FF        {head_ptr[4:0], tail_ptr[4:0]}                                           1RW   建表推 tail，退休推 head；自启动模式重新激活时两者各推一格、按 stream_num 环回   复位 0
 mem datain_hold    FF        1 项 {valid, task_pc[31:0], task_id[5:0], user_id[15:0], path_id[7:0], stream_id[3:0]}  1RW  占住即反压要派 DTE 的 trigger  复位空
 mem ack_half       FF 阵列   每个未配齐的 {执行单元, stream_id, task_id} 一项 {core, dsa, user_id[15:0], pid[7:0]}  1RW  两半都到即清  复位空   // LLD 每个执行单元一项，模型不限项数
 mem credit_cnt     FF 阵列   每 {path_id, stream_id} 一个计数器                                        1RW   广播初值 = 目的 core 数，P2P = 1  复位由输入给
@@ -441,7 +441,7 @@ DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录）�
 
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
-| 0 | 查有没有 ready 的数据（`task_bc_wait`） | VU | 00 | 0 | 0 | 0 | — | 0 |
+| 0 | 查有没有 ready 的数据（`task_bc_wait`） | MU | 00 | 0 | 0 | 0 | — | 0 |
 | 1 | 广播出去（`task_dte_bc_send`） | DTE | 01 | 0 | 0 | 1 | 广播 path | 链尾那一组为 1 |
 | 2 | 转给下一组的 B core（`task_dte_bc_relay`），下面还有 EP 组时才配 | DTE | 01 | 0 | 0 | 0 | 转发 path | 1 |
 
@@ -717,9 +717,9 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
 ### M4 · 选最老发射
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1119 244" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1119 264" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs><marker id="tsm4" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="1119" height="244" fill="#ffffff"/>
+  <rect x="0" y="0" width="1119" height="264" fill="#ffffff"/>
   <rect x="20" y="20" width="188" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="24" width="180" height="34" fill="none" stroke="#374151"/>
   <text x="114" y="45" font-size="10" fill="#374151" text-anchor="middle">stream_table · FF 16 项 · 1R</text>
@@ -738,7 +738,7 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="1000" y="75" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_id · task_id · user_id</text>
   <text x="1000" y="93" font-size="9.5" fill="#6b7280" text-anchor="middle">path_id · task_dsa_en · vcid</text>
   <text x="1000" y="111" font-size="9.5" fill="#6b7280" text-anchor="middle">ready</text>
-  <rect x="252" y="20" width="604" height="204" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <rect x="252" y="20" width="604" height="224" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="270" y="36" font-size="8.5" fill="#6b7280">M4</text>
   <text x="842" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="270" y="56" font-size="12" fill="#111827">三条 Arb · 各选最老的一个</text>
@@ -747,7 +747,8 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="282" y="118" font-size="10.5" fill="#475569">同一 stream 时 Generated 先，Bypass 那一格按最老</text>
   <text x="270" y="138" font-size="10.5" fill="#475569">3. cmd[u] = {task_pc, stream_id, task_id, user_id, task_path_id, dsa_en = (task_recv == 01)}</text>
   <text x="270" y="158" font-size="10.5" fill="#475569">4. DTE：vcid = ts_route[task_path_id].vcid，搬入那一格填 0</text>
-  <text x="270" y="182" font-size="10" fill="#9ca3af">选中后非抢占保持，字段到 ACCEPT 前不变</text>
+  <text x="270" y="178" font-size="10.5" fill="#475569">5. SELF_START &amp;&amp; 有 Task 0 已下发未完成 → task_id == 0 的项不入 cand</text>
+  <text x="270" y="202" font-size="10" fill="#9ca3af">选中后非抢占保持，字段到 ACCEPT 前不变</text>
   <path d="M208 41 L251 41" stroke="#475569" marker-end="url(#tsm4)" fill="none"/>
   <path d="M208 95 L251 95" stroke="#475569" marker-end="url(#tsm4)" fill="none"/>
   <path d="M208 149 L251 149" stroke="#475569" marker-end="url(#tsm4)" fill="none"/>
@@ -885,11 +886,11 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <rect x="252" y="20" width="568" height="158" fill="#fbf3df" stroke="#b45309" rx="4" stroke-dasharray="5 3"/>
   <text x="270" y="36" font-size="8.5" fill="#6b7280">M8</text>
   <text x="806" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="270" y="56" font-size="12" fill="#7c2d12">retire · 先发退休请求再清 valid</text>
+  <text x="270" y="56" font-size="12" fill="#7c2d12">retire · 先发退休请求再动表项</text>
   <text x="270" y="78" font-size="10.5" fill="#92400e">1. 条件：i == head_ptr &amp;&amp; valid &amp;&amp; (done_bitmap &amp; THROUGH_END_MASK) == THROUGH_END_MASK</text>
   <text x="270" y="98" font-size="10.5" fill="#92400e">2. ts2router_credit_release_ch = {valid = 1, user_id}，保持到 ready</text>
-  <text x="270" y="118" font-size="10.5" fill="#92400e">3. ready → stream_table[i].valid = 0；head_ptr += 1</text>
-  <text x="270" y="138" font-size="10.5" fill="#92400e">4. SELF_START → 在 tail_ptr 补一项：Task 0 的属性，user_id_vld = 0（create 口）</text>
+  <text x="270" y="118" font-size="10.5" fill="#92400e">3. ready &amp;&amp; !SELF_START → stream_table[i].valid = 0；head_ptr += 1</text>
+  <text x="270" y="138" font-size="10.5" fill="#92400e">4. ready &amp;&amp; SELF_START → stream_table[i] 原地装 Task 0；head、tail 各 +1 mod stream_num</text>
   <text x="270" y="162" font-size="10" fill="#9ca3af">只允许队头退休，head_ptr 才能单调推进</text>
   <path d="M208 41 L251 41" stroke="#475569" marker-end="url(#tsm8)" fill="none"/>
   <path d="M208 95 L251 95" stroke="#475569" marker-end="url(#tsm8)" fill="none"/>
@@ -995,7 +996,7 @@ task 唤醒延迟        2～3 cycle（MAS 的硬件目标值）
 | credit 申请带四个号，授予后置 READY 并置 `reissue` | F58、F35 | `BachTsCredit.RequestCarriesTheFourIds`、`BachTsCredit.GrantWakesTheTaskAndSetsReissue` |
 | 逐级 reduce 用本级 Rmem credit，一项做完才发下一项 | F30、F46、F52、F59 | `BachTsCredit.ReduceTakesTheLocalRmemCredit`、`BachTs.ReduceIssuesOneTaskAtATime` |
 | Head-only 退休，第 0 项到 End 全做完才退，先还 credit 再清 valid | F68、F69 | `BachTsCredit.OnlyTheHeadEntryRetires`、`BachTsCredit.ClearsOnlyAfterRouterAccepts`、`BachTsCredit.NextEntryRetiresAfterTheHead`、`BachTsCredit.RetiresOnceEveryTaskThroughEndIsDone`、`BachTs.OneUserRunsFromTriggerToRetire` |
-| 自启动建满 `stream_num` 项，退休后补一项 | F70、F72 | `BachStreamTable.SelfStartFillsEveryEntry`、`BachMoeChip.BcoreStartsTheBroadcast`、`BachMoeChip.TwoEpGroupsMeetAtTheReductionCore` |
+| 自启动建满 `stream_num` 项；Task 0 一次只下发一笔；Router 收下退休请求后原地重新激活 | F70、F72、F75 | `BachStreamTable.SelfStartFillsEveryEntry`、`BachTs.SelfStartIssuesOneTask0AtATime`、`BachTs.SelfStartChainRestartsInPlace`、`BachMoeChip.BcoreStartsTheBroadcast`、`BachMoeChip.TwoEpGroupsMeetAtTheReductionCore` |
 | 超前发送窗口按 path 配 | F77 | `BachTsCfg.FlowControlWindowIsPerPath` |
 | 重发未成功前数据不覆盖；P2P 阻塞缓冲；B core 按方向查 credit；广播 CreditCounter；异常上报；窗口判断 | F63～F67、F71、F78 | 未建 |
 

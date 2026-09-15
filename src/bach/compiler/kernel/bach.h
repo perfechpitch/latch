@@ -189,12 +189,13 @@ static inline u32 rc_land(u32 user, u32 half) {
  *
  *   链一  datain。只把这一笔是哪个用户记进 Share Mem，搬运与置 valid 都是硬件
  *         的事
- *   链二  自启动。VU 查 tail 那一格的 valid，置起来了就把 tail 推一格；head 与
+ *   链二  自启动。MU 查 tail 那一格的 valid，置起来了就把 tail 推一格；head 与
  *         tail 不相等就认下 head 那一格：清掉它的 valid、推一格 head、记下槽
  *         号，再交给 DTE 从 Matrix Mem 广播给本组各 core
  *
- * 认下那一格的几步全在 VU 那一步做完，不留到 DTE 那一步：一个 core 上几条链并
- * 行跑，划晚了另一条链会认到同一格，同一笔发两遍。
+ * 认下那一格的几步全在 MU 那一步做完，不留到 DTE 那一步：MU 这一步报完成，TS
+ * 就把下一条链的 task 0 发下来，而本条链的 DTE 还没发，划晚了下一条链会认到同
+ * 一格，同一笔发两遍。
  *
  * 槽号一律按“第几笔”取模算：发方按自己送出的笔数算落点，本 core 的 datain 按
  * 自己收下的笔数记用户，链二的 tail 也是笔数。三处同一条规则，所以 user_id 取

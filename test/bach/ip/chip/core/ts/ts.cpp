@@ -155,7 +155,7 @@ TEST(BachTs, OneUserRunsFromTriggerToRetire) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
     ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, /*end=*/true));
-    ts.Cfg().SetInitFinish();
+    ts.InitFinish();
 
     RouterSide router(clk, ts, /*at=*/2, /*user=*/77);
     UnitSide units(clk, ts, /*latency=*/3);
@@ -187,7 +187,7 @@ TEST(BachTs, WalksTheWholeChain) {
     ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, false));
     ts.Cfg().WriteTask(1, MakeTask(SendUnit::kMu, false));
     ts.Cfg().WriteTask(2, MakeTask(SendUnit::kVu, true));
-    ts.Cfg().SetInitFinish();
+    ts.InitFinish();
 
     RouterSide router(clk, ts, 2, 88);
     UnitSide units(clk, ts, 2);
@@ -280,7 +280,7 @@ TEST(BachTs, SkipsCompletedDatainTask) {
     din.path_id = 9;
     ts.Cfg().WriteTask(1, din);
     ts.Cfg().WriteTask(2, MakeTask(SendUnit::kDte, true));
-    ts.Cfg().SetInitFinish();
+    ts.InitFinish();
 
     RouterSide router(clk, ts, 2, 99);
     // 第 8 拍注入一笔 task1 的完成：datain 提前到了，done_bitmap 的第 1 位先亮，
@@ -309,7 +309,7 @@ TEST(BachTs, BackpressuresTriggerWhenTableIsFull) {
     ts.Cfg().SetStreamNum(2);   // 只给两个坑
     // 一条永远不完成的链：没有 RV core 来 ack，表项一直占着
     ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, true));
-    ts.Cfg().SetInitFinish();
+    ts.InitFinish();
 
     // 连着灌四个不同的用户
     class ManyUsers : public BachModule {
@@ -370,7 +370,7 @@ TEST(BachTs, ReduceIssuesOneTaskAtATime) {
       red.credit_en = true;
       ts.Cfg().WriteTask(k, red);
     }
-    ts.Cfg().SetInitFinish();
+    ts.InitFinish();
 
     class ReduceDriver : public BachModule {
      public:
@@ -438,6 +438,171 @@ TEST(BachTs, ReduceIssuesOneTaskAtATime) {
   EXPECT_EQ(finished_at_25, 0u) << "本地两路 ACK 只算搬完";
   EXPECT_EQ(finished, 3u);
   EXPECT_EQ(admitted, 3u);
+}
+
+namespace {
+
+constexpr uint64_t kNever = ~0ull;
+
+// 自启动 core 的配置：Task 0 发 MU、只收 RV core 那一路，第 2 个任务发 DTE 并收尾。
+void WriteSelfStartChain(Ts& ts, uint64_t stream_num) {
+  ts.Cfg().WriteTask(0, MakeTask(SendUnit::kMu, /*end=*/false, /*dsa=*/false));
+  ts.Cfg().WriteTask(1, MakeTask(SendUnit::kDte, /*end=*/true, /*dsa=*/false));
+  ts.Cfg().WriteDatainTask(0x300, /*weights_mode=*/false);
+  ts.Cfg().SetSelfStart(true);
+  ts.Cfg().SetStreamNum(stream_num);
+  ts.InitFinish();
+}
+
+// 扮演自启动 core 上的三个 RV core：命令来一笔收一笔，隔几拍报 RV core 那一路
+// 完成。几笔可以同时在做，一拍报一笔。完成带回用户号，自启动的表项靠它补。
+class SelfStartUnits : public BachModule {
+ public:
+  struct Got {
+    uint64_t at = 0, unit = 0, stream = 0, task = 0;
+  };
+
+  SelfStartUnits(ClockPtr c, Ts& sched, std::array<uint64_t, 3> lat)
+      : BachModule(c, "units"), ts(sched), latency(lat) {}
+
+  std::vector<Got> issued, done;
+
+ protected:
+  void Step() override {
+    uint64_t now = CycleNow();
+    TaskCmdPort* cmd[3] = {&ts.DteCmd(), &ts.MuCmd(), &ts.VuCmd()};
+    for (uint64_t u = 0; u < 3; ++u) {
+      // 同一笔会连着几拍出现在端口上，按序号认它。
+      if (cmd[u]->Valid() && cmd[u]->Seq() != last_seq[u]) {
+        last_seq[u] = cmd[u]->Seq();
+        Got g{now, u, cmd[u]->stream_id.Get(), cmd[u]->task_id.Get()};
+        issued.push_back(g);
+        pending[u].push_back({now + latency[u], g});
+      }
+      cmd[u]->DriveReady(true);
+      if (head[u] < pending[u].size() && pending[u][head[u]].first <= now) {
+        Got g = pending[u][head[u]++].second;
+        ts.RvDone(u).Drive(g.stream, g.task, /*user=*/100 + g.stream);
+        g.at = now;
+        done.push_back(g);
+      } else {
+        ts.RvDone(u).Idle();
+      }
+      ts.DsaDone(u).Idle();
+    }
+  }
+
+ private:
+  Ts& ts;
+  std::array<uint64_t, 3> latency;
+  std::array<uint64_t, 3> last_seq{}, head{};
+  std::array<std::vector<std::pair<uint64_t, Got>>, 3> pending;
+};
+
+}  // namespace
+
+// 自启动 core：上电建满 stream_num 条链，Task 0 一次只下发一笔。taskchain0 的
+// Task 0 做完才发 taskchain1 的，这时 taskchain0 已经在做第 2 个任务，两条链并行。
+TEST(BachTs, SelfStartIssuesOneTask0AtATime) {
+  std::vector<SelfStartUnits::Got> issued, done;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Ts ts(clk, "ts", TsCfg{});
+    WriteSelfStartChain(ts, 4);
+    RouterSide router(clk, ts, kNever, 0);
+    // MU 做 Task 0 用 10 拍，DTE 做第 2 个任务用 40 拍。
+    SelfStartUnits units(clk, ts, {40, 10, 10});
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    issued = units.issued;
+    done = units.done;
+  }
+  RT::Reset();
+  std::vector<SelfStartUnits::Got> t0_issue, t0_done;
+  uint64_t chain0_second_done = 0;
+  for (auto const& g : issued) {
+    if (g.task == 0) t0_issue.push_back(g);
+  }
+  for (auto const& g : done) {
+    if (g.task == 0) t0_done.push_back(g);
+    if (g.stream == 0 && g.task == 1 && chain0_second_done == 0) {
+      chain0_second_done = g.at;
+    }
+  }
+  ASSERT_GE(t0_issue.size(), 4u);
+  for (uint64_t k = 0; k < 4; ++k) {
+    EXPECT_EQ(t0_issue[k].stream, k) << "按链的次序下发";
+  }
+  for (uint64_t k = 0; k + 1 < t0_issue.size(); ++k) {
+    ASSERT_LT(k, t0_done.size());
+    EXPECT_GT(t0_issue[k + 1].at, t0_done[k].at)
+        << "第 " << k + 1 << " 笔 Task 0 要等上一笔做完";
+  }
+  EXPECT_LT(t0_issue[1].at, chain0_second_done)
+      << "taskchain0 的第 2 个任务还在做时 taskchain1 的 Task 0 已经下发";
+}
+
+// 自启动 core：一条链的全部任务做完，照常向 Router 退休；Router 收下之后这条链
+// 在原来的 stream 上重新激活成 Task 0，排到队尾，等前面那条链的 Task 0 做完才轮
+// 到它。表一直是满的。
+TEST(BachTs, SelfStartChainRestartsInPlace) {
+  std::vector<uint64_t> t0_streams;
+  uint64_t retire_seen = 0, in_flight = 0;
+  bool both_valid = false, third_valid = true;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Ts ts(clk, "ts", TsCfg{});
+    WriteSelfStartChain(ts, 2);
+    RouterSide router(clk, ts, kNever, 0);
+    SelfStartUnits units(clk, ts, {5, 5, 5});
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    for (auto const& g : units.issued) {
+      if (g.task == 0) t0_streams.push_back(g.stream);
+    }
+    retire_seen = router.retire_seen;
+    in_flight = ts.Table().TailPtr() - ts.Table().HeadPtr();
+    both_valid = ts.Table().Peek(0).valid && ts.Table().Peek(1).valid;
+    third_valid = ts.Table().Peek(2).valid;
+  }
+  RT::Reset();
+  ASSERT_GE(t0_streams.size(), 6u);
+  for (uint64_t k = 0; k < 6; ++k) {
+    EXPECT_EQ(t0_streams[k], k % 2) << "重新激活的链排到队尾，两条链轮流";
+  }
+  EXPECT_GE(retire_seen, 2u) << "退休照常先交给 Router";
+  EXPECT_EQ(in_flight, 2u) << "表一直是满的";
+  EXPECT_TRUE(both_valid);
+  EXPECT_FALSE(third_valid) << "只在原来的 stream 上重新激活";
+}
+
+// 自启动 core 在权重加载模式下写 TS_INIT_FINISH 不建表：这一阶段不启动任务链。
+// 切回业务模式再写一次，才建满 stream_num 个表项。
+TEST(BachTs, SelfStartBuildsNothingInWeightsMode) {
+  bool built_in_weights = true, built_in_business = false;
+  uint64_t in_flight = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Ts ts(clk, "ts", TsCfg{});
+    ts.Cfg().WriteTask(0, MakeTask(SendUnit::kMu, /*end=*/false, /*dsa=*/false));
+    ts.Cfg().WriteTask(1, MakeTask(SendUnit::kDte, /*end=*/true, /*dsa=*/false));
+    ts.Cfg().SetSelfStart(true);
+    ts.Cfg().SetStreamNum(4);
+    ts.Cfg().WriteDatainTask(0x300, /*weights_mode=*/true);
+    ts.InitFinish();
+    built_in_weights = ts.Table().Peek(0).valid;
+    ts.Cfg().WriteDatainTask(0x300, /*weights_mode=*/false);
+    ts.InitFinish();
+    built_in_business = ts.Table().Peek(0).valid && ts.Table().Peek(3).valid;
+    in_flight = ts.Table().TailPtr() - ts.Table().HeadPtr();
+  }
+  RT::Reset();
+  EXPECT_FALSE(built_in_weights) << "权重加载模式不启动任务链";
+  EXPECT_TRUE(built_in_business);
+  EXPECT_EQ(in_flight, 4u);
 }
 
 // 配置检查：一条链上出现两个 TASK_END 是错的。

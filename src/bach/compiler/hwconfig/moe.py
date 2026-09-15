@@ -408,7 +408,7 @@ def compute_chain(out_path):
 def bcore_chain(out_path, next_path=0):
     """B core 的链二：等一格、广播出去，前五组还要往下一组转一笔。"""
     items = [
-        ChainItem(0, "VU", "RV_ONLY", ("vu", "task_bc_wait")),
+        ChainItem(0, "MU", "RV_ONLY", ("mu", "task_bc_wait")),
         ChainItem(1, "DTE", "DSA", ("dte", "task_dte_bc_send"),
                   path_id=out_path, credit_en=True, end=next_path == 0),
     ]

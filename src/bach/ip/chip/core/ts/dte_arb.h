@@ -21,6 +21,8 @@
 // 命令里带 VCID：按当前任务的 PID 查 ROUTER_TABLE 得到，DTE 出核用它选 VC。
 //
 // 重发 task 不在用户主线任务链上，可与用户任务链并行执行。
+//
+// 自启动 core 上 Task 0 一次只放一笔，规则与 MU_Arb、VU_Arb 相同。
 
 #include <memory>
 #include <string>
@@ -93,6 +95,11 @@ class DteArb : public BachModule {
         issued_stream = kStreamNum;
       }
     }
+    // 自启动 core：Task 0 一次只放一笔。有一条链的 Task 0 发出去还没完成时，
+    // 别的链的 Task 0 都等着；刚发出、快照上还是 READY 的那两拍也算。
+    bool task0_busy = cfg.SelfStartCore() &&
+                      (s->Task0Infly() ||
+                       (issued_stream < kStreamNum && issued_task == 0));
     // DataIn 与普通 Generated 按相对 head_ptr 的 Stream 年龄比较，较老者优先；
     // 同一个 Stream 上两者都在时优先选 Generated。
     //
@@ -109,7 +116,7 @@ class DteArb : public BachModule {
     for (uint64_t k = 0; k < kStreamNum; ++k) {
       uint64_t i = s->AgeOrder(k);
       StreamEntry const& e = s->entry[i];
-      if (Candidate(i, e)) {
+      if (Candidate(i, e, task0_busy)) {
         Lock(i, e);
         return;
       }
@@ -125,11 +132,12 @@ class DteArb : public BachModule {
     cmd->Idle();
   }
 
-  bool Candidate(uint64_t i, StreamEntry const& e) const {
+  bool Candidate(uint64_t i, StreamEntry const& e, bool task0_busy) const {
     if (!e.valid || e.task_fsm != TaskFsm::kReady ||
         e.task_unit != SendUnit::kDte) {
       return false;
     }
+    if (task0_busy && e.task_id == 0) return false;
     // 刚发出去的那一笔，表里的 READY → INFLY 还没落下来：写口一拍、快照一拍，
     // 这两拍里快照上它仍是 READY。不挡住的话同一个 task 会被下发两次。
     return !(i == issued_stream && e.task_id == issued_task);

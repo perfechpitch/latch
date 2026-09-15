@@ -16,7 +16,8 @@
 // 通路上的 flit credit。
 //
 // 退休顺序不能反：先向 Router 持续发 credit 返还请求，Router 接收后才清该槽位的
-// valid 并推进 head_ptr。反了会让还在路上的 credit 无处归还。
+// valid 并推进 head_ptr。反了会让还在路上的 credit 无处归还。自启动 core 同样先
+// 等 Router 接收，之后不清 valid，把这条链原地重新激活成 Task 0、排到队尾。
 
 #include <deque>
 #include <memory>
@@ -66,6 +67,9 @@ class TsCreditMonitor : public BachModule {
 
   uint64_t Woken() const { return woken.Get(); }
   uint64_t Retired() const { return retired.Get(); }
+  // 自启动 core 上 Router 收下退休请求后原地重新激活的笔数，Core 层拿它并进
+  // ts_create。
+  uint64_t Reactivated() const { return reactivate_cnt; }
   uint64_t RmemAdmitted() const { return rmem_admitted.Get(); }
 
   bool Quiescent() const override { return !asking && !retiring; }
@@ -91,17 +95,26 @@ class TsCreditMonitor : public BachModule {
   void DoRetire() {
     if (retiring) {
       if (!retire_req->Accepted()) return;  // Router 还没收，保持
-      // Router 收下了才清 valid 并推 head_ptr。
+      // Router 收下了才动表项：普通 core 清 valid 并推 head_ptr；自启动 core
+      // 把这条链原地重新激活成 Task 0，排到队尾。
       auto w = std::make_shared<StreamWrite>();
       w->valid = true;
       w->stream_id = retire_slot;
-      w->clear_valid = true;
+      if (cfg.SelfStartCore()) {
+        w->whole = true;
+        w->entry = SelfStartEntry(cfg.Task(0));
+        w->reactivate = true;
+        w->stream_num = cfg.StreamNum();
+        ++reactivate_cnt;
+      } else {
+        w->clear_valid = true;
+      }
       retire_wr->Drive(w);
       retire_req->Idle();
       retiring = false;
-      // 清 valid 的那一笔写要下一拍才落进表、再下一拍才进快照。这中间读到的
-      // 还是旧快照，同一项会被再判成「可以退休」。记住它，等快照里那一项的
-      // valid 掉下去再放开。
+      // 这一笔写要下一拍才落进表、再下一拍才进快照。这中间读到的还是旧快照，
+      // 同一项会被再判成「可以退休」。记住它，等快照里那一项不再满足退休条件
+      // 再放开：普通 core 上是 valid 掉下去，自启动 core 上是完成位清空。
       just_retired = retire_slot;
       just_retired_vld = true;
       ++retire_pending;
@@ -113,8 +126,12 @@ class TsCreditMonitor : public BachModule {
       retire_req->Idle();
       return;
     }
+    uint64_t through = cfg.ThroughEndMask();
     if (just_retired_vld) {
-      if (!s->entry[just_retired].valid) just_retired_vld = false;
+      StreamEntry const& old = s->entry[just_retired];
+      if (!old.valid || (old.done_bitmap & through) != through) {
+        just_retired_vld = false;
+      }
     }
     uint64_t h = s->head_ptr;
     StreamEntry const& e = s->entry[h];
@@ -122,7 +139,6 @@ class TsCreditMonitor : public BachModule {
       retire_req->Idle();
       return;
     }
-    uint64_t through = cfg.ThroughEndMask();
     if (e.valid && through != 0 && (e.done_bitmap & through) == through) {
       retire_req->Drive(e.user_id);
       retiring = true;
@@ -249,6 +265,8 @@ class TsCreditMonitor : public BachModule {
   bool just_retired_vld = false;
   uint64_t retire_slot = 0, just_retired = 0;
   uint64_t wake_pending = 0, retire_pending = 0, rmem_pending = 0;
+  // 重新激活的笔数，供 Core 层发波形。
+  uint64_t reactivate_cnt = 0;
 
   Logic64 woken, retired, rmem_admitted;
 };

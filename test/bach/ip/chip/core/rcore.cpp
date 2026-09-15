@@ -154,8 +154,7 @@ void WriteRcoreChains(Core& core) {
   core.GetTs().Cfg().SetSelfStart(true);
   // B core 与 R core 的 stream_num 配 16，自启动数因此也是 16（ts.md F72）。
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
-  core.GetTs().Cfg().SetInitFinish();
-  core.GetTs().SelfStart();
+  core.GetTs().InitFinish();
 }
 
 RouteEntry EnterCore() {
@@ -345,7 +344,7 @@ TEST(BachRcore, TwoPartsAreSummedAndSentOn) {
 }
 
 // 用户之间乱序：谁先集齐谁先走，不按到达顺序。三个用户交叉着来，第二个先集
-// 齐，它就先算完出去。三个都走完，说明表项退休之后又自发建了新的自启动链。
+// 齐，它就先算完出去。三个都要走完。
 // 一个用户送出去 kPieceNum 包，按各自的第 0 包记先后。
 TEST(BachRcore, WhoeverIsCompleteFirstGoesFirst) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";

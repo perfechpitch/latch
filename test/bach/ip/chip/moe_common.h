@@ -388,7 +388,7 @@ inline void WriteMoeChain(Core& core, uint64_t out_path) {
   }
 
   core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(kInPath, 0);
 }
 
@@ -606,7 +606,7 @@ inline void EnterWeightsMode(Core& core) {
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_weights_loader", "dte"),
                                      /*weights_mode=*/true);
   core.GetTs().Cfg().SetTriggerChainEn(false);
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(kWeightsPath, 0);
   core.SetWeightsInbound();
 }
@@ -616,7 +616,7 @@ inline void EnterBusinessMode(Core& core) {
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_user_init", "dte"),
                                      /*weights_mode=*/false);
   core.GetTs().Cfg().SetTriggerChainEn(true);
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.SetBusinessInbound();
 }
 
@@ -890,8 +890,7 @@ inline void WriteRcoreChains(Core& core, uint64_t out_path) {
   core.GetTs().Cfg().SetSelfStart(true);
   // B core 与 R core 的 stream_num 配 16，自启动数因此也是 16（ts.md F72）。
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
-  core.GetTs().Cfg().SetInitFinish();
-  core.GetTs().SelfStart();
+  core.GetTs().InitFinish();
 }
 
 // ── B core：组内广播的发起点 ──
@@ -918,9 +917,9 @@ inline uint64_t BcoreLand(uint64_t seq) {
 inline void WriteBcoreChains(Core& core, uint64_t out_path, uint64_t dirs,
                              uint64_t next_path = 0) {
   TaskEntry wait;
-  wait.send_unit = SendUnit::kVu;
+  wait.send_unit = SendUnit::kMu;
   wait.recv_unit = RecvUnit::kRvOnly;
-  wait.task_pc = SymbolOf("task_bc_wait", "vu");
+  wait.task_pc = SymbolOf("task_bc_wait", "mu");
   core.GetTs().Cfg().WriteTask(0, wait);
 
   TaskEntry send;
@@ -949,8 +948,7 @@ inline void WriteBcoreChains(Core& core, uint64_t out_path, uint64_t dirs,
   core.GetTs().Cfg().SetSelfStart(true);
   core.GetTs().Cfg().SetBCoreDirection(dirs);
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
-  core.GetTs().Cfg().SetInitFinish();
-  core.GetTs().SelfStart();
+  core.GetTs().InitFinish();
 }
 
 // B core 起头的广播树：token 从 enter_port 进来，坐在那个口上的 core 不派角色，

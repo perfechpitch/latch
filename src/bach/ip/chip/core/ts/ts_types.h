@@ -128,13 +128,25 @@ inline void ApplyTaskAttr(StreamEntry& e, TaskEntry const& t) {
   e.end = t.end;
 }
 
+// 自启动 core 上一条链的起点：Task 0 的属性，还没有用户号，等 Task 0 的 RV core
+// ACK 带回来。上电建表与退休后重新激活都从它开始。
+inline StreamEntry SelfStartEntry(TaskEntry const& task0) {
+  StreamEntry e;
+  e.valid = true;
+  e.user_id_vld = false;
+  e.task_id = 0;
+  ApplyTaskAttr(e, task0);
+  e.task_fsm = InitFsmOf(task0);
+  return e;
+}
+
 // 八个写口，按来源命名。优先级由高到低就是这个顺序：让表项先腾空再填新的，
 // 回收类排在生成类前面，create 排最后，队头卡住时不会因为新用户不断插队
 // 而饿死。
 // issue 这一类有三个物理实例：三条发射通路各自独立打拍，同一拍可以并行下发
 // 3 个 task，各自都要回写 READY → INFLY。三个实例优先级相同，挨在一起排。
 enum StreamWritePort : uint32_t {
-  kWrRetirement = 0,  // 清 valid 并推 head_ptr
+  kWrRetirement = 0,  // 清 valid 并推 head_ptr；自启动 core 上原地重新激活
   kWrCompletion = 1,  // 完成事件
   kWrInstall = 2,     // Task_ctrl 生成后继，整项写
   kWrIssueDte = 3,    // 发射通路收到 ACCEPT 后 READY → INFLY

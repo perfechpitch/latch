@@ -3,7 +3,9 @@
 
 // Stream_table：16 项顺序 FIFO，每项对应一条完整用户业务流。
 //
-// head_ptr 与 tail_ptr 环形推进：建表推 tail，退休推 head。
+// head_ptr 与 tail_ptr 环形推进：建表推 tail，退休推 head。自启动 core 上表一直
+// 是满的：退休的队头在同一个 stream 原地重新激活，两个指针同一步各推一格，按
+// stream_num 环回。
 //
 // 六个写口按固定优先级仲裁，每口一拍一笔，请求保持到 accepted 才算生效。优先级
 // 由高到低是 retirement、completion、install、issue、credit_wake、create，让
@@ -55,18 +57,10 @@ class StreamTable : public BachModule {
   }
   std::shared_ptr<SnapshotPort> SnapPtr() const { return snap_port; }
 
-  // 自启动的 core：复位后直接建满表项，不等 Router trigger。此时还没有用户信息，
+  // 自启动的 core：上电配完直接建满表项，不等 Router trigger。此时还没有用户信息，
   // 等自启动任务的 RV core 返回 user_id 后再补进表项。
   void SelfStart(TaskEntry const& task0, uint64_t n) {
-    for (uint64_t i = 0; i < n; ++i) {
-      StreamEntry& e = table[i];
-      e = StreamEntry{};
-      e.valid = true;
-      e.user_id_vld = false;
-      e.task_id = 0;
-      ApplyTaskAttr(e, task0);
-      e.task_fsm = InitFsmOf(task0);
-    }
+    for (uint64_t i = 0; i < n; ++i) table[i] = SelfStartEntry(task0);
     tail_ptr = n;
     snap_port->Drive(MakeSnapshot());
   }
@@ -135,6 +129,14 @@ class StreamTable : public BachModule {
     if (w.whole) {
       e = w.entry;
       if (port == kWrCreate) tail_ptr = (tail_ptr + 1) % (2 * kStreamNum);
+      if (w.reactivate) {
+        // 自启动 core：退休的队头原地重新激活，排到队尾。表一直是满的，两个
+        // 指针同一步各推一格，按 stream_num 环回，在途数不变。
+        LOGCHECK(w.stream_num > 0 && w.stream_num <= kStreamNum,
+                 "StreamTable: 重新激活时 stream_num 越界。");
+        head_ptr = (head_ptr % kStreamNum + 1) % w.stream_num;
+        tail_ptr = head_ptr + w.stream_num;
+      }
       return;
     }
     if (w.clear_valid) {

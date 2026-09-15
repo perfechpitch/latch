@@ -133,6 +133,10 @@ struct StreamWrite {
   bool set_pid = false;
   uint64_t pid = 0;
   bool clear_valid = false;
+  // retirement 口专用，自启动 core：退休的队头原地重新激活成 Task 0，排到队尾。
+  // 表一直是满的，head 与 tail 同一步各推一格，按 stream_num 环回。
+  bool reactivate = false;
+  uint64_t stream_num = 0;
   // completion 口专用：只有这一笔的 task_id 等于该 stream 当前的 task_id 时
   // 才改 task_fsm，否则只亮 done_bitmap 一位。
   bool fsm_if_current = false;
@@ -194,6 +198,16 @@ struct StreamSnapshot {
   uint64_t InFlight() const { return in_flight; }
   // 从 head_ptr 开始的环形年龄序：越靠近 head 越老。
   uint64_t AgeOrder(uint64_t k) const { return (head_ptr + k) % kStreamNum; }
+  // 有没有哪一条链停在 Task 0、已经发射还没完成。自启动 core 上 Task 0 一次只
+  // 放一笔，三条发射通路按它判。
+  bool Task0Infly() const {
+    for (StreamEntry const& e : entry) {
+      if (e.valid && e.task_id == 0 && e.task_fsm == TaskFsm::kInfly) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 using StreamSnapshotPtr = std::shared_ptr<StreamSnapshot>;

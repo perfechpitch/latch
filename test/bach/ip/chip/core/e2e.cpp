@@ -180,7 +180,7 @@ void WriteDatainChain(Core& core) {
   t.wait_wake = true;
   t.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, t);
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
@@ -335,7 +335,7 @@ void WriteTwoStepChain(Core& core) {
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(1, out);
 
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
@@ -413,7 +413,7 @@ void WriteComputeChain(Core& core) {
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(2, out);
 
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
@@ -488,7 +488,7 @@ void WriteFullChain(Core& core) {
   out.task_pc = SymbolOf("task_dte_move");
   core.GetTs().Cfg().WriteTask(3, out);
 
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
@@ -604,7 +604,7 @@ void WriteGemmChain(Core& core) {
   out.task_pc = SymbolOf("task_dte_send_fc1");
   core.GetTs().Cfg().WriteTask(2, out);
 
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
@@ -714,7 +714,7 @@ void WriteGemmActChain(Core& core) {
   out.task_pc = SymbolOf("task_dte_send_act");
   core.GetTs().Cfg().WriteTask(3, out);
 
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 

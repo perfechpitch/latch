@@ -160,6 +160,36 @@ TASK void task_rc_find(void) {
   }
 }
 
+/* ===== B core 链二的第一步：等有没发出去的 token =====
+ *
+ * 硬件把一笔搬进 Matrix Mem 之后置那一格的 valid，这里循环查 tail 指的那一格：
+ * 置起来了就把 tail 推一格。head 与 tail 不相等就说明有还没发的，把 head 那一
+ * 格是哪个用户写回身份寄存器，交给后面那一步发。
+ *
+ * 等不到就一直等：这个 RV core 在 B core 的任务链上没有别的活，长期占用不挡同
+ * 一个 core 上的其他 task。这一档不调 DSA。 */
+TASK void task_bc_wait(void) {
+  for (;;) {
+    u32 tail = smem_read(BC_TAIL_OFF);
+    if (smem_read(BC_FLAG_OFF + (tail % BC_SLOTS) * 4) != 0) {
+      tail = tail + 1;
+      smem_write(BC_TAIL_OFF, tail);
+    }
+    u32 head = smem_read(BC_HEAD_OFF);
+    if (head != tail) {
+      u32 slot = head % BC_SLOTS;
+      /* 认下这一格就把它从待发那一段里划走：这一笔报完成，TS 就把下一条链的
+       * task 0 发下来，而本条链的 DTE 还没发，划晚了会认到同一格，同一笔发两遍 */
+      smem_write(BC_FLAG_OFF + slot * 4, 0);
+      smem_write(BC_HEAD_OFF, head + 1);
+      smem_write(BC_SLOT_OFF + stream_id() * 4, slot);
+      set_user_id(smem_read(BC_USER_OFF + slot * 4));
+      task_done();
+      return;
+    }
+  }
+}
+
 void kernel_init(void) {
   /* 异常复位默认全屏蔽，写 0 打开上报 */
   mmio_write(MU_IO_BASE, MU_EXCEPT_MASK, 0);

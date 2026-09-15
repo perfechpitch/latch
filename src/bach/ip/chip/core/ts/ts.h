@@ -50,9 +50,9 @@ class Ts {
                                            setting.tick);
     dte_arb = std::make_unique<DteArb>(clock, "dte_arb", *user_match, *cfg,
                                        gid, setting.tick);
-    mu_arb = std::make_unique<UnitArb>(clock, "mu_arb", SendUnit::kMu,
+    mu_arb = std::make_unique<UnitArb>(clock, "mu_arb", SendUnit::kMu, *cfg,
                                        gid, setting.tick);
-    vu_arb = std::make_unique<UnitArb>(clock, "vu_arb", SendUnit::kVu,
+    vu_arb = std::make_unique<UnitArb>(clock, "vu_arb", SendUnit::kVu, *cfg,
                                        gid, setting.tick);
     task_done = std::make_unique<TaskDone>(clock, "task_done", *cfg, gid,
                                            setting.tick);
@@ -63,6 +63,16 @@ class Ts {
 
   // ── 配置面 ──
   CfgReg& Cfg() { return *cfg; }
+
+  // 配置的最后一步：写 TS_INIT_FINISH。查完整张配置表，自启动的 core（B core
+  // 与 R core）随即建满 stream_num 个表项，不等 Router trigger。权重加载模式不
+  // 启动任务链，这时不建。
+  void InitFinish() {
+    cfg->SetInitFinish();
+    if (cfg->SelfStartCore() && !cfg->WeightsMode()) {
+      table->SelfStart(cfg->Task(0), cfg->StreamNum());
+    }
+  }
 
   // ── 对外：接 Router ──
   TriggerPort& Trigger() { return user_match->Trigger(); }
@@ -111,12 +121,6 @@ class Ts {
   UnitArb& VuArbiter() { return *vu_arb; }
   TaskDone& Done() { return *task_done; }
   TsCreditMonitor& Credit() { return *credit; }
-
-  // 自启动：B core 与 R core 复位后直接建满表项，不等 Router trigger。
-  void SelfStart() {
-    if (!cfg->SelfStartCore()) return;
-    table->SelfStart(cfg->Task(0), cfg->StreamNum());
-  }
 
   void RunStep() {
     cfg->RunStep();

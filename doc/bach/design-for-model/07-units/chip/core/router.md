@@ -482,7 +482,7 @@ port ts2router_req (slave, valid/ready, clk)          // TS → CoreMemCreditMon
   out req_ready                                           // = 监听事件队列有空项
 port ts2router_retire (slave, valid/ready, clk)        // TS → Retire：用户退休与 credit 返还
   in  valid · user_id[15:0]
-  out accepted                                            // 即 ready：Router 接收后 TS 才清 valid 并推进 head_ptr
+  out accepted                                            // 即 ready：Router 接收后 TS 才动表项，普通模式清 valid 并推进 head_ptr，自启动模式原地重新激活
 port stream_credit (master, 电平, clk)               // per-port 的 stream credit 同步信息，给 core 与 DTE
   out credit_vld[2:0] · credit_user[2:0][15:0]
 port cmem_reissue (master, valid/ready, clk)          // CoreMem 重发与 Core Mem 之间的暂存读写，256 B

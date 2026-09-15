@@ -170,8 +170,8 @@ struct Bench {
     table = std::make_unique<StreamTable>(c, "table", 0, false);
     um = std::make_unique<UserMatch>(c, "um", *cfg, 0, false);
     dte = std::make_unique<DteArb>(c, "dte", *um, *cfg, 0, false);
-    mu = std::make_unique<UnitArb>(c, "mu", SendUnit::kMu, 0, false);
-    vu = std::make_unique<UnitArb>(c, "vu", SendUnit::kVu, 0, false);
+    mu = std::make_unique<UnitArb>(c, "mu", SendUnit::kMu, *cfg, 0, false);
+    vu = std::make_unique<UnitArb>(c, "vu", SendUnit::kVu, *cfg, 0, false);
     auto snap = table->SnapPtr();
     um->AttachSnapshot(snap);
     dte->AttachSnapshot(snap);
@@ -230,6 +230,8 @@ TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
     b.cfg->WriteDatainTask(0x3000, /*weights_mode=*/false);
     b.cfg->SetStreamNum(1);
     b.cfg->SetInitFinish();
+    // 上电配完就建满表项，与 Ts::InitFinish() 同一步。
+    b.table->SelfStart(t0, 1);
 
     IssueBench h(clk, *b.cfg, *b.table, *b.um, *b.dte, *b.mu, *b.vu);
     // 同一个用户的两笔数据从两个方向来，各自都要被登记一次。
@@ -240,7 +242,7 @@ TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
     used = b.table->TailPtr() - b.table->HeadPtr();
   }
   RT::Reset();
-  // 表里那一项是自启动补出来的，不是进来的包建的：包只登记 datain 任务。
+  // 表里那一项是上电时自启动建的，不是进来的包建的：包只登记 datain 任务。
   EXPECT_EQ(used, 1u);
   ASSERT_EQ(d.size(), 2u) << "同一个用户来两次要登记两次";
   for (auto const& one : d) {

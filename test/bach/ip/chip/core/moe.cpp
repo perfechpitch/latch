@@ -711,7 +711,7 @@ void WriteMoeChain(Core& core) {
   out.task_pc = SymbolOf("task_dte_send_moe", "dte");
   core.GetTs().Cfg().WriteTask(4, out);
 
-  core.GetTs().Cfg().SetInitFinish();
+  core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 

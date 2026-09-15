@@ -25,7 +25,7 @@ CFGMISC 0 7 16 0 0x0 1
 CFGMISC 0 8 16 0 0x0 1
 CFGMISC 0 9 16 0 0x0 1
 # TCHAIN <chip> <core> <idx> <task_pc> <unit> <recv_unit> <wait_wake> <task_type> <p2p_reissue_tid> <credit_en> <path_id> <end>
-TCHAIN 0 0 0 0x36c 2 0 0 0 0 0 0 0
+TCHAIN 0 0 0 0x438 1 0 0 0 0 0 0 0
 TCHAIN 0 0 1 0x588 0 1 0 0 0 1 4 1
 TCHAIN 0 1 0 0xa8 0 1 1 0 0 0 4 0
 TCHAIN 0 1 1 0x1c8 1 0 0 0 0 0 0 0

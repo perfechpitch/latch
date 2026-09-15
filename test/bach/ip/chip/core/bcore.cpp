@@ -5,9 +5,9 @@
 //
 //   链一  由 Router 触发。落点与 valid 标志都由硬件按包头办，datain 那一段只
 //         把这一格是哪个用户记进 Share Mem
-//   链二  自启动。VU 查 tail 那一格的 valid，置起来了就把 tail 推一格；head 与
-//         tail 不相等就说明有还没发的，DTE 把 head 那一笔从 Matrix Mem 广播
-//         出去，发完清那一格的 valid 并把 head 推一格
+//   链二  自启动。MU 查 tail 那一格的 valid，置起来了就把 tail 推一格；head 与
+//         tail 不相等就认下 head 那一格：清掉它的 valid、推一格 head，DTE 再把
+//         那一笔从 Matrix Mem 广播出去
 //
 // 这一份验的是两条链接起来之后走不走得通：一笔都没有时链二在 task 0 上等着，
 // 连着几笔时按进来的次序发出去，发出去的那一份与送进来的逐字节相同。
@@ -95,9 +95,9 @@ MessagePtr MakeToken(uint64_t seq, uint64_t user,
 // B core 的两条链。链二从 task 0 起，链一是单独配的 datain_task。
 void WriteBcoreChains(Core& core) {
   TaskEntry wait;
-  wait.send_unit = SendUnit::kVu;
+  wait.send_unit = SendUnit::kMu;
   wait.recv_unit = RecvUnit::kRvOnly;
-  wait.task_pc = SymbolOf("task_bc_wait", "vu");
+  wait.task_pc = SymbolOf("task_bc_wait", "mu");
   core.GetTs().Cfg().WriteTask(0, wait);
 
   TaskEntry send;
@@ -117,8 +117,7 @@ void WriteBcoreChains(Core& core) {
   // 广播只往中间那一路发，TS 下发搬出之前查的就是这个方向的下游资源。
   core.GetTs().Cfg().SetBCoreDirection(kFlowMid);
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
-  core.GetTs().Cfg().SetInitFinish();
-  core.GetTs().SelfStart();
+  core.GetTs().InitFinish();
 }
 
 RouteEntry EnterCore() {

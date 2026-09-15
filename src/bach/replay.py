@@ -14,7 +14,7 @@
 样式与操作照 doc/bach/design-for-model/09-*.html 那几份动画讲解：左边舞台、右边
 信息栏、底下播放条，空格播放暂停、左右方向键单步。
 
-只认 Bach 的摆法：chip / core 的编号与 Core::EmitTrace() 那几个信号名，换个项目
+只认 Bach 的摆法：chip 下面挂 coreN，core 下面是 Core::EmitTrace() 那几个信号名，换个项目
 就不成立。读波形那一段按 latch 的 .trace 格式自己解，格式与
 src/utils/insight/reader.py 同一套。
 
@@ -238,7 +238,7 @@ ROUTER_SIGS = [
 CORE_SIGS = ROUTER_SIGS + [
     "core_out", "ts_inflight", "ts_issue", "ts_done",
     # 这两个是打包值：ts_unit 是位掩码，ts_task 三路各占 8 bit。不画成波形，
-    # 解成「本拍哪一路下发了第几号 task」，core 那一级按它分步。
+    # 解成「哪一拍哪一路下发了第几号 task」，core 那一级按它分步。
     "ts_unit", "ts_task",
 ]
 # 画成波形看的那些，打包的两个不在里面。
@@ -255,15 +255,37 @@ CUM_SIGS = ["fwd_mid", "fwd_left", "fwd_right", "fwd_core",
 # 一颗 chip 四个 C2C 口的方位，与 chip.h 的 BuildBridges 同序。
 PORTS = ["n", "e", "w", "s"]
 
-RE_CORE = re.compile(r"^chip(\d+)\.core(\d+)\.(\w+)$")
-RE_C2C = re.compile(r"^chip(\d+)\.c2c_([news])\.(\w+)\.(\w+)$")
-RE_SCP = re.compile(r"^chip(\d+)\.scp\.(\w+)$")
+RE_CORE = re.compile(r"^(\w+)\.core(\d+)\.(\w+)$")
+RE_C2C = re.compile(r"^(\w+)\.c2c_([news])\.(\w+)\.(\w+)$")
+RE_SCP = re.compile(r"^(\w+)\.scp\.(\w+)$")
+RE_TAIL_NUM = re.compile(r"^(.*?)(\d+)$")
+
+
+def chip_order(name: str):
+    """chip 的排法：名字末尾带编号的按编号排（chip2 在 chip10 前面），其余按名字排。"""
+    m = RE_TAIL_NUM.match(name)
+    return (m.group(1), int(m.group(2))) if m else (name, -1)
 
 
 def collect(prefix: str) -> dict:
-    """从波形里把 chip / core / 链路三档数据取出来，顺带算出拓扑。"""
+    """从波形里把 chip / core / 链路三档数据取出来，顺带算出拓扑。
+
+    顶层模块下面挂着 coreN、c2c_* 或 scp 的就算一颗 chip，名字不限：一个 LPU 里
+    是 chip0～chip47，单颗 chip 的用例叫 chip，两个 EP 组的用例叫 g0、g1。chip 按
+    chip_order 排好后依次编号，页面上显示原名。"""
     with Reader(prefix) as r:
         paths = r.tree_paths()
+        found: Dict[str, None] = {}
+        for sig_id in r.signals():
+            name = paths.get(sig_id) or ""
+            for rx in (RE_CORE, RE_C2C, RE_SCP):
+                m = rx.match(name)
+                if m:
+                    found[m.group(1)] = None
+                    break
+        chip_names = sorted(found, key=chip_order)
+        cid = {n: i for i, n in enumerate(chip_names)}
+
         core: Dict[str, List[int]] = {}
         c2c: Dict[str, List[int]] = {}
         scp: Dict[str, List[int]] = {}
@@ -278,7 +300,7 @@ def collect(prefix: str) -> dict:
                 continue
             m = RE_CORE.match(name)
             if m and m.group(3) in CORE_SIGS:
-                c, k, s = int(m.group(1)), int(m.group(2)), m.group(3)
+                c, k, s = cid[m.group(1)], int(m.group(2)), m.group(3)
                 ts, vs = r.events(sig_id)
                 if not ts:
                     continue
@@ -296,7 +318,7 @@ def collect(prefix: str) -> dict:
 
             m = RE_C2C.match(name)
             if m:
-                c, p, sub, s = int(m.group(1)), m.group(2), m.group(3), m.group(4)
+                c, p, sub, s = cid[m.group(1)], m.group(2), m.group(3), m.group(4)
                 # 出片那一路用 axi_out 的在途数，进片那一路用 axi_in 的。
                 if not (sub in ("axi_out", "axi_in") and s == "inflight"):
                     continue
@@ -323,8 +345,8 @@ def collect(prefix: str) -> dict:
                     flat.append(int(t))
                     flat.append(int(v))
                     frames.add(int(t))
-                scp[f"{int(m.group(1))}.{m.group(2)}"] = flat
-                chips.setdefault(int(m.group(1)), set())
+                scp[f"{cid[m.group(1)]}.{m.group(2)}"] = flat
+                chips.setdefault(cid[m.group(1)], set())
                 t_end = max(t_end, int(ts[-1]))
 
     ids = sorted(chips)
@@ -337,6 +359,7 @@ def collect(prefix: str) -> dict:
         ccols = 5 if n > 8 else max(1, (n + 1) // 2)
         topo.append({
             "id": c,
+            "name": chip_names[c],
             "gx": ids.index(c) % cols,
             "gy": ids.index(c) // cols,
             "cols": ccols,
@@ -488,6 +511,8 @@ let playing = false, fps = 24, stride = 1, timer = null;
 
 const chipById = {};
 D.chips.forEach(ch => chipById[ch.id] = ch);
+// 页面上显示 chip 在波形里的原名。
+const chipName = c => chipById[c] ? chipById[c].name : 'chip' + c;
 
 // 一颗 chip 本拍的三个汇总量：转发量、堵住的笔数、在飞的 stream 数。
 function chipStat(ch){
@@ -511,7 +536,9 @@ function coreStat(c,k){
   return o;
 }
 
-// ── 分步：ts_unit 是位掩码，ts_task 三路各占 8 bit，0xFF 表示那一路没发 ──
+// ── 分步：ts_unit 是位掩码，ts_task 三路各占 8 bit，0xFF 表示那一路没发。两个信号
+// 每拍都发，波形只在值变了的那一拍记事件：同一路连着几拍都下发时 ts_unit 几拍同值，
+// 事件只落在头一拍。所以非零的那一段要逐拍展开，一拍一笔，task 号按那一拍取 ──
 const UNAME = ['DTE', 'MU', 'VU'];
 const stepCache = {};
 function stepsOf(c, k){
@@ -521,9 +548,13 @@ function stepsOf(c, k){
   const issue = [];
   for(let j = 0; j < um.length; j += 2){
     const mask = um[j+1]; if(!mask) continue;
-    const t = um[j], pack = valAt(tk, t);
-    for(let u = 0; u < 3; ++u)
-      if(mask & (1 << u)) issue.push({t, u, task: (pack >> (8*u)) & 0xFF});
+    // 这个值保持到下一个事件；最后一个事件之后波形就停了，只算那一拍。
+    const t0 = um[j], t1 = j + 2 < um.length ? um[j+2] : t0 + 1;
+    for(let t = t0; t < t1; ++t){
+      const pack = valAt(tk, t);
+      for(let u = 0; u < 3; ++u)
+        if(mask & (1 << u)) issue.push({t, u, task: (pack >> (8*u)) & 0xFF});
+    }
   }
   // 完成数是累计的，取增量当完成事件。
   const dn = D.core[key + ".ts_done"] || [], done = [];
@@ -585,7 +616,7 @@ function drawGrid(){
     if(h) r.setAttribute('fill', `color-mix(in srgb, var(--accent) ${Math.round(h*100)}%, var(--box))`);
     g.appendChild(r);
     g.appendChild(el('text', {class:'t', x:p.x+9, y:p.y+18, 'font-size':12,
-      'font-weight':600})).textContent = 'chip' + ch.id;
+      'font-weight':600})).textContent = ch.name;
     g.appendChild(el('text', {class:'cnt', x:p.x+9, y:p.y+34}))
       .textContent = `fwd ${st.flow}  occ ${st.occ}  st ${st.jam}`;
     g.appendChild(el('text', {class:'cnt', x:p.x+CW-9, y:p.y+18,
@@ -1112,7 +1143,7 @@ function panel(){
   }
   if(view.k === 'chip'){
     const ch = chipById[view.c], st = chipStat(ch);
-    name.textContent = 'chip' + ch.id;
+    name.textContent = ch.name;
     sub.textContent = `${ch.cores.length} 个 core · 摆成 2 × ${ch.cols}`;
     rows([['本拍片内转发 flit', st.flow], ['VC Buffer 占用合计', st.occ],
           ['Xbar 没发出去', st.jam], ['在飞的 stream', st.task],
@@ -1124,7 +1155,7 @@ function panel(){
   }
   if(view.k === 'router'){
     const rs = coreStat(view.c, view.k2);
-    name.textContent = `chip${view.c} · core${view.k2} · Router`;
+    name.textContent = `${chipName(view.c)} · core${view.k2} · Router`;
     sub.textContent = '照设计文档的方框摆，每个框写本拍的量，有 flit 经过的线点亮';
     const groups = [
       ['从哪进来', ['fwd_mid', 'fwd_left', 'fwd_right', 'fwd_core']],
@@ -1146,7 +1177,7 @@ function panel(){
   const st = coreStat(view.c, view.k2);
   const co = chipById[view.c].cores.find(x => x.i === view.k2) || {role:true};
   const sp = stepsOf(view.c, view.k2), si = stepAt(view.c, view.k2);
-  name.textContent = `chip${view.c} · core${view.k2}`;
+  name.textContent = `${chipName(view.c)} · core${view.k2}`;
   sub.textContent = co.role ? '派了角色，Router / TS / DTE 都在跑'
                             : '不派角色，只有 Router 转发';
   if(sp.issue.length){
@@ -1200,7 +1231,7 @@ function nav(){
     s.className = 'sep'; s.textContent = '›'; n.appendChild(s); };
   add('阵列', view.k === 'grid', () => { view = {k:'grid'}; sel = null; render(); });
   if(view.k !== 'grid'){
-    sep(); add('chip' + view.c, view.k === 'chip',
+    sep(); add(chipName(view.c), view.k === 'chip',
       () => { view = {k:'chip', c:view.c}; sel = {k:'chip', c:view.c}; render(); });
   }
   if(view.k === 'core' || view.k === 'router'){
