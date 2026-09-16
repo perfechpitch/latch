@@ -73,11 +73,11 @@ class Core : public BachModule {
     // local。CoreStation 永远不准入，ReduceModule 不累加。
     rcfg.pass_through = ctx.router_only;
     rcfg.tick = false;
-    // 波形上一个 core 只有 EmitTrace() 那一组信号，直接挂在 core 下面，单元与
-    // 模块不在层次里各占一级。所以底下的模块建出来时波形一律关掉，由本层统一
-    // 发。要看某个模块自己的全部信号，跑 test/bach/ip/chip/core/ 下对应的单
-    // 模块用例，那里不经这一层。
-    TraceOffScope off;
+    // 波形上一个 core 记两层：EmitTrace() 那组精选信号直接挂在 core 下面，外加
+    // 底下各单元模块自己的全部信号（层次 chip<i>.core<j>.<单元>.<模块>.<信号>）。
+    // 全量在 48 chip 规模下信号上万、波形很大，只想看流程就把下一行取消注释、
+    // 退回只发精选信号（或调小 moe_lpu 的 kTraceChips）。
+    // TraceOffScope off;
     router = std::make_unique<Router>(clock, "router", rcfg, Id());
     if (ctx.router_only) return;
 
