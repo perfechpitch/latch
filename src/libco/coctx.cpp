@@ -1,5 +1,6 @@
 
 #include "coctx.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -37,6 +38,25 @@ enum {
   kRSP = 13,
 };
 
+#if defined(__x86_64__)
+// coctx_swap.S 按偏移 112/120 存取这两个槽位，与 regs[14]/regs[15] 对应。
+enum {
+  kMXCSR = 14,
+  kFPCW = 15,
+};
+
+// MXCSR 与 x87 控制字的 ABI 默认值（SSE2 初始状态 / 扩展精度、就近舍入）。
+// memset 出来的 0 是个非法状态：它把所有浮点异常都解除屏蔽，第一次不精确
+// 结果就会 SIGFPE。所以每次 memset 之后都要把这两个槽位填回默认值。
+static const uint32_t kDefaultMXCSR = 0x1F80;
+static const uint32_t kDefaultFPCW = 0x037F;
+
+static void coctx_init_fp(coctx_t* ctx) {
+  ctx->regs[kMXCSR] = (void*)(uintptr_t)kDefaultMXCSR;
+  ctx->regs[kFPCW] = (void*)(uintptr_t)kDefaultFPCW;
+}
+#endif
+
 extern "C" {
 extern void coctx_swap(coctx_t*, coctx_t*) asm("coctx_swap");
 };
@@ -67,6 +87,7 @@ int coctx_make(coctx_t* ctx, coctx_pfn_t pfn, const void* s, const void* s1) {
   sp = (char*)((unsigned long)sp & -16LL);
 
   memset(ctx->regs, 0, sizeof(ctx->regs));
+  coctx_init_fp(ctx);
   void** ret_addr = (void**)(sp);
   *ret_addr = (void*)pfn;
 
@@ -81,6 +102,8 @@ int coctx_make(coctx_t* ctx, coctx_pfn_t pfn, const void* s, const void* s1) {
 
 int coctx_init(coctx_t* ctx) {
   memset(ctx, 0, sizeof(*ctx));
+  // 主伪协程的 ctx 会被 co_swap 保存、并在 co_yield_env 时恢复，初值同样要合法。
+  coctx_init_fp(ctx);
   return 0;
 }
 

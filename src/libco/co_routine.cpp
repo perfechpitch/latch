@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <string>
 #include <map>
 
@@ -55,7 +56,14 @@ struct stCoRoutineEnv_t
 
 void co_log_err( const char *fmt,... )
 {
+	va_list ap;
+	va_start( ap,fmt);
+	vfprintf( stderr,fmt,ap );
+	va_end( ap );
 }
+
+// 越界这类错误在协程栈上继续跑下去只会把坏状态传得更远，所以记一笔就退出。
+#define CO_ASSERT( cond,msg ) do { if( !(cond) ) { co_log_err( "%s\n",(msg) ); abort(); } } while(0)
 
 #if defined( __LIBCO_RDTSCP__)
 static unsigned long long counter(void)
@@ -513,6 +521,8 @@ void co_resume( stCoRoutine_t *co )
 		coctx_make( &co->ctx,(coctx_pfn_t)CoRoutineFunc,co,0 );
 		co->cStart = 1;
 	}
+	CO_ASSERT( env->iCallStackSize < (int)( sizeof(env->pCallStack)/sizeof(env->pCallStack[0]) ),
+	           "co_resume: 协程嵌套层数超过 pCallStack[128]，再推一次会越界写坏 env" );
 	env->pCallStack[ env->iCallStackSize++ ] = co;
 
 	lpCurrRoutine->BaseTime = latch::GetBase();
@@ -549,6 +559,10 @@ void co_reset(stCoRoutine_t * co)
 
 void co_yield_env( stCoRoutineEnv_t *env )
 {
+	// 主伪协程（pCallStack[0]）没有可以返回的上一层，在这里让出会读到
+	// pCallStack[-1]。这条错误在 latch 的用法里走不到，但 API 本身是裸奔的。
+	CO_ASSERT( env->iCallStackSize >= 2,
+	           "co_yield_env: 从主协程让出，没有上一层可返回" );
 	stCoRoutine_t *last = env->pCallStack[ env->iCallStackSize - 2 ];
 	stCoRoutine_t *curr = env->pCallStack[ env->iCallStackSize - 1 ];
 
@@ -707,6 +721,40 @@ void co_init_curr_thread_env()
 stCoRoutineEnv_t *co_get_curr_thread_env()
 {
 	return gCoEnvPerThread;
+}
+
+// 把 co_init_curr_thread_env 建起来的东西全部还回去。
+//
+// 线程退出时没有任何析构会替它做这件事：gCoEnvPerThread 是个裸的 __thread 指针，
+// 每线程一份超时时间轮（60*1000 槽 × 16 B ≈ 960 KB）加一个 epoll fd 就这么留在
+// 那里。仿真框架一遍又一遍地建线程、扔线程，泄漏按线程数线性累积。
+//
+// 调用前提：本线程自己的协程已经用 co_free 释放过了。那些协程在 co_yield 时已从
+// pCallStack 上弹出，不在下面这个循环的处理范围里 —— 这里处理的是 pCallStack[0]
+// 上的主伪协程。它那个 128 KB 栈从没被真正跑过（线程用的是 pthread 自己的栈），
+// 但 co_create_env 照样给它分配了，所以要一并还。
+void co_free_curr_thread_env()
+{
+	stCoRoutineEnv_t *env = gCoEnvPerThread;
+	if( !env ) return;
+
+	for( int i = 0; i < env->iCallStackSize; i++ )
+	{
+		if( env->pCallStack[i] ) co_free( env->pCallStack[i] );
+		env->pCallStack[i] = NULL;
+	}
+	env->iCallStackSize = 0;
+
+	if( env->pEpoll )
+	{
+		// FreeEpoll 只 free 内存，不关 fd，两件事要分开做。
+		co_epoll_close( env->pEpoll->iEpollFd );
+		FreeEpoll( env->pEpoll );
+		env->pEpoll = NULL;
+	}
+
+	free( env );
+	gCoEnvPerThread = NULL;
 }
 
 void OnPollProcessEvent( stTimeoutItem_t * ap )

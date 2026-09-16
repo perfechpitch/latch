@@ -35,7 +35,10 @@ else
 LINKS += -g -L./lib -lcolib -lpthread -ldl
 endif
 
-COLIB_OBJS=co_epoll.o co_routine.o co_hook_sys_call.o coctx_swap.o coctx.o co_comm.o
+# co_hook_sys_call.o 不在其中：它把 socket/read/write/poll 定义成强符号对整个
+# 进程做 libc 符号插入，而 latch 从不调 co_enable_hook_sys()，编进去只有坏处。
+# 与 src/CMakeLists.txt 里那条 EXCLUDE 是同一件事，改一处要一起改。
+COLIB_OBJS=co_epoll.o co_routine.o coctx_swap.o coctx.o co_comm.o
 #co_swapcontext.o
 
 PROGS = colib example_poll example_echosvr example_echocli example_thread  example_cond example_specific example_copystack example_closure example_setenv

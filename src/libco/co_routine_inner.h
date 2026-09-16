@@ -59,6 +59,12 @@ struct stCoRoutine_t
 void 				co_init_curr_thread_env();
 stCoRoutineEnv_t *	co_get_curr_thread_env();
 
+// 拆掉本线程的 env：释放主伪协程、epoll fd、超时时间轮与 env 自身，并把
+// gCoEnvPerThread 置回 NULL。必须由本线程在退出前调用 —— env 是 thread_local，
+// 别的线程调不到它；线程退出时没有任何析构会替它收这个尾。
+// 调用前本线程自己的协程应已用 co_free 释放（那些协程不在 pCallStack 上）。
+void 				co_free_curr_thread_env();
+
 void    co_free( stCoRoutine_t * co );
 void    co_yield_env(  stCoRoutineEnv_t *env );
 

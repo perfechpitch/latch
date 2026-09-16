@@ -141,7 +141,10 @@ class Latch : public LeafBase<T> {
     }
 
     static uint64_t PackTidTime(uint64_t tid, Time t) {
-      LOGCHECK(t < INVALID_TIME, "Latch: exceed max time (32-bit limit).");
+      LOGCHECK(t < INVALID_TIME,
+               "Latch: 写入的时间超出环形槽 32 位打包上限。见 "
+               "time_stamp.h 的 kPackedTimeMax；正常路径上 Clock::Continue 会"
+               "在开跑时先拦下这一条。");
       return (tid << 32) | (t & 0xffff'ffffull);
     }
     static uint64_t UnpackTime(uint64_t v) { return v & 0xffff'ffffull; }

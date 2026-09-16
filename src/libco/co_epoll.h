@@ -22,6 +22,8 @@ struct co_epoll_res
 int 	co_epoll_wait( int epfd,struct co_epoll_res *events,int maxevents,int timeout );
 int 	co_epoll_ctl( int epfd,int op,int fd,struct epoll_event * );
 int 	co_epoll_create( int size );
+// 关掉 co_epoll_create 建的那个 fd。FreeEpoll 只 free 内存，不碰 fd，两者要分开调。
+int 	co_epoll_close( int epfd );
 struct 	co_epoll_res *co_epoll_res_alloc( int n );
 void 	co_epoll_res_free( struct co_epoll_res * );
 
@@ -67,6 +69,7 @@ struct co_epoll_res
 int 	co_epoll_wait( int epfd,struct co_epoll_res *events,int maxevents,int timeout );
 int 	co_epoll_ctl( int epfd,int op,int fd,struct epoll_event * );
 int 	co_epoll_create( int size );
+int 	co_epoll_close( int epfd );
 struct 	co_epoll_res *co_epoll_res_alloc( int n );
 void 	co_epoll_res_free( struct co_epoll_res * );
 

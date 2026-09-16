@@ -217,6 +217,14 @@ ThreadPool::SimThread::SimThread(int id, int co_thread_num)
                 });
           }
         }
+        // 线程退出前把本线程的协程与 libco 的线程环境都还回去，否则每建一次
+        // 线程就漏掉 co_thread 个 128 KB 栈加一份约 1 MB 的时间轮与一个 epoll fd。
+        //
+        // 位置有讲究：必须在本线程的函数体内做这两件事 —— gCoEnvPerThread 是
+        // thread_local，别的线程碰不到；而此刻上下文是主伪协程，所有协程都已
+        // yield 回来，释放它们的栈才是安全的。
+        t->FreeCoroutines();
+        co_free_curr_thread_env();
       },
       this);
 

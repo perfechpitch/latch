@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <unistd.h>
 
 #if !defined( __APPLE__ ) && !defined( __FreeBSD__ )
 
@@ -18,6 +19,11 @@ int	co_epoll_ctl( int epfd,int op,int fd,struct epoll_event * ev )
 int	co_epoll_create( int size )
 {
 	return epoll_create( size );
+}
+int	co_epoll_close( int epfd )
+{
+	if( epfd < 0 ) return 0;
+	return close( epfd );
 }
 
 struct co_epoll_res *co_epoll_res_alloc( int n )
@@ -116,6 +122,11 @@ struct kevent_pair_t
 int co_epoll_create( int size )
 {
 	return kqueue();
+}
+int co_epoll_close( int epfd )
+{
+	if( epfd < 0 ) return 0;
+	return close( epfd );
 }
 int co_epoll_wait( int epfd,struct co_epoll_res *events,int maxevents,int timeout )
 {

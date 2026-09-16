@@ -33,7 +33,9 @@ class Clock {
     isContd.store(true);
 
     Time continue_tgt = std::min(t, end);
+    // 只有给了终止时刻才查得出来；不给就是跑到被 Stop 为止，那条路由下面每拍查。
     const bool bounded = (continue_tgt < TimeMax);
+    if (bounded) CheckHorizon(continue_tgt);
 
     auto advance_to = [](Time tgt) {
       if (GetTarget() < tgt) TargetIncrease(tgt - GetTarget());
@@ -81,6 +83,7 @@ class Clock {
                          "Clock::Continue: Cycle() advanced Target by "
                          "more than one period — use ContinueLaunch.");
                 ++c;
+                CheckHorizon(start_time + c * period);
                 advance_to(start_time + c * period);
               }
             },
@@ -96,6 +99,8 @@ class Clock {
     isContd.store(true);
 
     Time continue_tgt = std::min(t, end);
+    const bool bounded = (continue_tgt < TimeMax);
+    if (bounded) CheckHorizon(continue_tgt);
 
     auto func = [this, continue_tgt]() {
       DelayCycle(1);
@@ -117,6 +122,7 @@ class Clock {
 
         if (stop.load(std::memory_order_acquire)) break;
         now += period;
+        CheckHorizon(now);
       }
     };
 
@@ -136,6 +142,16 @@ class Clock {
   bool IsStopped() const { return stop.load(std::memory_order_acquire); }
 
  private:
+  // Latch 的环形槽把时间压进 32 位，越界之后写进去会静默读错。与其跑到一半才
+  // 在某个信号上炸，不如在开跑时就说清楚是时间轴超了、该怎么办。每拍那条只是一
+  // 次可预测的整数比较，开销可忽略。
+  static void CheckHorizon(Time t) {
+    LOGCHECK(t <= kPackedTimeMax,
+             "Clock: 仿真时间超出 Latch 的 32 位打包上限（1 T 一拍下约 4.29e9 "
+             "拍）。把 Continue(t) 的 t 调小，或者加大 period 让一拍代表更长"
+             "时间。");
+  }
+
   const Time start;
   const Time end;
   const Time period;

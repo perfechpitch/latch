@@ -44,6 +44,11 @@ coctx_swap:
     movq %r13, 16(%rdi)
     movq %r14, 8(%rdi)
     movq %r15, (%rdi)
+    /* MXCSR 与 x87 控制字不保存的话，一个协程改了舍入模式会泄漏给同线程的
+       其他协程 —— 它们不在 SysV 的 caller-saved 集合里，编译器假定跨调用保持。
+       两条都是写内存，不碰 %rax、不影响标志位。 */
+    stmxcsr 112(%rdi)
+    fnstcw  120(%rdi)
 	  xorq %rax, %rax
 
     movq 48(%rsi), %rbp
@@ -58,6 +63,9 @@ coctx_swap:
     movq 80(%rsi), %rdx
     movq 88(%rsi), %rcx
     movq 96(%rsi), %rbx
+    /* 必须赶在下面 movq 64(%rsi),%rsi 之前：%rsi 到那里就被覆盖了。 */
+    ldmxcsr 112(%rsi)
+    fldcw   120(%rsi)
 		leaq 8(%rsp), %rsp
 		pushq 72(%rsi)
 

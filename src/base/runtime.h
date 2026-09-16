@@ -76,6 +76,19 @@ class ThreadPool {
     SimThread(int thread_id, int co_thread_num);
     ~SimThread() {}
 
+    // 释放本线程建的那些协程。必须在线程自己的函数体内、且协程全部 yield 回主
+    // 伪协程之后调用 —— co_free 只是把栈和描述符还给堆，它不认识正在跑的上下文，
+    // 放错地方就是释放正在用的栈。
+    void FreeCoroutines() {
+      for (auto& c : cos) {
+        if (c.co != nullptr) {
+          co_free(c.co);
+          c.co = nullptr;
+        }
+      }
+      cos.clear();
+    }
+
     bool TryPushJob(SimJob& job) {
       std::lock_guard<std::mutex> lck(mutex);
       if (!pending.empty()) return false;
