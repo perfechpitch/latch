@@ -74,7 +74,7 @@
 <rect x="320" y="118" width="560" height="222" rx="8" fill="none" stroke="#9aa1ad" stroke-width="1" stroke-dasharray="5 4"/>
 <rect x="160" y="30" width="740" height="320" rx="8" fill="none" stroke="#9aa1ad" stroke-width="1" stroke-dasharray="5 4"/>
 <text x="170" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#9aa1ad" font-weight="600" text-anchor="start">一颗 chip</text>
-<text x="870" y="134" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#9aa1ad" font-weight="600" text-anchor="end">Bach core（不派角色的只构造 Router）</text>
+<text x="870" y="134" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#9aa1ad" font-weight="600" text-anchor="end">Bach core（坏 core 只配 Router）</text>
 <rect x="20" y="150" width="120" height="60" rx="7" fill="#eceef1" stroke="#6b7280" stroke-width="1.4"/>
 <text x="80.0" y="170.9" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#6b7280" font-weight="600" text-anchor="middle">上位 CPU</text>
 <text x="80.0" y="184.4" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" text-anchor="middle">tray 的 CPU</text>
@@ -326,8 +326,11 @@
 * ② 配 PCIe：配 PCIE_PLL、经 CRG 释放复位、配寄存器、完成链路训练；之后才能与上位 CPU 通信
 * ③ 解复位前配置（此时 core 内模块全部未解复位，`ctrl_noc` 已连通）
   * 初始化 ITCM：RV core 有分支预测、无预取，只扫 ITCM，避免预测取到未初始化内容触发异常
-  * 写固件：RV firmware 写到三个 RV core 的 ITCM reset pc 位置（固定位置）；DTCM 写静态参数
-  * 配本 chip 全部 core 的 Router：写 RouterTable、Skip Mask、Credit Bypass Route；不派角色的 core 也写这几项，其他不配
+  * 写固件：RV firmware 写到三个 RV core 的 ITCM reset pc 位置（固定位置）；DTCM 写静态参数；坏 core 跳过
+  * 配本 chip 全部 10 个 core 的 Router：先写 `core_bad_mask`，再写 RouterTable 与 Credit Bypass Route（`RTR_RELEASE_ROUTE`）；坏 core 只配这几项，其他不配
+    * `core_bad_mask` 每颗 chip 10 bit，第 i 位为 1 表示 core i 是坏 core；每个 Router 只看本 core 那一位，为 1 就进透传档：只按 RouterTable 转发，不投递本 core，不进 ReduceModule
+    * 真机上 `core_bad_mask` 在上电时从 eFuse 读出并锁存；模型没有 eFuse，由 bundle 给出，在这一步写入，时机等同上电锁存，之后不再变
+    * 不派角色的好 core（没配任务链，只转发）的 Router 走正常档，转发由表项决定
     * Router 上电顺序：PMU 释放 core 时钟域复位 → `stream_credit` 置 0 → RouterTable 全 bypass / no-op → 等 SCP 配表与 VC 使能 → 各 core 发初始化脉冲 → 就绪
     * RouterTable 多副本全部写完 Router 才回完成；SCP 拿到完成后再写 DTE 与 ReduceModule 各自的那一份，硬件不代为同步
 * ④ 解复位：SCP 写 clk / reset 模块
@@ -339,6 +342,7 @@
   * 三个 RV core 都 boot done → 自定义指令置 Bach core 状态为 Boot done
   * SCP 轮询状态寄存器，或收 IPI 中断
   * 三个 RV core 的 ready 全高 → SCP 开放该 core 的业务接收权限，Router 才收业务
+  * 只等好 core，坏 core 的 ready 恒为真
 * ⑥ 通知上位 CPU：SCP 经 PCIe 报 boot 完成；此时路由表里还没有业务路径，TS 也没有任务链
 * 每个 core 的初始化五步：RV firmware 进 ITCM → 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化；后三步在装模型时做
 
@@ -429,16 +433,18 @@
   * 上位 CPU 经 PCIe 把 kernel 镜像与配置数据下发到 SCP 子系统，通知 SCP 开始 launch
   * SCP 经 `ctrl_noc` 写标量缓存：代码段进 ITCM，数据段进 DTCM，按地址区分 `.insn` 与 `.data`；Share Mem 也可写
   * 每类 core 一个 RV32 ELF，配套 `task_pc` 表，把 `task_chain` 每一项的 `TASK_PC` 指到 kernel 的入口
-  * 内容：三个 RV core 的固件，计算 core 的 datain 与计算 task，B core 的 `bcore_datain`、`check_flag`、`broadcast`，R core 的映射表维护与求和，weights loader
+  * 内容：三个 RV core 的固件，计算 core 的搬运与计算 task，B core 的 `bcore_datain`、`check_flag`、`broadcast`，R core 的映射表维护与求和，weights loader
+    * dot core 是每颗 chip 的逻辑 core7：chip 内 FC1/FC3 的部分和归约到它，它另有 silu·dot·量化、FC2 输入广播、concat 搬入与行链出核这几个 task
+  * 坏 core 不装 kernel
 * 装 weights（MB 级，每 core 不同，不经 SCP）
   * ① SCP 先配 weights 加载模式（三处配置见下表），再通知上位 CPU 可以下发
   * ② SCP 读每个 core 的 `core_id`：编译器按物理 id 配路由表，用户 kernel 只见逻辑 id
   * 数据路径：Host msg 流 → PCIe → Router → Router 通知 TS 触发 datain → TS 派 DTE RV core 跑 weights loader；数据由 DTE 按包头里的落点搬进 Matrix Mem，loader 数搬进来几笔 → datain 出槽，不触发任务链；先发最远路径的数据
   * 完成：weights loader 计数满 → 自定义指令中断 SCP → 执行 WFT 进入正常模式
-* ③ 切业务模式（SCP 收到中断后改三处）
-  * Router 路由表换业务路径：token 广播、逐级 reduce 等
+* ③ 切业务模式（SCP 收到中断后改三处；只配好 core，坏 core 跳过）
+  * Router 路由表换业务路径：token 广播、组间转发、chip 内归约、FC2 输入广播、concat、行链、R core 之间的逐行一跳
   * TS：`datain_task` 的 pc 指向 token 搬移，`trigger_task_chain_en = 1`；`task_chain` 配成本 core 角色的业务任务链（也可在 weights 模式就配好）
-  * DSA 写业务场景的静态配置；DTE 的进核那一笔改回本 core 角色的落点，计算 core 是 Core Mem
+  * DSA 写业务场景的静态配置；DTE 的进核那一笔按角色重配，各角色的取值见下文“切业务模式时体现角色的几项配置”那张表
   * TS 配置的写入顺序：`STREAM_NUM`、`SELF_START`（读回核对）→ B / R core 重写 `DATAIN_TASK_PC` → 逐项 `task_chain[i]`，每项先 PC 后 ATTR（写 ATTR 时硬件置 `TASK_VALID`）→ `TS_INIT_FINISH`；硬件随即查配置写 `TS_STATE`，有错软件清掉 `TS_INIT_FINISH`、改链重来；B / R core 自启动 16 项
 * ④ SCP 经 PCIe 通知 launch 完成；此后 token 进来才会算
 
@@ -446,9 +452,20 @@ weights 加载模式的三处配置：
 
 | 配置对象 | 配什么 |
 | - | - |
-| Router | 路由表只用 1 条 path，是 weights 专用的 P2P 路径；path 与物理 core id 解耦，软件在 path 里指定 core index、在 msg 里标记落在哪些 core；不派角色的 core 数据不进核，仍按位置转发 |
+| Router | 路由表只用 1 条 path，是 weights 专用的 P2P 路径；path 与物理 core id 解耦，软件在 path 里指定 core index、在 msg 里标记落在哪些 core；坏 core 与不派角色的好 core 不落 weights，只按表项转发 |
 | TS | `WEIGHTS_MODE = 1`；`datain_task` 的 pc 指向 weights loader，`trigger_task_chain_en = 0`，搬完不启动任务链 |
-| DTE | SCP 复位 DTE → 全局静态寄存器 → task LUT → stream 表 → header / topK 参数 → 使能 TS 直接触发；进核那一笔落 Matrix Mem；DTE 回 `init_done` |
+| DTE | SCP 复位 DTE → 全局静态寄存器 → task LUT → stream 表 → header / topK 参数 → 使能 TS 直接触发；进核那一笔一律落 Matrix Mem、不回 Ack；DTE 回 `init_done` |
+
+切业务模式时体现角色的几项配置：真机上没有记角色的寄存器，角色由下表几项体现，SCP 逐 core 写。不派角色的好 core 这几项都不配，坏 core 整个跳过。
+
+| 配置 | 所在单元 | 计算 core | B core | R core |
+| - | - | - | - | - |
+| `SELF_START` | TS | 0 | 1 | 1 |
+| `B_CORE_DIRECTION` | TS | 0 | 广播的方向 | 0 |
+| 任务链与 datain 任务 | TS | 计算 core 的任务链 | 自启动任务链与 datain 任务 | 自启动任务链与 datain 任务 |
+| 业务模式下进核那一笔的 `route` | DTE | Router → Core Mem | Router → Matrix Mem | Router → Matrix Mem |
+| 业务模式下进核那一笔回不回 Ack | DTE | 回 | 不回 | 不回 |
+| 标志表的基址与一个槽位多大 | DTE | 不配 | token 槽位 | 行结果槽位 |
 
 ```svg
 <svg viewBox="0 0 920 180" width="920" height="180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bach core 状态机">
@@ -651,8 +668,10 @@ weights 加载模式的三处配置：
 ```
 
 * SCP 桩每 chip 一个，只接 `ctrl_noc`；`ctrl_noc` 端点每 core 一个；都是每拍推进一次的模块，归属 Chip
-* 事务顺序：先给本 chip 全部 core 的 Router 配表，再顺序解复位并配置各个 core；每笔一拍
+* 事务顺序：先给本 chip 全部 10 个 core 的 Router 写 `core_bad_mask` 并配表，再顺序解复位并配置各个好 core，坏 core 跳过；等 ready 只等好 core；每笔一拍
 * 编译侧的 `core_cfg`、`credit_init`、`kernel_img` 在 boot 期变成 `scp_img`；`scp_fsm` 记当前 core 与步骤
+* `core_bad_mask` 由 bundle 的 `CHIP` 记录给出；业务模式下进核那一笔的配置与标志表几何由 `DTEIN` 记录给出，计算 core、B core、R core 各一条
+* 坏 core 的 TS、三个 RV core、三个 DSA 与存储照样构造，但不步进、不配置、不记波形
 * 三份 RouterTable 一致不在输入自洽检查里查，由 SCP 桩的写入顺序保证
 * 本轮不建：`async_int` 与 IPI 的行为（留接口名与状态位）；Debug Module、DTM、GDB；Host / Node / tray CPU 的流控与退出；RV core 异常与 TS Except Check 的行为
 
@@ -678,7 +697,7 @@ weights 加载模式的三处配置：
 * RV core 的 reset PC：硬件固定值，还是软件可配且不受复位影响
 * Boot 完成通知用的 mailbox 在 core 内还是 core 外
 * 广播的实现位置：SoC 级文档放在 SCP 侧的 BCB，core 级文档写的是 core0 转发；建模按 chip.md 的开关
-* Router 初始化在六步里的位置：MAS_TOP 排在 TS 之后，《latch 建模计划》提前到解复位前并覆盖不派角色的 core
+* Router 初始化在六步里的位置：MAS_TOP 排在 TS 之后，《latch 建模计划》提前到解复位前并覆盖坏 core
 * SCP 的初始化程序来自 flash 还是经 PCIe 搬入；SCP 与哪个 PCIe 相连
 * ITCM 溢出：通知 SCP 重搬 kernel，还是调 DTE DSA 重搬
 * kernel 是否也支持经 msg 流搬运
@@ -693,7 +712,7 @@ weights 加载模式的三处配置：
 ## 取舍
 
 * **kernel 走 SCP，weights 走 msg 流**：kernel 重复、KB 级，配置总线够用且能广播；weights 每 core 不同、MB 级，配置总线带宽不够
-* **不派角色的 core 的 Router 先配，一个不落**：漏配会让经过它的 path 全断
+* **全 chip 的 Router 先配，坏 core 一个不落**：坏 core 上只有 Router 在用，漏配会让经过它的 path 全断
 * **解复位前先初始化 ITCM**：分支预测会取到未初始化内容；没有预取，所以只扫 ITCM
 * **运行期 SCP 不碰调度**：TS 写完 `TS_INIT_FINISH` 后按固定逻辑跑，计算与通信的推进不依赖 SCP 的响应时间
 * **调试经 SCP，停机停整核**：core 不跑 GDB server；现场分布在多个模块又没有快照，只停一部分会不一致

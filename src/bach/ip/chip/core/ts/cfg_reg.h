@@ -56,6 +56,7 @@ class CfgReg : public BachModule {
     LOGCHECK(idx < kTaskChainNum, "CfgReg: task_chain 下标越界。");
     e.valid = true;
     chain[idx] = e;
+    task_written = true;
   }
   void WriteDatainTask(uint64_t task_pc, bool weights_mode) {
     datain_pc = task_pc;
@@ -120,6 +121,8 @@ class CfgReg : public BachModule {
   bool InitFinished() const { return init_finish; }
   bool WeightsMode() const { return weights_mode_on; }
   bool DatainValid() const { return datain_valid; }
+  // 任务链写过至少一项，或者 datain 任务写过。
+  bool HasTask() const { return task_written || datain_valid; }
   uint64_t DatainPc() const { return datain_pc; }
   bool FlowCtlEn(uint64_t path_id) const { return flowctl_en.at(path_id); }
   uint64_t FlowCtlWindow(uint64_t path_id) const {
@@ -189,6 +192,7 @@ class CfgReg : public BachModule {
 
   uint64_t datain_pc = 0;
   bool weights_mode_on = false, datain_valid = false;
+  bool task_written = false;
   uint64_t stream_num = kStreamNum;
   bool self_start = false;
   uint64_t b_core_dir = 0;

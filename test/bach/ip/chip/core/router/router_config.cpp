@@ -88,7 +88,7 @@ TEST(BachRouterTable, ResetLeavesEveryEntryNoOp) {
       EXPECT_EQ(e.flow_dir, 0u);
     }
   }
-  EXPECT_EQ(tab.SkipMask(), 0u);
+  EXPECT_EQ(tab.CoreBadMask(), 0u);
   RT::Reset();
 }
 
@@ -153,20 +153,22 @@ TEST(BachRouterTable, PreloadFillsEveryCopyAtOnce) {
   RT::Reset();
 }
 
-// Skip Mask 与 RouterTable 分开配：改一个不动另一个。
-TEST(BachRouterTable, SkipMaskIsConfiguredApartFromTheTable) {
+// core_bad_mask 与 RouterTable 分开配：改一个不动另一个。
+TEST(BachRouterTable, CoreBadMaskIsConfiguredApartFromTheTable) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   RouterTable tab(clk, "rtab", 0, false);
 
   tab.Preload(3, SomeEntry());
-  EXPECT_EQ(tab.SkipMask(), 0u) << "写表不动 Skip Mask";
+  EXPECT_EQ(tab.CoreBadMask(), 0u) << "写表不动 core_bad_mask";
 
-  tab.SetSkipMask(0b0100);
-  EXPECT_TRUE(tab.CoreSkipped(2));
-  EXPECT_FALSE(tab.CoreSkipped(0));
-  EXPECT_FALSE(tab.CoreSkipped(3));
-  EXPECT_TRUE(tab.Lookup(0, 3).valid) << "改 Skip Mask 不动表项";
+  tab.SetCoreBadMask(0x084);
+  EXPECT_TRUE(tab.CoreBad(2));
+  EXPECT_TRUE(tab.CoreBad(7));
+  EXPECT_FALSE(tab.CoreBad(0));
+  EXPECT_FALSE(tab.CoreBad(3));
+  EXPECT_TRUE(tab.Lookup(0, 3).valid) << "改 core_bad_mask 不动表项";
+  EXPECT_DEATH(tab.SetCoreBadMask(1ull << 10), "") << "只有 10 位";
   RT::Reset();
 }
 

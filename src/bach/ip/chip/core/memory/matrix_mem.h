@@ -3,6 +3,10 @@
 
 // Matrix Mem：32 + 4 MB，64 bank × 0.5625 MB。
 //
+// scale 区与 Core Mem 同样是 SRAM 旁边的寄存器，与数据地址一一映射。硬件按
+// scale : data = 1 : 8 留（32 MB 数据配 4 MB），MXFP8 每 128 B 数据只用其中 4 B，
+// 所以模型按每 128 B 配 4 B 建；地址空间仍按非 scale 模式的 36 MB 算。
+//
 // 硬约束：DTE、ctrl_noc、MU 三者不能有两个同时访问同一个 bank。真硬件上撞了只
 // 执行 MU、被让路的那一笔直接丢弃并计数，而 DTE 没有重传通路，丢一笔就少一段
 // 数据、结果直接错。所以模型遇到这一笔直接断言失败，不用重试掩盖。
@@ -50,6 +54,7 @@ class MatrixMem : public BankedMem {
     c.granule = 128;
     c.capacity = kMatrixMemBytes;
     c.exclusive_bank = true;
+    c.scale_bytes = 4;
     return c;
   }
 };

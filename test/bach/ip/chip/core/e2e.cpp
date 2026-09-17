@@ -47,21 +47,23 @@ bool KernelBuilt() {
   return f.good();
 }
 
-// 一个 token。payload 逐字节可辨，落到 Core Mem 后按它比对。
-//
-// 512 B 是一个 K=256 的 BF16 token，与 kernel 里的 TOKEN_BYTES 同一个数：出核
-// 那几笔搬运按它配 data_len，进来的与出去的长度对不上就不是同一份数据。
-MessagePtr MakeToken(uint64_t path, uint64_t user, uint64_t bytes = 512) {
+// 一个 token 是 128 个 MXFP8，与 kernel 里的 E2E_TOKEN_BYTES 同一个数：出核那一笔
+// 搬运按它配 data_len，进来的与出去的长度对不上就不是同一份数据。
+constexpr uint64_t kTokenBytes = 128;
+
+// 一个 token 的包：数据后面接 4 个 scale，逐字节可辨，落到 Core Mem 后按它比对。
+MessagePtr MakeToken(uint64_t path, uint64_t user) {
   auto m = std::make_shared<Message>();
   m->path_id = path;
   m->user_id = user;
-  m->size = bytes;
+  m->scale_valid = 1;
+  m->size = kTokenBytes + kTokenBytes / 32;
   // 包头带这个用户在本 core 上的槽位与这一笔是链上的第几步。TS 那边环形分配
   // 出来的第一个槽位也是 0。
   m->stream_id = 0;
   m->task_id = 0;
-  m->payload.resize(bytes);
-  for (uint64_t i = 0; i < bytes; ++i) {
+  m->payload.resize(m->size);
+  for (uint64_t i = 0; i < m->size; ++i) {
     m->payload[i] = uint8_t((user * 7 + i * 3) & 0xFFu);
   }
   return m;
@@ -233,12 +235,12 @@ TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
   EXPECT_EQ(cs_used, 0u);    // Router 那一侧的 stream 表项也释放了
 }
 
-// 搬进 Core Mem 的字节与注入的 payload 逐字节相等。
+// 搬进 Core Mem 的字节与注入的 payload 逐字节相等：数据那一段落数据地址，包尾
+// 的 scale 落同一段地址的 scale 旁带。
 TEST(BachCoreE2e, PayloadLandsByteForByte) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
-  constexpr uint64_t kBytes = 512;
-  MessagePtr token = MakeToken(3, 42, kBytes);
-  std::vector<uint8_t> landed;
+  MessagePtr token = MakeToken(3, 42);
+  std::vector<uint8_t> landed, scale;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -252,13 +254,17 @@ TEST(BachCoreE2e, PayloadLandsByteForByte) {
     clk->Continue(400 * kPeriod);
     RT::JoinAll();
     // 进核搬运的落点取自包头的 dst_addr，注入那一包没填，就是 0。
-    landed = core.Cmem().Peek(0, kBytes);
+    landed = core.Cmem().Peek(0, kTokenBytes);
+    scale = core.Cmem().PeekScale(0, kTokenBytes / 32);
   }
   RT::Reset();
-  ASSERT_EQ(landed.size(), kBytes);
-  for (uint64_t i = 0; i < kBytes; ++i) {
+  ASSERT_EQ(landed.size(), kTokenBytes);
+  for (uint64_t i = 0; i < kTokenBytes; ++i) {
     ASSERT_EQ(landed[i], token->payload[i]) << "第 " << i << " 个字节";
   }
+  std::vector<uint8_t> want_scale(token->payload.begin() + kTokenBytes,
+                                  token->payload.end());
+  EXPECT_EQ(scale, want_scale) << "包尾那几个 scale";
 }
 
 // 前一个用户退休之后，下一个用户接着走完整条链。
@@ -286,7 +292,7 @@ TEST(BachCoreE2e, NextUserRunsAfterRetire) {
         uint64_t now = CycleNow();
         LinkEndPtr in = core.InWire(kLeft);
         if (now == 2 || now == 200) {
-          MessagePtr m = MakeToken(3, now == 2 ? 42 : 43, 512);
+          MessagePtr m = MakeToken(3, now == 2 ? 42 : 43);
           // 前一个退休后 head 推进一格，下一个用户落在槽位 1。
           m->stream_id = now == 2 ? 0 : 1;
           in->flit.Drive(0, true, true, m->size, m);
@@ -344,8 +350,7 @@ void WriteTwoStepChain(Core& core) {
 // 出核那一半：数据从 Core Mem 发回 Router，出口上收到的包与注入的逐字节相等。
 TEST(BachCoreE2e, TokenLeavesTheCore) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
-  constexpr uint64_t kBytes = 512;
-  MessagePtr token = MakeToken(3, 42, kBytes);
+  MessagePtr token = MakeToken(3, 42);
   std::vector<MessagePtr> got;
   uint64_t dones = 0, head = 0, tail = 0, sent_beats = 0;
   {
@@ -375,14 +380,15 @@ TEST(BachCoreE2e, TokenLeavesTheCore) {
     sent_beats = probe.out_sent;
   }
   RT::Reset();
-  EXPECT_EQ(sent_beats, 2u); // 512 B 分两拍发，一拍 256 B
+  EXPECT_EQ(sent_beats, 2u); // 数据 128 B 一拍，scale 4 B 另一拍
   EXPECT_EQ(dones, 2u);      // 两步各报一次完成
   EXPECT_EQ(head, tail);     // 走到链尾退休了
   ASSERT_FALSE(got.empty()) << "出口上一个包都没有";
   MessagePtr sent = got.front();
   EXPECT_EQ(sent->user_id, token->user_id);
-  ASSERT_EQ(sent->payload.size(), kBytes);
-  for (uint64_t i = 0; i < kBytes; ++i) {
+  EXPECT_EQ(sent->scale_valid, 1u);
+  ASSERT_EQ(sent->payload.size(), token->payload.size());
+  for (uint64_t i = 0; i < token->payload.size(); ++i) {
     ASSERT_EQ(sent->payload[i], token->payload[i]) << "第 " << i << " 个字节";
   }
 }
@@ -542,7 +548,8 @@ namespace {
 
 // reference/ 那一份算出来的期望：注入什么、应当收到什么。
 struct E2eCase {
-  std::vector<uint8_t> token, weight, out_bytes, act_bytes;
+  std::vector<uint8_t> token, token_scale, weight, weight_scale, out_bytes,
+      act_bytes;
   std::vector<float> out;
 };
 
@@ -566,7 +573,9 @@ E2eCase ReadE2eCase() {
     std::string key, val;
     if (!(ls >> key >> val)) continue;
     if (key == "token") c.token = HexBytes(val);
+    else if (key == "token_scale") c.token_scale = HexBytes(val);
     else if (key == "weight") c.weight = HexBytes(val);
+    else if (key == "weight_scale") c.weight_scale = HexBytes(val);
     else if (key == "out_bytes") c.out_bytes = HexBytes(val);
     else if (key == "act_bytes") c.act_bytes = HexBytes(val);
     else if (key == "out_bits") {
@@ -578,6 +587,21 @@ E2eCase ReadE2eCase() {
     }
   }
   return c;
+}
+
+// 参考实现用的那份 token：数据后面接 scale。
+MessagePtr RefToken(std::vector<uint8_t> const& data,
+                    std::vector<uint8_t> const& scale, uint64_t user) {
+  auto m = std::make_shared<Message>();
+  m->path_id = 3;
+  m->user_id = user;
+  m->scale_valid = 1;
+  m->payload = data;
+  m->payload.insert(m->payload.end(), scale.begin(), scale.end());
+  m->size = m->payload.size();
+  m->stream_id = 0;
+  m->task_id = 0;
+  return m;
 }
 
 // 三步链：datain 把 token 搬进 Core Mem、MU 算一条原语、把结果搬出去。
@@ -641,17 +665,12 @@ TEST(BachCoreE2e, TokenInResultOutMatchesReference) {
     WriteGemmChain(core);
     ASSERT_GT(SymbolOf("task_dte_send_fc1"), 0u);
 
-    // 权重是 boot 期装进 Matrix Mem 的，不随 token 走。
+    // 权重是 boot 期装进 Matrix Mem 的，不随 token 走，scale 在旁带。
     core.Mmem().Poke(0, want.weight);
+    core.Mmem().PokeScale(0, want.weight_scale);
 
     // 注入的包带的就是参考实现用的那份 token。
-    auto token = std::make_shared<Message>();
-    token->path_id = 3;
-    token->user_id = 42;
-    token->size = want.token.size();
-    token->stream_id = 0;
-    token->task_id = 0;
-    token->payload = want.token;
+    MessagePtr token = RefToken(want.token, want.token_scale, 42);
 
     CoreHarness harness(clk, core, /*at=*/2, token);
     CoreProbe probe(clk, core);
@@ -718,7 +737,7 @@ void WriteGemmActChain(Core& core) {
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
-// VU 的第 0 组静态配置：LU 读 32 个 FP32，VALU0 逐元素平方，SU 写回。
+// VU 的第 0 组静态配置：LU 读 BF16，VALU0 逐元素平方，SU 按 BF16 写回。
 //
 // 地址与长度由 kernel 写进动态参数寄存器，这里只配算什么。
 void PreloadVuSquare(Core& core, uint64_t vl) {
@@ -726,11 +745,11 @@ void PreloadVuSquare(Core& core, uint64_t vl) {
   auto st = [&](uint64_t off, uint64_t data) {
     vu.Preload(kVuStaticBase + 0 * kVuStaticStride + off, data);
   };
-  st(kVuLuOp, uint64_t(LuOp::kLdFp32));
+  st(kVuLuOp, uint64_t(LuOp::kLdBf16));
   // vfmul.vv：两个源都取 LU 的输出。
   st(kVuValu0Op, uint64_t(ValuOp::kFmulVv) | (uint64_t(kSrcLu) << 8) |
                      (uint64_t(kSrcLu) << 16));
-  st(kVuSuOp, uint64_t(SuOp::kStFp32) | (uint64_t(kSrcValu0) << 8));
+  st(kVuSuOp, uint64_t(SuOp::kStBf16) | (uint64_t(kSrcValu0) << 8));
   st(kVuStaticDupOffset + kVuTypeVl,
      vl | (uint64_t(numeric::RoundMode::kRne) << 17));
 }
@@ -768,14 +787,9 @@ TEST(BachCoreE2e, GemmThenActivationMatchesReference) {
     WriteGemmActChain(core);
     PreloadVuSquare(core, want.out.size());
     core.Mmem().Poke(0, want.weight);
+    core.Mmem().PokeScale(0, want.weight_scale);
 
-    auto token = std::make_shared<Message>();
-    token->path_id = 3;
-    token->user_id = 42;
-    token->size = want.token.size();
-    token->stream_id = 0;
-    token->task_id = 0;
-    token->payload = want.token;
+    MessagePtr token = RefToken(want.token, want.token_scale, 42);
 
     CoreHarness harness(clk, core, /*at=*/2, token);
     CoreProbe probe(clk, core);
@@ -810,8 +824,8 @@ namespace {
 
 // 连着来的几个 token：各自的输入与期望。
 struct BatchCase {
-  std::vector<uint8_t> weight;
-  std::vector<std::vector<uint8_t>> token, out;
+  std::vector<uint8_t> weight, weight_scale;
+  std::vector<std::vector<uint8_t>> token, token_scale, out;
 };
 
 BatchCase ReadBatchCase() {
@@ -819,20 +833,25 @@ BatchCase ReadBatchCase() {
   std::ifstream f(std::string(LATCH_SOURCE_DIR) +
                   "/src/bach/compiler/reference/vectors/e2e.txt");
   std::string line;
-  std::map<uint64_t, std::vector<uint8_t>> tok, out;
+  std::map<uint64_t, std::vector<uint8_t>> tok, tsc, out;
   while (std::getline(f, line)) {
     if (line.empty() || line[0] == '#') continue;
     std::istringstream ls(line);
     std::string key, val;
     if (!(ls >> key >> val)) continue;
     if (key == "weight") c.weight = HexBytes(val);
-    else if (key.rfind("token", 0) == 0 && key.size() > 5) {
+    else if (key == "weight_scale") c.weight_scale = HexBytes(val);
+    else if (key.rfind("token_scale", 0) == 0 && key.size() > 11) {
+      tsc[std::stoull(key.substr(11))] = HexBytes(val);
+    } else if (key.rfind("token", 0) == 0 && key.size() > 5 &&
+               key.find("scale") == std::string::npos) {
       tok[std::stoull(key.substr(5))] = HexBytes(val);
     } else if (key.rfind("out_bytes", 0) == 0 && key.size() > 9) {
       out[std::stoull(key.substr(9))] = HexBytes(val);
     }
   }
   for (auto const& kv : tok) c.token.push_back(kv.second);
+  for (auto const& kv : tsc) c.token_scale.push_back(kv.second);
   for (auto const& kv : out) c.out.push_back(kv.second);
   return c;
 }
@@ -868,6 +887,7 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
     core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
     WriteGemmChain(core);
     core.Mmem().Poke(0, want.weight);
+    core.Mmem().PokeScale(0, want.weight_scale);
 
     // 四个 token 隔几拍一个地灌进来，各占一个 stream 槽位。
     class Feeder : public BachModule {
@@ -883,14 +903,10 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
         LinkEndPtr in = core.InWire(kLeft);
         uint64_t idx = (now - 2) / 40;
         if (now >= 2 && (now - 2) % 40 == 0 && idx < want.token.size()) {
-          auto m = std::make_shared<Message>();
-          m->path_id = 3;
-          m->user_id = 100 + idx;
-          m->size = want.token[idx].size();
+          MessagePtr m =
+              RefToken(want.token[idx], want.token_scale[idx], 100 + idx);
           // 槽位按到达顺序环形分配，第 i 个用户落在第 i 格。
           m->stream_id = idx;
-          m->task_id = 0;
-          m->payload = want.token[idx];
           in->flit.Drive(0, true, true, m->size, m);
         } else {
           in->flit.Idle();

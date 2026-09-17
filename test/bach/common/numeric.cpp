@@ -158,6 +158,27 @@ TEST(Numeric, AccumByScaleBlockScalesOncePerBlock) {
   EXPECT_EQ(BitsOf(got), BitsOf(want));
 }
 
+TEST(Numeric, AccumByScaleBlock2MultipliesBothScalesPerBlock) {
+  // MXFP8 × MXFP8：块内先加完，再乘 token 与权重两个 scale 之积。
+  std::vector<float> prods;
+  for (int i = 0; i < 64; ++i) prods.push_back(1.0f / float(i + 3));
+  std::vector<float> a = {0.5f, 4.0f};
+  std::vector<float> w = {0.25f, 16.0f};
+  float got = AccumByScaleBlock2(prods, a, w, 32);
+
+  float want = 0.0f;
+  for (int b = 0; b < 2; ++b) {
+    float part = 0.0f;
+    for (int i = b * 32; i < (b + 1) * 32; ++i) part += prods[i];
+    want += part * (a[b] * w[b]);
+  }
+  EXPECT_EQ(BitsOf(got), BitsOf(want));
+  // 权重的 scale 全是 1 时退回单 scale 那一档。
+  std::vector<float> ones(2, 1.0f);
+  EXPECT_EQ(BitsOf(AccumByScaleBlock2(prods, a, ones, 32)),
+            BitsOf(AccumByScaleBlock(prods, a, 32)));
+}
+
 TEST(Numeric, ReduceTreeMatchesLaneThenTree) {
   // VU 的归约：LANES 内先加，再走 ceil(log2 SEG) 级树。
   std::vector<float> v;

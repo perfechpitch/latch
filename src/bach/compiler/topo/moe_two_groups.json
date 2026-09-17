@@ -1,0 +1,11 @@
+{
+  "name": "moe_two_groups",
+  "note": "一行两颗 chip：左边是中间列那种（坏 core2、core7），右边是最后一列那种。token 从左边那颗的 W 口直接进计算 core 的广播树。两颗各做 chip 内归约、FC2 输入广播与 concat，左边那颗的 dot core 是行首，行链两跳落进右边那颗的 R core core9；它是唯一一行的 R core，结果经 core4 从 E 口出去",
+  "layer": "moe",
+  "rows": 1,
+  "cols": 2,
+  "col": ["middle", "last"],
+  "groups": 1,
+  "bcore": false,
+  "stream_num": 16
+}

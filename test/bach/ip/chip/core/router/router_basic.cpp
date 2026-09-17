@@ -2,7 +2,7 @@
 // stream 坑按 user 记。
 //
 // 对应验收场景 A2（中间核只做 bypass）、A5（同一个 user 第二次发送余额不变）、
-// A15（单个只透传的 core）。
+// A15（单个坏 core）。
 
 #include <gtest/gtest.h>
 

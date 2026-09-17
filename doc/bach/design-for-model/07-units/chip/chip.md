@@ -11,24 +11,52 @@
 **对应设计**：
 
 * 《系统与部署》：“Chip 内结构”“Boot 流程”“Chip 内地址划分”
-* 《Router 片上交换与归约》：“跳过与跨 chip”的 Skip 与 C2C Bridge
+* 《Router 片上交换与归约》：“跳过与跨 chip”的坏 core 透传档与 C2C Bridge
 * 《软件栈》：“部署阶段：kernel 与 weights 走两条不同的路”
 
 ***
 
 ## 1　定位与边界
 
-一颗 chip 是两行的 Core 阵列，加四个 C2C Bridge、一个 SCP、一条 ctrl_noc。48 颗 chip 怎么摆、四个 chip 口接到哪，是 LPU 的事；chip 只把四个口露出来。
+一颗 chip 是 2 行 × 5 列共 10 个 Core 的阵列，加四个 C2C Bridge、一个 SCP、一条 ctrl_noc。48 颗 chip 怎么摆、四个 chip 口接到哪，是 LPU 的事；chip 只把四个口露出来。
 
-**列数有两种**，由这颗 chip 在 LPU 里的列位置定：
+```
+0 1 2 3 4
+5 6 7 8 9
+```
 
-| chip 的列位置 | 阵列 | core 数 | 多出来的那一列 |
+* 行优先编号。同行 core `i` 与 `i+1` 左右相连，同列 core `i` 与 `i+5` 经 mid 相连。
+* 四个 C2C 口：N 接 core0 左侧，E 接 core4 右侧，W 接 core5 左侧，S 接 core9 右侧。
+
+构造 chip 时不区分它所在的列，构造 core 时不区分角色。坏 core 与角色都由编译器写进 bundle，经 SCP 配进 core。
+
+**坏 core** 由 `core_bad_mask` 标出，每颗 chip 10 bit，第 i 位为 1 表示 core i 是坏 core：
+
+| chip 所在列 | `core_bad_mask` | 坏 core |
+| - | - | - |
+| 第一列（gx = 0） | `0x000` | 无 |
+| 中间两列（gx = 1、2） | `0x084` | core2、core7 |
+| 最后一列（gx = 3） | `0x000` | 无 |
+
+坏 core 上只有 Router 工作，Router 处在透传档：
+
+* 数据只按 RouterTable 往 mid、left、right 转发，不投递本 core，不进 ReduceModule。
+* 只查、只扣下一跳链路的 VC credit，不查、不占 stream 与 Core Mem credit。
+* 不做溢流转存，`stall_way` 只能是留在 VC 等待。
+* 下游还回来的 Reduce release 按 `RTR_RELEASE_ROUTE` 静态转发。
+
+坏 core 的 TS、三个 RV core、三个 DSA 与存储照样构造，但不步进、不配置、不记波形。
+
+**角色**是编译器给每个 core 分的用途，有四种：计算 core、B core、R core、不派角色。坏 core 的角色一律是不派角色。组头 chip 指每个 EP 组左上角那颗 chip；单颗 chip 的拓扑按第一列的组头 chip 分配。
+
+| chip | 计算 core | B core / R core | 不派角色 |
 | - | - | - | - |
-| 中间列 | 2 行 × 4 列 | 8，全部是计算 core | — |
-| 第一列 | 2 行 × 5 列 | 10 | 在西侧：左上角是 B core，左下角不派角色 |
-| 最后一列 | 2 行 × 5 列 | 10 | 在东侧：右下角是 R core，右上角不派角色 |
+| 第一列，组头 chip | 1 2 3 4 6 7 8 9 | core0 是 B core | core5 |
+| 第一列，其余 | 1 2 3 4 6 7 8 9 | 无 | core0、core5 |
+| 中间两列 | 0 1 3 4 5 6 8 9 | 无 | core2、core7（坏 core） |
+| 最后一列 | 0 1 2 3 5 6 7 8 | core9 是 R core | core4 |
 
-三种形状都是 **8 个计算 core**，B core 与 R core 是多出来的那一列带进来的，不占计算 core 的位置。**不派角色**是指那个 core 只构造 Router 的八个模块，不构造 TS、RV core、DSA 与三块存储：它永远不作端点，只按路由表转发。它坐在 chip 接 PCIe Switch 的那个口上（第一列的 W 口、最后一列的 E 口），Switch 与专用 core 之间的一跳就走它。
+每颗 chip 都是 **8 个计算 core**。不派角色的好 core 没配任务链，它的 TS、RV core、DSA 照样构造并复位；Router 走正常档，只转发由表项决定。口上坐的不是计算 core 时，进出 chip 多一跳转发，这只出现在两侧 chip：第一列的 core0、core5，最后一列的 core4、core9。
 
 这一层有四个对象：
 
@@ -36,7 +64,7 @@
 | - | - | - |
 | Chip | 装配容器，不打拍 | 1 |
 | SCP 桩 | 逐拍推进的模块 | 1 |
-| ctrl_noc 端点 | 逐拍推进的模块 | 8 或 10，每 core 一个 |
+| ctrl_noc 端点 | 逐拍推进的模块 | 10，每 core 一个 |
 | C2C Bridge | 逐拍推进的模块 | 4，每行左右两端各一个 |
 
 ```svg
@@ -49,15 +77,15 @@
 <rect x="150" y="150" width="1700" height="540" rx="14" fill="none" stroke="#374151" stroke-width="1.2"/>
 <rect x="340" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
 <rect x="580" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
-<rect x="820" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="820" y="180" width="200" height="170" rx="5" fill="#f3f4f6" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
 <rect x="1060" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
-<rect x="1300" y="180" width="200" height="170" rx="5" fill="#fdf6ec" stroke="#374151" stroke-width="1"/>
+<rect x="1300" y="180" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
 <rect x="340" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
 <rect x="580" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
-<rect x="820" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<rect x="820" y="480" width="200" height="170" rx="5" fill="#f3f4f6" stroke="#6b7280" stroke-width="1" stroke-dasharray="4 3"/>
 <rect x="1060" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
-<rect x="1300" y="480" width="200" height="170" rx="5" fill="#fef2f2" stroke="#be123c" stroke-width="1.4"/>
-<text x="160" y="165" font-size="11" fill="#111827" font-weight="600">图上画最后一列 chip：2 行 × 5 列，row-major 编号。中间列 chip 少最右一列，只有 core0～core7；第一列 chip 是它的镜像，core0 是 B core、core5 不派角色</text>
+<rect x="1300" y="480" width="200" height="170" rx="5" fill="#f8fafc" stroke="#374151" stroke-width="1"/>
+<text x="160" y="165" font-size="11" fill="#111827" font-weight="600">图上画中间列 chip：2 行 × 5 列，行优先编号。灰色虚线框的 core2、core7 是坏 core（core_bad_mask = 0x084），只有 Router 工作，其余模块构造了但不步进；第一列与最后一列 chip 没有坏 core</text>
 <rect x="348" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
 <text x="440.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
 <text x="348" y="196" font-size="10" fill="#111827" font-weight="600">core0</text>
@@ -91,21 +119,21 @@
 <rect x="588" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
 <text x="680.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
 <rect x="828" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
-<text x="920.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
-<text x="828" y="196" font-size="10" fill="#111827" font-weight="600">core2</text>
-<rect x="828" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
-<text x="920.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
-<rect x="828" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
-<text x="858" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
-<text x="858" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
-<rect x="890" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
-<text x="920" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
-<text x="920" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
-<rect x="952" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
-<text x="982" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
-<text x="982" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
-<rect x="828" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
-<text x="920.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<text x="920.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router · 透传档</text>
+<text x="828" y="196" font-size="10" fill="#4b5563" font-weight="600">core2 · 坏 core</text>
+<rect x="828" y="202" width="184" height="16" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="920.0" y="214" font-size="8.5" fill="#9ca3af" font-weight="600" text-anchor="middle">TS</text>
+<rect x="828" y="226" width="60" height="54" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="858" y="248" font-size="8" fill="#9ca3af" text-anchor="middle">MU</text>
+<text x="858" y="262" font-size="7" fill="#9ca3af" text-anchor="middle">RV + DSA</text>
+<rect x="890" y="226" width="60" height="54" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="920" y="248" font-size="8" fill="#9ca3af" text-anchor="middle">VU</text>
+<text x="920" y="262" font-size="7" fill="#9ca3af" text-anchor="middle">RV + DSA</text>
+<rect x="952" y="226" width="60" height="54" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="982" y="248" font-size="8" fill="#9ca3af" text-anchor="middle">DTE</text>
+<text x="982" y="262" font-size="7" fill="#9ca3af" text-anchor="middle">RV + DSA</text>
+<rect x="828" y="288" width="184" height="18" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="920.0" y="301" font-size="8" fill="#9ca3af" text-anchor="middle">构造但不步进 · 不配置 · 不记波形</text>
 <rect x="1068" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
 <text x="1160.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
 <text x="1068" y="196" font-size="10" fill="#111827" font-weight="600">core3</text>
@@ -125,11 +153,19 @@
 <rect x="1308" y="318" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
 <text x="1400.0" y="334" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
 <text x="1308" y="196" font-size="10" fill="#111827" font-weight="600">core4</text>
-<text x="1312" y="234.0" font-size="8.5" fill="#92400e">不派角色：只构造 Router 八个模块</text>
-<text x="1312" y="247.5" font-size="8.5" fill="#92400e">local 侧禁用 · 不接收溢流</text>
-<text x="1312" y="261.0" font-size="8.5" fill="#92400e">业务 credit 跨过它透传，VC credit 照查</text>
-<text x="1312" y="274.5" font-size="8.5" fill="#92400e">只按路由表转发</text>
-<text x="1492" y="301" font-size="8.5" fill="#9ca3af" text-anchor="end">最后一列 chip 的空位</text>
+<rect x="1308" y="202" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
+<text x="1400.0" y="214" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
+<rect x="1308" y="226" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
+<text x="1338" y="248" font-size="8" fill="#374151" text-anchor="middle">MU</text>
+<text x="1338" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1370" y="226" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
+<text x="1400" y="248" font-size="8" fill="#374151" text-anchor="middle">VU</text>
+<text x="1400" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1432" y="226" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
+<text x="1462" y="248" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
+<text x="1462" y="262" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
+<rect x="1308" y="288" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
+<text x="1400.0" y="301" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
 <rect x="348" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
 <text x="440.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
 <text x="348" y="642" font-size="10" fill="#111827" font-weight="600">core5</text>
@@ -163,21 +199,21 @@
 <rect x="588" y="518" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
 <text x="680.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
 <rect x="828" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
-<text x="920.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
-<text x="828" y="642" font-size="10" fill="#111827" font-weight="600">core7</text>
-<rect x="828" y="612" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
-<text x="920.0" y="624" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
-<rect x="828" y="544" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
-<text x="858" y="566" font-size="8" fill="#374151" text-anchor="middle">MU</text>
-<text x="858" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
-<rect x="890" y="544" width="60" height="54" rx="3" fill="#d1fae5" stroke="#047857"/>
-<text x="920" y="566" font-size="8" fill="#374151" text-anchor="middle">VU</text>
-<text x="920" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
-<rect x="952" y="544" width="60" height="54" rx="3" fill="#e0f2fe" stroke="#0369a1"/>
-<text x="982" y="566" font-size="8" fill="#374151" text-anchor="middle">DTE</text>
-<text x="982" y="580" font-size="7" fill="#6b7280" text-anchor="middle">RV + DSA</text>
-<rect x="828" y="518" width="184" height="18" rx="3" fill="#fde8d8" stroke="#c2410c"/>
-<text x="920.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
+<text x="920.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router · 透传档</text>
+<text x="828" y="642" font-size="10" fill="#4b5563" font-weight="600">core7 · 坏 core</text>
+<rect x="828" y="612" width="184" height="16" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="920.0" y="624" font-size="8.5" fill="#9ca3af" font-weight="600" text-anchor="middle">TS</text>
+<rect x="828" y="544" width="60" height="54" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="858" y="566" font-size="8" fill="#9ca3af" text-anchor="middle">MU</text>
+<text x="858" y="580" font-size="7" fill="#9ca3af" text-anchor="middle">RV + DSA</text>
+<rect x="890" y="544" width="60" height="54" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="920" y="566" font-size="8" fill="#9ca3af" text-anchor="middle">VU</text>
+<text x="920" y="580" font-size="7" fill="#9ca3af" text-anchor="middle">RV + DSA</text>
+<rect x="952" y="544" width="60" height="54" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="982" y="566" font-size="8" fill="#9ca3af" text-anchor="middle">DTE</text>
+<text x="982" y="580" font-size="7" fill="#9ca3af" text-anchor="middle">RV + DSA</text>
+<rect x="828" y="518" width="184" height="18" rx="3" fill="#ffffff" stroke="#9ca3af"/>
+<text x="920.0" y="531" font-size="8" fill="#9ca3af" text-anchor="middle">构造但不步进 · 不配置 · 不记波形</text>
 <rect x="1068" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
 <text x="1160.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
 <text x="1068" y="642" font-size="10" fill="#111827" font-weight="600">core8</text>
@@ -196,7 +232,7 @@
 <text x="1160.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
 <rect x="1308" y="488" width="184" height="24" rx="3" fill="#e0e7ff" stroke="#4338ca"/>
 <text x="1400.0" y="504" font-size="9.5" fill="#3730a3" font-weight="600" text-anchor="middle">Router</text>
-<text x="1308" y="642" font-size="10" fill="#be123c" font-weight="600">core9 · R core</text>
+<text x="1308" y="642" font-size="10" fill="#111827" font-weight="600">core9</text>
 <rect x="1308" y="612" width="184" height="16" rx="3" fill="#dcf3f0" stroke="#0d9488"/>
 <text x="1400.0" y="624" font-size="8.5" fill="#0f766e" font-weight="600" text-anchor="middle">TS</text>
 <rect x="1308" y="544" width="60" height="54" rx="3" fill="#fef9c3" stroke="#a16207"/>
@@ -278,7 +314,7 @@
 <rect x="20" y="44" width="240" height="100.0" rx="4" fill="#fbf3df" stroke="#b45309"/>
 <text x="32" y="65" font-size="11" fill="#111827" font-weight="600">SCP 桩（每 chip 一个）</text>
 <text x="32.0" y="82.0" font-size="8.5" fill="#475569">boot：自启动 → PCIe 训练</text>
-<text x="32.0" y="95.5" font-size="8.5" fill="#475569">→ 顺序配 core0～core7</text>
+<text x="32.0" y="95.5" font-size="8.5" fill="#475569">→ 全部 Router → 顺序配好 core</text>
 <text x="32.0" y="109.0" font-size="8.5" fill="#475569">初始化六步 · 广播开关</text>
 <text x="32.0" y="122.5" font-size="8.5" fill="#475569">weights 模式 ↔ 业务模式</text>
 <path d="M260.0 94.0 L300.0 94.0 L300.0 154.0 L1875.0 154.0 L1875.0 676.0 L300.0 676.0" stroke="#7c3aed" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-dasharray="7 4"/>
@@ -296,14 +332,14 @@
 <path d="M1160.0 676.0 L1160.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
 <path d="M1400.0 154.0 L1400.0 179.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
 <path d="M1400.0 676.0 L1400.0 651.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
-<text x="1510" y="670" font-size="8.5" fill="#7c3aed" text-anchor="start">每 core 一个 ctrl_noc 端点，不派角色的也配</text>
+<text x="1510" y="670" font-size="8.5" fill="#7c3aed" text-anchor="start">每 core 一个 ctrl_noc 端点，坏 core 也有</text>
 <polygon points="29,174.0 140,174.0 131,204.0 20,204.0" fill="#f8fafc" stroke="#374151"/>
 <text x="80.0" y="188.0" font-size="9" fill="#374151" text-anchor="middle">async_int</text>
 <text x="80.0" y="199.0" font-size="7.5" fill="#6b7280" text-anchor="middle">core_status → SCP</text>
 <path d="M84.5 174.0 L80.1 145.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
 <text x="150" y="194.0" font-size="8.5" fill="#6b7280" text-anchor="start">本轮只留接口名</text>
 <text x="20" y="762" font-size="10.5" fill="#374151" text-anchor="start">四个 chip 口由 LPU 接到相邻 chip 或 PCIe Switch；C2C 当作一种长延迟的 R2R，Router 到 Router 400T。</text>
-<text x="20" y="784" font-size="10.5" fill="#374151" text-anchor="start">Chip 不打拍，是装配容器：按 chip 形状构造 8 或 10 个 Core、接 mesh、接四个 C2C Bridge、接 ctrl_noc。SCP 桩、ctrl_noc 端点、C2C Bridge 是本层三种逐拍推进的模块。</text>
+<text x="20" y="784" font-size="10.5" fill="#374151" text-anchor="start">Chip 不打拍，是装配容器：构造 10 个 Core（不区分所在列与角色）、接 mesh、接四个 C2C Bridge、接 ctrl_noc。SCP 桩、ctrl_noc 端点、C2C Bridge 是本层三种逐拍推进的模块。</text>
 </svg>
 ```
 
@@ -317,32 +353,32 @@
 
 | 编号 | 功能 |
 | - | - |
-| F1 | 按本 chip 的 `chip_shape` 构造 Core：中间列 8 个，第一列与最后一列 10 个。不派角色的那个 core 只构造 Router 的八个模块，不构造 TS、RV core、DSA 与三块存储 |
-| F2 | 构造期断言：不派角色的 core 不承担 logical compute core、EP broadcast core、EP reduction core，也不承担任何需要访问 local memory 的源或目的；它只转发 |
+| F1 | 构造 10 个 Core，2 行 × 5 列，行优先编号。构造时不区分 chip 所在的列，也不区分 core 的角色；坏 core 与其他 core 一样构造七个单元的全部模块 |
+| F2 | 装载时检查坏 core：`core_bad_mask` 至多 2 位为 1，每行至多 1 位；坏 core 的角色是不派角色，只配 RouterTable 与 `RTR_RELEASE_ROUTE`；它的 RouterTable 表项一律不进 core（`path_core_bypass = 1`），`op_type` 为 transfer，`stream_table_enable` 与 `stall_way` 为 0 |
 | F3 | 同行相邻 core 的 Router `left` 与 `right` 端口用一对 Link 对接，走 R2R 参数 |
-| F4 | `core[i]` 与另一行对称位置的 core 的 `mid` 端口对接：4 列 chip 是 `core[i]` 与 `core[i+4]`，5 列 chip 是 `core[i]` 与 `core[i+5]`。mid-to-mid 直连，同样走 R2R 参数 |
-| F5 | 每行左右两端的 core 各接一个 C2C Bridge，行 0 左端引到 chip 的 N 口、行 0 右端引到 E 口、行 1 左端引到 W 口、行 1 右端引到 S 口。落到编号上：4 列 chip 是 core0 / core3 / core4 / core7，5 列 chip 是 core0 / core4 / core5 / core9 |
+| F4 | `core[i]` 与另一行同列的 `core[i+5]` 的 `mid` 端口对接，mid-to-mid 直连，同样走 R2R 参数 |
+| F5 | 每行左右两端的 core 各接一个 C2C Bridge，行 0 左端引到 chip 的 N 口、行 0 右端引到 E 口、行 1 左端引到 W 口、行 1 右端引到 S 口，落到编号上是 core0 / core4 / core5 / core9 |
 | F6 | 每 core 构造一个 ctrl_noc 端点，按各单元文档声明的 `cfg` 口接线 |
-| F7 | 三种形状的角色分配写死在 `logical_map` 里：第一列 chip 的 core0 是 B core、core5 不派角色，最后一列 chip 的 core9 是 R core、core4 不派角色，其余 core 一律是 logical compute core 0～7 |
-| F8 | 三种形状的路由表不同，路由表按 chip 从编译侧读入，不写死 |
+| F7 | 角色不存在 chip 与 core 里，由 SCP 在 core 配置阶段逐项写的几项配置体现：TS 的 `SELF_START`（B core、R core 为 1，计算 core 为 0）与 `B_CORE_DIRECTION`（B core 写广播的方向，计算 core 与 R core 为 0）；TS 的任务链与 datain 任务（计算 core 配计算 core 的任务链，B core、R core 配自启动任务链与 datain 任务）；DTE 业务模式下进核那一笔的 `route`（计算 core 落 Core Mem，B core、R core 落 Matrix Mem）、回不回 Ack（计算 core 回，B core、R core 不回）、标志表的基址与一个槽位多大（计算 core 不配，B core 配 token 槽位，R core 配行结果槽位）。不派角色的 core 这几项都不配 |
+| F8 | 路由表按 chip 从编译侧读入，不写死。逻辑上左右相邻的两个计算 core 物理上隔着坏 core 时，坏 core 配一条只转发的表项，方向与这一跳相同；这一跳在归约链上时，坏 core 再配 `RTR_RELEASE_ROUTE`，把从下游一侧进来的 Reduce release 转往上游一侧 |
 
 ### SCP 桩
 
 | 编号 | 功能 |
 | - | - |
-| F9 | boot 序列：自启动 → 完成 PCIe 链路训练 → 给**本 chip 全部 core 的 Router** 配 RouterTable、Skip Mask 与 Credit Bypass Route → 顺序解复位并配置各 core 的 TS、三个 RV core 与三个 DSA |
+| F9 | boot 序列：自启动 → 完成 PCIe 链路训练 → 给**本 chip 全部 core 的 Router** 先写 `core_bad_mask`，再配 RouterTable 与 `RTR_RELEASE_ROUTE` → 顺序解复位并配置各好 core 的 TS（含体现角色的那几项）、三个 RV core 与三个 DSA，最后写 `TS_INIT_FINISH`；坏 core 跳过 |
 | F10 | Router 那一段的上电顺序：PMU 退出 Idle 释放 core 时钟域复位 → `stream_credit[port]` 置 0 → RouterTable 处于默认状态（**所有条目 bypass / no-op**），VC Buffer 硬件固定初始化 → SCP 经 ctrl_noc 配 RouterTable 与 VC 使能 mask → 各 core 上电发初始化脉冲，`stream_credit` 逐步初始化 → 就绪 |
-| F11 | 不派角色的 core 在 Skip Mask 里标成跳过：经过它的包走完整流水线但不投递 local。它的 Router 的**数据通路可时钟门控，配置通路时钟保持** |
-| F12 | 不派角色的 core 只配 Router 那两样，不配 TS、RV core、DSA，也不解复位它们（那几个模块本来就没构造）。Router 的配置排在 TS 与 RV core 之前，全 chip 一个 core 不落；漏掉任何一个 core 的 Router，经过它的 path 就全断 |
+| F11 | `core_bad_mask` 每颗 chip 10 bit，第 i 位为 1 表示 core i 是坏 core。真机上电时从 eFuse 读出锁存；模型由 bundle 给，写入时机等同上电锁存：业务开始之前写完，之后不再变。每个 core 的 Router 只看本 core 那一位，为 1 就进透传档 |
+| F12 | 坏 core 只配 RouterTable 与 `RTR_RELEASE_ROUTE`，不配 TS、RV core、DSA，也不解复位它们；等 ready 时只等好 core，坏 core 的 ready 恒为真。Router 的配置排在 TS 与 RV core 之前，全 chip 一个 core 不落；漏掉任何一个 core 的 Router，经过它的 path 就全断 |
 | F13 | ctrl_noc 广播开关：关时依次配每个 core，开时只发一次带广播标记的请求给 core0，由 core0 依次广播；默认关 |
 | F14 | 每个 core 的初始化五步，按序做完：RV core firmware 写入 ITCM → 配置 Bach core 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化。DTE 的 weights loader 属于 kernel，随 kernel 镜像装入 |
 | F15 | RouterTable 的三份副本：等 Router 内部多副本提交完成后，软件才写 DTE 与 ReduceModule 的那两份，硬件不代为同步 |
 | F16 | core 内 boot：把启动程序搬进三个 RV core 的 ITCM，启动三个 RV core 进 wait，确认 `ready` 全高后开放业务接收权限，Router 才开始接收业务 |
 | F17 | TS 没有控制核，只有寄存器，复位清 0 后等外部启动，不需要装载程序 |
 | F18 | 装载拍数按镜像字节数除以 4 B 计，与业务段用同一把尺 |
-| F19 | weights 加载模式的配置：Router 路由表配成 weights 专用的 P2P 路径且只用 1 条 path，TS 的 datain 任务 `pc` 指向 weights loader、`trigger_task_chain_en = 0` |
+| F19 | weights 加载模式的配置：Router 路由表配成 weights 专用的 P2P 路径且只用 1 条 path，TS 的 datain 任务 `pc` 指向 weights loader、`trigger_task_chain_en = 0`，DTE 进核那一笔一律落 Matrix Mem、不回 Ack |
 | F20 | 加载一笔 weights 的四步：Router 收到数据通知 TS 触发 datain 任务 → TS 通知 DTE core 执行 → DTE core 跑 weights loader 算出落 Matrix Mem 的地址再发 DTE 指令搬运 → datain 完成通知 TS 释放，不触发任务链 |
-| F21 | 切到业务模式改三处：Router 路由表换成业务路径、TS 的 datain `pc` 指向 token 搬移入口且 `trigger_task_chain_en = 1`、各 DSA 写入业务场景的静态配置 |
+| F21 | 切到业务模式改四处：Router 路由表换成业务路径、TS 的 datain `pc` 指向 token 搬移入口且 `trigger_task_chain_en = 1`、DTE 进核那一笔的 `route`、Ack 与标志表按角色重配、各 DSA 写入业务场景的静态配置 |
 | F22 | 异常与中断从 `async_int` 收，转报给上层。本轮只留接口名与状态位，不实现行为 |
 
 ### ctrl_noc 端点
@@ -405,10 +441,9 @@ port core_ready[i] (slave, 电平, clk)             // 第 i 个 core 的三个 
 ## 4　存储器
 
 ```
-mem chip_shape     FF        {中间列 2×4, 第一列 2×5, 最后一列 2×5}                1R    编译侧读入      复位由输入给   // 本 chip 的 core 阵列形状
-mem logical_map    FF 阵列   8 或 10 × {logical_core[3:0], role[2:0]}               1R    编译侧读入      复位由输入给   // 逻辑 core 编号与角色（compute / B core / R core / 不派角色）
+mem core_bad_mask[10] FF     每 core 的 Router 一份，10 bit，内容相同                1R1W  SCP 在 Router 配置阶段写入，业务开始后不变  复位由输入给   // 第 i 位为 1 表示 core i 是坏 core；各 Router 只看本 core 那一位
 mem addr_map       FF 阵列   N × {base[23:0], size, target_module, target_core}     1R    静态            复位由输入给   // ctrl_noc 地址分发表
-mem core_id_reg[N] FF        只读 core id，N 为本 chip 的 core 数                    1R    SCP 经 ctrl_noc 读，不可改     复位固定
+mem core_id_reg[10] FF       只读 core id                                            1R    SCP 经 ctrl_noc 读，不可改     复位固定
 mem scp_fsm        FF        {state[3:0], core_idx[3:0], step[2:0], cursor[31:0]}   1RW   boot 序列       复位 自启动
 mem scp_img        FF 阵列   配置事务序列（firmware、任务链、路由表、kernel、DSA 静态配置）        1R  编译侧读入  复位由输入给
 mem noc_latch[N]   级间 latch {valid, addr[23:0], we, wdata[31:0]}                  —     每拍覆写        —              // 端点 → 目的模块 cfg 口
@@ -507,12 +542,12 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M1</text>
   <text x="680" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
   <text x="250" y="56" font-size="12" fill="#111827">SCP 桩 · 六步初始化逐笔发事务</text>
-  <text x="250" y="78" font-size="10.5" fill="#475569">1. 自启动 → PCIe 训练 → 本 chip 全部 core 的 Router 配路由表与 credit 旁路</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. 再顺序解复位各个 core，逐个走六步：RV firmware 进 ITCM → DTE</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. 自启动 → PCIe 训练 → 全部 Router 写 core_bad_mask、路由表与 RTR_RELEASE_ROUTE</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 再顺序解复位各个好 core，逐个走六步：RV firmware 进 ITCM → DTE</text>
   <text x="262" y="118" font-size="10.5" fill="#475569">解复位 → TS 任务链 → DSA 静态配置 → kernel</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">3. scp_ctrl = {cfg_core, cfg_addr, cfg_we, cfg_wdata, cfg_bcast}，每笔一拍</text>
   <text x="250" y="158" font-size="10.5" fill="#475569">4. Router 的 commit_done 拉高后才写 DTE 与 ReduceModule 的两份副本</text>
-  <text x="250" y="182" font-size="10" fill="#9ca3af">三个 RV core 的 ready 全高后才开放业务接收</text>
+  <text x="250" y="182" font-size="10" fill="#9ca3af">好 core 的 ready 全高后才开放业务接收，坏 core 的 ready 恒为真</text>
   <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
   <path d="M188 109 L231 109" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
   <path d="M188 162 L231 162" stroke="#475569" marker-end="url(#arc1)" fill="none"/>
@@ -705,11 +740,10 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
 ## 7　参数汇总
 
 ```
-ARRAY             中间列 2×4、第一列与最后一列 2×5，row-major
-                  4 列：core0 = 行 0 左端 → chip 的 N 口，core3 = 行 0 右端 → E，core4 = 行 1 左端 → W，core7 = 行 1 右端 → S
-                  5 列：core0 → N，core4 → E，core5 → W，core9 → S
-ROLES             一律 8 个计算 core；第一列 chip 的 core0 是 B core、core5 不派角色，最后一列 chip 的 core9 是 R core、core4 不派角色
-MESH              同行 left / right 相邻，跨行 mid 接另一行对称位置；每方向 256 B/T、40T
+ARRAY             一律 2×5 共 10 个 core，行优先编号；core0 → N，core4 → E，core5 → W，core9 → S
+BAD_CORE          core_bad_mask 10 bit；第一列与最后一列 0x000，中间两列 0x084（core2、core7）；每颗至多 2 个、每行至多 1 个
+ROLES             一律 8 个计算 core；第一列组头 chip 的 core0 是 B core，最后一列 chip 的 core9 是 R core；第一列的 core5 与非组头 chip 的 core0、最后一列的 core4 不派角色
+MESH              同行 left / right 相邻，跨行 mid 接 core[i+5]；每方向 256 B/T、40T
 CTRL_NOC_BW       32 bit/T（待定）；每笔事务一拍
 CTRL_NOC_BCAST    开关，默认关
 PCIE_TRAIN_CYCLES 待定
@@ -728,13 +762,14 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
 
 | 机制 | 功能 | 用例 |
 | - | - | - |
-| 两种阵列形状与三个 R2R 方向的连接规则 | F3、F4 | `chip_mesh_shape` |
-| 不派角色的 core 只构造 Router 的八个模块，只转发不落数据 | F1、F11 | `spare_core_router_only` |
-| 不派角色的 core 不能承担 compute / B core / R core；可承担转发、多播、router reduce | F2 | `spare_core_roles` |
-| 三种形状的角色分配与路由表按 chip 读入，不写死 | F7、F8 | `chip_shape_roles` |
+| 2×5 阵列与三个 R2R 方向的连接规则 | F1、F3、F4 | `chip_mesh_2x5` |
+| 坏 core 照样构造全部模块，由 `core_bad_mask` 切进透传档，只转发不落数据 | F1、F11 | `bad_core_pass_through` |
+| 坏 core 的装载检查：至多 2 个、每行至多 1 个，只配 RouterTable 与 `RTR_RELEASE_ROUTE`，表项不进 core | F2、F12 | `bad_core_load_check` |
+| 角色由体现角色的那几项配置给，不存在 chip 与 core 里 | F7、F21 | `role_from_config` |
+| 路由表按 chip 读入；隔着坏 core 的一跳由坏 core 配只转发的表项与 `RTR_RELEASE_ROUTE` | F8 | `route_across_bad_core` |
 | 每行左右两端接 C2C Bridge，全 chip 共 4 个 | F5 | `c2c_bridge_four` |
 | core id 由 SCP 经 ctrl_noc 读 MMIO，不可修改 | F26 | `core_id_readonly` |
-| SCP boot 序列：自启动 → PCIe 训练 → 全部 Router → 各 core | F9 | `boot_sequence` |
+| SCP boot 序列：自启动 → PCIe 训练 → 全部 Router（先写 `core_bad_mask`）→ 各好 core | F9 | `boot_sequence` |
 | ctrl_noc 广播开关 | F13 | `ctrl_noc_bcast` |
 | 初始化六步 | F14 | `init_six_steps` |
 | Router 多副本提交完成后软件再写 DTE 与 ReduceModule 副本 | F15 | `router_table_three_copies` |
@@ -753,7 +788,7 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
 | 对 PCIe Switch 一侧 bypass 掉 Bridge 的业务层逻辑 | F41 | `c2c_bridge_bypass` |
 | C2C 只做透明传输，左收右发、右收左发 | F42 | `c2c_transparent` |
 | Router 段上电六步，RouterTable 默认 bypass / no-op | F10、F12 | `router_boot_reset` |
-| 不派角色的 core 的 Router 数据通路时钟门控，配置通路时钟保持 | F11 | `spare_core_clock_gate` |
+| 等 ready 只等好 core，坏 core 的 ready 恒为真 | F12 | `bad_core_ready` |
 
 ***
 
@@ -768,3 +803,6 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
   * 让配置事务与每个模块的 `cfg` 口一一对应
 * **装载拍数为什么按字节数计而不是同拍写入**
   * 这样 boot 段的拍数与业务段用同一把尺
+* **透传档为什么只跟 `core_bad_mask` 走**
+  * 《DATA_NOC DE HAS》把“不接收溢流、业务 credit pulse 无效”绑在 `core_bad_mask` 上
+  * 不派角色的好 core 只转发，由它的表项决定，Router 走正常档

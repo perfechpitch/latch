@@ -89,6 +89,13 @@ def check_gemm():
     weight = n.encode(n.BF16, [1.0, 1.0, 1.0, 1.0] + [2.0, 0.0, 0.0, 0.0])
     got = ffn.gemm(n.BF16, token, weight, b"", 4, 2, False)
     check(got == [10.0, 2.0], f"gemm 算出 {got}，应当是 [10.0, 2.0]")
+    # MXFP8 × MXFP8：token scale 2、权重 scale 4，一块 32 个元素全是 1 × 1，
+    # 部分和 32 乘两个 scale 之积 8 得 256。
+    token = bytes([n.to_fp8_e4m3(1.0)] * 32)
+    weight = bytes([n.to_fp8_e4m3(1.0)] * 32)
+    got = ffn.gemm(n.MXFP8, token, weight, bytes([n.to_e8m0(2.0)]), 32, 1,
+                   False, bytes([n.to_e8m0(4.0)]))
+    check(got == [256.0], f"双 scale 的 gemm 算出 {got}，应当是 [256.0]")
     parts = [[1.0, 2.0], [0.5, 0.25], [0.125, 0.0625]]
     got = ffn.reduce_experts(parts)
     check(got == [1.625, 2.3125], f"专家归约算出 {got}")

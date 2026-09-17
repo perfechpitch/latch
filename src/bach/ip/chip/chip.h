@@ -1,27 +1,23 @@
 #ifndef _LATCH_BACH_IP_CHIP_CHIP_
 #define _LATCH_BACH_IP_CHIP_CHIP_
 
-// Chip：一片里 8 或 10 个 core 的阵列，加四座 C2C Bridge、每 core 一个 ctrl_noc
+// Chip：一片里 2×5 共 10 个 core 的阵列，加四座 C2C Bridge、每 core 一个 ctrl_noc
 // 端点与一个 SCP 桩。
 //
 // 自己不打拍：这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与四座 Bridge 里，core 内
 // 的在各单元的模块里。
 //
-// 三种形状：中间列 chip 是 2×4 共 8 个 core，第一列与最后一列是 2×5 共 10 个。
-// 都按 row-major 编号。角色写死在 logical_map 里：第一列 chip 的 core0 是 B core、
-// core5 不派角色；最后一列 chip 的 core9 是 R core、core4 不派角色；其余一律是
-// logical compute core 0～7。
+// 10 个 core 按 row-major 编号：
+//   0 1 2 3 4
+//   5 6 7 8 9
+// 构造时不区分 chip 所在列，也不区分角色。坏 core 由 core_bad_mask 标出，业务开
+// 始之前写进每个 core 的 Router；角色由编译器写进各 core 的配置。
 //
 // 接线三条：
 //   同行相邻 core 的 left 与 right 用一对 Link 对接
-//   core[i] 与另一行对称位置的 core 的 mid 口对接（4 列是 i 与 i+4，5 列是
-//   i 与 i+5），mid-to-mid 直连
-//   每行左右两端的 core 各接一座 C2C Bridge，行 0 左端引到 N 口、行 0 右端引到
-//   E 口、行 1 左端引到 W 口、行 1 右端引到 S 口
-//
-// 不派角色的那个 core 只构造 Router 的八个模块。它仍要承担单向转发、多播、
-// router-level reduce 与三类 credit 的透传，而且坐在 chip 接 PCIe Switch 的那个
-// 口上，所以 Router 一个都不能少。
+//   core[i] 与 core[i+5] 的 mid 口直连
+//   每行左右两端的 core 各接一座 C2C Bridge：core0 引到 N 口、core4 引到 E 口、
+//   core5 引到 W 口、core9 引到 S 口
 
 #include <array>
 #include <memory>
@@ -39,12 +35,9 @@
 namespace latch {
 namespace bach {
 
-// 本 chip 在列方向上的位置，决定形状与角色分配。
-enum class ChipShape : uint32_t {
-  kMiddle = 0,   // 中间列：2×4，8 个 core，全是 compute
-  kFirst = 1,    // 第一列：2×5，core0 是 B core，core5 不派角色
-  kLast = 2,     // 最后一列：2×5，core9 是 R core，core4 不派角色
-};
+// 一颗 chip 2 行 × 5 列共 10 个 core。
+constexpr uint64_t kChipCols = 5;
+constexpr uint64_t kChipCoreNum = 2 * kChipCols;
 
 // chip 的四个对外口。
 enum ChipPort : uint64_t {
@@ -55,31 +48,8 @@ enum ChipPort : uint64_t {
   kChipPortNum = 4,
 };
 
-inline uint64_t CoresOf(ChipShape s) {
-  return s == ChipShape::kMiddle ? 8 : 10;
-}
-inline uint64_t ColsOf(ChipShape s) {
-  return s == ChipShape::kMiddle ? 4 : 5;
-}
-
-// 角色写死在这里。三种形状各一套。
-inline CoreRole RoleOf(ChipShape s, uint64_t i) {
-  if (s == ChipShape::kFirst) {
-    if (i == 0) return CoreRole::kBroadcast;
-    if (i == 5) return CoreRole::kSpare;
-  } else if (s == ChipShape::kLast) {
-    if (i == 9) return CoreRole::kReduce;
-    if (i == 4) return CoreRole::kSpare;
-  }
-  return CoreRole::kCompute;
-}
-
 struct ChipCfg {
-  ChipShape shape = ChipShape::kMiddle;
   uint64_t gx = 0, gy = 0;   // 本 chip 在 LPU 里的坐标
-  // B core 与 R core 的 token 槽位标志表，编译侧给。交给这两个 core 的上下文。
-  uint64_t inbound_flag_base = 0;
-  uint64_t inbound_entry_bytes = 0;
   // 四个 C2C 口各一份参数。同层左右与同列上下用 C2C，跨 tray 那两处换纵向
   // 参数，接 PCIe Switch 的那个口用 PCIe ↔ Router，都由 LPU 按链路表填。
   std::array<C2cCfg, kChipPortNum> port{};
@@ -96,23 +66,14 @@ class Chip : public BachModule {
  public:
   Chip(ClockPtr clock, const std::string& name, ChipCfg const& setting)
       : BachModule(clock, name, 0, setting.chip_tick), cfg(setting),
-        cols(ColsOf(setting.shape)) {
-    uint64_t n = CoresOf(cfg.shape);
+        cols(kChipCols) {
+    uint64_t n = kChipCoreNum;
     for (uint64_t i = 0; i < n; ++i) {
       CoreContext ctx;
       ctx.core_id = i;
       ctx.gx = cfg.gx;
       ctx.gy = cfg.gy;
-      ctx.role = RoleOf(cfg.shape, i);
-      ctx.router_only = ctx.role == CoreRole::kSpare;
-      if (ctx.role == CoreRole::kBroadcast || ctx.role == CoreRole::kReduce) {
-        ctx.inbound_flag_base = cfg.inbound_flag_base;
-        ctx.inbound_entry_bytes = cfg.inbound_entry_bytes;
-      }
       ctx.tick = cfg.core_tick;
-      // 构造期断言：不派角色的 core 不承担任何角色，它只转发。
-      LOGCHECK(!ctx.router_only || ctx.role == CoreRole::kSpare,
-               "Chip: 不派角色的 core 不能同时担别的角色。");
       cores.push_back(std::make_unique<Core>(
           clock, "core" + std::to_string(i), ctx, Id()));
       // Ctrl-NOC 端点上跑的是 boot 期的配置写，不是业务数据，不记波形。
@@ -139,7 +100,14 @@ class Chip : public BachModule {
   Core& GetCore(uint64_t i) { return *cores.at(i); }
   CtrlNocEndpoint& Noc(uint64_t i) { return *noc.at(i); }
   uint64_t CoreNum() const { return cores.size(); }
-  ChipShape Shape() const { return cfg.shape; }
+  uint64_t Gx() const { return cfg.gx; }
+  uint64_t Gy() const { return cfg.gy; }
+  // core_bad_mask 写进每个 core 的 Router，与 SCP 在 Router 配置阶段逐 core 写同
+  // 一个值等价。业务开始之前写完。
+  void SetCoreBadMask(uint64_t mask) {
+    for (auto& c : cores) c->SetCoreBadMask(mask);
+  }
+  uint64_t CoreBadMask() { return cores[0]->GetRouter().Table().CoreBadMask(); }
 
   // 装配层每拍调这个。四座桥永远在调用方那个协程里跑，因为两片对接靠的是
   // TakeOut() 与 PushIn() 这一对直接改容器的方法。其余按 chip_tick：不挂时钟
@@ -181,10 +149,9 @@ class Chip : public BachModule {
   }
 
  private:
-  // 同行相邻 core 的 left 与 right 用一对 Link 对接；core[i] 与另一行对称位置
-  // 的 mid 口直连。两者都走 R2R 参数。
+  // 同行相邻 core 的 left 与 right 用一对 Link 对接；core[i] 与 core[i+5] 的
+  // mid 口直连。两者都走 R2R 参数。
   void BuildLinks() {
-    uint64_t n = cores.size();
     for (uint64_t row = 0; row < 2; ++row) {
       for (uint64_t c = 0; c + 1 < cols; ++c) {
         uint64_t a = row * cols + c;
@@ -193,7 +160,7 @@ class Chip : public BachModule {
                 uint64_t(Dir::kDirLeft));
       }
     }
-    for (uint64_t c = 0; c < cols && c + cols < n; ++c) {
+    for (uint64_t c = 0; c < cols; ++c) {
       Connect("mid" + std::to_string(c), c, uint64_t(Dir::kDirMid),
               c + cols, uint64_t(Dir::kDirMid));
     }
@@ -225,8 +192,8 @@ class Chip : public BachModule {
     links.push_back(std::move(l));
   }
 
-  // 每行左右两端的 core 各接一座 Bridge：行 0 左端 → N，行 0 右端 → E，
-  // 行 1 左端 → W，行 1 右端 → S。
+  // 每行左右两端的 core 各接一座 Bridge：core0 → N，core4 → E，core5 → W，
+  // core9 → S。
   void BuildBridges() {
     static const char* kNames[kChipPortNum] = {"n", "e", "w", "s"};
     uint64_t edge[kChipPortNum] = {0, cols - 1, cols, 2 * cols - 1};

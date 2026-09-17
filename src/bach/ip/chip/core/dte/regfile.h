@@ -239,6 +239,7 @@ class DteRegfile : public BachModule {
     d->src_addr = t.src_addr + shift;
     d->dst_addr = t.dst_addr + shift;
     d->bytes = t.data_len * kDteDataLenGrain;
+    d->scale = (t.trigger & kDteScaleValid) != 0;
     d->task_last = (t.trigger & kDteTaskLast) != 0;
     d->smem_wr = (t.trigger & kDteWrSharememFlag) != 0;
     d->smem_addr = t.sharemem_waddr;

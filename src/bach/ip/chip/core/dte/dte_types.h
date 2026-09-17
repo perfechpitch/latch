@@ -87,6 +87,10 @@ struct Descriptor {
   uint64_t src_addr = 0;
   uint64_t dst_addr = 0;
   uint64_t bytes = 0;
+  // SCALE_VALID：MXFP8 数据带 scale。bytes 仍只算数据那一段，scale 另有
+  // ceil(bytes / 32) 个，随数据一起搬，包里接在数据后面。
+  bool scale = false;
+  uint64_t ScaleBytes() const { return scale ? (bytes + 31) / 32 : 0; }
   uint64_t vc = 0;           // 出核走哪个 VC，决定落在哪个 out_ch
 
   // task_last 标记一个 task 拆成几笔搬运时的最后一笔，只有带这个标记的那一笔

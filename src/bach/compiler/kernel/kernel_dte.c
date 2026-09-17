@@ -11,8 +11,9 @@
 
 /* 一笔搬运的四个寄存器加 Trigger，Trigger 必须最后写。
  * 寄存器落在模板 0 里，一套模板 64 B，照《DTE寄存器配置参数》的地址空间。
- * len 是字节数，CFG_DATA_LEN 收的是 8 B 一格的格数，所以这里除 8。传进来的
- * 字节数必须是 8 的倍数，硬件配不出不足一格的尾巴。
+ * len 是数据那一段的字节数，CFG_DATA_LEN 收的是 8 B 一格的格数，所以这里除 8。
+ * 传进来的字节数必须是 8 的倍数，硬件配不出不足一格的尾巴。mode 里带
+ * DTE_SCALE_VALID 时 scale 随数据一起搬，长度硬件按 len / 32 自己算。
  * last 置位的那一笔带 task_last：一个 task 拆成几笔搬运时只有最后一笔带，DTE
  * 做完它才通知 TS。前一笔还没交出去时寄存器接口顶住写，所以几笔可以接着配 */
 static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
@@ -31,7 +32,10 @@ static void send_seg(u32 off, u32 bytes) {
 
 /* datain：包一到 DTE 就自己起搬运，不必这里再配一笔。这一笔要做的是软件包头
  * 那一档：把硬件包头抄进按 stream 排的软件包头表，再弹掉这个包的包头。搬运
- * 的完成由 DTE 报 TS，所以这里交还自己就走，不通知 TS。 */
+ * 的完成由 DTE 报 TS，所以这里交还自己就走，不通知 TS。
+ *
+ * 一个计算 core 上几项搬入任务（token、FC2 输入、归约结果、concat）都走它：
+ * 落点与 scale 由包头带着，DTE 自己办。 */
 TASK void task_dte_user_init(void) {
   u32 tpl = dte_template(0);
   u32 head = mmio_read(DTE_IO_BASE, tpl + DTE_HW_HEADER_ADDR);
@@ -40,89 +44,70 @@ TASK void task_dte_user_init(void) {
   task_done();
 }
 
-/* Core Mem 搬到 Router，往下游发 */
+/* ===== 单 core 用例的几笔 ===== */
+
+/* token 从 Core Mem 搬到 Router，往下游发，scale 随它走 */
 TASK void task_dte_move(void) {
-  dte_move(CMEM_TOKEN_OFF, 0, TOKEN_BYTES, DTE_MODE_CMEM_TO_ROUTER, 1);
-  task_done();
-}
-
-/* 逐级 reduce：发进本级 ReduceModule，完成由 Router 报 TS */
-TASK void task_dte_reduce(void) {
-  dte_move(CMEM_TOKEN_OFF, 0, TOKEN_BYTES, DTE_MODE_CMEM_TO_ROUTER, 1);
-  task_done();
-}
-
-/* 树形 reduce 的结果汇聚 */
-TASK void task_dte_reduction(void) {
-  dte_move(CMEM_TOKEN_OFF, 0, TOKEN_BYTES, DTE_MODE_CMEM_TO_ROUTER, 1);
-  task_done();
-}
-
-/* 多份数据拼接后写回 Core Mem */
-TASK void task_dte_concat(void) {
-  dte_move(0, CMEM_TOKEN_OFF, TOKEN_BYTES, 0, 1);
-  task_done();
-}
-
-/* 与外部节点收发 */
-TASK void task_dte_fifo_in(void) {
-  dte_move(0, 0, TOKEN_BYTES, 0, 1);
-  task_done();
-}
-
-TASK void task_dte_fifo_out(void) {
-  dte_move(0, 0, TOKEN_BYTES, 2, 1);
+  dte_move(CMEM_TOKEN_OFF, 0, E2E_TOKEN_BYTES,
+           DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
   task_done();
 }
 
 /* 把 MU 算完的那一段发给下游 */
 TASK void task_dte_send_fc1(void) {
-  send_seg(CMEM_FC1_OFF, FC1_BYTES);
+  send_seg(CMEM_FC1_OFF, E2E_OUT_BYTES);
   task_done();
 }
 
 /* 把 VU 算完的那一段发给下游 */
 TASK void task_dte_send_act(void) {
-  send_seg(CMEM_ACT_OFF, ACT_BYTES);
+  send_seg(CMEM_ACT_OFF, E2E_ACT_BYTES);
   task_done();
 }
 
-/* 把一层 MoE 那一段算完的结果发给下游。结果拆成 MOE_PIECE_NUM 个 reduce 包，
- * 一格一包，格首那 16 B 软件辅助信息随包一起发（摆放见 bach.h）。
- * 落到 R core 的哪个槽、哪一半，包头里带着走：链上每个 core 算出来的是同一个
- * 值，Router 归约时照抄首份分量的包头，末端那一份带的就是它。第 k 包落那一半的
- * 第 k 格。
- * 不走归约时一次发完，只有最后一包带 task_last，这个 task 只报一次完成 */
-TASK void task_dte_send_moe(void) {
-  u32 land = rc_land(user_id(), smem_read(MOE_SEND_HALF_OFF));
-  u32 k;
-  for (k = 0; k < MOE_PIECE_NUM; ++k) {
-    dte_move(moe_piece(k), land + k * MOE_PIECE_STRIDE, MOE_PIECE_BYTES,
-             DTE_MODE_CMEM_TO_ROUTER, k + 1 == MOE_PIECE_NUM);
-  }
+/* ===== 一层 MoE 那一段 ===== */
+
+/* 部分和出核，逐级 reduce：一包里两个专家的 FC1 与 FC3。链上每个 core 发的包头
+ * 都写 dot core 上收归约结果的那一处，Router 归约时照抄首份分量的包头，链尾交回
+ * dot core 的那一份就落在那里。这笔任务由 Router 报完成 */
+TASK void task_dte_send_part(void) {
+  dte_move(MOE_PART_OFF, MOE_RED_OFF, MOE_PART_BYTES, DTE_MODE_CMEM_TO_ROUTER,
+           1);
   task_done();
 }
 
-/* 走逐级 reduce 时一包一个任务：任务链上配 MOE_PIECE_NUM 项 reduce 任务，第 k
- * 项只发第 k 包，这笔任务由 Router 报完成 */
-#if MOE_PIECE_NUM != 3
-#error "task_dte_send_moe_p0～p2 按三包写死，MOE_PIECE_NUM 变了要跟着改"
+/* dot core：FC2 输入广播给本 chip 另外 7 个计算 core，scale 随它走，落在各自同一处 */
+TASK void task_dte_send_fc2in(void) {
+  dte_move(MOE_ACT_OFF, MOE_ACT_OFF, MOE_ACT_BYTES,
+           DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
+  task_done();
+}
+
+/* 计算 core：把 FC2 第 s 段发给 dot core，落点是 concat 区第 s 段。按槽位变化，
+ * 每个槽位一个入口 */
+static void send_concat(u32 s) {
+  dte_move(moe_concat(s), moe_concat(s), MOE_FC2_BYTES, DTE_MODE_CMEM_TO_ROUTER,
+           1);
+  task_done();
+}
+TASK void task_dte_send_concat_s0(void) { send_concat(0); }
+TASK void task_dte_send_concat_s1(void) { send_concat(1); }
+TASK void task_dte_send_concat_s2(void) { send_concat(2); }
+TASK void task_dte_send_concat_s3(void) { send_concat(3); }
+TASK void task_dte_send_concat_s4(void) { send_concat(4); }
+TASK void task_dte_send_concat_s5(void) { send_concat(5); }
+TASK void task_dte_send_concat_s6(void) { send_concat(6); }
+
+#if MOE_SLOTS != 8 || MOE_DOT_SLOT != 7
+#error "task_dte_send_concat_s0～s6 按 8 个槽位、dot core 在槽位 7 写死，要跟着改"
 #endif
-static void send_moe_piece(u32 k) {
-  u32 land = rc_land(user_id(), smem_read(MOE_SEND_HALF_OFF));
-  dte_move(moe_piece(k), land + k * MOE_PIECE_STRIDE, MOE_PIECE_BYTES,
+
+/* dot core：行链出核，逐级 reduce。一包是 16 B 头加 concat 区，落到本行 R core 那个
+ * 槽的前一半；一行 4 颗 chip 的 dot core 发的包头都写这一处，Router 归约时照抄首份
+ * 分量的包头。这笔任务由 Router 报完成 */
+TASK void task_dte_send_row(void) {
+  dte_move(MOE_ROW_OFF, rc_land(user_id(), 0), MOE_ROW_BYTES,
            DTE_MODE_CMEM_TO_ROUTER, 1);
-}
-TASK void task_dte_send_moe_p0(void) {
-  send_moe_piece(0);
-  task_done();
-}
-TASK void task_dte_send_moe_p1(void) {
-  send_moe_piece(1);
-  task_done();
-}
-TASK void task_dte_send_moe_p2(void) {
-  send_moe_piece(2);
   task_done();
 }
 
@@ -137,8 +122,8 @@ TASK void task_dte_rc_datain(void) {
   task_yield();
 }
 
-/* 链二的第二步：把那个槽的两笔从 Matrix Mem 搬到 Core Mem。两边都按格连着
- * 摆，一笔搬运就够 */
+/* 链二的第二步：把那个槽的两半从 Matrix Mem 搬到 Core Mem。两边都连着摆，一笔
+ * 搬运就够 */
 TASK void task_dte_rc_load(void) {
   u32 slot = smem_read(RC_SLOT_OFF + stream_id() * 4);
   dte_move(RC_MM_BASE + slot * RC_SLOT_BYTES, RC_A_OFF, RC_SLOT_BYTES,
@@ -146,21 +131,16 @@ TASK void task_dte_rc_load(void) {
   task_done();
 }
 
-/* 链二的最后一步：求和结果送下一组的 R core，一格一包，与收进来时同一个摆法。
- * 落到那边哪个槽的哪一半，按同一条规则算：上游组的中间结果落后一半。这一步
- * 不走归约，只在最后一包带 task_last，报一次完成 */
+/* 链二的最后一步：求和结果送下一行的 R core，一包，与收进来时同一个摆法。落到那
+ * 边哪个槽的哪一半，按同一条规则算：上一行的累加结果落后一半 */
 TASK void task_dte_rc_send(void) {
-  u32 land = rc_land(user_id(), 1);
-  u32 k;
-  for (k = 0; k < MOE_PIECE_NUM; ++k) {
-    dte_move(RC_SUM_OFF + k * MOE_PIECE_STRIDE, land + k * MOE_PIECE_STRIDE,
-             MOE_PIECE_BYTES, DTE_MODE_CMEM_TO_ROUTER, k + 1 == MOE_PIECE_NUM);
-  }
+  dte_move(RC_SUM_OFF, rc_land(user_id(), 1), MOE_ROW_BYTES,
+           DTE_MODE_CMEM_TO_ROUTER, 1);
   task_done();
 }
 
-/* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点与 valid 标志都由硬件按
- * 包头办。这里只把这一格是哪个用户记下来，链二发的时候要按它认人。
+/* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点、scale 与 valid 标志都由
+ * 硬件按包头办。这里只把这一格是哪个用户记下来，链二发的时候要按它认人。
  *
  * 记在第几格按自己收下的笔数算，与发方算落点用的是同一条规则 */
 TASK void task_dte_bc_datain(void) {
@@ -171,10 +151,11 @@ TASK void task_dte_bc_datain(void) {
   task_yield();
 }
 
-/* B core 的链二第二步：把上一步认下的那一格广播给本组各 core */
+/* B core 的链二第二步：把上一步认下的那一格广播给本组各 core，scale 随它走 */
 TASK void task_dte_bc_send(void) {
   u32 slot = smem_read(BC_SLOT_OFF + stream_id() * 4);
-  dte_move(bc_land(slot), 0, BC_TOKEN_BYTES, DTE_MODE_MMEM_TO_ROUTER, 1);
+  dte_move(bc_land(slot), MOE_TOKEN_OFF, BC_TOKEN_BYTES,
+           DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
   task_done();
 }
 
@@ -185,7 +166,8 @@ TASK void task_dte_bc_relay(void) {
   u32 slot = smem_read(BC_SLOT_OFF + stream_id() * 4);
   u32 n = smem_read(BC_SENT_OFF);
   smem_write(BC_SENT_OFF, n + 1);
-  dte_move(bc_land(slot), bc_land(n), BC_TOKEN_BYTES, DTE_MODE_MMEM_TO_ROUTER, 1);
+  dte_move(bc_land(slot), bc_land(n), BC_TOKEN_BYTES,
+           DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
   task_done();
 }
 
@@ -196,8 +178,9 @@ TASK void task_dte_retire(void) {
 
 /* weights 加载模式下由 datain_task 的 pc 指到这里。
  * 这一阶段进核那一笔落 Matrix Mem，落点是包头里的 dst_addr，搬运由 DTE 自己
- * 起，所以这里只数搬进来几笔。数满了中断 SCP，SCP 再把这颗 core 切到业务模式。
- * Matrix Mem 一侧硬件不叠 stream 偏移，包头里带的就是最终地址。 */
+ * 起，scale 随包头的标记落进 scale 旁带，所以这里只数搬进来几笔。数满了中断
+ * SCP，SCP 再把这颗 core 切到业务模式。Matrix Mem 一侧硬件不叠 stream 偏移，
+ * 包头里带的就是最终地址。 */
 TASK void task_dte_weights_loader(void) {
   u32 n = smem_read(WEIGHTS_CNT_OFF);
   smem_write(WEIGHTS_CNT_OFF, n + 1);

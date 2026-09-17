@@ -45,6 +45,8 @@ struct InjectItem {
   uint64_t path_id = 0;
   uint64_t bytes = kTokenBytes;
   std::vector<uint8_t> payload;  // 空表示这一轮不关心内容
+  // payload 是 MXFP8 数据后面接它的 scale。收方据此把包尾那一段写进 scale 旁带。
+  bool scale_valid = false;
 };
 
 // 一个 GPU 那一份本地 credit。
@@ -165,6 +167,7 @@ class InStub : public BachModule {
     m->user_id = it.token_id;
     m->seq = hdr_cnt[it.gpu_id]++;
     m->payload = it.payload;
+    m->scale_valid = it.scale_valid ? 1 : 0;
 
     uint64_t n = FlitsOf(it.bytes);
     uint64_t left = it.bytes;

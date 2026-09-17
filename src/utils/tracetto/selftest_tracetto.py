@@ -113,7 +113,7 @@ def lanes_to_signals(evs, lanes=3):
 
 
 # 一份合成波形：chip0.core0 上两笔下发（DTE 与 MU 各一笔），各带一对 RV 边沿与一对
-# DSA 边沿；外加一路 VU，只有 RV 边沿、身份是占位 —— 查「认不出配对」那一支。
+# DSA 边沿；外加一路 VU，只有 RV 边沿、身份是占位 —— 查「认不出是哪一笔」那一支。
 # DSA 那一行的段由起止两条边沿折出来，与真波形上「一个单元压着好几笔」的折法一致。
 RV_EV = [(11, 0, 3, 77), (41, 1, 5, 77), (60, 2, 0xFF, 0xFFFF)]
 RV_DONE_EV = [(20, 0, 3, 77), (50, 1, 5, 77), (70, 2, 0xFF, 0xFFFF)]
@@ -291,38 +291,40 @@ def check_labels(prefix):
 
 
 def check_chain():
-    ev0 = [{"t": 10, "task": 3, "user": 77}]
-    ev1 = [{"t": 40, "task": 5, "user": 77}]
-    expect(S.pair_chain([(14, 30)], ev0), [[10, 30, 77, 3]], "DTE 的全程")
-    expect(S.pair_chain([(44, 70)], ev1), [[40, 70, 77, 5]], "MU 的全程")
-    expect(S.pair_chain([(44, 70)], [{"t": 10, "task": 3, "user": 77}]),
-           [[10, 70, 77, 3]], "下发早于段")
-    expect(S.pair_chain([(60, 70)], []), [[60, 70, -1, -1]], "没被认领的段")
-    # 一笔 task 的 DSA 碎成几段：后面那几段一并吃进同一笔，段末取最后一段的末。
-    expect(S.pair_chain([(521, 1334), (1405, 2218)],
-                        [{"t": 458, "task": 1, "user": 77}]),
-           [[458, 2218, 77, 1]], "碎成两段的同一笔")
-    expect(S.pair_chain([(2671, 2972), (3045, 3346), (3419, 3720)],
-                        [{"t": 2606, "task": 3, "user": 77}]),
-           [[2606, 3720, 77, 3]], "碎成三段的同一笔")
-    expect(S.pair_chain([(521, 1334), (1405, 2218), (2671, 2972)],
-                        [{"t": 458, "task": 1, "user": 77},
-                         {"t": 2606, "task": 3, "user": 77}]),
-           [[458, 2218, 77, 1], [2606, 2972, 77, 3]], "两笔各吃各的碎段")
-    expect(S.pair_chain([(0, 1), (14, 30)], ev0),
-           [[0, 1, -1, -1], [10, 30, 77, 3]], "下发之前的孤段")
-    expect(S.pair_chain([(44, 70)], [{"t": 10, "task": 3, "user": 77},
-                                     {"t": 40, "task": 5, "user": 77}]),
-           [[40, 70, 77, 5]], "不越过下一笔去认段")
+    def e(t, task, user=77):
+        return {"t": t, "task": task, "user": user}
 
-
-def check_done(prefix):
-    r = TraceReader(prefix)
-    try:
-        ts, vs = r.events(103)
-    finally:
-        r.close()
-    expect(S.delta_ticks(ts, vs), [35, 80], "完成的增量")
+    expect(S.pair_chain([e(10, 3)], [e(14, 3)], [e(30, 3)], 80),
+           [[10, 30, 77, 3]], "DTE 的全程")
+    expect(S.pair_chain([e(40, 5)], [e(44, 5)], [e(70, 5)], 80),
+           [[40, 70, 77, 5]], "MU 的全程")
+    # 一笔 task 的 DSA 边沿有好几对：都认回同一笔，段末取最后一次完成。
+    expect(S.pair_chain([e(369, 1)], [e(437, 1), e(650, 1)],
+                        [e(576, 1), e(789, 1)], 3000),
+           [[369, 789, 77, 1]], "两对边沿的同一笔")
+    expect(S.pair_chain([e(369, 1), e(1826, 4)],
+                        [e(437, 1), e(650, 1), e(1897, 4)],
+                        [e(576, 1), e(789, 1), e(2036, 4)], 3000),
+           [[369, 789, 77, 1], [1826, 2036, 77, 4]], "两笔各认各的")
+    # 按身份认，不按先后：前一笔的完成落在后一笔下发之后，前一笔截在后一笔下发那一拍。
+    expect(S.pair_chain([e(2060, 10), e(2077, 13)], [],
+                        [e(2080, 10), e(2090, 13)], 3000),
+           [[2060, 2077, 77, 10], [2077, 2091, 77, 13]], "完成晚于下一笔下发")
+    expect(S.pair_chain([e(100, 1), e(150, 2)], [e(110, 1), e(160, 2)],
+                        [e(400, 1), e(300, 2)], 800),
+           [[100, 150, 77, 1], [150, 300, 77, 2]], "前一笔整个盖住后一笔")
+    # 同一身份反复下发：各认下发时刻不晚于它的最后一笔。
+    expect(S.pair_chain([e(100, 1), e(300, 1)], [e(120, 1), e(320, 1)],
+                        [e(200, 1), e(400, 1)], 800),
+           [[100, 200, 77, 1], [300, 400, 77, 1]], "同一身份的两笔")
+    expect(S.pair_chain([e(10, 3)], [e(14, 3)], [], 80),
+           [[10, 80, 77, 3]], "还没做完延到波形末")
+    expect(S.pair_chain([e(10, 3)], [], [], 80), [], "没认到边沿的下发")
+    expect(S.pair_chain([e(10, 3)], [e(60, 0xFF, 0xFFFF)],
+                        [e(70, 0xFF, 0xFFFF)], 80),
+           [[60, 70, -1, -1]], "占位身份的边沿")
+    expect(S.pair_chain([e(10, 3)], [], [e(0, 9), e(30, 3)], 80),
+           [[0, 1, -1, -1], [10, 31, 77, 3]], "没有同一身份的下发")
 
 
 def check_rows(prefix):
@@ -629,6 +631,43 @@ def check_http(prefix):
         th.join(timeout=2)
 
 
+def check_http_after_router_only():
+    """chip 里排在只有 Router 在用的 core 后面的那个 core：窗口要取到它自己的文件。"""
+    modules = [(1, 0, "chip0"), (2, 1, "core0"), (99, 2, "fwd_mid"), (3, 1, "core1")]
+    modules += [(sid, 3, name) for sid, _pid, name in MODULES[2:]]
+    signals = dict(SIGNALS)
+    signals[99] = [(10, 1)]
+    with tempfile.TemporaryDirectory() as d:
+        prefix = str(Path(d) / "gap")
+        write_trace(prefix + ".trace", modules, signals)
+        trace = Path(prefix + ".trace")
+        manifest, _ = idxbuild.ensure(trace, workers=1, quiet=True)
+        expect(manifest["chips"], [[0, [[0, 0, -1], [1, 1, 0]]]],
+               "只有 Router 的 core0 没有基址，core1 的基址是 0")
+        srv = server.TraceServer(("127.0.0.1", 0), server.Handler, trace, manifest, 1)
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        try:
+            cf = index.CoreFile(index.index_dir(prefix) / index.CORES_DIR / "00001.bin")
+            w = cf.window(0, 0, 80, 1200)
+            want_bytes = cf.read(w["off"], w["end"])
+            cf.close()
+            url = f"http://127.0.0.1:{srv.server_address[1]}/api/window?lanes=0&t0=0&t1=80&px=1200"
+            with urllib.request.urlopen(url, timeout=10) as r:
+                raw = r.read()
+            n = struct.unpack_from("<I", raw, 4)[0]
+            head = json.loads(raw[8:8 + n])
+            expect([e["lane"] for e in head["lanes"]], [0], "core1 的 TS·DTE 回来了")
+            if head["lanes"]:
+                e = head["lanes"][0]
+                expect(raw[8 + n + e["off"]:8 + n + e["off"] + e["len"]], want_bytes,
+                       "取的是 core1 自己的文件")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            th.join(timeout=2)
+
+
 def check_no_insight():
     """不该再依赖 insight 的任何东西。"""
     for gone in ("WIRE_FORMAT", "BUCKET_FMT", "samples_multi_bytes", "init_json",
@@ -657,12 +696,12 @@ def main():
     with_trace(check_tree)
     with_trace(check_bits)
     with_trace(check_issues)
-    with_trace(check_done)
     with_trace(check_rows)
     with_trace(check_index_roundtrip)
     with_trace(check_reuse)
     with_trace(check_parallel_determinism)
     with_trace(check_http)
+    check_http_after_router_only()
     with_trace(check_labels)
     check_chain()
     check_window()

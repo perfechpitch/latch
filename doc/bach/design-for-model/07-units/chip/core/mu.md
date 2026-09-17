@@ -112,16 +112,16 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <rect x="250" y="584.5" width="680" height="208.0" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="262" y="605.5" font-size="11" fill="#111827" font-weight="600">matrix exe</text>
 <text x="262.0" y="622.5" font-size="8.5" fill="#475569">32 个物理 Lane，左右镜像各 16 lane；单 Lane 内 10 级混合高频流水</text>
-<text x="262.0" y="636.0" font-size="8.5" fill="#475569">物理阵列规格二选一：1×K256×N32（输出带宽 128 B）或 1×K128×N64（输出带宽 256 B）</text>
+<text x="262.0" y="636.0" font-size="8.5" fill="#475569">物理阵列规格：1×K128×N64（输出带宽 256 B）</text>
 <text x="262.0" y="649.5" font-size="8.5" fill="#475569">两种运算形式：C = A × B，以及 C = C + (A × B) × W_ep（矩阵乘加专家间 reduce，不支持初始 C 加载）</text>
 <text x="262.0" y="663.0" font-size="8.5" fill="#475569">算力：BF16×BF16 4K MACs · MXFP8×MXFP8 8K MACs（scale block 32，E8M0）</text>
 <text x="262.0" y="676.5" font-size="8.5" fill="#475569">　　　MXFP8×MXFP4 与 MXFP8×NVFP4 各 16K MACs（scale block 16，FP8）· BF16×MXFP4 与 BF16×NVFP4 各 8K MACs</text>
 <text x="262.0" y="690.0" font-size="8.5" fill="#475569">八种计算原语：MXFP8 的 1×K128×N64 与 1×K64×N128；BF16 的 1×K64×N64 与 1×K32×N128；</text>
 <text x="262.0" y="703.5" font-size="8.5" fill="#475569">　　　　　　　W4A8 的 1×K256×N64 与 1×K128×N128；W4A16 的 1×K128×N64 与 1×K64×N128</text>
 <text x="262.0" y="717.0" font-size="8.5" fill="#475569">vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树的第 128 输入层级节点插旁路 MUX，配上对应 vlane 分组的</text>
-<text x="262.0" y="730.5" font-size="8.5" fill="#475569">　MUX 逻辑和 Ksplit_acc 寄存器，做到单 lane 同时输出多个结果；vlane 有 1 和 2 两种模式</text>
-<text x="262.0" y="744.0" font-size="8.5" fill="#475569">数据类型：token(A) / weight(B) 输入 BF16 或 MXFP8；W_ep 输入 FP32；输出 FP32 或 BF16</text>
-<text x="262.0" y="757.5" font-size="8.5" fill="#475569">bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序</text>
+<text x="262.0" y="730.5" font-size="8.5" fill="#475569">　MUX 逻辑和 Ksplit_acc 寄存器，做到单 lane 同时输出多个结果；vlane 有 1 和 2 两种模式；1×K64×N128 即 1×K128×N64 阵列开 vlane=2</text>
+<text x="262.0" y="744.0" font-size="8.5" fill="#475569">数据类型：token(A) / weight(B) 输入 BF16 或 MXFP8；W_ep 输入 FP32；输出 FP32 或 BF16；默认用例 A、B 为 MXFP8，输出 BF16</text>
+<text x="262.0" y="757.5" font-size="8.5" fill="#475569">bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序；A、B 都是 MXFP8 时每组乘两个 scale</text>
 <text x="262.0" y="771.0" font-size="8.5" fill="#475569">计算异常 MATH_NAN_INF 不阻塞流水，由硬件自动 Clamp；零输入旁路 + 特殊值穿透；DIDT 分级启动，最小分级为单 lane</text>
 <rect x="1300" y="584.5" width="300" height="221.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1312" y="605.5" font-size="11" fill="#111827" font-weight="600">stq</text>
@@ -251,18 +251,18 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | 编号 | 功能 |
 | - | - |
 | F27 | 32 个物理 Lane，左右镜像各 16 lane；单 Lane 内 10 级混合高频流水 |
-| F28 | 物理阵列规格二选一：`1×K256×N32`（输出带宽 128 B）或 `1×K128×N64`（输出带宽 256 B） |
+| F28 | 物理阵列规格：`1×K128×N64`（输出带宽 256 B）。依据《MU 评估》“选取平衡型、适应性中等、面积较小的 K128\*N64阵列结构” |
 | F29 | 算力按精度组合分六档：BF16×BF16 4K MACs；MXFP8×MXFP8 8K MACs（scale block 32，E8M0）；MXFP8×MXFP4 与 MXFP8×NVFP4 各 16K MACs（scale block 16，FP8）；BF16×MXFP4 与 BF16×NVFP4 各 8K MACs |
-| F30 | 八种计算原语：MXFP8 的 `1×K128×N64` 与 `1×K64×N128`；BF16 的 `1×K64×N64` 与 `1×K32×N128`；W4A8 的 `1×K256×N64` 与 `1×K128×N128`；W4A16 的 `1×K128×N64` 与 `1×K64×N128` |
-| F31 | 数据类型：token(A) 与 weight(B) 输入 BF16 或 MXFP8，`W_ep` 输入 FP32，输出 FP32 或 BF16 |
+| F30 | 八种计算原语：MXFP8 的 `1×K128×N64` 与 `1×K64×N128`；BF16 的 `1×K64×N64` 与 `1×K32×N128`；W4A8 的 `1×K256×N64` 与 `1×K128×N128`；W4A16 的 `1×K128×N64` 与 `1×K64×N128`。默认用例用 MXFP8 的两种：FC1、FC3 用 `1×K128×N64`，FC2 用 `1×K64×N128`。`1×K64×N128` 是 `1×K128×N64` 阵列开 `vlane = 2`（F32），依据《MU 评估》“假设支持 K64\*N128时，需要vlane=2” |
+| F31 | 数据类型：token(A) 与 weight(B) 输入 BF16 或 MXFP8，`W_ep` 输入 FP32，输出 FP32 或 BF16。默认用例 token 与 weight 都是 MXFP8，两者各带 E8M0 scale，输出 BF16 |
 | F32 | vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树的第 128 输入层级节点插旁路 MUX，配上对应 vlane 分组的 MUX 逻辑和 `Ksplit_acc` 寄存器，做到单 lane 同时输出多个结果。vlane 有 1 和 2 两种模式 |
-| F33 | bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序 |
+| F33 | bit 级累加顺序：CSA 树按 scale block 分组累加，参考实现必须用同一顺序。token 与 weight 都是 MXFP8 时，每个 scale block 的部分和乘 token scale 与权重 scale 两个 |
 | F33a | 两级累加寄存器，都是每 lane 一组，都只存一列那么宽：`kblock_acc` 收一列切出来的几段部分和，`ep_acc` 收这一列几个专家各乘上 `W_ep` 之后的加权和。段间与专家间都是顺序相加，每加一次 Clamp 一次；参考实现按同一个顺序算 |
 | F33b | 走完一列才产出结果：一列的几段与这一列的几个专家都算完，才按 `DTYPE_C` 转成 FP32 或 BF16 交给 stq |
 | F34 | 计算异常 `MATH_NAN_INF` 不走 Drain & Trap，不阻塞流水，由硬件自动 Clamp |
 | F35 | 单 lane MAC 阵列 bitmask 计算，零输入旁路加特殊值（NaN / Inf）穿透 |
 | F36 | DIDT 分级启动，分级模式可配置，最小分级为单 lane 启动；Matrix 与 Vector 错峰启动，防止二者功耗陡升叠加。本轮只留状态位与接口名 |
-| F37 | 性能目标：MXFP8 下 Primitive K256×N32 和 K128×N64 阵列利用率 100%，BF16 与 MXFP4 同样 100%；Primitive `1×64×128` 且 K=64 时有 50% 性能损失；Tile K×N 过小会有性能损失，由 RV core 配置延时和 MU 内启动延时决定 |
+| F37 | 性能目标：MXFP8 下 K128×N64 阵列利用率 100%，BF16 与 MXFP4 同样 100%；Primitive `1×64×128` 且 K=64 时有 50% 性能损失；Tile K×N 过小会有性能损失，由 RV core 配置延时和 MU 内启动延时决定 |
 
 ### stq
 
@@ -739,7 +739,9 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
 
 ```
 物理 lane          32（左右镜像各 16），单 lane 10 级流水
-物理阵列规格        1×K256×N32（输出 128 B）或 1×K128×N64（输出 256 B），二选一
+物理阵列规格        1×K128×N64（输出 256 B）
+默认原语            FC1、FC3 用 MXFP8 的 1×K128×N64；FC2 用 1×K64×N128，即 1×K128×N64 阵列开 vlane = 2
+默认精度            token 与 weight 为 MXFP8（各带 E8M0 scale，每 32 个元素 1 B），W_ep 为 FP32，输出 BF16
 算力               BF16 4K · MXFP8 8K · W4A8 16K · W4A16 8K MAC/T
 issue_q            16
 Token ldq / Weight ldq / stq   16 / 4 / 16

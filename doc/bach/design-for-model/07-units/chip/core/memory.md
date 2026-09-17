@@ -42,8 +42,8 @@
 <text x="954" y="26" font-size="9.5" fill="#6b7280">每个模块内部是 bank 阵列加每 bank 一个仲裁器；stream_id 分片在 master 侧的地址计算里做，存储模块只看物理地址</text>
 <rect x="300" y="140" width="480" height="410" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="312" y="161" font-size="11" fill="#111827" font-weight="600">Matrix Mem（Mmem）</text>
-<text x="312.0" y="178.0" font-size="8.5" fill="#475569">容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8），</text>
-<text x="312.0" y="191.5" font-size="8.5" fill="#475569">　32 MB 存正常数据；非 scale 模式下 36 MB 全存数据</text>
+<text x="312.0" y="178.0" font-size="8.5" fill="#475569">容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale、32 MB 存正常数据；</text>
+<text x="312.0" y="191.5" font-size="8.5" fill="#475569">　scale 按每 128 B 数据 4 B 存，与 Core Mem 相同；非 scale 模式下 36 MB 全存数据</text>
 <text x="312.0" y="205.0" font-size="8.5" fill="#475569">按 64 个 lane 分成 64 bank，每 bank 0.5625 MB</text>
 <text x="312.0" y="218.5" font-size="8.5" fill="#475569">每 bank 与 MU 的 lane 匹配，顶层拉齐不同 lane 的延迟</text>
 <text x="312.0" y="232.0" font-size="8.5" fill="#475569">SRAM 单元 2048 × 128 bit，ECC 按 128 bit 一组</text>
@@ -358,7 +358,7 @@
 
 | 编号 | 功能 |
 | - | - |
-| F22 | 容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8）、32 MB 存正常数据；非 scale 模式下 36 MB 全存数据 |
+| F22 | 容量 32 + 4 MB。scale 模式下划出 4 MB 存 scale（scale : data = 1 : 8）、32 MB 存正常数据；非 scale 模式下 36 MB 全存数据。MXFP8 数据与 Core Mem 同样按每 128 B 用 4 B scale（E8M0，每 32 个元素 1 B），只占 scale 区的一部分；scale 与数据地址一一对应，随数据一起读写与搬运 |
 | F23 | 按 64 个 lane 分成 64 bank，每 bank 0.5625 MB；每 bank 与 MU 的 lane 匹配，顶层拉齐不同 lane 的延迟 |
 | F24 | SRAM 单元 2048 × 128 bit，ECC 按 128 bit 一组 |
 | F25 | 最大访存带宽 (8 + 1) KB/T（scale 模式；非 scale 模式最大 8 KB/T） |
@@ -394,7 +394,7 @@
 | F43 | **Broadcast MSG 默认不能修改**，因为本 core 不知道下一级 core 什么时候能接收，原包要一直留着 |
 | F44 | 容量按 MSG 算时，默认长度取“数据量 + 1 KB”，那 1 KB 是包头等额外信息的余量 |
 | F45 | VU-DSA 内部有独立缓存，Core Mem **不需要**缓存 VU 计算的中间值，只存最终输出 |
-| F46 | 精度对容量的影响：chip 内 Reduce 出于精度考虑要用 FP32，chip 间可以用 BF16。两者都在 Router 里做时不占额外 Core Mem 容量；改在 VU 里做就要额外一份，按 6144 个数算是 24 KiB（FP32）或 12 KiB（BF16） |
+| F46 | 精度对容量的影响：Router 做归约时输入输出按 path 的精度配置取 BF16 或 FP32，中间累加固定 FP32。chip 内与 chip 间的归约都在 Router 里做时不占额外 Core Mem 容量；改在 VU 里做就要额外一份，按 6144 个数算是 24 KiB（FP32）或 12 KiB（BF16） |
 | F47 | 单用户容量按角色的分档（原始文档逐场景推出来的值）：FC0 DP2 TP4 约 30 KiB；Norm 约 25 KiB；Router core 约 21 KiB；EP-TP（chip 内外都切 inter）约 31.3 KiB；EP-TP（chip 内切 embedding）约 33.25 KiB；EP-PPTP FC3 约 16 KiB；EP-PPTP FC2 约 28.3 KiB。各档里列的分项之间可以部分复用 |
 | F48 | 带宽的另一条算法：按容量需求乘 5 MTPS 折算，物理带宽 256 B/cycle @1 GHz 的前提下，每个用户允许写入 25 KiB 加读出 25 KiB。两种算法的误差来源是 MSG 包头，以及 Concat 时本 core 的数据被算了两次 |
 
@@ -419,8 +419,8 @@ port cmem_reissue (slave, valid/ready, clk)                // Router 的 CoreMem
   in  req_valid · req_we · req_addr[17:0] · req_wdata[2047:0]
   out req_ready · rsp_valid · rsp_rdata[2047:0]
 port mmem_dte_rd / mmem_dte_wr (slave, valid/ready, clk)   // DTE DSA，256 B/T
-  in  req_valid · req_addr[24:0] · req_wdata[2047:0]
-  out req_ready · rsp_valid · rsp_rdata[2047:0]
+  in  req_valid · req_addr[24:0] · req_wdata[2047:0] · req_scale_en
+  out req_ready · rsp_valid · rsp_rdata[2047:0] · rsp_scale[63:0]
 port mmem_mu_rd (slave, valid/ready, clk)                  // MU DSA 只读，一个行地址广播到各 bank
   in  req_valid · req_addr[24:0]
   out req_ready · rsp_valid · rsp_rdata[65535:0] · rsp_scale[8191:0]
@@ -446,7 +446,7 @@ mem cmem_part       FF        {stream_base, stream_stride, scale_base, topk_base
 mem cmem_ecc_cnt    FF 阵列   每读端口 1 个、DTE / MU / VU 读写各 1 个                               1RW   1 bit 错计数    复位 0
 mem cmem_arb[8]     FF        每 bank 一个仲裁器状态                                                 1RW   —              复位 空闲
 mem mmem_sram[64]   SRAM      每 bank 2048 × 128 bit × N，合计 0.5625 MB / bank                     1R1W  同 bank 不许两个 master  复位未定义
-mem mmem_scale      SRAM      4 MB（scale : data = 1 : 8）                                          1R1W  scale 模式下划出  复位未定义
+mem mmem_scale      SRAM      4 MB，按每 128 B 数据 4 B 存，与数据地址一一映射                        1R1W  scale 模式下划出，scale 使能时与数据同读同写  复位未定义
 mem mmem_err_cnt    FF        同 bank 冲突计数器                                                     1RW   冲突时只执行 MU 并计数  复位 0
 mem smem_sram       SRAM      32 KB                                                                 1R1W  四个 master 轮询  复位未定义（不需要初始化）
 mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固定拍数把响应推回出口                     1RW   —              复位空
@@ -653,7 +653,7 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">cmem_scale[8] · FF 4 KB · 1R1W</text>
   <rect x="20" y="210" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="214" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="231" font-size="10" fill="#374151" text-anchor="middle">mmem_sram[64] · SRAM · 1R1W</text>
+  <text x="104" y="231" font-size="10" fill="#374151" text-anchor="middle">mmem_sram[64] + scale · 1R1W</text>
   <rect x="20" y="264" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="268" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="285" font-size="10" fill="#374151" text-anchor="middle">smem_sram · SRAM 32 KB · 1R1W</text>
@@ -669,7 +669,7 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="250" y="120" font-size="12" fill="#111827">SRAM 阵列 · 按 bank 读写并处理 scale 与 ECC</text>
   <text x="250" y="142" font-size="10.5" fill="#475569">1. we → sram[bank][addr] = wdata（byte_mask 非全 1 时内部留存记录）</text>
   <text x="250" y="162" font-size="10.5" fill="#475569">2. !we → rdata = sram[bank][addr]；byte_mask 全 1 才做 ECC 检测</text>
-  <text x="250" y="182" font-size="10.5" fill="#475569">3. scale_en → 同地址的 scale 寄存器一并读写（Core Mem 128 B : 4 B）</text>
+  <text x="250" y="182" font-size="10.5" fill="#475569">3. scale_en → 同地址的 scale 一并读写（MXFP8 在两块里都是 128 B : 4 B）</text>
   <text x="250" y="202" font-size="10.5" fill="#475569">4. Matrix Mem 读出单 bit 错 → 纠错，并在 SRAM 空闲时写回覆盖</text>
   <text x="250" y="226" font-size="10" fill="#9ca3af">ECC 按 128 bit 一组，编解码在 SRAM 接口处</text>
   <line x1="188" y1="55" x2="228" y2="55" stroke="#475569" marker-end="url(#ars3)"/>
@@ -724,7 +724,7 @@ Core Mem 容量        (128 KB + 4 KB) × 8 bank = 1 MB + 32 KB
 Core Mem 带宽        (1 KB + 32 B)/T；地址粒度 128 B + 4 B，支持 byte mask
 Core Mem 延迟        DTE 13T · MU 16T · VU 14T（MU 这一档按 MU 侧的 16T 记，Cmem MAS 写的 11T 是它自己那一侧的口径）
 Core Mem 优先级       非同组 MU > VU = DTE > {重发、DTE RV core、ctrl_noc} 三者平级先到先得；同组内 DTE 先判读写各自冲突再判读写之间
-Matrix Mem 容量      32 + 4 MB，64 bank × 0.5625 MB
+Matrix Mem 容量      32 + 4 MB，64 bank × 0.5625 MB；scale 区按 1 : 8 留，MXFP8 每 128 B 数据用 4 B
 Matrix Mem 带宽      (8 + 1) KB/T；地址粒度 128 B，不支持 byte mask
 Matrix Mem 延迟      50T 以内；DTE 写 9T 读 8T · MU 读 8T
 Matrix Mem 硬约束    同一 bank 不许两个 master 同时访问，冲突时只执行 MU、被让路的一笔丢弃并计数；模型直接断言失败
@@ -759,6 +759,7 @@ Matrix Mem bank 数    **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对�
 | ECC 编解码在 SRAM 接口处，1 bit 计数、2 bit 报错 | F16、F17 | `cmem_ecc` |
 | 按 stream_num 均等切分，分片基址在 master 侧算 | F18 | `cmem_stream_slice` |
 | cmem_part 定分区，boot 期写入，运行期不变 | F22、F23 | `cmem_partition` |
+| Matrix Mem 的 scale 按每 128 B 数据 4 B 存，随数据一起读写与搬运 | F22 | `mmem_scale` |
 | Matrix Mem 64 bank 与 lane 匹配，顶层拉齐延迟 | F23 | `mmem_bank_lane` |
 | 最大带宽 (8 + 1) KB/T，地址粒度 128 B 不支持 byte mask | F25、F27 | `mmem_bw` |
 | 同一 bank 不许两个 master，冲突时只执行 MU 并计数 | F29 | `mmem_single_master` |

@@ -62,10 +62,19 @@ constexpr uint64_t kMuTaskStart = 1u << 0;
 // 等一次完成，收尾由 RV core 报。
 constexpr uint64_t kMuBusy = 1u << 0;
 
+// 物理阵列：32 个 lane，每 lane 128 个 MAC，一次出 64 个结果。
+constexpr uint64_t kMuArrayK = 128;
+constexpr uint64_t kMuArrayN = 64;
+
+// TASK_CFG 的 PRIM_TYPE 位：物理阵列只有 1×K128×N64 这一种，固定写 1。
+constexpr uint64_t kMuPrimK128N64 = 1u << 0;
+
 // 一次任务的完整配置。写 trigger 那一刻锁存成这一份。
 struct MuTaskCfg {
   // TASK_CFG：[0] PRIM_TYPE、[2:1] VLANE_MODE、[4:3] DTYPE_AB、[5] DTYPE_C
-  bool prim_k128_n64 = false;   // 0 = 1×K256×N32，1 = 1×K128×N64
+  //
+  // vlane = 2 时每个 lane 在 CSA 树中间断开，一次出两个半长的点积，原语就是
+  // 1×K64×N128；vlane = 1 是 1×K128×N64。
   uint64_t vlane = 1;           // 1 或 2
   numeric::DataType dtype_ab = numeric::DataType::kBf16;
   bool out_bf16 = false;        // 0 = FP32 全精度写回，1 = BF16 原位舍入截断
@@ -76,6 +85,8 @@ struct MuTaskCfg {
 
   uint64_t addr_token = 0;
   uint64_t addr_weight = 0;
+  // ADDR_SCALE 寄存器照留。scale 与数据地址一一映射，随数据一起从存储的 scale
+  // 旁带读出来，这一项不参与寻址。
   uint64_t addr_scale = 0;
   uint64_t addr_out = 0;
 
@@ -101,9 +112,9 @@ struct MuTaskCfg {
   uint64_t topk_addr = 0;
   uint64_t topk_stride = 0;
 
-  // 物理矩阵原语的 K 与 N。
-  uint64_t PrimK() const { return prim_k128_n64 ? 128 : 256; }
-  uint64_t PrimN() const { return prim_k128_n64 ? 64 : 32; }
+  // 一条原语的 K 与 N，由 vlane 从物理阵列折出来。
+  uint64_t PrimK() const { return kMuArrayK / vlane; }
+  uint64_t PrimN() const { return kMuArrayN * vlane; }
   // 这一笔要走几个专家。不带 topK 的那一档按一个走。
   uint64_t Experts() const { return expert_count == 0 ? 1 : expert_count; }
 };
@@ -196,7 +207,8 @@ class MuRegfile : public BachModule {
   void WriteReg(uint64_t addr, uint64_t v) {
     switch (addr) {
       case kMuTaskCfg:
-        live.prim_k128_n64 = (v & 1u) != 0;
+        LOGCHECK((v & kMuPrimK128N64) != 0,
+                 "MuRegfile: 物理阵列只有 1×K128×N64，PRIM_TYPE 要写 1。");
         live.vlane = ((v >> 1) & 0x3u) == 0 ? 1 : 2;
         live.dtype_ab = DecodeDtype((v >> 3) & 0x3u);
         live.out_bf16 = ((v >> 5) & 1u) != 0;

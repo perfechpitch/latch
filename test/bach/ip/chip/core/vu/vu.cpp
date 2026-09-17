@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include <deque>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -30,7 +31,8 @@ constexpr Time kPeriod = 1;
 // VU 十四个模块由装配统一驱动，只占一个协程；驱动台自己另外几个。
 void EnsureSlots() { RT::Reset(8, 8); }
 
-// 扮演 Core Mem：一块字节数组，收得下、隔 14 拍回响应。
+// 扮演 Core Mem：一块字节数组，收得下、隔 14 拍回响应。scale 与数据地址一一
+// 映射，每 32 B 一组，与 BankedMem 的 scale 旁带同一个口径。
 class MemStub : public BachModule {
  public:
   MemStub(ClockPtr c, const std::string& name, MemPort& p, uint64_t bytes)
@@ -77,27 +79,45 @@ class MemStub : public BachModule {
         for (uint64_t i = 0; i < n && woff + i < d->size(); ++i) {
           if (addr + woff + i < mem.size()) mem[addr + woff + i] = (*d)[woff + i];
         }
-        if (d->size() > 128) {
-          // scale 段：一块 128 B 一个字节，摆在正文之后的 scale 区。
-          uint64_t at = scale_base + addr / 128;
-          if (at < mem.size()) mem[at] = (*d)[128];
+        if (port.req_scale_en.Get() == kScaleWithData) {
+          // 正文后面接 scale：每 32 B 一组，只改 [woff, woff + n) 覆盖到的那几组。
+          uint64_t total = d->size();
+          uint64_t body = total - (total + 32) / 33;
+          uint64_t from = woff / kScaleGroupBytes;
+          uint64_t to = (woff + n + kScaleGroupBytes - 1) / kScaleGroupBytes;
+          for (uint64_t g = from; g < to && body + g < total; ++g) {
+            scale[addr / kScaleGroupBytes + g] = (*d)[body + g];
+          }
         }
       }
       ++writes;
       return;
     }
     auto data = std::make_shared<ByteBlock>(Peek(addr, n));
-    if (port.req_scale_en.Get() != 0) {
-      uint64_t at = scale_base + addr / 128;
-      data->push_back(at < mem.size() ? mem[at] : 0);
-      data->resize(n + 4, 0);
+    if (port.req_scale_en.Get() == kScaleWithData) {
+      uint64_t groups = (n + kScaleGroupBytes - 1) / kScaleGroupBytes;
+      for (uint64_t g = 0; g < groups; ++g) {
+        auto it = scale.find(addr / kScaleGroupBytes + g);
+        data->push_back(it == scale.end() ? 0 : it->second);
+      }
     }
     pipe.push_back({now + kVuCmLatency, data});
     ++reads;
   }
 
  public:
-  uint64_t scale_base = 0;
+  std::map<uint64_t, uint8_t> scale;   // 按组号存
+  void PokeScale(uint64_t at, std::vector<uint8_t> const& v) {
+    for (uint64_t g = 0; g < v.size(); ++g) scale[at / kScaleGroupBytes + g] = v[g];
+  }
+  std::vector<uint8_t> PeekScale(uint64_t at, uint64_t groups) const {
+    std::vector<uint8_t> v;
+    for (uint64_t g = 0; g < groups; ++g) {
+      auto it = scale.find(at / kScaleGroupBytes + g);
+      v.push_back(it == scale.end() ? 0 : it->second);
+    }
+    return v;
+  }
 
  private:
   struct Pending {
@@ -340,6 +360,68 @@ TEST(Vu, LoadStoreRoundTrip) {
   EXPECT_EQ(rig.sink->got[0].task_id, kTask);
   EXPECT_EQ(rig.sink->got[0].event, 0u);
 }
+
+// st.mxfp8 与 ld.mxfp8：SU 按块算出 scale，连着数据写回；LU 连着 scale 读回来
+// 乘回去。两条宏指令，第一条从一行的中间开始写，第二条从同一处读。
+void Mxfp8RoundTrip(bool round_up) {
+  constexpr uint64_t kN = 128;
+  const uint64_t at = kDstAddr + 32;
+  std::vector<float> in = Tame(kN, round_up ? 0x501 : 0x500);
+  // 把几个元素放大，块内峰值超过 448 × scale 的那一档才分得出两种取整。
+  in[3] = 300.0f;
+  in[40] = -700.0f;
+
+  std::vector<float> scale = numeric::MakeScale(numeric::DataType::kMxfp8, in,
+                                                round_up);
+  std::vector<uint8_t> want_data = numeric::Encode(
+      numeric::DataType::kMxfp8, in, scale, numeric::RoundMode::kRne);
+  std::vector<uint8_t> want_scale =
+      numeric::EncodeScale(numeric::DataType::kMxfp8, scale);
+  std::vector<float> want_back =
+      numeric::Decode(numeric::DataType::kMxfp8, want_data, kN);
+  for (uint64_t i = 0; i < kN; ++i) want_back[i] *= scale[i / 32];
+
+  Rig rig;
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+  uint64_t su = OpWord(uint64_t(SuOp::kStMxfp8), kSrcLu) |
+                (round_up ? kVuSuScaleRoundUp : 0);
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuSuOp, su);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kN, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, at);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Run(400);
+
+  EXPECT_EQ(rig.stmem->Peek(at, kN), want_data);
+  EXPECT_EQ(rig.stmem->PeekScale(at, kN / 32), want_scale);
+  EXPECT_EQ(rig.stmem->PeekScale(kDstAddr, 1), std::vector<uint8_t>{0})
+      << "起点前面那一组 scale 属于相邻数据，不该动";
+
+  Rig back;
+  back.ldmem->Poke(at, want_data);
+  back.ldmem->PokeScale(at, want_scale);
+  back.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdMxfp8)));
+  back.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
+  back.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                   TypeVlWord(kN, false, numeric::RoundMode::kRne));
+  back.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, at);
+  back.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kSrcAddr);
+  back.Write(kVuMacroInstTrigger, TriggerWord(0));
+  back.Run(400);
+
+  std::vector<float> got = Fp32Of(back.stmem->Peek(kSrcAddr, kN * 4));
+  ASSERT_EQ(got.size(), want_back.size());
+  for (uint64_t i = 0; i < kN; ++i) {
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want_back[i]))
+        << "i=" << i;
+  }
+}
+
+TEST(Vu, Mxfp8StoreThenLoad) { Mxfp8RoundTrip(false); }
+
+TEST(Vu, Mxfp8ScaleRoundUp) { Mxfp8RoundTrip(true); }
 
 // ── 执行单元的计算原语 ──
 

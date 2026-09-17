@@ -14,6 +14,7 @@
 #include "base/runtime.h"
 #include "bach/ip/chip/core/router/coremem_reissue.h"
 #include "bach/ip/chip/core/router/retire.h"
+#include "bach/ip/chip/core/router/router_table.h"
 #include "bach/ip/wiring.h"
 
 using namespace latch;
@@ -156,12 +157,16 @@ TEST(BachReissue, FullBufferIsAConfigurationError) {
   RT::Reset();
 }
 
-// 不派角色的 core 不接收溢流：Router 对它不发起进 core 缓存处理。
+// 坏 core 不接收溢流：Router 对它不发起进 core 缓存处理。透传档由 core_bad_mask
+// 里本 core 那一位打开。
 TEST(BachReissue, PassThroughCoreTakesNoOverflow) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
+  RouterTable rtab(clk, "rtab", 0, false);
+  rtab.SetCoreBadMask(0x084);
+  ASSERT_TRUE(rtab.CoreBad(7));
   CoreMemReissue rq(clk, "rq", 4, 0, false);
-  rq.SetPassThrough(true);
+  rq.SetPassThrough(rtab.CoreBad(7));
   EXPECT_DEATH(rq.Store(MakeFlit(61, 7, 0)), "");
   RT::Reset();
 }

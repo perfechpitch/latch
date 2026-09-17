@@ -1,34 +1,11 @@
 {
   "name": "moe_chip",
-  "note": "一层 MoE 摊在一颗 chip 的 8 个计算 core 上。token 从 W 口进来，坐在那个口上的 core5 不派角色、只往上转一跳，B core 留一份再广播给两行 8 个计算 core；8 份部分和沿链在 Router 上逐跳相加，链尾从 E 口出去",
+  "note": "一层 MoE 的 KN 那一段摊在一颗第一列 chip 上。token 从 W 口进来，坐在那个口上的 core5 不派角色、只往上转一跳，B core 留一份再广播给 8 个计算 core；8 份部分和沿 chip 内归约链进 dot core core9，它做 silu·dot·量化后把 FC2 输入广播回本 chip，8 段 FC2 在它上面拼成 concat。它是行首也是行尾，本 chip 结果经 core4 从 E 口出去",
   "layer": "moe",
-  "chips": [
-    {
-      "shape": "first"
-    }
-  ],
-  "stream_num": 16,
-  "broadcast": [
-    {
-      "chip": 0,
-      "enter_port": "W",
-      "from_bcore": true
-    }
-  ],
-  "reduce": [
-    {
-      "order": [
-        0,
-        4,
-        5,
-        1,
-        2,
-        6,
-        7,
-        3
-      ],
-      "tail_flow": "right",
-      "note": "与 reference/vectors.py 的 MOE_CHIP_ORDER 同源：链尾落在坐着 E 口的那个槽位上"
-    }
-  ]
+  "rows": 1,
+  "cols": 1,
+  "col": ["first"],
+  "groups": 1,
+  "bcore": true,
+  "stream_num": 16
 }

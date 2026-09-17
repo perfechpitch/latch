@@ -24,6 +24,11 @@
 //   出核  RD 侧的 AGCU 生成源端读地址、经 DMA_XBAR 读存储，数据进 outbound
 //         buffer；WR 侧从 buffer 取数发给 Router
 //   MM→CM 完全走出核通道，只是 WR 侧的出口从 Router TX 切到 Core Mem
+//
+// 带 scale 的任务（SCALE_VALID）：包里 scale 接在数据后面。读那一侧先按拍读完
+// 数据，再用只读 scale 的请求把 scale 读回来接在包尾；写那一侧数据那一段照常
+// 写，包尾那一段用只写 scale 的请求落到同一段地址的 scale 旁带。边读边发时
+// scale 只能排在数据后面，所以分两段搬。
 
 #include <deque>
 #include <memory>
@@ -160,6 +165,16 @@ class Lane : public BachModule {
     c.filled += blk->size();
   }
 
+  // 一块里 [from, from + n) 那一段。
+  static ByteBlockPtr SliceBlock(ByteBlockPtr const& blk, uint64_t from,
+                                 uint64_t n) {
+    auto b = std::make_shared<ByteBlock>(n, 0);
+    for (uint64_t i = 0; i < n && from + i < blk->size(); ++i) {
+      (*b)[i] = (*blk)[from + i];
+    }
+    return b;
+  }
+
   // 从整包 payload 里切出这一拍那一段。包没带 payload 时给一块零。
   static ByteBlockPtr SliceOf(MessagePtr const& m, uint64_t off, uint64_t n) {
     auto b = std::make_shared<ByteBlock>(n, 0);
@@ -232,6 +247,10 @@ class Lane : public BachModule {
       ctx[h].desc = d;
       ctx[h].remain = d.bytes == 0 ? 0 : d.bytes;
       ctx[h].cur_addr = StartAddr(d, h);
+      ctx[h].scale_remain = d.ScaleBytes();
+      ctx[h].scale_addr = ctx[h].cur_addr;
+      ctx[h].off = 0;
+      ctx[h].part = 0;
       ctx[h].outstanding = 0;
       ctx[h].issue_done = false;
       ctx[h].drained = false;
@@ -281,16 +300,24 @@ class Lane : public BachModule {
     bool room = buffer.Credit(idx) > c.outstanding;
     bool slot = c.outstanding < kRdOutstanding;
     if (!room || !slot) return;
-    uint64_t n = c.remain > kFlitBytes ? kFlitBytes : c.remain;
     bool from_cm = c.desc.route == Route::kCmToRouter;
     MemPort& port = from_cm ? *cmem : *mmem;
     if (!port.Ready()) return;
-    port.Read(c.cur_addr, n);
+    if (c.remain != 0 || c.scale_remain == 0) {
+      uint64_t n = c.remain > kFlitBytes ? kFlitBytes : c.remain;
+      port.Read(c.cur_addr, n);
+      c.cur_addr += n;
+      c.remain -= n;
+    } else {
+      // 数据读完了再读 scale：一笔最多一拍那么多个。
+      uint64_t g = c.scale_remain > kFlitBytes ? kFlitBytes : c.scale_remain;
+      port.ReadScale(c.scale_addr, g * kScaleGroupBytes);
+      c.scale_addr += g * kScaleGroupBytes;
+      c.scale_remain -= g;
+    }
     (from_cm ? cmem_used : mmem_used) = true;
-    c.cur_addr += n;
-    c.remain -= n;
     ++c.outstanding;
-    if (c.remain == 0) c.issue_done = true;
+    if (c.remain == 0 && c.scale_remain == 0) c.issue_done = true;
   }
 
   // 响应按发出的顺序回来：先给还在等收敛的那一笔，它收满了再给当前这一笔。
@@ -309,13 +336,16 @@ class Lane : public BachModule {
     if (!port.RspValid()) return;
     LOGCHECK(c.outstanding > 0, "Lane: 收到没发过的读响应。");
     --c.outstanding;
-    bool last = (c.remain == 0 && c.outstanding == 0);
+    bool last = (c.remain == 0 && c.scale_remain == 0 && c.outstanding == 0);
     // 位置在发请求时就占下了，这里一定放得进。
     LOGCHECK(buffer.HasRoom(idx), "Lane: 读回来的数据没地方放，发请求那一步的"
                                   "Buffer credit 记错了。");
     ByteBlockPtr blk = port.RspData();
     FillOut(c, blk);
-    buffer.Push(idx, {TagOf(c.desc), kFlitBytes, last, blk, c.desc.msg});
+    // 这一拍的字节数按实际读回来的算：末拍不足一整拍，scale 那一拍也只有几个
+    // 字节。收方按累计字节数切包，记多了会把包尾之外的零写进存储。
+    uint64_t n = blk ? blk->size() : kFlitBytes;
+    buffer.Push(idx, {TagOf(c.desc), n, last, blk, c.desc.msg});
   }
 
   void StepWr() {
@@ -356,12 +386,36 @@ class Lane : public BachModule {
     MemPort& port = to_cm ? *cmem : *mmem;
     if (!port.Ready()) return;
     ByteBlockPtr data = b.data ? b.data : std::make_shared<ByteBlock>(b.bytes, 0);
-    port.Write(c.cur_addr, data);
+    uint64_t n = b.bytes;
+    uint64_t pos = c.off + c.part;           // 这一笔从整包的第几个字节起
+    uint64_t data_end = c.desc.bytes;        // 数据那一段在整包里的末尾
+    bool whole = c.part == 0;
+    if (!c.desc.scale || pos < data_end) {
+      // 数据那一段。带 scale 时这一拍可能跨进 scale 那一段，先只写到数据末尾。
+      uint64_t take = n - c.part;
+      if (c.desc.scale && pos + take > data_end) take = data_end - pos;
+      port.Write(c.cur_addr,
+                 whole && take == n ? data : SliceBlock(data, c.part, take));
+      c.cur_addr += take;
+      c.part += take;
+    } else {
+      // scale 那一段：整包里第 data_end + k 个字节是第 k 个 scale，管数据地址
+      // scale_addr + k × 32 那一组。
+      uint64_t take = n - c.part;
+      uint64_t k = pos - data_end;
+      port.WriteScale(c.scale_addr + k * kScaleGroupBytes,
+                      whole ? data : SliceBlock(data, c.part, take),
+                      take * kScaleGroupBytes);
+      c.part += take;
+    }
     (to_cm ? cmem_used : mmem_used) = true;
-    c.cur_addr += b.bytes;
+    if (c.part < n) return;
+    bool last = b.last;
+    c.off += n;
+    c.part = 0;
     buffer.Pop(idx);
     ++move_pending;
-    if (b.last) c.issue_done = true;
+    if (last) c.issue_done = true;
   }
 
   uint64_t idx;

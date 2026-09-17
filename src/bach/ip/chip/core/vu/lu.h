@@ -217,15 +217,15 @@ class VuLu : public BachModule {
     numeric::DataType t = CmType(op);
     std::vector<float> scale;
     if (op == LuOp::kLdMxfp8) {
-      uint64_t nblock = (vl + numeric::ScaleBlockOf(t) - 1) /
-                        numeric::ScaleBlockOf(t);
-      scale = numeric::DecodeScale(t, scale_buf, nblock);
+      scale = numeric::DecodeScale(t, scale_buf, scale_buf.size());
     }
     std::vector<float> v = numeric::Decode(t, body, vl);
     if (!scale.empty()) {
+      // scale 是按块从块首起接回来的：第 i 个元素在块里的偏移是 head + i，它的
+      // scale 是第 (head + i) / 32 个。向量从一行中间开始时 head 不为 0。
       uint64_t block = numeric::ScaleBlockOf(t);
       for (uint64_t i = 0; i < v.size(); ++i) {
-        uint64_t b = i / block;
+        uint64_t b = (head + i) / block;
         if (b < scale.size()) v[i] *= scale[b];
       }
     }

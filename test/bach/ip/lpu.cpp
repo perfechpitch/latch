@@ -80,48 +80,57 @@ TEST(BachLpuGrid, GlobalYIsTrayTimesFourPlusLayer) {
   }
 }
 
-TEST(BachLpuGrid, ShapeFollowsColumn) {
-  // 形状由 gx 定：gx ∈ {1, 2} 是 2×4，gx ∈ {0, 3} 是 2×5。
-  EXPECT_EQ(ShapeOfGx(0), ChipShape::kFirst);
-  EXPECT_EQ(ShapeOfGx(1), ChipShape::kMiddle);
-  EXPECT_EQ(ShapeOfGx(2), ChipShape::kMiddle);
-  EXPECT_EQ(ShapeOfGx(3), ChipShape::kLast);
+TEST(BachLpuGrid, CoreBadMaskFollowsColumn) {
+  // core_bad_mask 由 gx 定：gx ∈ {1, 2} 坏 core2、core7，gx ∈ {0, 3} 全好。
+  EXPECT_EQ(CoreBadMaskOfGx(0), 0u);
+  EXPECT_EQ(CoreBadMaskOfGx(1), 0x084u);
+  EXPECT_EQ(CoreBadMaskOfGx(2), 0x084u);
+  EXPECT_EQ(CoreBadMaskOfGx(3), 0u);
 
   LpuTables t = Tables();
   for (uint64_t i = 0; i < kChipNum; ++i) {
-    uint64_t gx = t.grid[i].gx;
-    uint64_t want = (gx == 0 || gx + 1 == kGridX) ? 10 : 8;
-    EXPECT_EQ(CoresOf(t.chip_shape[i]), want) << "chip=" << i;
+    EXPECT_EQ(t.core_bad_mask[i], CoreBadMaskOfGx(t.grid[i].gx))
+        << "chip=" << i;
   }
 }
 
-TEST(BachLpuGrid, CoreCountIsFourHundredThirtyTwo) {
-  // 中间两列每 chip 8 个，两侧每 chip 10 个；全 LPU 432 个 core，其中 384 个
-  // 计算 core，每颗 chip 都是 8 个。
+TEST(BachLpuGrid, CoreCountIsFourHundredEighty) {
+  // 每颗 chip 10 个 core，全 LPU 480 个；其中 384 个计算 core，每颗 chip 都是
+  // 8 个。
   LpuTables t = Tables();
   uint64_t cores = 0, compute = 0;
   for (uint64_t i = 0; i < kChipNum; ++i) {
-    uint64_t n = CoresOf(t.chip_shape[i]);
-    cores += n;
+    cores += kMaxCorePerChip;
     uint64_t local = 0;
-    for (uint64_t c = 0; c < n; ++c) {
+    for (uint64_t c = 0; c < kMaxCorePerChip; ++c) {
       if (t.logical_map[i][c].role == CoreRole::kCompute) ++local;
     }
     EXPECT_EQ(local, 8u) << "chip=" << i;
     compute += local;
   }
-  EXPECT_EQ(cores, 432u);
+  EXPECT_EQ(cores, 480u);
   EXPECT_EQ(compute, 384u);
 }
 
 TEST(BachLpuGrid, SpecialCoresSitAtFixedPositions) {
-  // 专用 core 的位置固定，不用搜：第一列 chip 的 core0 是 EP broadcast，最后
-  // 一列 chip 的 core9 是 EP reduction。
+  // 角色按角色分配表，位置固定，不用搜：组头 chip 的 core0 是 B core，第一列
+  // 其余 chip 的 core0 与每颗的 core5 不派角色；中间两列的坏 core2、core7 不派
+  // 角色；最后一列 chip 的 core9 是 R core、core4 不派角色。
   LpuTables t = Tables();
   for (uint64_t gy = 0; gy < kGridY; ++gy) {
     uint64_t first = ChipIdOf(0, gy);
-    EXPECT_EQ(t.logical_map[first][0].role, CoreRole::kBroadcast);
+    EXPECT_EQ(t.logical_map[first][0].role,
+              gy % kLayerPerGroup == 0 ? CoreRole::kBroadcast
+                                       : CoreRole::kSpare)
+        << "gy=" << gy;
     EXPECT_EQ(t.logical_map[first][5].role, CoreRole::kSpare);
+    for (uint64_t gx = 1; gx + 1 < kGridX; ++gx) {
+      uint64_t mid = ChipIdOf(gx, gy);
+      EXPECT_EQ(t.logical_map[mid][2].role, CoreRole::kSpare);
+      EXPECT_EQ(t.logical_map[mid][7].role, CoreRole::kSpare);
+      EXPECT_EQ(t.logical_map[mid][0].role, CoreRole::kCompute);
+      EXPECT_EQ(t.logical_map[mid][9].role, CoreRole::kCompute);
+    }
     uint64_t last = ChipIdOf(kGridX - 1, gy);
     EXPECT_EQ(t.logical_map[last][9].role, CoreRole::kReduce);
     EXPECT_EQ(t.logical_map[last][4].role, CoreRole::kSpare);
@@ -129,12 +138,12 @@ TEST(BachLpuGrid, SpecialCoresSitAtFixedPositions) {
 }
 
 TEST(BachLpuGrid, SpecialCoresAreNotLogicalComputeCores) {
-  // 专用 core 不映射为 logical compute core：逻辑 0～7 各出现一次，专用那个
-  // 拿逻辑 8，不派角色的那个没有逻辑编号。
+  // B core 与 R core 不映射为逻辑计算 core：逻辑 0～7 各出现一次，B core 与
+  // R core 拿逻辑 8，不派角色的 core 没有逻辑编号。
   LpuTables t = Tables();
   for (uint64_t i = 0; i < kChipNum; ++i) {
     std::set<uint64_t> logical;
-    for (uint64_t c = 0; c < CoresOf(t.chip_shape[i]); ++c) {
+    for (uint64_t c = 0; c < kMaxCorePerChip; ++c) {
       LogicalEntry const& e = t.logical_map[i][c];
       if (e.role == CoreRole::kCompute) {
         EXPECT_TRUE(e.mapped);
@@ -151,10 +160,10 @@ TEST(BachLpuGrid, SpecialCoresAreNotLogicalComputeCores) {
 }
 
 TEST(BachLpuGrid, CrossTableChecksCatchABadTable) {
-  // 跨表自洽检查真的在查：把一颗 chip 的形状改错，检查应当拦下来。
+  // 跨表自洽检查真的在查：让一颗中间列 chip 同一行坏两个 core，检查应当拦下来。
   LpuTables t = Tables();
   CheckLpuTables(t);
-  t.chip_shape[ChipIdOf(1, 0)] = ChipShape::kFirst;
+  t.core_bad_mask[ChipIdOf(1, 0)] = 0x006;
   EXPECT_DEATH(CheckLpuTables(t), "");
 }
 
@@ -165,13 +174,13 @@ namespace {
 // ── 装配 ──
 
 TEST(BachLpu, BuildsFortyEightChips) {
-  // 48 颗 chip 构造出来，432 个 core，其中 384 个计算 core。
+  // 48 颗 chip 构造出来，480 个 core，其中 384 个计算 core。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   Lpu lpu(clk, "lpu", Tables());
 
   EXPECT_EQ(lpu.ChipCount(), 48u);
-  EXPECT_EQ(lpu.CoreCount(), 432u);
+  EXPECT_EQ(lpu.CoreCount(), 480u);
   EXPECT_EQ(lpu.ComputeCoreCount(), 384u);
   RT::Reset();
 }
@@ -318,19 +327,25 @@ TEST(BachLpu, FirstColumnRunsTopDown) {
 }
 
 TEST(BachLpu, SpareCoreSitsOnTheSwitchPort) {
-  // 不派角色的 core 只构造 Router，坐在 chip 接 PCIe Switch 的那个口上：第一
-  // 列的 core5 在 W 口，最后一列的 core4 在 E 口。
+  // 坐在 chip 接 PCIe Switch 的那个口上的 core 不派角色，但不是坏 core，Router
+  // 走正常档：第一列的 core5 在 W 口，最后一列的 core4 在 E 口。坏 core 只在中
+  // 间两列。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   Lpu lpu(clk, "lpu", Tables());
+  lpu.WriteCoreBadMask();
+  LpuTables const& t = lpu.Tables();
 
   for (uint64_t gy = 0; gy < kGridY; ++gy) {
-    Chip& first = lpu.GetChip(0, gy);
-    EXPECT_TRUE(first.GetCore(5).Context().router_only) << "gy=" << gy;
-    EXPECT_EQ(first.GetCore(0).Context().role, CoreRole::kBroadcast);
-    Chip& last = lpu.GetChip(kGridX - 1, gy);
-    EXPECT_TRUE(last.GetCore(4).Context().router_only) << "gy=" << gy;
-    EXPECT_EQ(last.GetCore(9).Context().role, CoreRole::kReduce);
+    uint64_t first = ChipIdOf(0, gy);
+    EXPECT_EQ(t.logical_map[first][5].role, CoreRole::kSpare) << "gy=" << gy;
+    EXPECT_FALSE(lpu.ChipAt(first).GetCore(5).Bad()) << "gy=" << gy;
+    uint64_t last = ChipIdOf(kGridX - 1, gy);
+    EXPECT_EQ(t.logical_map[last][4].role, CoreRole::kSpare) << "gy=" << gy;
+    EXPECT_FALSE(lpu.ChipAt(last).GetCore(4).Bad()) << "gy=" << gy;
+    Chip& mid = lpu.GetChip(1, gy);
+    EXPECT_TRUE(mid.GetCore(2).Bad()) << "gy=" << gy;
+    EXPECT_TRUE(mid.GetCore(7).Bad()) << "gy=" << gy;
   }
   RT::Reset();
 }

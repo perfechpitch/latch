@@ -35,19 +35,25 @@
 namespace latch {
 namespace bach {
 
+// 进核那一笔的配置，SCP 在 core 配置阶段逐 core 写。
+struct InboundCfg {
+  // 落 Core Mem 还是 Matrix Mem。落点的地址取自包头，落哪一块由这一项定：业务
+  // 模式下计算 core 落 Core Mem、B core 与 R core 落 Matrix Mem；weights 加载阶
+  // 段进来的是权重，一律落 Matrix Mem。
+  Route route = Route::kRouterToCm;
+  // 进来的包不建 stream 表项时，进核那一笔不回 Ack：B core、R core 与 weights
+  // 加载阶段是这一档。
+  bool no_ack = false;
+  // 标志表：进核那一笔搬完之后给落点所在的槽位置 valid 标志。表在 Share Mem
+  // 里，一项 4 B，第几项按落点除以槽位大小算。flag_entry_bytes 为 0 表示本 core
+  // 不置标志。
+  uint64_t flag_base = 0;
+  uint64_t flag_entry_bytes = 0;
+};
+
 struct DteCfg {
   CmemLayout cmem;
-  // 进核那一笔落 Core Mem 还是 Matrix Mem。落点的地址取自包头，落哪一块由收方
-  // 定：业务模式下计算 core 落 Core Mem、B core 与 R core 落 Matrix Mem；
-  // weights 加载阶段计算 core 上进来的也是权重，同样落 Matrix Mem。
-  Route inbound = Route::kRouterToCm;
-  // B core 与 R core：进核那一笔搬完之后给这个 token 槽位置 valid 标志。标志
-  // 表在 Share Mem 里，一项 4 B，第几项按落点除以槽位大小算。entry_bytes 为 0
-  // 表示本 core 不置标志。
-  uint64_t inbound_flag_base = 0;
-  uint64_t inbound_entry_bytes = 0;
-  // B core 与 R core 上进来的包不建 stream 表项，进核那一笔不回 Ack。
-  bool inbound_no_ack = false;
+  InboundCfg inbound;
   bool tick = true;
 };
 
@@ -65,10 +71,7 @@ class Dte {
                                           kLaneNum - 1, gid, setting.tick);
     parser = std::make_unique<HeaderParser>(clock, "parser", gid,
                                             setting.tick);
-    parser->SetInboundRoute(setting.inbound);
-    parser->SetInboundFlag(setting.inbound_flag_base,
-                           setting.inbound_entry_bytes);
-    parser->SetInboundNoAck(setting.inbound_no_ack);
+    SetInbound(setting.inbound);
     parser->AttachPathTask(
         [this](uint64_t path) { return hmem->PathTask(path); });
     commit = std::make_unique<Commit>(clock, "commit", *hmem, gid,
@@ -87,11 +90,11 @@ class Dte {
   }
 
   // ── 对外 ──
-  // SCP 切模式时重配进核那一档。weights 加载阶段与业务阶段的落点、回不回 Ack
-  // 都不一样，两样都在这里改。
-  void SetInbound(Route r, bool no_ack) {
-    parser->SetInboundRoute(r);
-    parser->SetInboundNoAck(no_ack);
+  // SCP 写进核那一笔的配置，切模式时重写一遍。
+  void SetInbound(InboundCfg const& in) {
+    parser->SetInboundRoute(in.route);
+    parser->SetInboundNoAck(in.no_ack);
+    parser->SetInboundFlag(in.flag_base, in.flag_entry_bytes);
   }
 
   CoreDataPort& FromRouter() { return parser->FromRouter(); }

@@ -4,7 +4,7 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：**LPU**（模型的顶层）→ chip ×48
 
-给实现 LPU 顶层装配的人：48 颗 chip 怎么摆、彼此怎么接、全局坐标怎么算、片外桩挂在哪、chip 形状与逻辑 core 映射怎么读进来。
+给实现 LPU 顶层装配的人：48 颗 chip 怎么摆、彼此怎么接、全局坐标怎么算、片外桩挂在哪、坏 core 标记与逻辑 core 映射怎么读进来。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
@@ -23,28 +23,28 @@ LPU 的组成：
 
 | 组成 | 数量 | 在模型里是什么 |
 | - | - | - |
-| chip | 48，摆成全局 12 × 4 的网格 | 装配容器；`gx ∈ {1, 2}` 的是 2 行 × 4 列共 8 个 core，`gx ∈ {0, 3}` 的多一列放 B core / R core，共 10 个 |
+| chip | 48，摆成全局 12 × 4 的网格 | 装配容器；每颗都是 2 行 × 5 列共 10 个 core，其中 8 个计算 core；`gx ∈ {1, 2}` 的 chip 的 core2、core7 是坏 core |
 | tray | 3，每个 4 层 × 4 chip | 不是对象。它决定 chip 的全局坐标，以及哪两处纵向链路用不同参数 |
 | PCIe Switch | 12，每 tray 4 个，左右各 2，一个接两层 chip 的边缘口 | 逐拍推进的模块 |
 | 链路 | chip 之间、chip 到 Switch、Switch 到片外桩 | 逐拍推进的模块，一条物理链路每方向一个实例 |
 
 LPU 只做构造与接线，不打拍，五件事：
 
-1. 按每颗 chip 的列位置定形状，构造 48 个 Chip
+1. 构造 48 个 Chip，每颗都是 2×5，构造时不区分 chip 所在的列
 2. 按 12 × 4 网格接 chip 之间的 C2C 链路：同层左右直连、同列上下直连，都不经 Switch
 3. 每层最左最右两颗 chip 的边缘口接本 tray 的 PCIe Switch
 4. 片外桩挂到 PCIe Switch 上
-5. 读入编译侧给的全局坐标换算表与逻辑 core 映射
+5. 读入编译侧给的全局坐标换算表、坏 core 标记表与逻辑 core 映射
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1250 880" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1250 900" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs>
     <marker id="p0" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker>
     <marker id="p0s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#475569"/></marker>
     <marker id="p1" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
     <marker id="p1s" markerWidth="9" markerHeight="9" refX="1" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#b45309"/></marker>
   </defs>
-  <rect x="0" y="0" width="1250" height="880" fill="#ffffff"/>
+  <rect x="0" y="0" width="1250" height="900" fill="#ffffff"/>
   <text x="20" y="30" font-size="12" fill="#111827">LPU · 第 0 层（48 chip，全局 12 × 4 网格）</text>
   <rect x="356" y="88" width="460" height="228" fill="none" stroke="#94a3b8" stroke-dasharray="5 4" rx="6"/>
   <text x="350" y="104" font-size="10" fill="#64748b" text-anchor="end">tray0</text>
@@ -57,10 +57,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="130" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="100" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="117" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,0)</text>
-  <text x="532" y="130" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="130" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="100" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="117" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,0)</text>
-  <text x="640" y="130" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="130" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="100" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="117" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,0)</text>
   <text x="748" y="130" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -69,10 +69,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="186" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="156" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="173" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,1)</text>
-  <text x="532" y="186" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="186" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="156" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="173" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,1)</text>
-  <text x="640" y="186" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="186" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="156" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="173" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,1)</text>
   <text x="748" y="186" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -81,10 +81,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="242" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="212" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="229" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,2)</text>
-  <text x="532" y="242" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="242" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="212" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="229" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,2)</text>
-  <text x="640" y="242" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="242" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="212" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="229" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,2)</text>
   <text x="748" y="242" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -93,10 +93,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="268" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="285" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,3)</text>
-  <text x="532" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="268" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="285" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,3)</text>
-  <text x="640" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="268" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="285" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,3)</text>
   <text x="748" y="298" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -105,10 +105,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="354" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="324" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="341" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,4)</text>
-  <text x="532" y="354" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="354" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="324" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="341" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,4)</text>
-  <text x="640" y="354" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="354" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="324" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="341" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,4)</text>
   <text x="748" y="354" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -117,10 +117,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="410" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="380" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="397" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,5)</text>
-  <text x="532" y="410" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="410" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="380" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="397" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,5)</text>
-  <text x="640" y="410" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="410" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="380" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="397" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,5)</text>
   <text x="748" y="410" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -129,10 +129,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="466" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="436" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="453" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,6)</text>
-  <text x="532" y="466" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="466" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="436" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="453" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,6)</text>
-  <text x="640" y="466" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="466" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="436" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="453" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,6)</text>
   <text x="748" y="466" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -141,10 +141,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="522" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="492" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="509" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,7)</text>
-  <text x="532" y="522" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="522" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="492" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="509" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,7)</text>
-  <text x="640" y="522" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="522" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="492" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="509" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,7)</text>
   <text x="748" y="522" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -153,10 +153,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="578" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="548" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="565" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,8)</text>
-  <text x="532" y="578" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="578" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="548" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="565" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,8)</text>
-  <text x="640" y="578" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="578" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="548" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="565" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,8)</text>
   <text x="748" y="578" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -165,10 +165,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="634" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="604" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="621" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,9)</text>
-  <text x="532" y="634" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="634" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="604" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="621" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,9)</text>
-  <text x="640" y="634" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="634" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="604" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="621" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,9)</text>
   <text x="748" y="634" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -177,10 +177,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="690" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="660" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="677" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,10)</text>
-  <text x="532" y="690" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="690" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="660" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="677" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,10)</text>
-  <text x="640" y="690" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="690" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="660" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="677" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,10)</text>
   <text x="748" y="690" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -189,10 +189,10 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="424" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
   <rect x="488" y="716" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="532" y="733" font-size="9.5" fill="#111827" text-anchor="middle">chip(1,11)</text>
-  <text x="532" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="532" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="596" y="716" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="640" y="733" font-size="9.5" fill="#111827" text-anchor="middle">chip(2,11)</text>
-  <text x="640" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×4 core</text>
+  <text x="640" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 · 坏 core2、7</text>
   <rect x="704" y="716" width="88" height="38" fill="#f8fafc" stroke="#374151" rx="3"/>
   <text x="748" y="733" font-size="9.5" fill="#111827" text-anchor="middle">chip(3,11)</text>
   <text x="748" y="746" font-size="8.5" fill="#94a3b8" text-anchor="middle">2×5 core</text>
@@ -355,6 +355,7 @@ LPU 只做构造与接线，不打拍，五件事：
   <text x="748" y="794" font-size="9.5" fill="#b45309" text-anchor="middle">global_bottom_right：最终结果从东侧出</text>
   <text x="20" y="828" font-size="10.5" fill="#374151">橙色纵向连线是跨 tray 的两处：上一 tray 最底层 chip 的 S 口接下一 tray 最顶层 chip 的 N 口，链路参数与 tray 内不同。</text>
   <text x="20" y="850" font-size="10.5" fill="#374151">LPU 不是模块，是装配容器：构造 48 个 Chip、按网格接 C2C、把每层两端接 PCIe Switch、把片外桩挂上去。</text>
+  <text x="20" y="872" font-size="10.5" fill="#374151">每颗 chip 都是 2 行 × 5 列；中间两列 chip 的 core2、core7 是坏 core（core_bad_mask = 0x084），两侧两列没有坏 core。</text>
 </svg>
 ```
 
@@ -379,8 +380,8 @@ port sw.port[p] (双向, credit/release, clk)      // PCIe Switch 的端口，�
 
 ```
 mem grid          FF 阵列   48 × {tray[1:0], layer[1:0], col[1:0], gx[1:0], gy[3:0]}   1R   编译侧读入   复位由输入给   // 全局坐标换算表
-mem chip_shape    FF 阵列   48 × {中间列 2×4, 第一列 2×5, 最后一列 2×5}  1R   由 gx 推出                  // 每 chip 的 core 阵列形状
-mem logical_map   FF 阵列   48 × (8 或 10) × {logical_core[3:0], role[2:0]}  1R   编译侧读入   复位由输入给   // 逻辑 core 编号与角色
+mem core_bad_mask FF 阵列   48 × 10 bit                                  1R   由 gx 推出   复位由输入给   // 每 chip 的坏 core 标记，第 i 位为 1 表示 core i 是坏 core
+mem logical_map   FF 阵列   48 × 10 × {logical_core[3:0], role[2:0]}      1R   编译侧读入   复位由输入给   // 逻辑 core 编号与角色，只给编译侧与装载检查用，不写进 core
 mem entry_exit    FF        {global_top_left{gx,gy}, global_bottom_right{gx,gy}}  1R  编译侧读入  复位由输入给
 mem link_param    FF 阵列   每条链路一项 {bw, latency}                1R   参数表       复位由输入给   // chip 之间落在发送侧那座桥的 AXI 段，chip 到 Switch 落在 Link 实例
 ```
@@ -396,12 +397,21 @@ mem split_param   FF        {ep[3:0], tp[4:0], pp[2:0], dp[3:0], mode[2:0], gpu_
 | 表 | 约束 |
 | - | - |
 | `grid` | `gy = tray × 4 + layer`（0～11），`gx = col`（0～3） |
-| `chip_shape` | `gx ∈ {1, 2}` 是 2×4，`gx ∈ {0, 3}` 是 2×5 |
-| `logical_map` | 每颗 chip 逻辑 0～7 是 compute；第一列 chip 另有 core0 是 B core、core5 不派角色，最后一列 chip 另有 core9 是 R core、core4 不派角色 |
+| `core_bad_mask` | `gx ∈ {1, 2}` 是 `0x084`（core2、core7），`gx ∈ {0, 3}` 是 `0x000`；每颗至多 2 位为 1，每行至多 1 位 |
+| `logical_map` | 每颗 chip 8 个计算 core，逻辑 0～7 是 compute；其余 2 个按下面的角色分配表，坏 core 不映射逻辑编号 |
 | `entry_exit` | 外部数据从 `global_top_left` 西侧进，结果从 `global_bottom_right` 东侧出 |
 | `split_param` | `mode` 是四种 core 级切分之一：`eptp_nn` / `eptp_nk` / `pptp_nn` / `pptp_nk` |
 
-专用 core 的位置是固定的，不用搜：第一列 chip 的 B core 在 `core0`（chip 的 N 口），最后一列 chip 的 R core 在 `core9`（chip 的 S 口）。这两列各自多出来的另一个 core（第一列的 `core5`、最后一列的 `core4`）不派角色，只构造 Router。它坐在 chip 接 PCIe Switch 的那个口上，只作转发：token 从 Switch 进 `core5` 后一跳转给 B core，链尾的结果从 R core 一跳转到 `core4` 再经 Switch 出核。
+`logical_map` 里的角色按下表分配。组头 chip 指每个 EP 组左上角那颗 chip，一个 EP 组是两层 × 4 列共 8 颗 chip。
+
+| chip | 计算 core | B core / R core | 不派角色 |
+| - | - | - | - |
+| 第一列，组头 chip | 1 2 3 4 6 7 8 9 | core0 是 B core | core5 |
+| 第一列，其余 | 1 2 3 4 6 7 8 9 | 无 | core0、core5 |
+| 中间两列 | 0 1 3 4 5 6 8 9 | 无 | core2、core7（坏 core） |
+| 最后一列 | 0 1 2 3 5 6 7 8 | core9 是 R core | core4 |
+
+专用 core 的位置是固定的，不用搜：B core 在组头 chip 的 `core0`（chip 的 N 口），R core 在最后一列每颗 chip 的 `core9`（chip 的 S 口），全 LPU 12 行各一个。两侧两列不派角色的 core（第一列的 `core5` 与非组头 chip 的 `core0`、最后一列的 `core4`）是好 core，没配任务链，只按表项转发。它们坐在 chip 的口上：token 从 Switch 进 `core5` 后一跳转给 B core，链尾的结果从 R core 一跳转到 `core4` 再经 Switch 出核。中间两列的坏 core 只有 Router 工作，处在透传档。
 
 ***
 
@@ -417,13 +427,13 @@ LPU 没有自己的一拍工作，全部逐拍行为在 chip 内各模块、PCIe
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `grid`、`chip_shape`、`link_param` | 1. `Build`：对 48 颗 chip，把 `chip_shape[i]` 与这颗 chip 四个口的链路参数交给第 i 个 Chip 构造<br>2. `WireRow`：同层左右，`(gx, gy)` 的 `c2c[E]` 与 `(gx+1, gy)` 的 `c2c[W]` 两座桥直接对接，这一段的带宽与延迟落在发送侧那座桥的 AXI 段上，取 C2C 参数<br>3. `WireCol`：同列上下，`(gx, gy)` 的 `c2c[S]` 与 `(gx, gy+1)` 的 `c2c[N]` 对接；`gy` 与 `gy+1` 跨 tray 时（`gy mod 4 == 3`）换纵向链路参数<br>4. `WireEdge`：每层 `gx == 0` 的 `c2c[W]`、`gx == 3` 的 `c2c[E]` 接本 tray 那一侧的 PCIe Switch，一个 Switch 接两层。这一段两端传的是 flit，带宽与延迟由一对 Link 承担，两侧桥的 AXI 段计 0；段与 flit 的折算在这个口上做<br>5. `WireExt`：入口桩与出口桩各挂一个 Switch 端口，走 ETH 参数的 Link | 模块实例与端口连接 | — |
+| `grid`、`link_param` | 1. `Build`：对 48 颗 chip，把这颗 chip 四个口的链路参数交给第 i 个 Chip 构造；每颗都构造 10 个 core，不区分所在列，`core_bad_mask` 不在构造期给<br>2. `WireRow`：同层左右，`(gx, gy)` 的 `c2c[E]` 与 `(gx+1, gy)` 的 `c2c[W]` 两座桥直接对接，这一段的带宽与延迟落在发送侧那座桥的 AXI 段上，取 C2C 参数<br>3. `WireCol`：同列上下，`(gx, gy)` 的 `c2c[S]` 与 `(gx, gy+1)` 的 `c2c[N]` 对接；`gy` 与 `gy+1` 跨 tray 时（`gy mod 4 == 3`）换纵向链路参数<br>4. `WireEdge`：每层 `gx == 0` 的 `c2c[W]`、`gx == 3` 的 `c2c[E]` 接本 tray 那一侧的 PCIe Switch，一个 Switch 接两层。这一段两端传的是 flit，带宽与延迟由一对 Link 承担，两侧桥的 AXI 段计 0；段与 flit 的折算在这个口上做<br>5. `WireExt`：入口桩与出口桩各挂一个 Switch 端口，走 ETH 参数的 Link | 模块实例与端口连接 | — |
 
 ### L2 · 坐标与角色表读入（构造期，不逐拍）
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `grid`、`logical_map`、`entry_exit` | 1. `gy = tray 序号 × 4 + tray 内层号`（0～11），`gx = 层内列号`（0～3）<br>2. 断言：`gx ∈ {1, 2}` 的 chip 有 8 个 core，`gx ∈ {0, 3}` 的有 10 个，全 LPU 共 432 个；每颗 chip 的计算 core 数都是 8<br>3. 断言：`gx == 0` 的 chip 的 `core0` 是 EP broadcast core、`core5` 不派角色，`gx == 3` 的 chip 的 `core9` 是 EP reduction core、`core4` 不派角色，这四个都不在 compute 集合里<br>4. 把 `(gx, gy)` 与片内编号交给各 Chip 与它的 core，core 认自己在阵列里的位置<br>5. 把 PCIe Switch 的路由表填上：`dst` 是片外那一段的目的标识，0～47 是 chip、48 是出口桩，一个 Switch 只认它自己接的那两颗 chip，接着出口桩的那个另认 48 | 静态表 | — |
+| `grid`、`core_bad_mask`、`logical_map`、`entry_exit` | 1. `gy = tray 序号 × 4 + tray 内层号`（0～11），`gx = 层内列号`（0～3）<br>2. 断言：每颗 chip 10 个 core，全 LPU 共 480 个；每颗 chip 的计算 core 数都是 8，全 LPU 384 个；`core_bad_mask[i]` 至多 2 位为 1、每行至多 1 位，`gx ∈ {1, 2}` 是 `0x084`，`gx ∈ {0, 3}` 是 `0x000`<br>3. 断言：角色与角色分配表一致；B core、R core、不派角色的 core 都不在 compute 集合里，坏 core 没有逻辑编号<br>4. 把 `(gx, gy)` 与片内编号交给各 Chip 与它的 core，core 认自己在阵列里的位置<br>5. 把 PCIe Switch 的路由表填上：`dst` 是片外那一段的目的标识，0～47 是 chip、48 是出口桩，一个 Switch 只认它自己接的那两颗 chip，接着出口桩的那个另认 48 | 静态表 | — |
 
 ***
 
@@ -431,14 +441,15 @@ LPU 没有自己的一拍工作，全部逐拍行为在 chip 内各模块、PCIe
 
 ```
 CHIPS         48 = 3 tray × 4 层 × 4 chip；全局 12 × 4 网格
-CORES         `gx ∈ {1, 2}` 每 chip 2×4 共 8 个，`gx ∈ {0, 3}` 每 chip 2×5 共 10 个；全 LPU 432 个 core，其中 384 个计算 core
+CORES         每 chip 2×5 共 10 个，行优先编号；全 LPU 480 个 core，其中 384 个计算 core
+BAD_CORE      `gx ∈ {1, 2}` 每 chip core2、core7（core_bad_mask = 0x084），`gx ∈ {0, 3}` 没有；全 LPU 96 个
 TRAY          4 层，每层一行 4 chip；4 个 PCIe Switch，左右各 2，每个接两层
 GLOBAL_Y      tray 序号 × 4 + tray 内层号，0～11
 GLOBAL_X      层内列号，0～3
 ENTRY         global_top_left 西侧进，沿第一列自上而下
 PARTIAL       partial result 沿最后一列自上而下
 EXIT          global_bottom_right 东侧出，经 Switch 到 ETH
-SPECIAL       第一列 chip 的 core0 是 B core、core5 不派角色；最后一列 chip 的 core9 是 R core、core4 不派角色
+SPECIAL       组头 chip 的 core0 是 B core；最后一列每颗 chip 的 core9 是 R core，共 12 个；第一列的 core5 与非组头 chip 的 core0、最后一列的 core4 不派角色
 DISPATCH      LPU 广播（当前选定的派遣方式）
 链路参数       见链路的参数汇总：同层与同列用 C2C，跨 tray 用纵向参数，边缘用 PCIe ↔ Router
 ```
@@ -457,11 +468,11 @@ DISPATCH      LPU 广播（当前选定的派遣方式）
 | 外部数据从 `global_top_left` 西侧进入 | L1 第 5 条 + 注入表 | `lpu_entry` |
 | partial result 沿最后一列自上而下，最终结果从 `global_bottom_right` 东侧出 | L1 第 4、5 条 | `lpu_exit` |
 | LPU 广播：token 只送进左上角第一个 B core，B core 留一份再沿第一列往下传，跨 tray 走纵向链路 | 注入表 + B core 的 kernel | `lpu_broadcast` |
-| core 数量：中间两列每 chip 8 个，两侧每 chip 10 个，每 chip 都是 8 个计算 core | L2 第 2 条 | `core_count` |
-| chip 形状由 `gx` 定，`gx ∈ {0, 3}` 是 2×5 | L1 第 1 条 + L2 第 2 条 | `chip_shape_by_gx` |
-| 专用 core 位置固定：第一列 `core0` 是 EP broadcast，最后一列 `core9` 是 EP reduction | 编译侧，L2 第 3 条查 | `logical_map` |
-| 专用 core 不映射为 logical compute core | L2 第 3 条 | `special_reserved` |
-| 不派角色的 core 只构造 Router，坐在接 Switch 的那个口上，只作转发 | L2 第 3 条 | `spare_core_router_only` |
+| core 数量：每 chip 10 个，其中 8 个计算 core；全 LPU 480 个，计算 core 384 个 | L1 第 1 条 + L2 第 2 条 | `core_count` |
+| `core_bad_mask` 由 `gx` 定：`gx ∈ {1, 2}` 是 `0x084`，`gx ∈ {0, 3}` 是 `0x000`；至多 2 位、每行至多 1 位 | L2 第 2 条 | `bad_mask_by_gx` |
+| 专用 core 位置固定：组头 chip 的 `core0` 是 B core，最后一列每颗 chip 的 `core9` 是 R core | 编译侧，L2 第 3 条查 | `logical_map` |
+| 专用 core、不派角色的 core 不映射为 logical compute core，坏 core 没有逻辑编号 | L2 第 3 条 | `special_reserved` |
+| 两侧不派角色的好 core 坐在 chip 的口上，没配任务链，只按表项转发 | L2 第 3 条 | `spare_core_on_port` |
 | chip 到 Switch 的那个口上，出去的两拍段合成一个 flit，进来的一个 flit 摊成两拍 | L1 第 4 条 | `switch_port_fold` |
 | Switch 之间不互联，一个 Switch 只认它自己接的那两颗 chip | L2 第 5 条 | `switch_route` |
 | 跨表的自洽检查在构造期做完 | L2 第 2、3 条 | `lpu_table_check` |
@@ -484,4 +495,7 @@ DISPATCH      LPU 广播（当前选定的派遣方式）
   * 跨 LPU 的那一段在片外桩里表达成注入表的时刻与一条链路实例
 * **为什么允许只构造用到的那几颗 chip**
   * 48 颗全建起来一拍要几十毫秒，一个 token 从入口走到出口是上万拍，一次要跑几个小时
-  * 一轮只用到其中几颗时给构造一份名单，名单外的不建；坐标、形状、角色、链路参数仍按 12 × 4 的整机算，两端有一端没建的链路不登记
+  * 一轮只用到其中几颗时给构造一份名单，名单外的不建；坐标、`core_bad_mask`、角色、链路参数仍按 12 × 4 的整机算，两端有一端没建的链路不登记
+* **`core_bad_mask` 为什么由 `gx` 定死**
+  * 静态路由与坏 core 位置强绑定，支持任意组合要做整套 Harvest 规划
+  * 编译器只实现中间两列坏 core2、core7 这一种布局，中间两列只接受 `0x084`、两侧只接受 `0x000`，其他取值报错

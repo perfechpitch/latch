@@ -176,7 +176,13 @@ inline std::vector<uint8_t> Encode(DataType t, std::vector<float> const& v,
 }
 
 // 一组元素按 block 算出各块的 scale：取块内绝对值最大的那个定阶。
-inline std::vector<float> MakeScale(DataType t, std::vector<float> const& v) {
+//
+// MXFP8 的 scale 只有 2 的幂这一档，块内峰值除以元素最大值得出的数要取整到 2 的
+// 幂：round_up 为假时向下取（VU 的 MXFP8_SCALE_ROUND = 0，峰值可能被 Clamp 到
+// 元素最大值），为真时向上取（= 1，块内不会上溢）。FP4 那两档的 scale 是 FP8，
+// 不受这一项影响。
+inline std::vector<float> MakeScale(DataType t, std::vector<float> const& v,
+                                    bool round_up = false) {
   std::vector<float> out;
   uint64_t block = ScaleBlockOf(t);
   if (block == 0) return out;
@@ -196,8 +202,13 @@ inline std::vector<float> MakeScale(DataType t, std::vector<float> const& v) {
     }
     float raw = peak / emax;
     // MXFP8 的 scale 只有 E8M0 这一档 2 的幂，编回去再解出来才是真正生效的值。
-    out.push_back(t == DataType::kMxfp8 ? FromE8m0(ToE8m0(raw))
-                                        : FromFp8E4m3(ToFp8E4m3(raw)));
+    if (t == DataType::kMxfp8) {
+      uint8_t e = ToE8m0(raw);
+      if (round_up && FromE8m0(e) < raw && e < 0xFEu) ++e;
+      out.push_back(FromE8m0(e));
+    } else {
+      out.push_back(FromFp8E4m3(ToFp8E4m3(raw)));
+    }
   }
   return out;
 }

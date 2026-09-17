@@ -188,12 +188,14 @@ class Commit : public BachModule {
     HmemEntry const& h = hmem.Entry(d.stream_id);
     m->gpu_id = h.gpu_id;
     m->token_id = h.token_id;
-    m->size = d.bytes;
+    // 带 scale 的包：数据后面接 scale，包长把两段都算上。
+    m->size = d.bytes + d.ScaleBytes();
+    m->scale_valid = d.scale ? 1 : 0;
     m->vc = d.vc;
     m->stream_id = d.stream_id;
     m->task_id = d.task_id;
     m->reduce_seq = d.reduce_seq;
-    m->payload.assign(d.bytes, 0);
+    m->payload.assign(m->size, 0);
     d.msg = m;
   }
 

@@ -154,12 +154,8 @@ class DteXbar : public BachModule {
       if (slot[which][i].empty()) continue;
       MemReqView const& r = slot[which][i].front();
       if ((r.we ? kWrite : kRead) != rw) continue;
-      if (r.we) {
-        port.Write(r.addr, r.wdata, r.scale_en, r.woff, r.bytes);
-      } else {
-        port.Read(r.addr, r.bytes, r.scale_en);
-        pend[which].push_back(i);
-      }
+      ForwardMemReq(port, r);
+      if (!r.we) pend[which].push_back(i);
       slot[which][i].pop_front();
       turn = (i + 1) % kLaneNum;
       ++grant_cnt;

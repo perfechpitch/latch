@@ -2,7 +2,8 @@
 //
 // 软件只配基址，Core Mem 那一侧的偏移由硬件按 stream_id 算，Matrix Mem 那一侧
 // 配的就是最终物理地址；scale 与 topK 的长度硬件自己算；通道内按序激活，读那一
-// 半的领先量受 buffer 与 outstanding 限额约束；MM → CM 只写 Core Mem。
+// 半的领先量受 buffer 与 outstanding 限额约束；MM → CM 只写 Core Mem；带 scale
+// 的任务 scale 随数据搬。
 
 #include <gtest/gtest.h>
 
@@ -15,6 +16,8 @@
 #include "base/clock.h"
 #include "base/runtime.h"
 #include "bach/ip/chip/core/dte/lane.h"
+#include "bach/ip/chip/core/memory/core_mem.h"
+#include "bach/ip/chip/core/memory/matrix_mem.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -130,6 +133,116 @@ class LaneHarness : public BachModule {
 };
 
 }  // namespace
+
+namespace {
+
+// 接真存储的驱动台：灌一笔任务、推 Lane、收 Router 那一路。存储自己挂时钟。
+class RealMemHarness : public BachModule {
+ public:
+  RealMemHarness(ClockPtr c, Lane& target, std::shared_ptr<Descriptor> job)
+      : BachModule(c, "harness"), ln(target), d(std::move(job)) {}
+  std::vector<uint64_t> beat_bytes;
+  MessagePtr sent;
+
+ protected:
+  void Step() override {
+    CoreDataView v = ReadCoreData(ln.ToRouter());
+    if (v.valid && v.seq != last_seq) {
+      last_seq = v.seq;
+      beat_bytes.push_back(v.bytes);
+      sent = v.msg;
+    }
+    ln.ToRouter().DriveReady(true);
+    if (CycleNow() == 2) {
+      ln.AdmitPtr()->Drive(d, 1);
+    } else {
+      ln.AdmitPtr()->Idle();
+    }
+    ln.RunStep();
+  }
+
+ private:
+  Lane& ln;
+  std::shared_ptr<Descriptor> d;
+  uint64_t last_seq = 0;
+};
+
+}  // namespace
+
+// 出核带 scale：先按拍读完数据，再用只读 scale 的一笔把 scale 读回来接在包尾。
+// 末拍只有 scale 那几个字节，不按整拍记。
+TEST(BachDteLane, OutboundScaleFollowsTheData) {
+  constexpr uint64_t kData = 512;
+  std::vector<uint8_t> data(kData), scale(kData / 32);
+  for (uint64_t i = 0; i < kData; ++i) data[i] = uint8_t(i * 3 + 5);
+  for (uint64_t i = 0; i < scale.size(); ++i) scale[i] = uint8_t(100 + i);
+  std::vector<uint64_t> beats;
+  std::vector<uint8_t> payload;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    DteBuffer buf(clk, "buf", 64, 1, 0, false);
+    Agcu agcu(Layout());
+    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    CoreMem cmem(clk, "cmem");
+    ln.AttachCmem(cmem.PortPtr(kCmemDteRd));
+    uint64_t base = Layout().stream_base + 0x100;
+    cmem.Poke(base, data);
+    cmem.PokeScale(base, scale);
+
+    auto d = Task(1, Route::kCmToRouter, 0, kData, 0x100, 0);
+    d->scale = true;
+    d->msg->size = kData + scale.size();
+    d->msg->scale_valid = 1;
+    d->msg->payload.assign(d->msg->size, 0);
+    RealMemHarness h(clk, ln, d);
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    beats = h.beat_bytes;
+    if (h.sent) payload = h.sent->payload;
+  }
+  RT::Reset();
+  ASSERT_EQ(beats.size(), 3u) << "两拍数据加一拍 scale";
+  EXPECT_EQ(beats[2], scale.size());
+  std::vector<uint8_t> want = data;
+  want.insert(want.end(), scale.begin(), scale.end());
+  EXPECT_EQ(payload, want);
+}
+
+// MM → CM 带 scale：数据与 scale 都从 Matrix Mem 读出来，落到 Core Mem 同样
+// 的相对位置上。
+TEST(BachDteLane, MatrixToCoreCarriesScale) {
+  constexpr uint64_t kData = 768;
+  std::vector<uint8_t> data(kData), scale(kData / 32);
+  for (uint64_t i = 0; i < kData; ++i) data[i] = uint8_t(i * 5 + 2);
+  for (uint64_t i = 0; i < scale.size(); ++i) scale[i] = uint8_t(90 + i);
+  std::vector<uint8_t> got_data, got_scale;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    DteBuffer buf(clk, "buf", 64, 1, 0, false);
+    Agcu agcu(Layout());
+    Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
+    CoreMem cmem(clk, "cmem");
+    MatrixMem mmem(clk, "mmem");
+    ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
+    ln.AttachMmem(mmem.PortPtr(kMmemDteRd));
+    mmem.Poke(0x9000, data);
+    mmem.PokeScale(0x9000, scale);
+
+    auto d = Task(1, Route::kMmToCm, 1, kData, 0x9000, 0x40);
+    d->scale = true;
+    RealMemHarness h(clk, ln, d);
+    clk->Continue(300 * kPeriod);
+    RT::JoinAll();
+    uint64_t at = Layout().stream_base + Layout().stream_stride + 0x40;
+    got_data = cmem.Peek(at, kData);
+    got_scale = cmem.PeekScale(at, scale.size());
+  }
+  RT::Reset();
+  EXPECT_EQ(got_data, data);
+  EXPECT_EQ(got_scale, scale);
+}
 
 // Core Mem 那一侧按 stream_id 叠偏移，Matrix Mem 那一侧不叠。
 TEST(BachAgcu, StreamOffsetOnCoreMemSideOnly) {

@@ -3,15 +3,16 @@
 
 // matrix exe：32 个物理 Lane，左右镜像各 16，单 Lane 内 10 级混合高频流水。
 //
-// 物理阵列规格二选一：1×K256×N32（输出带宽 128 B）或 1×K128×N64（256 B）。
+// 物理阵列是 1×K128×N64（输出带宽 256 B）。
 //
 // bit 级累加顺序是这一层的核心：CSA 树按 scale block 分组累加，块内先把乘积
-// 加完再乘 scale，比逐个乘 scale 再加少一轮舍入。参考实现必须用同一个顺序：
-// 浮点加法不满足结合律，顺序是结果的一部分，不是实现细节。
+// 加完再乘 scale，比逐个乘 scale 再加少一轮舍入。MXFP8 × MXFP8 时 token 与权重
+// 各有一组 scale，块内部分和乘两者之积。参考实现必须用同一个顺序：浮点加法不
+// 满足结合律，顺序是结果的一部分，不是实现细节。
 //
-// vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树的第 128 输入层级插旁路 MUX，
-// 单 lane 同时输出多个结果。vlane 有 1 和 2 两种。vlane=2 时每个 lane 算两个
-// 半长的点积，所以块的划分也跟着减半。
+// vlane 机制：把 MAC 按 vlane 分组，在 CSA 加法树中间插旁路 MUX，单 lane 同时
+// 输出多个结果。vlane 有 1 和 2 两种。vlane=2 时每个 lane 在第 64 个输入处断
+// 开，算两个半长的点积，原语就是 1×K64×N128，块的划分跟着减半。
 //
 // 计算异常 MATH_NAN_INF 不走 Drain & Trap、不阻塞流水，由硬件自动 Clamp。
 //
@@ -60,16 +61,21 @@ class MatrixExe : public BachModule {
   // 这里就是数据金标准：参考实现按同一个 AccumByScaleBlock 算，逐元素比对不留
   // 容差。算完排进流水线，kMuLaneDepth 拍后出来。
   //
+  // wscale 是权重的 scale，按列排，一列 K / block 个；给空时权重按 scale 1 算。
+  //
   // k_first / k_last 说这一段在这一列的哪个位置，ep_first / ep_last 说这个专家
   // 在这一列的几个专家里的哪个位置。一列只占一段、只有一个专家时四个都是真，与
   // 不分块一样。w_ep 是这个专家的 topK 权重，只在几个专家合并成一份时用。
   void Issue(MuTaskCfg const& cfg, std::vector<uint8_t> const& token,
              std::vector<uint8_t> const& weight,
-             std::vector<uint8_t> const& scale, uint64_t out_addr = 0,
+             std::vector<uint8_t> const& scale,
+             std::vector<uint8_t> const& wscale = {}, uint64_t out_addr = 0,
              bool k_first = true, bool k_last = true, bool ep_first = true,
              bool ep_last = true, float w_ep = 1.0f) {
     uint64_t k = cfg.PrimK();
     uint64_t n = cfg.PrimN();
+    LOGCHECK(cfg.vlane == 1 || cfg.vlane == 2,
+             "MatrixExe: vlane 只有 1 与 2 两档。");
     uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
     uint64_t nblock = block == 0 ? 0 : k / block;
 
@@ -98,9 +104,21 @@ class MatrixExe : public BachModule {
       std::vector<float> prod(k, 0.0f);
       for (uint64_t i = 0; i < k; ++i) prod[i] = a[i] * b[i];
 
-      // 有 block scale 就按块分组累加，没有就顺序加。
-      float acc = block == 0 ? numeric::AccumInOrder(prod)
-                             : numeric::AccumByScaleBlock(prod, sc, block);
+      // 有 block scale 就按块分组累加，没有就顺序加。权重也带 scale 时块内部分
+      // 和乘两个 scale 之积。
+      float acc = 0.0f;
+      if (block == 0) {
+        acc = numeric::AccumInOrder(prod);
+      } else if (!wscale.empty()) {
+        std::vector<uint8_t> ws;
+        for (uint64_t t = 0; t < nblock && j * nblock + t < wscale.size(); ++t) {
+          ws.push_back(wscale[j * nblock + t]);
+        }
+        acc = numeric::AccumByScaleBlock2(
+            prod, sc, numeric::DecodeScale(cfg.dtype_ab, ws, nblock), block);
+      } else {
+        acc = numeric::AccumByScaleBlock(prod, sc, block);
+      }
       float clamped = numeric::ClampNanInf(acc);
       if (numeric::BitsOf(clamped) != numeric::BitsOf(acc)) ++clamp_pending;
       // 这一段的部分和加进累加寄存器。段间顺序加，每加一次也 Clamp。

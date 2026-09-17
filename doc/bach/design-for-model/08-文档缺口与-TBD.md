@@ -23,7 +23,7 @@
 | - | - | - | - |
 | RV core 特权态 | MAS_TOP：“仅支持 U 态（用户态）。没有 CSR？” | RV Core MAS：“支持 M 态，支持所有 M 态 CSR；不支持 S、U、H” | 按 RV Core MAS（M 态） |
 | VU 访存带宽 | 性能需求规格：B_VU = 64 B/T | VU MAS：每周期 1 Load + 1 Store 各 128 B | 按 VU MAS |
-| VU 能否直接读 Matrix Mem | 软件流程梳理：R core 链二由 VU DSA 直接从 Matrix Mem 读两路数据做 reduction（[`02_软件流程梳理/d13.png`](<Bach软件文档库/01_Bach软件文档库/04_总体设计/02_软件流程梳理/d13.png>) 画的就是 matrix mem → VU dsa → core mem） | MAS_TOP：“VU 不能直接读 Matrix mem”；EP 组间 Reduction 讨论与 core 内调度机制：DTE 先把两笔从 MM 搬到 CM，VU 再求和（[`04_core内调度机制/d40.png`](<Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制/d40.png>)） | 按 MAS_TOP（多一步 DTE 搬运），R core 链二因此是 4 个 task 而不是 3 个。这一步直接改变 R core 的 CM 容量与带宽需求 |
+| VU 能否直接读 Matrix Mem | 软件流程梳理：R core 链二由 VU DSA 直接从 Matrix Mem 读两路数据做 reduction（[`02_软件流程梳理/d13.png`](<Bach软件文档库/01_Bach软件文档库/04_总体设计/02_软件流程梳理/d13.png>) 画的就是 matrix mem → VU dsa → core mem） | MAS_TOP：“VU 不能直接读 Matrix mem”；EP 组间 Reduction 讨论与 core 内调度机制：DTE 先把两笔从 MM 搬到 CM，VU 再求和（[`04_core内调度机制/d40.png`](<Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制/d40.png>)） | 按 MAS_TOP（多一步 DTE 搬运），R core 链二因此是 4 个 task 而不是 3 个。这一步直接改变 R core 的 CM 容量与带宽需求。R core 每行一个：链一收本行结果与上一行 R core 送来的累加结果两半，每半一包 12288 B；链二找齐一个用户的两半、由 DTE 搬进 Core Mem、VU 做 VL = 6144 的 BF16 相加、送下一行 R core |
 | PPTP 下 silu·dot·量化 落在哪一段 chip | 软件流程梳理伪代码：FC1/FC3 的 reduce 结果都落到 **FC2 段** chip 的 core 0，dot 在那里做 | 需求分析的 `pptp_nk` 角色表：dot 在 **FC3 chip** 的 `pptp_fc3_nk_dot_core`；板卡结构和模型映射：Silu 在 **FC1 chip**、dot 在 **FC3 chip** | 三处把 VU 的活摆在不同 chip 上，直接改变每段 chip 的 VU 占用与跨段传输量。**已定**：按软件流程梳理那一档，三步统一落在 FC2 段 chip 的逻辑 core 0 |
 | 进核那一笔的目的地址由谁给 | DTE MAS：Header Parser 解析入站包头就生成 Descriptor，`dst_addr` 取自包头，搬运随即开始 | EP 组间 Reduction 讨论与软件流程梳理：R core 的 datain 任务里软件先读 `arrive_num`，结合 `(gpu_id, token_id)` 算出 Matrix Mem 存放位置再配给 DTE DSA。系统软件需求分析的 weights 加载那一段同样：DTE core 跑 weights loader，标量指令算出这一片落 Matrix Mem 的地址，再由 DTE 指令把数据从 Router 搬进去 | **已定：按 DTE MAS**，落点取自包头，发方在出核造包时写进去。后者要收方软件先算再搬，而软件被下发时数据已经在搬了。R core 一个用户的两笔落进同一个槽的哪一半，因此由发方按自己在链上的位置决定；weights 加载阶段落点由 Host 那一侧按 core 与分片算好写进包头，收方的 loader 只数搬进来几笔，数够了中断 SCP |
 | B / R core 的 datain 侧是几个 task | 软件流程梳理：两个 task，DTE 搬完再由另一个 task 置 flag / 更新 `arrive_num` | core 内调度机制与软件计算流程详细评估（GLM5 章 B core 伪代码）：一个 `DATAIN_TASK`，DTE DSA 搬完时顺带置标志并推进 head 指针 | 按一个 datain_task（两处较新的文档一致） |
@@ -57,8 +57,8 @@
 | loop_bp 项数 | Key features：最多 4 项 | 参数列表：4/8 | 未定 |
 | `STALL_COMPUTE_ON_CREDIT_MISS` | Top 模拟器详设正文：默认 `true`（credit 不足时本核停算） | 同文档仿真参数表：默认 `false` | **未解**，影响 credit 阻塞时的吞吐建模，两种模式文档建议做对比仿真 |
 | VU 读 CoreMem 带宽 | Top 模拟器：`vu 读/写 core mem = 256 B/T` | 一体化模拟器：`VU_Dsa 访存端口 CoreMem bw=64B`；VU MAS：128 B | 三处不一致，**建模取 VU MAS 的 128 B** |
-| chip 内 core 网格 | HAS 汇总版“Harvest 规则”：每 HBU 内 **2×5** 个 Bach Core，按坏核数分 A / B / C 型，坏 >2 个废弃；保证至少 8 个可用，**多于 8 个的富余 core 作特殊功能用**；板级左右两列只能 A / B 型。硬件 MAS / 需求分析同口径 | 两套模拟器一律按 **2×5** 建模；《仿真评估工作》里 Pysim 的基准 map 是 **2×4** 的 chip、B core 与 R core 另加 | **已定：按列位置分两种形状**。中间列 chip 2×4 共 8 个 core，第一列与最后一列 chip 2×5 共 10 个，多出的一列放 B core / R core 与一个不派角色的 core。Harvest 方案作废，没有坏核余量，每颗 chip 一律 8 个计算 core |
-| map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | 两个都对，只是各说一种 chip：中间列是 4 列，两侧是 5 列。这一项要按 chip 逐颗给，不能配成全局常数 |
+| chip 内 core 网格 | HAS 汇总版“Harvest 规则”：每 HBU 内 **2×5** 个 Bach Core，按坏核数分 A / B / C 型，坏 >2 个废弃；保证至少 8 个可用，**多于 8 个的富余 core 作特殊功能用**；板级左右两列只能 A / B 型。硬件 MAS / 需求分析同口径；《DATA_NOC DE HAS》REQ-ARCH-030 与 `core_bad_mask` 一节：每颗 chip 至多 2 个坏 core，一行至多 1 个，坏 core 的 Router 数据通路正常 | 两套模拟器一律按 **2×5** 建模；《仿真评估工作》里 Pysim 的基准 map 是 **2×4** 的 chip、B core 与 R core 另加；《编译器设计构想》：软件把可用的计算 core 当逻辑 2×4 用 | **已定：统一 2×5，中间列坏 core2、core7，两侧全好**。每颗 chip 10 个 core；`core_bad_mask` 每颗 chip 10 bit，中间两列 `0x084`，第一列与最后一列 `0x000`，由软件配置，编译器只实现这一种坏 core 布局。坏 core 上只有 Router 工作，数据经它透传。每颗 chip 8 个计算 core，编译器当逻辑 2×4 用；第一列组头 chip 的 core0 是 B core，最后一列 chip 的 core9 是 R core，其余不是计算 core 的好 core 不派角色 |
+| map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | **已定：统一 5 列**。chip 一律 2×5，列数是全局常数。编译器把每颗 chip 的 8 个计算 core 当逻辑 2×4 用，这个逻辑格子是 4 列，与 `.map` 示例的 4 相同 |
 | VC 数 | DATA_NOC HAS 正文与 VC Buffer 表：每 Input Port V = 4 | 同一份 HAS 的 VC 使能 mask 20-bit、`vc_id` 5-bit、Area 预算按 VC0–19（4×20 + 16×2 + shared 20 = 132 flits/port） | V = 20 是 2026/08/19 缩减 VC 之前的残留，但 Area 与 Architectural Guidelines 两节没同步。按 V = 4 建 |
 | VC private 深度 | HAS 3.2.2 与 REQ-ARCH-025：Private per-VC 深度 = 2（防死锁），软件可配 | 同一份 HAS 的 VC Buffer 结构表：Private ~20 flits/VC（覆盖 RTT），总量 4×20 + shared 20 = 100 flits/port = 25 KB | **已定：按 20**。HAS 的 VC Buffer 规格表是缩减到 V=4 之后的正式口径（`V=4`、`Private(VC0–3) ~20 flits/VC`、`总 4×20+20=100 flits/port=25 KB`）；`2` 是 REQ-ARCH-025 的软件可配下限，也是已删除的 VC4–19 那一档的深度，HAS 正文写作「极限情况……保证每 VC 基本传输需求」 |
 | R2R 单跳延迟 | DATA_NOC HAS 性能预算：internal 6 ns + wire 10 ns = **16 ns/hop**，mid 无走线延迟 | 第 5 章延迟表与性能需求规格：T_R2R = **40 T** | **倾向 16 ns**。HAS 新版新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300ns」，单跳约 10 cycle 以内，与 16 ns @1GHz 一档相符；40 T 对不上这条约束。待与设计者确认 40 T 是不是含 core 侧往返的端到端值 |
@@ -68,7 +68,7 @@
 | `stream_credit`（HAS 旧版叫 `coremem_credit`）初值 | HAS Boot 流程：上电 `stream_credit[port] = 0`，由正常 Core 上电发初始化脉冲逐步初始化 | HAS 4.3.2：`stream_credit` 为 16 个用户的状态表，**默认为全部使能状态** | 按 Boot 流程那一套（上电 0），另一处是描述稳态 |
 | Router 与 core 的接口协议 | HAS 正文：五类端口统一 Credit-based，local 也是 credit 流控 | HAS 遗留 action：“目前 router 和 core 通信采用 axi stream，如果可以也建议使用同样的 hflit 和 pflit 协议” | 当前实现是 AXI-Stream-Like，credit-based 是建议方向。按当前实现建，DTE-local 桥接做两侧协议转换 |
 | `TASK_EXE_MASK` 的极性 | TS MAS 寄存器表 bit 44：**0 = 按照用户执行，1 = 不按照用户执行**，一位一档 | 同一份 MAS 的 DP+P2P 场景描述：“有些用户只有 P2P 无计算 task、有些是计算无 P2P”，要分出两组就需要两个方向，一位不够 | **已消除**。TS MAS 现版寄存器表不再有 `TASK_EXE_MASK`，功能清单的 DP+P2P 一项整条划掉，trigger 也不再带 `compute` |
-| chip 内 mid 接口 | 第 2 章与我们的 Chip 装配：`core[i]` 与另一行对称位置的 core 的 mid 端口全部对接（2×4 是 `core[i+4]`，2×5 是 `core[i+5]`） | HAS 旧版 ASM-01 括号：“中间 router mid 接口不连接” | **已定：连接**。HAS 新版正文改成「简化二维 Mesh（**中间各列连接作为备份通路**）」，并新增 REQ-ARCH-037，用于提供多路径选择 |
+| chip 内 mid 接口 | 第 2 章与我们的 Chip 装配：`core[i]` 与另一行对称位置的 core 的 mid 端口全部对接（`core[i+5]`） | HAS 旧版 ASM-01 括号：“中间 router mid 接口不连接” | **已定：连接**。HAS 新版正文改成「简化二维 Mesh（**中间各列连接作为备份通路**）」，并新增 REQ-ARCH-037，用于提供多路径选择 |
 | VC Buffer 容量 | 《通信机制（分析过程）》按容量记：reduce 专用 VC3 16 KB、三个共享 VC 各 8 KB、三方向各一套，合计 **120 KB** | DATA_NOC HAS 按 flit 记：private 20 flit/VC × 4 加 shared 20，一个方向 100 flit ≈ **25 KB**，三方向 75 KB | 未解。前者按 reduce 要整包缓冲反推，后者按覆盖 credit 往返反推 |
 | ReduceBuffer 容量的第三种口径 | 《通信机制（分析过程）》另一处：Core 必须一次性整包发进 ReduceBuffer，一个 Token 8192 × 2 B = **16 KB** | 同一份文档前文记 64 KB；Router MAS F-044 记 512 KiB | 三个数在同一条链上：16 KB 是单包下界，64 KB 是正反双份，512 KiB 是 16 用户并发。**已定：按 Router MAS F-044**，16 个用户各一个 32 KiB 分区 |
 | `TASK_DSA_EN` 位域 | TS MAS 寄存器表 bit 38:37 曾定义 `TASK_DSA_EN`，`0` 只调用 RV core 不调 DSA、`1` 调用 | 同一份 MAS 已把这一整行划上删除线，且没有给替代方案 | **已消除**。TS MAS 现版用 `TASK_RECV_UNIT` 区分：00 只调 RV core，01 调 RV core 与 DSA、两路完成都要。下发字段 `task_dsa_en` 按它取 |
@@ -130,8 +130,9 @@
 * 整包传输方案下“长包阻塞可能有死锁场景，需要在架构层考虑不会出现死锁”，死锁避免的具体论证未写
 * Router 表项示例里一处原文未定：C0 在 Path2 上要不要查输出端的 stream credit table。原文另一处“C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位”已不成立：出方向掩码里没有 Core 位，进不进本 core 由 `path_core_bypass` 单独判定
 * 一笔 Reduce 任务含几个 Packet、任务边界靠什么标出来，Router MAS 没写。MAS 只说“同一任务在每个目标方向只取得一次用户级准入，后续 Packet 和 flit 复用该准入”；《TS_通信机制》把一笔 32 KB 的 reduce 拆成 4 笔 8 KB 的 reduce task。模型按一个 `reduce_seq` 的包算一笔任务
-* 本级 ReduceMemory 做完一笔任务后“向相关上游发送一次”的 release 从哪一组进静态路由，Router MAS 没写：`RTR_RELEASE_ROUTE` 只按四个输入方向分组，这一笔不从任何输入方向进来。模型把它直接写到这笔任务每一路上游来源所在的方向，经过纯透传的 core 时才按静态路由转。哪一路是本 core 那一份按表项 `flow_dir` 的 reduce1、reduce2 两位定，默认本 core 出了自己那一份
+* 本级 ReduceMemory 做完一笔任务后“向相关上游发送一次”的 release 从哪一组进静态路由，Router MAS 没写：`RTR_RELEASE_ROUTE` 只按四个输入方向分组，这一笔不从任何输入方向进来。模型把它直接写到这笔任务每一路上游来源所在的方向，经过只转发、不做 reduce 的 core 时才按静态路由转。哪一路是本 core 那一份按表项 `flow_dir` 的 reduce1、reduce2 两位定，默认本 core 出了自己那一份
 * `RTR_RELEASE_ROUTE` 的复位值，以及没配路由的口收到 release 怎么处理，Router MAS 没写。模型里这种口收到 Reduce release 就报错
+* Stream release 的回程模型没接：《Router MAS》规定 Stream release 与 Reduce release 都按 `RTR_RELEASE_ROUTE` 转发，模型只按它转 Reduce release。现有 MoE 路由不用 stream credit，模型暂不接这一路
 * Rmem 16 个分区都占着时新用户的第一笔怎么办，Router MAS 没写：反压那一段只列了“Rmem Bank、读改写通道、输入缓冲或输出空间暂时不可用”。模型对这一路输入反压，等有用户 Retire 放出一个分区。分区用时才分配之后，它与 16 项 stream 表不再一一对应；分区被上游先到的用户占满、本 core 的用户推进不下去时会不会卡死，原文没有论证
 * 只合并上游分量、本 core 不出分量的那一级，本 core 的 TS 里可能没有这个用户，谁对它发 User Retire 放 Rmem 分区，Router MAS 没写：原文只说“TS 发送 User Retire 触发Rmem释放”。模型里分区只等本 core 的 TS 对这个用户发 Retire
 * 结果流里后面的结果还没算好时，同一出口别的 VC 能不能先走，Router MAS 没写：F-012 只说“只有当前 Packet 因下游条件不满足而阻塞时，才允许在合法的 flit 边界切换到其他已就绪的 VC”，结果没算好不是下游条件。模型只锁同一出口同一 VC，别的 VC 照走
@@ -142,7 +143,7 @@
 
 **TS**
 
-* concat 的 task 软件配 1 个还是多个（若配 1 个，需在任务链中指明 `exe_num`）
+* ~~concat 的 task 软件配 1 个还是多个（若配 1 个，需在任务链中指明 `exe_num`）~~ 已定：配多个。dot core（每颗 chip 的逻辑 core7，收 chip 内 FC1/FC3 部分和的归约、广播 FC2 输入、收 concat 的那个 core）的 concat 搬入一个上游 core 一项，共 7 项，各对一个 PID。依据《软件计算流程详细评估》“EP1+PP3+TP16 KN拆分”的 FC2 reduce：目的 core 配 8 个 datain 任务，`path_id` 5～12 各一个，“需要调度8个任务来完成reduce结果的concat”
 * ~~DTE task 的三种优先级用固定优先级，还是“reissue 最高 + 其余按最老用户”~~ 已定：TS MAS 现版划掉方案 1，全部按最老用户仲裁
 * 哪些 task 该硬化进 TS，界线尚未定下
   * 原文的设想：“所有与用户和 core mem 分配无关的 task，都可以采用硬化 task 在 TS 的方式（包括 broadcast 重发），只有与用户强相关的任务链才会在 stream 表里创建和工作”
@@ -192,7 +193,7 @@
   * 《MU / DTE 需求整理和遗留问题分析》20260825 的结论是去掉 `task_len_table`、`task_len` 改由 RV core 配寄存器
   * 本文按「命中 Fast LUT 的常规任务用表里的 `length`，未命中才走 RV core 配寄存器」理解，未经源文档确认
 * R core 的 shareMem 怎么索引，原文留了问句未答
-* DTE 的 `path_task_map` 按 `path_id` 只记一个 `task_id`：TS 允许链上几项搬入任务配同一个 PID，每次找还没做完的最低一项（ts.md F11），DTE 给进核那一笔的 DSA 完成填的却固定是其中一项，与 RV core 那一路带回的 `task_id` 对不上。模型的三类 core 每个 PID 只对应一项搬入，没有碰到
+* DTE 的 `path_task_map` 按 `path_id` 只记一个 `task_id`：TS 允许链上几项搬入任务配同一个 PID，每次找还没做完的最低一项（ts.md F11），DTE 给进核那一笔的 DSA 完成填的却固定是其中一项，与 RV core 那一路带回的 `task_id` 对不上。链上几项搬入任务配同一个 PID 时，DTE 那一路填哪个 `task_id` 还没定。默认用例 dot core 上的 7 项 concat 搬入各对一个 PID，不在此列
 
 **Core Mem**
 
@@ -215,7 +216,7 @@
 * 完成信息由 Router 硬件解析包头发起，还是由软件调用 RV core 发起；软件需要配置哪个 Bach core 返回完成信息
 * Node 任务准入依据的 buffer 状态、SmartNIC 队列状态、板间网络拥塞状态缓存在哪里
 * GLM5 结果往 GPU 发送：R core 的 Matrix Mem 能否被读、是否先到 DDR（DDR 带宽需网卡的 2～3 倍）、是否组 batch
-* GLM5 的 GPU 侧：R core 的 credit 退休信号由谁返回、跨 tray 是否需要 NTB、GPU 能否发到第一列全部 B core 以扩大 Matrix Mem 缓存
+* GLM5 的 GPU 侧：R core 的 credit 退休信号由谁返回、跨 tray 是否需要 NTB、GPU 能否发到第一列全部 B core 以扩大 Matrix Mem 缓存（原文按第一列 12 颗 chip 各有一个 B core 来问；当前设计只有第一列组头 chip 的 core0 是 B core，第一列其余 chip 的 core0、core5 不派角色）
 
 **建模所需而设计未给值的参数**
 
@@ -239,6 +240,10 @@
 * R core 的 Matrix Mem 要不要额外的 credit 机制
   * 原文的疑问：“Reduction Core 的 Matrix Mem 与 Broadcast Core 的 Matrix Mem 对应的话，不需要额外 Credit 机制保证？”
   * 附带的追问：总槽位数是否要按输入 / 输出能支持的**较小**那个来算，否则进得多、出得少仍会缺 credit
+* R core 怎么知道本行所在的 EP 组对这个用户没有激活专家
+  * 已定的行为：这一行的 R core 不相加，只转发上一行的结果
+  * 未定的是判断方式：《软件计算流程详细评估》的原文疑问是“Reduction，需要coremask判断是否需要做A+B，还是透传A（没有B）。怎么获取coremask？”
+  * 附带的追问：第 0 行是链首，前面没有上一行；它所在的 EP 组没有激活专家时，这一行发什么、发不发
 
 ***
 

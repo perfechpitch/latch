@@ -9,10 +9,11 @@
 // 对外只有两组连接：三个 R2R 方向各一条 256 B/T 的双向链路，与 ctrl_noc 的配置
 // 写事务口。没有第三条路：core 的一切进出都过 Router。
 //
-// router_only 那一档是边界 chip 里不派角色的那个 core：只构造 Router 的八个
-// 模块，不构造 TS、RV core、DSA 与三块存储。它仍要承担单向转发、多播、
-// router-level reduce 与三类 credit 的透传，而且坐在 chip 接 PCIe Switch 的
-// 那个口上，所以 Router 一个都不能少。
+// 七个单元一律构造。坏 core 由 core_bad_mask 标出：Router 进透传档，TS、RV core、
+// DSA 与存储不步进、不记波形。
+//
+// core 不保存角色，行为逐项取自配置：自启动取自 TS 的 SELF_START，B core 搬出查
+// 哪几个方向取自 B_CORE_DIRECTION，进核落点、Ack 与标志表取自 DTE 的进核配置。
 //
 // 三个 DSA 之间没有任何直连：DSA 之间的数据一律经存储交换，控制一律经 TS 与
 // 各自的 RV core。每个 DSA 与本核那个 RV core 之间另有四个身份信号直连
@@ -38,25 +39,10 @@
 namespace latch {
 namespace bach {
 
-// 一个 core 在系统里扮演什么。不派角色的那个只转发。
-enum class CoreRole : uint32_t {
-  kCompute = 0,     // logical compute core 0～7
-  kBroadcast = 1,   // B core：第一列 chip 的 core0
-  kReduce = 2,      // R core：最后一列 chip 的 core9
-  kSpare = 3,       // 不派角色，只构造 Router
-};
-
 // 只读上下文，core 内各模块共用。构造期写入，之后不变。
 struct CoreContext {
   uint64_t core_id = 0;      // 本 chip 内的编号
   uint64_t gx = 0, gy = 0;   // 全局坐标
-  CoreRole role = CoreRole::kCompute;
-  bool router_only = false;
-  // R core 与 B core：进核那一笔搬完之后置这个 token 槽位的 valid 标志。表在
-  // Share Mem 里，一项 4 B，第几项按落点除以槽位大小算。两个数由编译侧给，
-  // entry_bytes 为 0 表示本 core 不置标志。
-  uint64_t inbound_flag_base = 0;
-  uint64_t inbound_entry_bytes = 0;
   // 本 core 自己挂时钟（占一个常驻协程），还是由 chip 那一层顺序调 RunStep()。
   // core 之间只经 LinkEnd 通讯，那一组端口全部打拍，所以两种驱动方式逐拍结果
   // 相同。挂时钟时 core 之间才能真正并行。
@@ -69,9 +55,7 @@ class Core : public BachModule {
        uint64_t parent = 0)
       : BachModule(clock, name, parent, context.tick), ctx(context) {
     RouterCfg rcfg;
-    // 不派角色的 core 在 Skip Mask 里标成跳过：经过它的包走完整流水线但不投递
-    // local。CoreStation 永远不准入，ReduceModule 不累加。
-    rcfg.pass_through = ctx.router_only;
+    rcfg.core_id = ctx.core_id;
     rcfg.tick = false;
     // 波形上一个 core 记两层：EmitTrace() 那组精选信号直接挂在 core 下面，外加
     // 底下各单元模块自己的全部信号（层次 chip<i>.core<j>.<单元>.<模块>.<信号>）。
@@ -79,7 +63,6 @@ class Core : public BachModule {
     // 退回只发精选信号（或调小 moe_lpu 的 kTraceChips）。
     // TraceOffScope off;
     router = std::make_unique<Router>(clock, "router", rcfg, Id());
-    if (ctx.router_only) return;
 
     TsCfg tcfg;
     tcfg.tick = false;
@@ -87,10 +70,7 @@ class Core : public BachModule {
 
     DteCfg dcfg;
     dcfg.tick = false;
-    dcfg.inbound = BusinessInbound();
-    dcfg.inbound_no_ack = BusinessNoAck();
-    dcfg.inbound_flag_base = ctx.inbound_flag_base;
-    dcfg.inbound_entry_bytes = ctx.inbound_entry_bytes;
+    dcfg.inbound = business_in;
     dte = std::make_unique<Dte>(clock, "dte", dcfg, Id());
 
     cmem = std::make_unique<CoreMem>(clock, "cmem", Id(), false);
@@ -115,18 +95,32 @@ class Core : public BachModule {
     return router->UpReleaseWire(d);
   }
 
-  // 切进 weights 加载模式：这一阶段进来的是权重，落 Matrix Mem；这一阶段不建
-  // stream 表项，进核那一笔没有可报的对象，不回 Ack。
-  void SetWeightsInbound() { dte->SetInbound(Route::kRouterToMm, true); }
-  // 切回业务模式：进核那一档按本 core 的角色定。
-  void SetBusinessInbound() {
-    dte->SetInbound(BusinessInbound(), BusinessNoAck());
+  // core_bad_mask：本 chip 每个 core 一位，SCP 在 Router 配置阶段写，业务开始之
+  // 前写完。本 core 那一位为 1 就是坏 core。
+  void SetCoreBadMask(uint64_t mask) { router->SetCoreBadMask(mask); }
+  bool Bad() const { return router->Bad(); }
+
+  // 业务模式下进核那一笔的配置，对应 bundle 的 DTEIN，SCP 在 core 配置阶段写，
+  // 写入即生效。
+  void SetBusinessInboundCfg(InboundCfg const& in) {
+    business_in = in;
+    dte->SetInbound(in);
   }
+  // 切进 weights 加载模式：这一阶段进来的是权重，落 Matrix Mem；这一阶段不建
+  // stream 表项，进核那一笔没有可报的对象，不回 Ack，也不置标志。
+  void SetWeightsInbound() {
+    InboundCfg in;
+    in.route = Route::kRouterToMm;
+    in.no_ack = true;
+    dte->SetInbound(in);
+  }
+  // 切回业务模式：按写入的业务模式配置重配。
+  void SetBusinessInbound() { dte->SetInbound(business_in); }
 
   CoreContext const& Context() const { return ctx; }
-  // 三个 RV core 都进 wait 后拉高，SCP 据此开放业务接收权限。
+  // 三个 RV core 都进 wait 后拉高，SCP 据此开放业务接收权限。坏 core 恒为真。
   bool Ready() const {
-    if (ctx.router_only) return true;
+    if (Bad()) return true;
     for (auto const& r : rv) {
       if (!r->Ready()) return false;
     }
@@ -142,36 +136,35 @@ class Core : public BachModule {
     if (!we) return;
     switch (r.target) {
       case kCfgRouter:
-        // RouterTable 的 CSR。逐笔写按 path_id 铺表。
-        router->Table().SetSkipMask(data);
+        // Router 段经 ctrl_noc 只收 core_bad_mask，RouterTable 由装载那一侧铺。
+        if (r.offset == kCfgRouterCoreBadMask) router->SetCoreBadMask(data);
         break;
       case kCfgTs:
-        if (ts) ts->Cfg().SetStreamNum(data == 0 ? 1 : data);
+        ts->Cfg().SetStreamNum(data == 0 ? 1 : data);
         break;
       case kCfgDte:
         // DTE 的寄存器由它的 Commit 那一侧收，boot 期只配 Hmem 的表。
         break;
       case kCfgMu:
-        if (mu) mu->Regfile().CfgWrite(r.offset, data);
+        mu->Regfile().CfgWrite(r.offset, data);
         break;
       case kCfgVu:
         // VU 有三条独立的配置通路，Ctrl-NOC 占其中一条，走端口。
         break;
-      case kCfgItcm:
-        if (rv[r.index]) {
-          std::vector<uint8_t> word(4);
-          for (int k = 0; k < 4; ++k) word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
-          rv[r.index]->PokeItcm(r.offset, word);
-        }
+      case kCfgItcm: {
+        std::vector<uint8_t> word(4);
+        for (int k = 0; k < 4; ++k) word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
+        rv[r.index]->PokeItcm(r.offset, word);
         break;
+      }
       case kCfgSmem:
-        if (smem) PokeWord(*smem, r.offset, data);
+        PokeWord(*smem, r.offset, data);
         break;
       case kCfgCmem:
-        if (cmem) PokeWord(*cmem, r.offset, data);
+        PokeWord(*cmem, r.offset, data);
         break;
       case kCfgMmem:
-        if (mmem) PokeWord(*mmem, r.offset, data);
+        PokeWord(*mmem, r.offset, data);
         break;
       default:
         break;
@@ -190,9 +183,10 @@ class Core : public BachModule {
   ShareMem& Smem() { return *smem; }
 
   // 末级先做：一笔活在一拍里最多前进一级。存储排在最前，因为它是各条通路的末端。
+  // 坏 core 只有 Router 步进。
   void Step() override {
     router->RunStep();
-    if (ctx.router_only) {
+    if (Bad()) {
       EmitTrace();
       return;
     }
@@ -222,7 +216,8 @@ class Core : public BachModule {
     TracePerCycle("reduce_q", router->GetReduce().OutQueued());
     TracePerCycle("core_in", router->GetCoreStation().OutBufDepth());
     EmitRouter();
-    if (ctx.router_only) return;
+    // 坏 core 与 TS 没配过任务的好 core 只有 Router 在用，只记上面那一组。
+    if (Bad() || !ts->Cfg().HasTask()) return;
     TracePerCycle("core_out", dte->OutBuf().Occupancy());
     TracePerCycle("ts_inflight", ts->Table().InFlight());
     TracePerCycle("ts_issue", ts->DteArbiter().Issued() +
@@ -314,8 +309,6 @@ class Core : public BachModule {
   //
   // DataIn 任务（Bypass 档从 DataIn_task_table 直接下发的那一路）既没有建表也没
   // 有装后继，它在 ts_unit 上出现时配不上这两个信号。
-  //
-  // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 不建 TS。
   void EmitStep() {
     // 自启动 core 上的重新激活不经 User_Match，笔数从 credit 与退休那一侧取。
     // 那一步是 Task 0，还没有用户身份。
@@ -372,8 +365,6 @@ class Core : public BachModule {
   // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
   // 这里填的是各单元侧存下来的那一份：MU 与 DTE 取自 RV core 写进 DSA 的 user，
   // VU 取自写 trigger 那一拍从身份直连线上采下来、随宏指令一路带到退休的 user。
-  //
-  // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 不建 DSA。
   void EmitDsa() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
@@ -414,9 +405,6 @@ class Core : public BachModule {
   //
   // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()、VU 轮询 MACRO_INST_LEFT），
   // 不含 DSA 自己的执行时间。
-  //
-  // 位置必须在上面那句 router_only 提前 return 之后：不派角色的 core 只建
-  // Router，rv 是空的。
   void EmitRv() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
@@ -447,7 +435,7 @@ class Core : public BachModule {
 
   bool Quiescent() const override {
     if (!router->Quiescent()) return false;
-    if (ctx.router_only) return true;
+    if (Bad()) return true;
     for (auto const& r : rv) {
       if (!r->Quiescent()) return false;
     }
@@ -456,25 +444,10 @@ class Core : public BachModule {
   }
 
  private:
-  // 业务模式下进核那一笔落哪块存储：R core 收到的两笔都落 Matrix Mem，它不参与
-  // 计算，Core Mem 只在链二求和那几步用。B core 也落 Matrix Mem，它留下这一份
-  // 再广播给本组各 core。
-  Route BusinessInbound() const {
-    return ctx.role == CoreRole::kReduce || ctx.role == CoreRole::kBroadcast
-               ? Route::kRouterToMm
-               : Route::kRouterToCm;
-  }
-  // B core 与 R core 上进来的包不建 stream 表项，进核那一笔不回 Ack。
-  bool BusinessNoAck() const {
-    return ctx.role == CoreRole::kReduce || ctx.role == CoreRole::kBroadcast;
-  }
-
   void Wire() {
     // B core 的搬出查的是广播那几个方向的下游资源。方向由软件写进 TS 的
-    // B_CORE_DIRECTION，Router 用的时候现读。
-    if (ctx.role == CoreRole::kBroadcast) {
-      router->SetBcastDirs([this] { return ts->Cfg().BCoreDirection(); });
-    }
+    // B_CORE_DIRECTION，Router 用的时候现读；为 0 时按本 core 的进核资源查。
+    router->SetBcastDirs([this] { return ts->Cfg().BCoreDirection(); });
     WireRouterToTs();
     WireTsToRv();
     WireRvToDsa();
@@ -572,6 +545,8 @@ class Core : public BachModule {
   }
 
   CoreContext ctx;
+  // 业务模式下进核那一笔的配置。切回业务模式时按它重配。
+  InboundCfg business_in;
   // 三个 DSA 的两个端点各要从一家的访问器上读。u：0 DTE、1 MU、2 VU。
   struct DsaEv {
     uint64_t seq = 0, task = 0, user = 0xFFFFu;

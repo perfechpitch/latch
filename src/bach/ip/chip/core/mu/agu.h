@@ -71,10 +71,6 @@ class MuAgu {
   uint64_t OutAddr(MuStep const& s) const {
     return cfg.addr_out + ExpertOffOfC(s) + s.n_idx * OutBytes();
   }
-  uint64_t ScaleAddr(MuStep const& s) const {
-    return cfg.addr_scale + ExpertOffOfA(s) + s.k_idx * ScaleBytes();
-  }
-
   uint64_t ExpertOffOfA(MuStep const& s) const {
     return cfg.ep_reduce ? s.e_idx * cfg.ac_expert_stride : 0;
   }
@@ -92,9 +88,16 @@ class MuAgu {
     // 输出 FP32 或 BF16。
     return cfg.PrimN() * (cfg.out_bf16 ? 2 : 4);
   }
+  // token 那一段的 scale 个数：与 token 一一映射，随它从存储的 scale 旁带读出来，
+  // 地址按元素算，vlane = 2 时一段 token 只占半行，取的也只是那半行的 scale。
   uint64_t ScaleBytes() const {
     uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
     return block == 0 ? 0 : cfg.PrimK() / block;
+  }
+  // 权重那一块的 scale 个数：只有 MXFP8 × MXFP8 带，按列排，一列 K / 32 个。
+  uint64_t WeightScaleBytes() const {
+    if (cfg.dtype_ab != numeric::DataType::kMxfp8) return 0;
+    return cfg.PrimK() * cfg.PrimN() / numeric::ScaleBlockOf(cfg.dtype_ab);
   }
 
   // acu：越界与对齐。Token 与 Weight 读要 16 B 对齐，结果写要 16 B 或 1 KB。

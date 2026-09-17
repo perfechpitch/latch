@@ -74,6 +74,10 @@ struct Message {
   // 出核造包时从 DTE 模板的 dst_addr 抄过来（F2 的入站包头字段）。
   uint64_t dst_addr = 0;
 
+  // payload 是 MXFP8 数据后面接它的 scale（每 32 B 一个 E8M0）。发方 DTE 的任务
+  // 置了 scale_valid 时打上，收方据此把包尾那一段写进存储的 scale 旁带。
+  uint64_t scale_valid = 0;
+
   // 诊断用：从哪个 core 发出、第几笔。模型不拿它当主键，硬件包头里也没有。
   uint64_t src_core = 0;
   uint64_t seq = 0;
@@ -84,6 +88,10 @@ struct Message {
 
   uint64_t TotalBytes() const {
     return size > kMinPacketBytes ? size : kMinPacketBytes;
+  }
+  // payload 里数据那一段的长度。带 scale 时 size = D + ceil(D / 32)，由此反推 D。
+  uint64_t DataBytes() const {
+    return scale_valid != 0 ? size - (size + 32) / 33 : size;
   }
 };
 

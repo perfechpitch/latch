@@ -3,19 +3,19 @@
 
 // M1 · SCP boot 序列。
 //
-// 自启动 → 完成 PCIe 链路训练 → 给本 chip 全部 core 的 Router 配 RouterTable、
-// Skip Mask 与 Credit Bypass Route → 顺序解复位并配置各 core 的 TS、三个 RV core
-// 与三个 DSA。
+// 自启动 → 完成 PCIe 链路训练 → 给本 chip 全部 core 的 Router 先写 core_bad_mask，
+// 再配 RouterTable 与 Credit Bypass Route → 顺序解复位并配置各好 core 的 TS、三个
+// RV core 与三个 DSA。
 //
 // Router 那一段排在最前，而且全 chip 一个 core 不落：漏掉任何一个 core 的 Router，
-// 经过它的 path 就全断。不派角色的 core 只配 Router 那两样，TS、RV core 与 DSA
-// 本来就没构造。
+// 经过它的 path 就全断。坏 core 只配 Router 那几样，core 配置阶段跳过它。
 //
 // 每个 core 的初始化五步按序做完：RV core firmware 写进 ITCM → 配置 Bach core
 // 解复位 → TS 初始化（任务链）→ Router 初始化（路由表）→ kernel 初始化。装载
 // 拍数按镜像字节数除以 4 B 计，与业务段用同一把尺。
 //
-// 三个 RV core 的 ready 全高之后才开放业务接收权限，Router 才开始接收业务。
+// 三个 RV core 的 ready 全高之后才开放业务接收权限，Router 才开始接收业务。坏
+// core 的 ready 恒为真，等的只有好 core。
 
 #include <deque>
 #include <memory>

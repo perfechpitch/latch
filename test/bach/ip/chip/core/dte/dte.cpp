@@ -165,7 +165,7 @@ TEST(BachDte, InboundRouterToCoreMem) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteCfg cfg;
-    cfg.inbound = Route::kRouterToCm;
+    cfg.inbound.route = Route::kRouterToCm;
     Dte dte(clk, "dte", cfg);
 
     auto cm_rd = std::make_shared<MemPort>(clk);
@@ -190,6 +190,50 @@ TEST(BachDte, InboundRouterToCoreMem) {
   EXPECT_EQ(parsed, 1u);   // 解析了一个 Header
   EXPECT_GT(writes, 0u);   // 数据写进了存储
   EXPECT_EQ(dones, 1u);    // exactly-once：只报一次
+}
+
+// 带 scale 的包：payload 是 MXFP8 数据后面接 scale。数据那一段落 Core Mem，包尾
+// 那一段落同一段地址的 scale 旁带，每 32 B 数据一个。
+TEST(BachDte, InboundScaleLandsInScaleSideband) {
+  constexpr uint64_t kData = 512;
+  constexpr uint64_t kAt = 0x80;
+  std::vector<uint8_t> data(kData), scale(kData / 32);
+  for (uint64_t i = 0; i < kData; ++i) data[i] = uint8_t(i * 7 + 1);
+  for (uint64_t i = 0; i < scale.size(); ++i) scale[i] = uint8_t(120 + i);
+  uint64_t dones = 0;
+  std::vector<uint8_t> got_data, got_scale;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    DteCfg cfg;
+    cfg.inbound.route = Route::kRouterToCm;
+    Dte dte(clk, "dte", cfg);
+    CoreMem cmem(clk, "cmem");
+    dte.AttachCmemRd(cmem.PortPtr(kCmemDteRd));
+    dte.AttachCmemWr(cmem.PortPtr(kCmemDteWr));
+    auto mm_rd = std::make_shared<MemPort>(clk);
+    auto mm_wr = std::make_shared<MemPort>(clk);
+    dte.AttachMmemRd(mm_rd);
+    dte.AttachMmemWr(mm_wr);
+
+    MessagePtr m = MakeMsg(11, 0, kData + scale.size());
+    m->scale_valid = 1;
+    m->dst_addr = kAt;
+    m->payload = data;
+    m->payload.insert(m->payload.end(), scale.begin(), scale.end());
+    RouterFeeder feed(clk, dte, 2, m);
+    MemSide mem(clk, {mm_rd, mm_wr});
+    TsSide ts(clk, dte);
+    clk->Continue(300 * kPeriod);
+    RT::JoinAll();
+    dones = ts.dones;
+    got_data = cmem.Peek(kAt, kData);
+    got_scale = cmem.PeekScale(kAt, scale.size());
+  }
+  RT::Reset();
+  EXPECT_EQ(dones, 1u);
+  EXPECT_EQ(got_data, data) << "数据那一段";
+  EXPECT_EQ(got_scale, scale) << "包尾那一段进 scale 旁带";
 }
 
 // 纯包头任务：data_len 为 0，Header beat 同时带 TLAST，照样走完并报完成。

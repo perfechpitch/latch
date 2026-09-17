@@ -289,11 +289,12 @@ def encode_scale(dtype, scale):
     return bytes(to_fp8_e4m3(s) for s in scale)
 
 
-def make_scale(dtype, values):
+def make_scale(dtype, values, round_up=False):
     """按 block 算各块的 scale：块内绝对值最大的那个定阶。
 
     算出来的 raw 还要编回 scale 自己那一档再解出来：真正生效的是能表示的
-    那个值，不是 raw。
+    那个值，不是 raw。MXFP8 那一档取整到 2 的幂：round_up 为假时向下取，为真
+    时向上取，对应 VU 的 MXFP8_SCALE_ROUND。
     """
     block = SCALE_BLOCK[dtype]
     if block == 0:
@@ -308,7 +309,10 @@ def make_scale(dtype, values):
             continue
         raw = peak / emax
         if dtype == MXFP8:
-            out.append(from_e8m0(to_e8m0(raw)))
+            e = to_e8m0(raw)
+            if round_up and from_e8m0(e) < raw and e < 0xFE:
+                e += 1
+            out.append(from_e8m0(e))
         else:
             out.append(from_fp8_e4m3(to_fp8_e4m3(raw)))
     return out
@@ -340,6 +344,19 @@ def accum_by_scale_block(prods, block_scale, block):
         for i in range(b * block, min((b + 1) * block, len(prods))):
             part = f32(part + prods[i])
         total = f32(total + f32(part * block_scale[b]))
+    return total
+
+
+def accum_by_scale_block2(prods, a_scale, w_scale, block):
+    """MXFP8 × MXFP8：块内先把乘积加完，再乘 token 与权重两个 scale 之积，块间
+    顺序加。两个 scale 都是 E8M0，先相乘就是指数相加。"""
+    total = 0.0
+    for b in range(len(a_scale)):
+        part = 0.0
+        for i in range(b * block, min((b + 1) * block, len(prods))):
+            part = f32(part + prods[i])
+        s = f32(a_scale[b] * (w_scale[b] if b < len(w_scale) else 1.0))
+        total = f32(total + f32(part * s))
     return total
 
 

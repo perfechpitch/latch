@@ -7,8 +7,8 @@
 //
 // 入口在 global_top_left 的西侧，出口在 global_bottom_right 的东侧，所以路要
 // 先沿第 0 列往下走完 12 层，再沿最后一层往右走到最后一列，一共 15 颗 chip。
-// 只构造这 15 颗：48 颗全建起来逐拍推进要几十毫秒一拍。坐标、形状、角色、链路
-// 参数仍按 12 × 4 的整机算。
+// 只构造这 15 颗：48 颗全建起来逐拍推进要几十毫秒一拍。坐标、坏 core、角色、
+// 链路参数仍按 12 × 4 的整机算。
 
 #include <gtest/gtest.h>
 
@@ -65,10 +65,10 @@ bool KernelBuilt() {
   return f.good();
 }
 
-// 一笔搬运的字节数，与 kernel 里的 TOKEN_BYTES 同一个数。入口桩那边一个 token
-// 的级联包是 6368 B，要等各段的 shape 都配齐才搬得动，先按 kernel 现在搬的这
-// 一段来。
-constexpr uint64_t kMoveBytes = 512;
+// 一笔搬运的包长：128 个 MXFP8 与 kernel 里的 E2E_TOKEN_BYTES 同一个数，后面接
+// 4 个 scale。入口桩那边一个 token 的级联包是 6368 B，要等各段的 shape 都配齐才
+// 搬得动，先按 kernel 现在搬的这一段来。
+constexpr uint64_t kMoveBytes = 128 + 4;
 
 LpuTables Tables() {
   SplitParam split;
@@ -108,12 +108,11 @@ std::vector<Hop> RoutePlan() {
 
 // 一颗 chip 上从进口那颗 core 到出口那颗 core 的一条路。
 //
-// 四个口各挂在一颗 core 上：N 在行 0 左端、E 在行 0 右端、W 在行 1 左端、S 在
-// 行 1 右端。两个出口都在各自那行的最右，所以走法只有一种：先沿进口那一行
-// 一直往右，要换行就在最右那颗转 mid 过去。
-std::vector<uint64_t> CorePath(ChipShape s, uint64_t in_port,
-                               uint64_t out_port) {
-  uint64_t cols = ColsOf(s);
+// 四个口各挂在一颗 core 上：N 是 core0、E 是 core4、W 是 core5、S 是 core9。两
+// 个出口都在各自那行的最右，所以走法只有一种：先沿进口那一行一直往右，要换行就
+// 在最右那颗转 mid 过去。路上的坏 core 只转发。
+std::vector<uint64_t> CorePath(uint64_t in_port, uint64_t out_port) {
+  uint64_t cols = kChipCols;
   uint64_t in_row = in_port == kChipN ? 0 : 1;
   uint64_t out_row = out_port == kChipE ? 0 : 1;
   std::vector<uint64_t> p;
@@ -174,26 +173,28 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
 
 // 只转发的一颗：路上每颗 core 都给这条 path 配一项，包不进核。
 void WirePassChip(Chip& chip, Hop const& h, uint64_t path) {
-  std::vector<uint64_t> p = CorePath(chip.Shape(), h.in_port, h.out_port);
+  std::vector<uint64_t> p = CorePath(h.in_port, h.out_port);
   for (uint64_t i = 0; i < p.size(); ++i) {
     chip.GetCore(p[i]).GetRouter().Preload(
         path, PassTo(FlowAt(i, p.size(), CrossRow(h))));
   }
 }
 
-// 落地的一颗：包在路上第一颗派了角色的 core 进核，搬进 Core Mem 再发出去。
-// 不派角色的那颗只转发，落不了任务。
+// 落地的一颗：包在路上第一颗计算 core 进核，搬进 Core Mem 再发出去。不派角色
+// 的 core 与坏 core 只转发，落不了任务。
 // ext_dst 只有出口那颗填：它的出核包要经 PCIe Switch 才到得了出口桩。
-uint64_t WireLandingChip(Chip& chip, Hop const& h, uint64_t in_path,
-                         uint64_t out_path, uint64_t ext_dst) {
-  std::vector<uint64_t> p = CorePath(chip.Shape(), h.in_port, h.out_port);
+uint64_t WireLandingChip(LpuTables const& t, Chip& chip, Hop const& h,
+                         uint64_t in_path, uint64_t out_path, uint64_t ext_dst) {
+  std::vector<uint64_t> p = CorePath(h.in_port, h.out_port);
   uint64_t n = p.size();
+  uint64_t chip_id = ChipIdOf(chip.Gx(), chip.Gy());
 
   uint64_t landing = n;
   for (uint64_t i = 0; i < n; ++i) {
     Core& c = chip.GetCore(p[i]);
     uint64_t flow = FlowAt(i, n, CrossRow(h));
-    if (landing == n && !c.Context().router_only) {
+    if (landing == n && !c.Bad() &&
+        t.logical_map[chip_id][p[i]].role == CoreRole::kCompute) {
       landing = i;
       c.GetRouter().Preload(in_path, EnterCore());
       c.GetRouter().Preload(out_path, PassTo(flow, ext_dst));
@@ -285,6 +286,7 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
     EnsureSlots(want.size() * (kMaxCorePerChip + 1));
     ClockPtr clk = MakeClock(0, kPeriod);
     Lpu lpu(clk, "lpu", Tables(), TickingCfg(want));
+    lpu.WriteCoreBadMask();
 
     // 三个 path：3 号进入口那颗，4 号穿过中间那十三颗，5 号从出口那颗出到片外。
     // 一颗 core 上进核与出核是两条不同的 path，因为同一个号只能配一种走法。
@@ -294,11 +296,11 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
       Hop const& h = plan[k];
       Chip& chip = lpu.GetChip(h.gx, h.gy);
       if (k == 0) {
-        landing.push_back(
-            &chip.GetCore(WireLandingChip(chip, h, kInPath, kMidPath, 0)));
+        landing.push_back(&chip.GetCore(WireLandingChip(
+            lpu.Tables(), chip, h, kInPath, kMidPath, 0)));
       } else if (k + 1 == plan.size()) {
-        landing.push_back(&chip.GetCore(
-            WireLandingChip(chip, h, kMidPath, kOutPath, kNodeOutStub)));
+        landing.push_back(&chip.GetCore(WireLandingChip(
+            lpu.Tables(), chip, h, kMidPath, kOutPath, kNodeOutStub)));
       } else {
         WirePassChip(chip, h, kMidPath);
       }
@@ -312,6 +314,7 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
     it.path_id = 3;
     it.bytes = kMoveBytes;
     it.payload = payload;
+    it.scale_valid = true;
     lpu.In().SetInjectTable({it});
     lpu.In().SetGpuBuffer(0, 8);
     lpu.Out().SetExpect(0, 0, payload);
@@ -350,6 +353,7 @@ TEST(BachLpuE2e, TokenEntersTheFirstChip) {
     EnsureSlots(kMaxCorePerChip + 1);
     ClockPtr clk = MakeClock(0, kPeriod);
     Lpu lpu(clk, "lpu", Tables(), TickingCfg({ChipIdOf(0, 0)}));
+    lpu.WriteCoreBadMask();
 
     Hop h;
     h.gx = 0;
@@ -357,7 +361,7 @@ TEST(BachLpuE2e, TokenEntersTheFirstChip) {
     h.in_port = kChipW;
     h.out_port = kChipE;
     Chip& chip = lpu.GetChip(0, 0);
-    Core& core = chip.GetCore(WireLandingChip(chip, h, 3, 4, 0));
+    Core& core = chip.GetCore(WireLandingChip(lpu.Tables(), chip, h, 3, 4, 0));
 
     InjectItem it;
     it.inject_cycle = 2;
@@ -365,6 +369,7 @@ TEST(BachLpuE2e, TokenEntersTheFirstChip) {
     it.path_id = 3;
     it.bytes = kMoveBytes;
     it.payload = payload;
+    it.scale_valid = true;
     lpu.In().SetInjectTable({it});
     lpu.In().SetGpuBuffer(0, 8);
 

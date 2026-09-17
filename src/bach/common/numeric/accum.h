@@ -43,6 +43,29 @@ inline float AccumByScaleBlock(std::vector<float> const& prods,
   return total;
 }
 
+// MXFP8 × MXFP8：token 与权重各有一组 block scale，两组按同一个 block 对齐。
+//
+// 块内先把乘积加完，再乘这一块的两个 scale 之积。两个 scale 都是 E8M0，相乘就是
+// 指数相加，硬件上是一次移位，所以先把两个 scale 乘起来再乘部分和，不分两次乘。
+// 块间顺序加，与单 scale 那一档同一个顺序。
+inline float AccumByScaleBlock2(std::vector<float> const& prods,
+                                std::vector<float> const& a_scale,
+                                std::vector<float> const& w_scale,
+                                uint64_t block) {
+  float total = 0.0f;
+  uint64_t nblock = a_scale.size();
+  for (uint64_t b = 0; b < nblock; ++b) {
+    float part = 0.0f;
+    uint64_t begin = b * block;
+    uint64_t end = begin + block;
+    if (end > prods.size()) end = prods.size();
+    for (uint64_t i = begin; i < end; ++i) part += prods[i];
+    float s = a_scale[b] * (b < w_scale.size() ? w_scale[b] : 1.0f);
+    total += part * s;
+  }
+  return total;
+}
+
 // 没有 block scale 时（BF16 × BF16）就是顺序加。
 inline float AccumInOrder(std::vector<float> const& v) {
   float total = 0.0f;

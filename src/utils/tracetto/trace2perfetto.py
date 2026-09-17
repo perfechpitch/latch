@@ -12,7 +12,7 @@ chrome://tracing。
 两边的对应关系（Perfetto 只有「process → thread」两级，tracetto 是
 「chip → core → 七行」三级，压掉最上面一级）：
 
-    pid  = 一个派角色的 core，名字写成 `chip0.core1`，左栏能直接搜
+    pid  = 一个配了任务的 core，名字写成 `chip0.core1`，左栏能直接搜
     tid  = 那条 core 的七行之一，名字就是行名（TS / DTE-Core / …）
     X 事件 = 一个段，`User_id 77 CORE-MU 5 813拍`
 
@@ -37,8 +37,8 @@ chrome://tracing。
     有用，而这个转换器给不出有意义的分类；
   · 分隔符用最紧的写法，整数不写小数，一行一个事件（方便 grep，代价 ~1 B/行）。
 
-要更小就把整份 gzip：实测 1.31 MB → ~89 KB（它太重复了 —— 九千多个段只有 72 种
-不同的名字，408 个 core 的元数据块字面一样）。
+要更小就把整份 gzip：实测 1.24 MB → ~89 KB（它太重复了 —— 八千多个段只有 113 种
+不同的名字，402 个 core 的元数据块字面一样）。
 """
 
 from __future__ import annotations

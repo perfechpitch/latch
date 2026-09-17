@@ -3,7 +3,7 @@
 // 计划里点名先跑的四个：
 //   A2       中间核只做 bypass，不占该核的用户坑
 //   A5       同一个 user 二次发送余额不减（在 router_basic 里）
-//   A15/A16  单个与多个只透传的 core 串联时的 credit 透传
+//   A15/A16  单个与多个坏 core 串联时的 credit 透传
 //   A17      reduce 完成 Ack 归 Router；缺 Ack 时任务链停在 reduce 处不前进
 //
 // 另外覆盖 CoreStation 的三态准入、CoreMem 重发的同 VC 保序、Retire 的三方时序、
@@ -140,22 +140,26 @@ TEST(BachRouterScenario, A2BypassDoesNotTakeSlot) {
   EXPECT_EQ(stream_used, 0u);  // bypass 不占坑
 }
 
-// A15：单个只透传的 core，只转发不记账，stream 表全空、不发 trigger。
+// A15：单个坏 core，只转发不记账，stream 表全空、不发 trigger。
 TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
   uint64_t got = 0, stream_used = 0, triggers = 0;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterTable rtab(clk, "rtab");
-    // 表里配的是进核加转发，但这个 core 只透传，进核那一位要被抹掉
+    // 表里配的是进核加转发，但这个 core 是坏 core，进核那一位要被抹掉
     RouteEntry e = Bypass(kFlowRight);
     e.path_core_bypass = false;   // 表里写的是进核
     e.stream_table_enable = true;
     rtab.Preload(3, e);
+    // 中间列 chip 的 core_bad_mask，本 core 是 core2。透传档由这一位打开。
+    constexpr uint64_t kSelf = 2;
+    rtab.SetCoreBadMask(0x084);
+    ASSERT_TRUE(rtab.CoreBad(kSelf));
 
     RouterStation st(clk, "st", kDirLeft, rtab, 0);
-    st.SetPassThrough(true);
+    st.SetPassThrough(rtab.CoreBad(kSelf));
     Xbar xb(clk, "xbar");
-    xb.SetPassThrough(true);
+    xb.SetPassThrough(rtab.CoreBad(kSelf));
     xb.AttachReq(kInLeft, st.ReqPtr());
     CoreStation cs(clk, "cs");
 
@@ -181,7 +185,7 @@ TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
   EXPECT_EQ(triggers, 0u);     // 不投递本 core
 }
 
-// A16：两个只透传的 core 串联，逐跳链式透传，时延是逐跳累加而不是单跳。
+// A16：两个坏 core 串联，逐跳链式透传，时延是逐跳累加而不是单跳。
 TEST(BachRouterScenario, A16ChainedPassThroughAccumulatesHops) {
   uint64_t one_hop = 0, two_hop = 0;
   auto run = [&](uint64_t hops) -> uint64_t {
@@ -197,11 +201,14 @@ TEST(BachRouterScenario, A16ChainedPassThroughAccumulatesHops) {
         tabs.push_back(std::make_unique<RouterTable>(
             clk, "rtab" + std::to_string(h)));
         tabs.back()->Preload(3, Bypass(kFlowRight));
+        // 每一跳是一颗中间列 chip 的坏 core2，透传档由 core_bad_mask 那一位打开。
+        tabs.back()->SetCoreBadMask(0x084);
+        bool bad = tabs.back()->CoreBad(2);
         sts.push_back(std::make_unique<RouterStation>(
             clk, "st" + std::to_string(h), kDirLeft, *tabs.back(), 0));
-        sts.back()->SetPassThrough(true);
+        sts.back()->SetPassThrough(bad);
         xbs.push_back(std::make_unique<Xbar>(clk, "xb" + std::to_string(h)));
-        xbs.back()->SetPassThrough(true);
+        xbs.back()->SetPassThrough(bad);
         xbs.back()->AttachReq(kInLeft, sts.back()->ReqPtr());
         sts.back()->AttachUp(wires.back());
         wires.push_back(MakeWire(clk));
@@ -225,7 +232,7 @@ TEST(BachRouterScenario, A16ChainedPassThroughAccumulatesHops) {
   // 第一跳前面还有推入那一拍与 station 读到那一拍，所以单跳落在第 5 拍。
   EXPECT_EQ(one_hop, 5u);
   EXPECT_EQ(two_hop, 8u);
-  // 多一个只透传的 core 就多一跳的三拍，不是把两跳压成单跳
+  // 多一个坏 core 就多一跳的三拍，不是把两跳压成单跳
   EXPECT_EQ(two_hop - one_hop, 3u);
 }
 

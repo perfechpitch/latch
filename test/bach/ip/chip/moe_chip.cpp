@@ -1,12 +1,14 @@
-// 一层 MoE 那一段摊在一颗 chip 的 8 个 core 与一个 EP 组的 64 个 core 上：FC1
-// 与 FC3 按中间维切开，FC2 因此按 K 切开，每个 core 出一份完整长度的部分和，
-// 沿一条链逐跳在 Router 的 ReduceModule 上相加。
+// 一层 MoE 按 EP6+TP8 的 KN 拆分摊在一颗 chip、一行两颗 chip 与一个 EP 组上。
 //
-// 与 core/moe.cpp 那一份的区别：那一条只在一个 core 内，专家间的加权求和落在
-// MU 里；这里多出跨 core 与跨 chip 切 K 的那一层归约，加法落在 Router 上。
+// 每颗 chip 上：B core 把 token 广播进 8 个计算 core，各 core 算 token 第 s 段的
+// FC1、FC3 部分和，沿 chip 内归约链逐跳在 Router 上相加，链尾交回 dot core；dot
+// core 做 silu·dot·量化，把 FC2 输入广播回本 chip；8 个 core 各算 FC2 第 s 段，另
+// 外 7 个各走自己那一条 path 发给 dot core，拼成 concat。一行 chip 的 dot core 沿
+// 行链逐跳归约进本行 R core，各行 R core 逐行相加。
 //
-// 每个 core 的任务链、kernel 与寄存器配置完全相同，EPTP-NN 的特点就在这里，
-// 差别只在 Matrix Mem 里那一片权重和 Router 表里那两条路由。
+// 与 core/moe.cpp 那一份的区别：那一份只在一个 core 内，这里多出 chip 内归约、
+// FC2 输入广播、concat、行链与 R core 那几段。配置表与 kernel 都从编译器产的
+// bundle 装。
 
 #include <iostream>
 
@@ -16,408 +18,282 @@ using namespace latch;
 using namespace latch::bach;
 using namespace latch::bach::moetest;
 
-// 一颗 chip 上的完整一段：token 从 W 口进来，坐在那个口上的 core5 不派角色、
-// 只往上转一跳，B core（core0）留一份在自己的 Matrix Mem，再往右与往下各发一
-// 路，广播给两行的 8 个计算 core。各 core 算自己那一片 FC1、FC3、门控与 FC2，
-// 8 份部分和沿链在 Router 上逐跳相加，链尾从 E 口出来，与参考实现逐 bit 相同。
+namespace {
+
+// 建 n 颗 chip：第 i 颗在第 gy[i] 层、第 gx[i] 列。
+std::vector<std::unique_ptr<Chip>> MakeChips(
+    ClockPtr clk, std::vector<uint64_t> const& gx,
+    std::vector<uint64_t> const& gy) {
+  std::vector<std::unique_ptr<Chip>> owned;
+  for (uint64_t i = 0; i < gx.size(); ++i) {
+    ChipCfg cfg;
+    cfg.gx = gx[i];
+    cfg.gy = gy[i];
+    cfg.core_tick = kCoreTick;
+    cfg.chip_tick = kChipTick;
+    owned.push_back(
+        std::make_unique<Chip>(clk, "chip" + std::to_string(i), cfg));
+  }
+  return owned;
+}
+
+std::vector<Chip*> Raw(std::vector<std::unique_ptr<Chip>> const& owned) {
+  std::vector<Chip*> all;
+  for (auto const& c : owned) all.push_back(c.get());
+  return all;
+}
+
+// 一颗 chip 的 8 个计算 core 铺好数据。chip 是它在 EP 组里的序号。
+void SetUpChipData(Chip& chip, uint64_t group, uint64_t index) {
+  for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
+    SetUpCoreData(chip.GetCore(CoreOfSlot(chip.Gx(), slot)), group, index,
+                  slot);
+  }
+}
+
+// R core 链首那一个只有本行结果，槽的另一半一直是 0，等一笔就走。
+void MarkRcoreHead(Chip& chip) {
+  chip.GetCore(kRcoreId).Smem().Poke(kn::kRcHeadOff, {1, 0, 0, 0});
+}
+
+}  // namespace
+
+// 一颗第一列 chip 上的完整一段：token 从 W 口进来，坐在那个口上的 core5 不派角
+// 色、只往上转一跳，B core（core0）留一份在自己的 Matrix Mem，再广播给 8 个计算
+// core。部分和归约进 dot core core9，FC2 输入广播回本 chip，8 段 FC2 在 dot core
+// 上拼成 concat。它是行首也是行尾，行链只有它一跳，结果经 core4 从 E 口出来。各
+// 步中间量与出口上的结果都与参考实现逐字节相同。
 TEST(BachMoeChip, BcoreStartsTheBroadcast) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
-  constexpr uint64_t kMaxCycles = 60000;
-  SpreadCase want = ReadCase("moe_chip.txt");
-  ASSERT_GT(want.k, 0u) << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
-  ASSERT_EQ(want.chips, 1u);
-  ASSERT_EQ(want.token.size(), kBcTokenBytes) << "B core 一格装一个 token";
+  constexpr uint64_t kMaxCycles = 20000;
+  Vectors want = ReadVectors("moe_chip.txt");
+  ASSERT_FALSE(want.Empty())
+      << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
 
   std::vector<MessagePtr> got;
   std::vector<uint64_t> inflight;
-  std::vector<std::vector<uint8_t>> landed;
-  std::vector<uint8_t> kept;
+  std::vector<uint8_t> kept, kept_scale;
   {
     EnsureSlots(kMaxCorePerChip + 1);
     TraceInto("moe_chip_bcast");
     ClockPtr clk = MakeClock(0, kPeriod);
-    ChipCfg cfg;
-    cfg.shape = ChipShape::kFirst;
-    cfg.gx = 0;
-    cfg.gy = 0;
-    // B core 的 token 槽位标志表：硬件把一笔搬进 Matrix Mem 之后置那一格。
-    cfg.inbound_flag_base = kBcFlagOff;
-    cfg.inbound_entry_bytes = kBcTokenBytes;
-    cfg.core_tick = kCoreTick;
-    cfg.chip_tick = kChipTick;
-    Chip chip(clk, "chip", cfg);
+    auto owned = MakeChips(clk, {0}, {0});
+    std::vector<Chip*> all = Raw(owned);
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
 
-    std::vector<Chip*> all = {&chip};
-    // 配置表与 kernel 都从 bundle 装：那一份由 compiler 按同一套拓扑描述编出来。
     BundleStat st = LoadBundle(all, BundleRoot(), "moe_chip");
     ASSERT_EQ(st.chips, 1u);
     ASSERT_EQ(st.cores, kMaxCorePerChip);
-    for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      SetUpCoreData(chip.GetCore(CoreOfSlot(cfg.shape, slot)), want, slot);
-    }
+    SetUpChipData(*all[0], 0, 0);
 
-    MessagePtr token = MakeToken(want);
-    // 进来那一路与广播出去那一路各走一个 path；落点按第几笔算，这是第一笔。
-    token->path_id = kBcastInPath;
-    token->dst_addr = BcoreLand(0);
-    SpreadHarness harness(clk, all, {}, feed, sink, 0, kChipW, 0, kChipE, {0},
-                          /*at=*/2, kMaxCycles, token);
+    // 进 B core 那一路与它广播出去那一路各走一个 path；落点按第几笔算，这是第
+    // 一笔。
+    SpreadHarness harness(clk, all, {}, feed, sink, 0, kChipW, 0, kChipE,
+                          /*at=*/2, kMaxCycles,
+                          MakeToken(kBcastInPath, BcoreLand(0)));
     clk->Continue();
     RT::JoinAll();
     got = harness.out_msgs;
     inflight = harness.inflight;
     std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
-    kept = chip.GetCore(0).Mmem().Peek(BcoreLand(0), kBcTokenBytes);
-    for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      landed.push_back(PartialOf(chip.GetCore(CoreOfSlot(cfg.shape, slot))));
-    }
+    Core& bcore = all[0]->GetCore(0);
+    kept = bcore.Mmem().Peek(BcoreLand(0), kn::kBcTokenBytes);
+    kept_scale = bcore.Mmem().PeekScale(BcoreLand(0), kn::kBcTokenBytes / 32);
+    CheckChip(*all[0], want, "c0.");
   }
   TraceDone();
   RT::Reset();
-  EXPECT_EQ(kept, want.token) << "B core 自己留的那一份";
-  CheckResult(want, landed, inflight, got);
+  ExpectSame(kept, kn::TokenData(), "B core 自己留的那一份 token");
+  ExpectSame(kept_scale, kn::TokenScale(), "B core 自己留的那一份 scale");
+  CheckInflight(inflight);
+  CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 0));
 }
 
-namespace {
-
-// ── 一个 EP 组的 8 颗 chip ──
-//
-// 摆成 2 层 × 4 列，编号 gy * 4 + gx。层内左右相接（E 对 W）、层间上下相接
-// （S 对 N），与 LPU 的 WireRow / WireCol 同一套接法。
-constexpr uint64_t kGroupCols = 4;
-constexpr uint64_t kGroupChips = 8;
-
-std::vector<ChipPair> GroupLinks() {
-  std::vector<ChipPair> v;
-  for (uint64_t gy = 0; gy < kGroupChips / kGroupCols; ++gy) {
-    for (uint64_t gx = 0; gx < kGroupCols; ++gx) {
-      uint64_t a = gy * kGroupCols + gx;
-      if (gx + 1 < kGroupCols) v.push_back({a, kChipE, a + 1, kChipW});
-      if (gy + 1 < kGroupChips / kGroupCols) {
-        v.push_back({a, kChipS, a + kGroupCols, kChipN});
-      }
-    }
-  }
-  return v;
-}
-
-
-BcastPlan GroupBcast(uint64_t chip) {
-  uint64_t gx = chip % kGroupCols;
-  uint64_t gy = chip / kGroupCols;
-  // 第 1 层的头一颗从上面下来，其余都从左边过来。
-  BcastPlan p{gx == 0 && gy == 1 ? kChipN : kChipW, {}};
-  if (gx + 1 < kGroupCols) p.out_port.push_back(kChipE);
-  if (gx == 0 && gy == 0) p.out_port.push_back(kChipS);
-  return p;
-}
-
-}  // namespace
-
-// 一个 EP 组的 64 个 core：token 从左上角那颗 chip 的 W 口进，由它的 B core 留
-// 一份再发起广播，一发覆盖 8 颗 chip 的每一个计算 core；64 份部分和沿一条蛇形
-// 链逐跳归约：chip 内 8 跳走 core 之间的链路，chip 与 chip 之间那 7 跳走
-// C2C。链尾从最后一颗 chip 的 E 口出来，与参考实现逐 bit 相同。
-TEST(BachMoeChip, OneEpGroupReducesSixtyFourCores) {
+// 一行两颗 chip：左边是中间列那种，隔着坏 core2、core7；右边是最后一列那种。
+// token 从左边那颗的 W 口直接进计算 core 的广播树。两颗各自做完 chip 内那一段，
+// 左边那颗的 dot core 是行首，结果经 core4 从 E 口过到右边那颗，沿第 1 行走到
+// dot core core8 加上本 chip 的结果，落进 R core core9 的 Matrix Mem。R core 是
+// 链首，另一半一直是 0，加完经 core4 从 E 口出去。
+TEST(BachMoeChip, OneRowOfTwoChipsLandsInTheReductionCore) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
-  // 广播与归约各要跨 7 段 C2C，一段 300 拍，加上 core 上算那一段。
-  constexpr uint64_t kMaxCycles = 40000;
-  SpreadCase want = ReadCase("moe_group.txt");
-  ASSERT_GT(want.k, 0u) << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
-  ASSERT_EQ(want.chips, kGroupChips);
+  constexpr uint64_t kMaxCycles = 30000;
+  Vectors want = ReadVectors("moe_two_groups.txt");
+  ASSERT_FALSE(want.Empty())
+      << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
+  // 这两颗在 EP 组里是第 1 颗与第 3 颗。
+  constexpr uint64_t kIndex[2] = {1, 3};
 
   std::vector<MessagePtr> got;
   std::vector<uint64_t> inflight;
-  std::vector<std::vector<uint8_t>> landed;
-  uint64_t wide = 0;
-  {
-    EnsureSlots(kGroupChips * (kMaxCorePerChip + 1));
-    TraceInto("moe_chip_group");
-    ClockPtr clk = MakeClock(0, kPeriod);
-    std::vector<std::unique_ptr<Chip>> owned;
-    std::vector<Chip*> all;
-    for (uint64_t i = 0; i < kGroupChips; ++i) {
-      ChipCfg cfg;
-      cfg.shape = ShapeOfGx(i % kGroupCols);
-      cfg.gx = i % kGroupCols;
-      cfg.gy = i / kGroupCols;
-      // 左上角那颗的 B core 是本组广播的发起点，它要按落点置 token 槽位的标志。
-      cfg.inbound_flag_base = kBcFlagOff;
-      cfg.inbound_entry_bytes = kBcTokenBytes;
-      cfg.core_tick = kCoreTick;
-      cfg.chip_tick = kChipTick;
-      owned.push_back(std::make_unique<Chip>(
-          clk, "chip" + std::to_string(i), cfg));
-      all.push_back(owned.back().get());
-    }
-    C2cBridge feed(clk, "feed", StubCfg());
-    C2cBridge sink(clk, "sink", StubCfg());
-
-    for (uint64_t i = 0; i < kGroupChips; ++i) {
-      ChipShape shape = all[i]->Shape();
-      for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        SetUpCore(all[i]->GetCore(CoreOfSlot(shape, slot)), want,
-                  i * kCorePerChip + slot);
-      }
-      BcastPlan p = GroupBcast(i);
-      if (i == 0) {
-        // 左上角那颗：token 进它的 B core，广播从那里发起。
-        LoadKernels(all[i]->GetCore(0));
-        WriteBcoreChains(all[i]->GetCore(0), kInPath, kFlowRight | kFlowMid);
-        WireBcoreBroadcast(*all[i], p.enter_port, p.out_port);
-      } else {
-        WireBroadcast(*all[i], shape, p.enter_port, p.out_port);
-      }
-    }
-    // 链尾坐在最后一颗 chip 的 E 口上。
-    WireReduceChain(all, want.order, kFlowRight);
-    uint64_t last = want.order.back() / kCorePerChip;
-
-    // 推的次序按归约链倒着来：末级先做。
-    std::vector<uint64_t> run;
-    for (uint64_t i = want.order.size(); i > 0; --i) {
-      uint64_t chip = want.order[i - 1] / kCorePerChip;
-      if (run.empty() || run.back() != chip) run.push_back(chip);
-    }
-
-    MessagePtr token = MakeToken(want);
-    // 进 B core 那一路与它广播出去那一路各走一个 path；落点按第几笔算。
-    token->path_id = kBcastInPath;
-    token->dst_addr = BcoreLand(0);
-    SpreadHarness harness(clk, all, GroupLinks(), feed, sink, 0, kChipW, last,
-                          kChipE, run, /*at=*/2, kMaxCycles, token);
-    clk->Continue();
-    RT::JoinAll();
-    got = harness.out_msgs;
-    inflight = harness.inflight;
-    std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
-    for (Chip* c : all) {
-      if (c->CoreNum() == kMaxCorePerChip) ++wide;
-    }
-    for (uint64_t i = 0; i < kGroupChips; ++i) {
-      ChipShape shape = all[i]->Shape();
-      for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        landed.push_back(PartialOf(all[i]->GetCore(CoreOfSlot(shape, slot))));
-      }
-    }
-  }
-  TraceDone();
-  RT::Reset();
-  // 组里 gx 为 0 与 3 的那四颗是 2×5：多出来的那一列放 B core、R core 与不派
-  // 角色的那个，它们在这两条 path 上都只做转发。
-  EXPECT_EQ(wide, 4u);
-  CheckResult(want, landed, inflight, got);
-}
-
-namespace {
-
-// ── 两个 EP 组在 R core 上会合 ──
-//
-// 两颗 chip 各是一个 EP 组：前一颗是中间列形状，后一颗是最后一列形状，R core
-// 坐在它的 core9 上。这个用户的第一组是组 0，它的组结果直接送到组 1 的 R core
-// 的后一半；组 1 的组结果落前一半。R core 上 VU 把两半相加再送出阵列。
-//
-// 两条归约链各用一个 path_id：组 0 那一条要穿过组 1 的四个计算 core 才到得了
-// R core，与组 1 自己那一条在同一批 core 上，共用一个号就冲突了。
-constexpr uint64_t kGroup0Path = 5;
-constexpr uint64_t kGroup1Path = 6;
-constexpr uint64_t kRcoreOutPath = 0;
-
-
-
-
-
-
-}  // namespace
-
-// 两个 EP 组各算各的，组结果在 R core 上相加：组 0 的那一份穿过组 1 的四个
-// core 直达 R core 的后一半，组 1 的落前一半，加出来的 32 个 FP32 与参考实现
-// 逐 bit 相同。
-TEST(BachMoeChip, TwoEpGroupsMeetAtTheReductionCore) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
-  constexpr uint64_t kMaxCycles = 40000;
-  SpreadCase want = ReadCase("moe_two_groups.txt");
-  ASSERT_GT(want.k, 0u) << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
-  ASSERT_EQ(want.chips, 2u);
-
-  std::vector<MessagePtr> got;
-  std::vector<uint64_t> inflight;
-  std::vector<std::vector<uint8_t>> landed;
-  std::vector<uint8_t> summed;
+  std::vector<uint8_t> row;
   {
     EnsureSlots(2 * (kMaxCorePerChip + 1));
     TraceInto("moe_chip_two_groups");
     ClockPtr clk = MakeClock(0, kPeriod);
-    ChipCfg c0;
-    c0.shape = ChipShape::kMiddle;
-    c0.gx = 1;
-    c0.core_tick = kCoreTick;
-    c0.chip_tick = kChipTick;
-    ChipCfg c1;
-    c1.shape = ChipShape::kLast;
-    c1.gx = 3;
-    c1.inbound_flag_base = kRcFlagOff;
-    c1.inbound_entry_bytes = kRcFlagEntryBytes;
-    c1.core_tick = kCoreTick;
-    c1.chip_tick = kChipTick;
-    Chip a(clk, "g0", c0);
-    Chip b(clk, "g1", c1);
+    auto owned = MakeChips(clk, {kIndex[0], kIndex[1]}, {0, 0});
+    std::vector<Chip*> all = Raw(owned);
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
-    std::vector<Chip*> all = {&a, &b};
 
-    // 两组各 8 个计算 core。组 0 是这个用户的第一组，结果送后一半。
-    for (uint64_t g = 0; g < 2; ++g) {
-      ChipShape shape = all[g]->Shape();
-      uint64_t path = g == 0 ? kGroup0Path : kGroup1Path;
-      for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        SetUpCore(all[g]->GetCore(CoreOfSlot(shape, slot)), want,
-                  g * kCorePerChip + slot, path, /*send_half=*/g == 0 ? 1 : 0);
-      }
-      WireBroadcast(*all[g], shape, kChipW, g == 0 ? std::vector<uint64_t>{kChipE}
-                                                   : std::vector<uint64_t>{});
-    }
-
-    // 组 0 的链走完本 chip 从 E 口出去；组 1 的链在坐着 core9 左边的那个 core
-    // 收尾，再往右一跳就是 R core。
-    std::vector<uint64_t> order0(want.order.begin(),
-                                 want.order.begin() + kCorePerChip);
-    std::vector<uint64_t> order1;
-    for (uint64_t i = kCorePerChip; i < want.order.size(); ++i) {
-      order1.push_back(want.order[i] - kCorePerChip);
-    }
-    WireReduceChain({&a}, order0, kFlowRight, kGroup0Path);
-    WireReduceChain({&b}, order1, kFlowRight, kGroup1Path);
-
-    // 组 0 那一份进 chip 1 之后一路往右转发到 R core。
-    for (uint64_t k = 0; k < kCols; ++k) {
-      uint64_t core = CoreOfSlot(ChipShape::kLast, kCols + k);
-      b.GetCore(core).GetRouter().Preload(kGroup0Path,
-                                          PassThrough(kFlowRight));
-    }
-    Core& rc = b.GetCore(kMaxCorePerChip - 1);
-    rc.GetRouter().Preload(kGroup0Path, LandInRcore());
-    rc.GetRouter().Preload(kGroup1Path, LandInRcore());
-    rc.GetRouter().Preload(kRcoreOutPath, PassThrough(kFlowRight));
-    rc.GetDte().Tables().PreloadRtab(kRcoreOutPath, PassThrough(kFlowRight));
-    rc.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
-    rc.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
-    rc.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
-    WriteRcoreChains(rc, kRcoreOutPath);
+    BundleStat st = LoadBundle(all, BundleRoot(), "moe_two_groups");
+    ASSERT_EQ(st.chips, 2u);
+    for (uint64_t i = 0; i < 2; ++i) SetUpChipData(*all[i], 0, kIndex[i]);
+    MarkRcoreHead(*all[1]);
 
     SpreadHarness harness(clk, all, {{0, kChipE, 1, kChipW}}, feed, sink, 0,
-                          kChipW, 1, kChipS, {1, 0}, /*at=*/2, kMaxCycles,
-                          MakeToken(want));
+                          kChipW, 1, kChipE, /*at=*/2, kMaxCycles,
+                          MakeToken(kInPath, kn::kTokenOff));
     clk->Continue();
     RT::JoinAll();
     got = harness.out_msgs;
     inflight = harness.inflight;
     std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
-    for (uint64_t g = 0; g < 2; ++g) {
-      ChipShape shape = all[g]->Shape();
-      for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        landed.push_back(PartialOf(all[g]->GetCore(CoreOfSlot(shape, slot))));
-      }
+    for (uint64_t i = 0; i < 2; ++i) {
+      CheckChip(*all[i], want, "c" + std::to_string(kIndex[i]) + ".");
     }
-    summed = GatherPieces(rc.Cmem(), kRcSumOff);
+    row = RcoreHalf(*all[1], 0);
   }
   TraceDone();
   RT::Reset();
-
-  // R core 的 Core Mem 里那一份：出核那一步之前加完的就是它。
-  ASSERT_EQ(summed.size(), want.out_bits.size() * 4);
-  for (uint64_t j = 0; j < want.out_bits.size(); ++j) {
-    uint32_t v = 0;
-    for (int t = 0; t < 4; ++t) v |= uint32_t(summed[j * 4 + t]) << (8 * t);
-    EXPECT_EQ(v, want.out_bits[j]) << "R core 上加出来的第 " << j << " 个";
-  }
-  CheckResult(want, landed, inflight, got);
+  ExpectSame(row, want.Bytes("row0"), "行链落进 R core 的那一份");
+  CheckInflight(inflight);
+  CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 1));
 }
 
-
-// 装模型那一段接在业务前面：权重不经 SCP，走 Host 那条 msg 流从数据面进来。
-// 每个计算 core 的 W1 与 W2 各留一段不预置，改由两个包搬进 Matrix Mem，一条
-// path 走遍格子里的 8 个 core，落在哪一个由包头的 path_core_mask 挑，落到哪个
-// 地址由包头的 dst_addr 定。各 core 都收够之后切业务模式，再发 token，结果与
-// 权重全部预置时逐 bit 相同。
-TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
+// 一个 EP 组的 8 颗 chip：两层 × 4 列，token 从左上角那颗 chip 的 W 口进它的 B
+// core，一发覆盖 64 个计算 core。每颗 chip 各做 chip 内那一段；两行各沿行链归约
+// 进本行 R core，第 0 行 R core 是链首，结果从 S 口下到第 1 行 R core 的后一半，
+// 第 1 行 R core 加完经 core4 从 E 口出去。
+TEST(BachMoeChip, OneEpGroupHasTwoReductionCores) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 60000;
-  // 一个包 64 flit，留够它走完广播树再落进 Matrix Mem。
-  constexpr uint64_t kGap = 400;
-  SpreadCase want = ReadCase("moe_chip.txt");
-  ASSERT_GT(want.k, 0u) << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
-  ASSERT_EQ(want.chips, 1u);
+  constexpr uint64_t kRows = 2;
+  constexpr uint64_t kChips = kRows * kGridX;
+  Vectors want = ReadVectors("moe_group.txt");
+  ASSERT_FALSE(want.Empty())
+      << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
 
   std::vector<MessagePtr> got;
   std::vector<uint64_t> inflight;
-  std::vector<std::vector<uint8_t>> landed;
-  std::vector<std::vector<uint8_t>> w1_head, w2_head;
+  std::vector<std::vector<uint8_t>> rows, prev;
+  {
+    EnsureSlots(kChips * (kMaxCorePerChip + 1));
+    TraceInto("moe_chip_group");
+    ClockPtr clk = MakeClock(0, kPeriod);
+    std::vector<uint64_t> gx, gy;
+    for (uint64_t i = 0; i < kChips; ++i) {
+      gx.push_back(i % kGridX);
+      gy.push_back(i / kGridX);
+    }
+    auto owned = MakeChips(clk, gx, gy);
+    std::vector<Chip*> all = Raw(owned);
+    C2cBridge feed(clk, "feed", StubCfg());
+    C2cBridge sink(clk, "sink", StubCfg());
+
+    BundleStat st = LoadBundle(all, BundleRoot(), "moe_group");
+    ASSERT_EQ(st.chips, kChips);
+    ASSERT_EQ(st.cores, kChips * kMaxCorePerChip);
+    for (uint64_t i = 0; i < kChips; ++i) SetUpChipData(*all[i], 0, i);
+    MarkRcoreHead(*all[kGridX - 1]);
+
+    SpreadHarness harness(clk, all, GridLinks(kRows, kGridX), feed, sink, 0,
+                          kChipW, kChips - 1, kChipE, /*at=*/2, kMaxCycles,
+                          MakeToken(kBcastInPath, BcoreLand(0)));
+    clk->Continue();
+    RT::JoinAll();
+    got = harness.out_msgs;
+    inflight = harness.inflight;
+    std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
+    for (uint64_t i = 0; i < kChips; ++i) {
+      CheckChip(*all[i], want, "c" + std::to_string(i) + ".");
+    }
+    for (uint64_t r = 0; r < kRows; ++r) {
+      Chip& last = *all[(r + 1) * kGridX - 1];
+      rows.push_back(RcoreHalf(last, 0));
+      prev.push_back(RcoreHalf(last, 1));
+    }
+  }
+  TraceDone();
+  RT::Reset();
+  for (uint64_t r = 0; r < kRows; ++r) {
+    ExpectSame(rows[r], want.Bytes("row" + std::to_string(r)),
+               "第 " + std::to_string(r) + " 行落进 R core 的行链结果");
+    if (r > 0) {
+      ExpectSame(prev[r], want.Bytes("rcore" + std::to_string(r - 1)),
+                 "第 " + std::to_string(r) + " 行 R core 收到的上一行累加结果");
+    }
+  }
+  CheckInflight(inflight);
+  CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 1));
+}
+
+// 装模型那一段接在业务前面：权重不经 SCP，走 Host 那条 msg 流从数据面进来。
+// 每个计算 core 的 W1 与 W2 在组内第 0 个专家那一片的开头各留两个 tile 不预
+// 置，数据与 scale 都清成 0，改由两个包搬进 Matrix Mem。一条 path 走遍格子里的
+// 8 个 core，落在哪一个由包头的 path_core_mask 挑，落到哪个地址由包头的 dst_addr
+// 定，scale 随包头的标记落进 scale 旁带。各 core 都收够之后切业务模式，再发
+// token，结果与权重全部预置时逐字节相同。
+TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
+  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  constexpr uint64_t kMaxCycles = 60000;
+  // 一个包 64 flit，留够它走完那棵树再落进 Matrix Mem。
+  constexpr uint64_t kGap = 400;
+  // 留空的那两段：W1 与 W2 在组内第 0 个专家那一片的开头。
+  constexpr uint64_t kHole[2] = {kn::kMmW1, kn::kMmW2};
+  Vectors want = ReadVectors("moe_chip.txt");
+  ASSERT_FALSE(want.Empty())
+      << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
+
+  std::vector<MessagePtr> got;
+  std::vector<uint64_t> inflight;
+  std::vector<std::vector<uint8_t>> sent, landed;
   uint64_t switched_at = 0;
   {
     EnsureSlots(kMaxCorePerChip + 1);
     TraceInto("moe_chip_weights");
     ClockPtr clk = MakeClock(0, kPeriod);
-    ChipCfg cfg;
-    cfg.shape = ChipShape::kFirst;
-    cfg.gx = 0;
-    cfg.gy = 0;
-    cfg.inbound_flag_base = kBcFlagOff;
-    cfg.inbound_entry_bytes = kBcTokenBytes;
-    cfg.core_tick = kCoreTick;
-    cfg.chip_tick = kChipTick;
-    Chip chip(clk, "chip", cfg);
+    auto owned = MakeChips(clk, {0}, {0});
+    std::vector<Chip*> all = Raw(owned);
+    Chip& chip = *all[0];
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
 
-    std::vector<Chip*> all = {&chip};
-    // 一个 core 要收的两段权重。全局第 1 个专家在组内排第 0 位，落在 W1 与 W2
-    // 两段的开头，正是这里留空的那两段。
+    LoadBundle(all, BundleRoot(), "moe_chip");
+    SetUpChipData(chip, 0, 0);
     std::vector<MessagePtr> load;
     for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      Core& core = chip.GetCore(CoreOfSlot(cfg.shape, slot));
-      SetUpCore(core, want, slot);
-      uint64_t off = slot * want.seed_stride + 1;
-      std::vector<uint8_t> w1 = TameBf16(want.k * want.inter, want.w1_seed + off);
-      std::vector<uint8_t> w2 =
-          TameBf16(want.inter * want.out_n, want.w2_seed + off);
-      w1.resize(kWeightsChunk);
-      w2.resize(kWeightsChunk);
-      // 这两段留给数据面搬进来。
-      core.Mmem().Poke(kW1At, std::vector<uint8_t>(kWeightsChunk, 0));
-      core.Mmem().Poke(kW2At, std::vector<uint8_t>(kWeightsChunk, 0));
-      load.push_back(MakeWeightsMsg(slot, kW1At, w1));
-      load.push_back(MakeWeightsMsg(slot, kW2At, w2));
+      Core& core = chip.GetCore(CoreOfSlot(0, slot));
+      for (uint64_t at : kHole) {
+        std::vector<uint8_t> data = core.Mmem().Peek(at, kWeightsChunk);
+        std::vector<uint8_t> scale = core.Mmem().PeekScale(at, kWeightsScale);
+        sent.push_back(data);
+        sent.push_back(scale);
+        core.Mmem().Poke(at, std::vector<uint8_t>(kWeightsChunk, 0));
+        core.Mmem().PokeScale(at, std::vector<uint8_t>(kWeightsScale, 0));
+        load.push_back(MakeWeightsMsg(slot, at, data, scale));
+      }
       EnterWeightsMode(core);
     }
-    LoadKernels(chip.GetCore(0));
-    WriteBcoreChains(chip.GetCore(0), kInPath, kFlowRight | kFlowMid);
-    WireBcoreBroadcast(chip, kChipW);
-    WireWeightsPath(chip, cfg.shape, kChipW);
-    WireReduceChain(all, want.order, kFlowRight);
+    WireWeightsPath(chip);
 
-    MessagePtr token = MakeToken(want);
-    token->path_id = kBcastInPath;
-    token->dst_addr = BcoreLand(0);
-    SpreadHarness harness(clk, all, {}, feed, sink, 0, kChipW, 0, kChipE, {0},
-                          /*at=*/2, kMaxCycles, token);
+    SpreadHarness harness(clk, all, {}, feed, sink, 0, kChipW, 0, kChipE,
+                          /*at=*/2, kMaxCycles,
+                          MakeToken(kBcastInPath, BcoreLand(0)));
     harness.weights = load;
     harness.weights_gap = kGap;
     // SCP 查各 core 的计数：都收够两笔，loader 才中断它。
-    harness.weights_done = [&chip, &cfg] {
+    harness.weights_done = [&chip] {
       for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        std::vector<uint8_t> n = chip.GetCore(CoreOfSlot(cfg.shape, slot))
-                                     .Smem()
-                                     .Peek(kWeightsCntOff, 4);
+        std::vector<uint8_t> n =
+            chip.GetCore(CoreOfSlot(0, slot)).Smem().Peek(kWeightsCntOff, 4);
         if (n[0] < 2) return false;
       }
       return true;
     };
-    harness.to_business = [&chip, &cfg] {
+    harness.to_business = [&chip] {
       for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-        EnterBusinessMode(chip.GetCore(CoreOfSlot(cfg.shape, slot)));
+        EnterBusinessMode(chip.GetCore(CoreOfSlot(0, slot)));
       }
     };
     clk->Continue();
@@ -428,24 +304,23 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
     std::cerr << "  切业务模式在第 " << switched_at << " 拍，停钟在第 "
               << harness.stopped_at << " 拍\n";
     for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      Core& core = chip.GetCore(CoreOfSlot(cfg.shape, slot));
-      w1_head.push_back(core.Mmem().Peek(kW1At, kWeightsChunk));
-      w2_head.push_back(core.Mmem().Peek(kW2At, kWeightsChunk));
-      landed.push_back(PartialOf(core));
+      Core& core = chip.GetCore(CoreOfSlot(0, slot));
+      for (uint64_t at : kHole) {
+        landed.push_back(core.Mmem().Peek(at, kWeightsChunk));
+        landed.push_back(core.Mmem().PeekScale(at, kWeightsScale));
+      }
     }
+    CheckChip(chip, want, "c0.");
   }
   TraceDone();
   RT::Reset();
   EXPECT_GT(switched_at, 0u) << "权重没搬完，模式没切过去";
-  for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-    uint64_t off = slot * want.seed_stride + 1;
-    std::vector<uint8_t> w1 = TameBf16(want.k * want.inter, want.w1_seed + off);
-    std::vector<uint8_t> w2 =
-        TameBf16(want.inter * want.out_n, want.w2_seed + off);
-    w1.resize(kWeightsChunk);
-    w2.resize(kWeightsChunk);
-    EXPECT_EQ(w1_head[slot], w1) << "第 " << slot << " 个 core 的 W1 那一段";
-    EXPECT_EQ(w2_head[slot], w2) << "第 " << slot << " 个 core 的 W2 那一段";
+  ASSERT_EQ(landed.size(), sent.size());
+  for (uint64_t i = 0; i < sent.size(); ++i) {
+    ExpectSame(landed[i], sent[i],
+               "第 " + std::to_string(i / 4) + " 个 core 搬进来的第 " +
+                   std::to_string(i % 4) + " 段");
   }
-  CheckResult(want, landed, inflight, got);
+  CheckInflight(inflight);
+  CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 0));
 }

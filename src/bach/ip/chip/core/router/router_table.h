@@ -10,8 +10,9 @@
 // 把同一笔写依次写进全部副本，全部写完才向软件报完成，中途不暴露部分新部分旧的
 // 状态。DTE 与 ReduceModule 那两份是外部副本，软件自己写，硬件不同步。
 //
-// 另有一组与 RouterTable 分开配的 Skip Mask：per-core 一位，标记该 core 是否被
-// 跳过。复位释放后全部条目是 bypass / no-op，配置写入前不投递任何包。
+// 另有一组与 RouterTable 分开配的 core_bad_mask：本 chip 每个 core 一位，1 表示
+// 那个 core 是坏 core。复位释放后全部条目是 bypass / no-op，配置写入前不投递任何
+// 包。
 
 #include <array>
 #include <string>
@@ -27,6 +28,9 @@ namespace bach {
 
 // 表项数，按 path_id 索引。
 constexpr uint64_t kPathNum = 64;
+
+// core_bad_mask 的位数：一颗 chip 2×5 共 10 个 core。
+constexpr uint64_t kCoreBadMaskBits = 10;
 
 // VC 数。VC3 专给逐级 reduce，VC0/1/2 由软件配给其余操作类型。
 constexpr uint64_t kReduceVc = 3;
@@ -190,11 +194,15 @@ class RouterTable : public BachModule {
   uint64_t CommitDone() const { return commit_done.Get(); }
   uint64_t Committed() const { return committed.Get(); }
 
-  // Skip Mask 与 Credit Bypass Route 都是与 RouterTable 分开配的一组。
-  void SetSkipMask(uint64_t mask) { skip_mask = mask; }
-  uint64_t SkipMask() const { return skip_mask; }
-  bool CoreSkipped(uint64_t core_in_chip) const {
-    return ((skip_mask >> core_in_chip) & 1u) != 0;
+  // core_bad_mask 与 Credit Bypass Route 都是与 RouterTable 分开配的一组。
+  void SetCoreBadMask(uint64_t mask) {
+    LOGCHECK(mask < (1ull << kCoreBadMaskBits),
+             "RouterTable: core_bad_mask 只有 10 位。");
+    core_bad_mask = mask;
+  }
+  uint64_t CoreBadMask() const { return core_bad_mask; }
+  bool CoreBad(uint64_t core_in_chip) const {
+    return ((core_bad_mask >> core_in_chip) & 1u) != 0;
   }
 
   // 每个业务 credit 输入端口一个静态输出方向 Mask（RTR_RELEASE_ROUTE）。Stream
@@ -240,7 +248,7 @@ class RouterTable : public BachModule {
  private:
   std::vector<std::vector<RouteEntry>> copies;
   std::array<uint64_t, kDirNum> credit_bypass{};
-  uint64_t skip_mask = 0;
+  uint64_t core_bad_mask = 0;
 
   bool busy = false;
   bool done_pulse = false;

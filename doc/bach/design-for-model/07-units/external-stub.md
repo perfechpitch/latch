@@ -126,7 +126,7 @@ port done (master, 电平, clk)                     // 出口桩：完成集合�
 ## 3　存储器
 
 ```
-mem inject_tbl      FF 阵列   N_token × {inject_cycle[31:0], gpu_id[7:0], token_id[15:0], dst[5:0], path_id[7:0], compute, payload 6368 B{act FP8 6144 B, scale FP32 192 B, expert Int16 16 B, weight BF16 16 B}}  1R  编译侧读入  复位由输入给
+mem inject_tbl      FF 阵列   N_token × {inject_cycle[31:0], gpu_id[7:0], token_id[15:0], dst[5:0], path_id[7:0], compute, payload 6368 B{act FP8 6144 B, scale E8M0 192 B, expert Int16 16 B, weight BF16 16 B}}  1R  编译侧读入  复位由输入给
 mem credit_local[G] FF        {buffer_depth_tokens[15:0], buffer_used[15:0], inflight_bach[15:0], grant_tokens[15:0]}  1RW  发 +1，retired −1  复位 0
 mem pool            FF        {pool_total[15:0], pool_avail[15:0]}   1RW    Σ inflight_bach                复位 pool_total
 mem seq_w           FF        W bit 序号，比较用模 2^W 差值           1RW    每发一 token +1                复位 0
@@ -141,7 +141,7 @@ mem done_set        FF 阵列   N_token × {done, mismatch}               1RW   
 另有两张只在读入时用到的表：
 
 ```
-mem weight_shard    FF 阵列   48 × 10 × {字节流, 落 Matrix Mem 的地址}   1R   编译侧读入   复位由输入给   // 每 core 27 MiB，EP6+TP8 下另加共享专家 576 KiB
+mem weight_shard    FF 阵列   48 × 10 × {字节流, 落 Matrix Mem 的地址}   1R   编译侧读入   复位由输入给   // 48 × 10 按物理 core 编号，含坏 core；每 core 27 MiB，EP6+TP8 下另加共享专家 576 KiB
 mem expect_out      FF 阵列   N_token × 12 KiB（[6144] @BF16）           1R   reference/ 生成  复位由输入给
 ```
 

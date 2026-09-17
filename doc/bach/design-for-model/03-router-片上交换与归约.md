@@ -18,7 +18,9 @@
 
 ## Router 解决的问题
 
-* 一个 chip 上是两行 Bach core：中间列 chip 4 列共 8 个，第一列与最后一列 chip 5 列共 10 个，都是 8 个计算 core
+* 一个 chip 上是两行 Bach core，每行 5 个共 10 个，按 `0 1 2 3 4 / 5 6 7 8 9` 行优先编号
+* 第一列与最后一列 chip 的 10 个 core 全好；中间两列 chip 的 core2、core7 是坏 core，只有 Router 能用，数据经它透传，见“坏 core 的透传档”
+* 每颗 chip 都是 8 个计算 core
 * core 之间要互相传业务数据，还要与相邻 chip 交换数据
 * Router 是这张片上网络的节点，每个 core 一个，物理上位于 chip 中部
 
@@ -521,9 +523,9 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
 
-不派角色的 core 上的 Router 只走直通：数据走完整流水线但不投递本 core，credit 也跨过它直接给两侧落地的 core，见“跳过与跨 chip”。
+坏 core 上的 Router 处在透传档，只走直通：数据走完整流水线但不投递本 core，stream credit 与 release 也跨过它，直接连到两侧落地的 core，见“坏 core 的透传档”。
 
-包落进哪块存储由数据类型决定，不由路由决定：Router 解析包头把数据类型交给 TS，TS 据此配置 DTE 的 `dst_sel`。**残差数据、EP 间的 reduction 数据、EP 间的 broadcast 数据都是 P2P 传输，落点都是 core 的 Matrix Mem**；业务流的 token 落 Core Mem。kernel 与 weight 走的是另一档，`op_type = 0` 时跳过 TS 直接唤醒 DTE，落 Matrix Mem。
+包落进哪块存储由收方 core 的 DTE 配置决定，不由路由决定：发方那一侧没有指定收方落哪块存储的寄存器，包头里只带地址；进核那一笔的 `route` 由 SCP 逐 core 配。**业务模式下计算 core 落 Core Mem，B core 与 R core 落 Matrix Mem**；weights 加载阶段进来的都是权重，计算 core 上也落 Matrix Mem。装 weights 的包照常通知 TS，由 TS 派 datain 任务；跳过 TS、直接唤醒 DTE 的只有走 msg 流搬 kernel 那一档。
 
 #### 直通与多播
 
@@ -602,7 +604,7 @@ Reduce 包从 core 出发这一段的本级资源由 TS 管，进了 ReduceModul
 ```
 if need_buffer && !core_bad_mask[本 core] &&
    (stream_credit[目标方向] 不可用 || pending_reinject[vc][目标方向] > 0):
-       目标端口改为 local          // 重定向，不派角色的 core 不接收溢流
+       目标端口改为 local          // 重定向，坏 core 不接收溢流
        overflow_reinject = 1
        pending_reinject[vc][原方向] += 1
        // 此时暂不更新 stream_credit
@@ -634,13 +636,13 @@ if need_buffer && !core_bad_mask[本 core] &&
   * 包进 core 暂存时改写 `overflow_reinject=1`，出 core 重发时 Router 改回 0
   * Output Port 识别到重注入标记才扣减 credit
 * 无论直接发送还是经 CoreMem 重发，完成后都向 core 内 TS 返回至少含 UserID 加 PathID 的完成信息
-* **不派角色的 core 不接收溢流**：Router 对它不发起进 core 缓存处理，此时 coremem credit 直接 bypass
+* **坏 core 不接收溢流**：Router 对它不发起进 core 缓存处理，此时 coremem credit 直接 bypass
 
 #### 业务 credit 的旁路
 
 Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走的是另一条规则：
 
-* 软件通过 CSR 为每个业务 credit 输入端口配置**静态输出方向 Mask**，可指定一个或多个 R2R 方向与 Core 方向
+* 软件通过 CSR `RTR_RELEASE_ROUTE` 为每个业务 credit 输入端口配置**静态输出方向 Mask**，可指定一个或多个 R2R 方向与 Core 方向
 * 转发时不查 RouterTable，也不做动态路径选择，不进 CrossBar 的仲裁
 * Mask 含多个方向时，同一笔 release 复制到所有指定方向，UserID 与 credit 类型保持不变
 * 跨过不落地的 core 时切换 credit 路径，靠的就是改这组静态配置
@@ -861,7 +863,7 @@ Input VC Buffer ──→ RC ──→ VA ──→ SA ──→ ST ──→ Ou
 
 * 单跳延迟 **≤6 cycles**
 * 优化空间：RC 与 VA 合并到 5 cycles，再把 SA 与 ST 合并到 4 cycles
-* 被 mask 掉的 core 走 **Skip 直通**：数据走完整流水线但不投递 local，延迟与正常跳一致
+* 坏 core 上的 Router 处在**透传档**：数据走完整流水线但不投递 local，延迟与正常跳一致
 
 ### 第一关：查表定去向
 
@@ -893,11 +895,11 @@ RouterTable 是路径解析与资源判定的唯一依据，**只描述静态路
 
 字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`，两个 credit require 照《Top 模拟器详设》。`reduce_in_mask` 与 `operation` 的三档 reduce 取值这三份都没有（**待确认**）。
 
-RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点可以按表改写 VC。复位释放后所有条目为 bypass / no-op，配置写入前不投递任何包。另有一组与 RouterTable 分开配的 **Skip Mask 寄存器**，per-core 一位。
+RouterTable 支持 64 条表项，软件通过 R2CU 接口配置，中间节点可以按表改写 VC。复位释放后所有条目为 bypass / no-op，配置写入前不投递任何包。另有一个与 RouterTable 分开配的 **`core_bad_mask` 寄存器**，每颗 chip 10 bit，第 i 位为 1 表示 core i 是坏 core，每个 Router 只看本 core 那一位；SCP 先写它，再写 RouterTable 与 `RTR_RELEASE_ROUTE`。
 
 **`reduce_data_type` 为什么配在表里而不是由 TS 给**：`reduce_twice` 时 Router 可能先收到两个远程的 Reduce Token，而不是本 core 发出的那一份，那时 TS 还没有介入。
 
-**`op_type = 0` 的 kernel 与 weight 搬运包进 core 时跳过 TS，直接唤醒 DTE**，不走 `router2ts_trigger_ch` 那条建表通路。
+`op_type = 0` 的包里，**只有走 msg 流搬 kernel 那一档进 core 时跳过 TS、直接唤醒 DTE**，不走 `router2ts_trigger_ch` 那条建表通路；装 weights 的包照常通知 TS。
 
 #### path_core_mask：用一个动态位图压掉 path 数
 
@@ -1123,7 +1125,7 @@ EP 内 LPU 多播加 PPTP 切分的简化场景里，Path0 是“广播 + P2P + 
 
 只要每个 Core 的 Core Memory 能容纳的 User 数量一致，或者沿数据流方向前窄后宽，这个次序就永远成立，即不会死锁。
 
-这个场景仍然会出空泡，前提是同一个 User 在 core0 和 core2 上的处理速度不同。一个 TP 组内处理时间差距一般不大，计算量分布均匀时差距主要来自逐级 Reduce。**原始文档在这里明确写了“需要模拟器介入协助确认”**，是本次建模要回答的问题之一。
+这个场景仍然会出空泡，前提是同一个 User 在 Path0 那段 P2P 两端，即 Core1 上游与下游那两个 core 上的处理速度不同。一个 TP 组内处理时间差距一般不大，计算量分布均匀时差距主要来自逐级 Reduce。**原始文档在这里明确写了“需要模拟器介入协助确认”**，是本次建模要回答的问题之一。
 
 ### 队头阻塞（不是死锁，但影响性能）
 
@@ -1161,7 +1163,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 * **上下文保护**：当前包的全部输入完成并输出前，同一 User 的下一个包不得覆盖该上下文
 * **必须执行 Reduce**：SRAM、Bank 或计算单元暂不可用时对输入反压，
   **不允许绕过 Reduce 降级为直接存储或转发**
-* **精度**：输入 FP32 或 BF16，BF16 转 FP32 后参与计算，中间累加统一 FP32，输出可配 FP32 或 BF16
+* **精度**：输入 FP32 或 BF16，BF16 转 FP32 后参与计算，中间累加统一 FP32，输出可配 FP32 或 BF16；输入输出精度由 RouterTable 按 path 配，MoE 用例的归约 path 输入输出都配 BF16
 
 性能指标：Reduce 输入三路各 160 GB/s，输出 160 GB/s，算力 80 GFLOPS（FP32 / BF16）。
 
@@ -1199,18 +1201,27 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 
 ## 跳过与跨 chip
 
-### Skip
+### 坏 core 的透传档
 
-边界 chip 多出来的那一列里有一个 core 不派角色：第一列 chip 的 `core5`、最后一列 chip 的 `core4`。它坐在 chip 接 PCIe Switch 的那个口上，只构造 Router，永远不作端点。Router 对它按 Skip 处理：
+中间两列 chip 的 core2、core7 是坏 core：core 本身不可用，只有 Router 工作，Router 数据通路照常 R2R 转发。
 
-* 由 Skip Mask 寄存器标记，per-core 一位
-* **Router 数据通路照常工作，正常 R2R 转发**
-* 它的 local 侧禁用，不接收溢流，credit pulse 无效，`stream_credit` 上电默认 0
+* 由 `core_bad_mask` 寄存器标记：每颗 chip 10 bit，第 i 位为 1 表示 core i 是坏 core；每颗 chip 至多 2 个坏 core，一行至多 1 个
+* 真机上电时从 eFuse 读出并锁存，业务开始之前定下，之后不再变
+* 本 core 那一位为 1，Router 就进透传档：
+  * 数据只按 RouterTable 往 mid、left、right 转发，不投递本 core，不进 ReduceModule
+  * 只查、只扣下一跳链路的 VC credit，不查、不占 stream 与 Core Mem credit
+  * local 侧禁用，不接收溢流，`stall_way` 只能是留在 VC 等待；credit pulse 无效，`stream_credit` 上电默认 0
 * credit 跨过它走：
-  * 上游要检查的 credit 对应的是它之后那个落地的 core
-  * 下游返还 credit 也跨过它直接给上游
-  * 它只按路由表透传，不检查 credit、不支持阻塞重发
-* 三种 chip 形状的路由表不同，**路由表必须作为建模输入参数，不能写死**
+  * 上游要检查的 stream credit 对应的是它之后那个落地的 core
+  * 下游还回来的 Stream release 与 Reduce release 按 `RTR_RELEASE_ROUTE` 静态转发，跨过它直接给上游
+* 坏 core 上只配 RouterTable 与 `RTR_RELEASE_ROUTE`。表项一律不进 core（`path_core_bypass = 1`），`op_type` 为 transfer，`stream_table_enable` 与 `stall_way` 为 0
+* 不派角色的好 core 没配任务链、只转发，它的 Router 走正常档，转发与否由表项决定
+
+软件把每颗 chip 的 8 个计算 core 当逻辑 2×4 用，坏 core 改变了物理相邻关系：
+
+* 逻辑上左右相邻的两个 core 物理上隔着坏 core 时，这一跳沿物理 Router 逐跳转发，隔着的坏 core 配一条方向相同、只转发的表项
+* 这一跳在归约链上时，隔着的坏 core 还要配 `RTR_RELEASE_ROUTE`，把从下游一侧进来的 Reduce release 转往上游一侧
+* 路由表随坏 core 布局铺，**路由表必须作为建模输入参数，不能写死**
 
 ### C2C Bridge
 
@@ -1288,8 +1299,8 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | R2R 往返 | ≤ 20 cycle（shared pool 深度的依据） |
 | Crossbar | 5 入 7 出，每 cycle 最多 7 组 input → output 交换 |
 | 拓扑 | 两行的简化二维 Mesh。left / right 连同行相邻 Router，mid 连另一行对称位置那一个；**中间各列的 mid 也连**，作为备份通路（HAS REQ-ARCH-037：提供多路径选择） |
-| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。HAS 新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300 ns」，单跳约 10 cycle 以内，与这一档相符；第 5 章的 T_R2R = 40 T 对不上，待确认是不是含 core 侧往返的端到端值 |
-| 全 chip 广播延迟 | 82 ns（两行并行，Row 0 七跳 82 ns 是关键路径） |
+| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。HAS 新增 ASM-03“R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300 ns”，单跳约 10 cycle 以内，与这一档相符；第 5 章的 T_R2R = 40 T 对不上，待确认是不是含 core 侧往返的端到端值 |
+| 全 chip 广播延迟 | 82 ns（按 2×5 算，两行并行：Row 1 从 PCIe 进、横穿 5 个 core 共 6 跳 76 ns；Row 0 经 mid 多一跳，共 7 跳 82 ns，是关键路径） |
 | 单 VC 传输效率 | 每包额外开销 2 cycles（RC 与 VA 不传 flit）：8 KB 包 94%、16 KB 97%、32 KB 98.5%；多输入竞争时按 80% 折算 |
 | Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |
 | ReduceBuffer 容量 | 通信机制记 8K × FP32 = 32 KB，正反双份 64 KB；Router MAS F-044 记 16 用户 × 32 KiB，按 FP32 驻留算，一个分区最多 8192 个 FP32。按 MAS |
@@ -1303,7 +1314,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | ReduceModule 上下文 | 16 用户 × 32 KiB |
 | 监听事件队列 | 16 项全相连 |
 | C2C Bridge | 全 chip 4 个，VC Buffer 合计约 138.7 KB |
-| 不派角色的 core | 边界 chip 各 1 个，中间列没有 |
+| 坏 core | 中间两列 chip 每颗 2 个（core2、core7），第一列与最后一列 chip 没有 |
 
 包结构。硬件包头 16 B、软件包头 16 B，合计 32 B：
 
@@ -1374,6 +1385,9 @@ Header 与 Payload 走**两根独立并行总线**：
 * **为什么结果按 flit 出，不等整包**
   * 逐级 reduce 的每一跳不必等整包收齐，各路首 flit 到了结果首 flit 就能往下一跳走，每跳省掉一整包的收包时间
   * 代价是包发出首 flit 后要占着出口等后面的结果
+* **为什么透传档只跟 `core_bad_mask` 走**
+  * 《DATA_NOC DE HAS》把不接收溢流、业务 credit pulse 无效绑在 `core_bad_mask` 上
+  * 不派角色的好 core 只转发，由它的表项决定
 
 ***
 

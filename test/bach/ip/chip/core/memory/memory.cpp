@@ -384,7 +384,7 @@ TEST(BachShareMem, ShapeAndMasters) {
 }
 
 // scale 使能时同时读写对应地址的 scale 寄存器：MU 与 VU 按 132 B 读写，块尾
-// 那 4 B 就是 scale。
+// 那 4 B 就是这一行的四组 scale。
 TEST(BachCoreMem, ScaleGoesWithTheDataWhenEnabled) {
   ByteBlock got_with, got_without;
   ByteBlock scale_after;
@@ -491,6 +491,143 @@ TEST(BachCoreMem, ScaleIsWrittenAlongWithTheData) {
   ASSERT_EQ(scale_after.size(), 4u);
   EXPECT_EQ(scale_after[0], 0x01) << "块尾那 4 B 落 scale 寄存器";
   EXPECT_EQ(scale_after[3], 0x04);
+}
+
+namespace {
+
+// 发一笔请求、收一笔响应。kind 取 ScaleAccess 的三档。
+class OneRequest : public BachModule {
+ public:
+  OneRequest(ClockPtr c, MemPort& p, bool write, uint64_t addr, uint64_t bytes,
+             uint64_t kind, ByteBlockPtr data = ByteBlockPtr(),
+             uint64_t woff = 0)
+      : BachModule(c, "one"), port(p), we(write), at(addr), n(bytes),
+        scale(kind), wdata(std::move(data)), off(woff) {}
+  ByteBlock got;
+
+ protected:
+  void Step() override {
+    if (port.RspValid() && got.empty()) {
+      ByteBlockPtr d = port.RspData();
+      if (d) got = *d;
+    }
+    if (done) {
+      port.IdleReq();
+      return;
+    }
+    if (asserted && port.Ready()) {
+      done = true;
+      port.IdleReq();
+      return;
+    }
+    if (we && scale == kScaleOnly) {
+      port.WriteScale(at, wdata, n);
+    } else if (we) {
+      port.Write(at, wdata, scale == kScaleWithData, off, n);
+    } else if (scale == kScaleOnly) {
+      port.ReadScale(at, n);
+    } else {
+      port.Read(at, n, scale == kScaleWithData);
+    }
+    asserted = true;
+  }
+
+ private:
+  MemPort& port;
+  bool we;
+  uint64_t at, n, scale;
+  ByteBlockPtr wdata;
+  uint64_t off;
+  bool asserted = false, done = false;
+};
+
+}  // namespace
+
+// scale 按数据地址逐组对应，不按行取整：从一行中间开始读 64 B，接回来的是这一
+// 行后两组的 scale。vlane = 2 时 MU 读第二段 token 就是这样。
+TEST(BachCoreMem, ScaleFollowsElementAddress) {
+  ByteBlock got;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    CoreMem mem(clk, "cmem");
+    mem.PokeScale(0, ByteBlock{0xA0, 0xA1, 0xA2, 0xA3, 0xB0, 0xB1});
+    OneRequest rd(clk, mem.Port(kCmemMuRd), false, 64, 64, kScaleWithData);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    got = rd.got;
+  }
+  RT::Reset();
+  ASSERT_EQ(got.size(), 66u) << "64 B 数据加两组 scale";
+  EXPECT_EQ(got[64], 0xA2);
+  EXPECT_EQ(got[65], 0xA3);
+}
+
+// 只访问 scale：DTE 边读边发，包里 scale 排在数据后面，搬 scale 那一笔走这一档。
+// 读回来的只有 scale，写进去的也只动 scale。
+TEST(BachCoreMem, ScaleOnlyAccessLeavesDataAlone) {
+  ByteBlock read_back, data_after, scale_after;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    CoreMem mem(clk, "cmem");
+    mem.Poke(128, ByteBlock(256, 0x33));
+    mem.PokeScale(0x4000, ByteBlock{0xC0, 0xC1, 0xC2, 0xC3});
+    auto sc = std::make_shared<ByteBlock>(ByteBlock{1, 2, 3, 4, 5, 6, 7, 8});
+    OneRequest wr(clk, mem.Port(kCmemDteWr), true, 128, 256, kScaleOnly, sc);
+    OneRequest rd(clk, mem.Port(kCmemDteRd), false, 0x4000 + 32, 96,
+                  kScaleOnly);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    read_back = rd.got;
+    data_after = mem.Peek(128, 256);
+    scale_after = mem.PeekScale(128, 8);
+  }
+  RT::Reset();
+  EXPECT_EQ(data_after, ByteBlock(256, 0x33)) << "数据段不动";
+  EXPECT_EQ(scale_after, (ByteBlock{1, 2, 3, 4, 5, 6, 7, 8}));
+  EXPECT_EQ(read_back, (ByteBlock{0xC1, 0xC2, 0xC3}))
+      << "从第二组起 96 B 覆盖三组";
+}
+
+// 正文接 scale 的写只改 [woff, woff + bytes) 覆盖到的那几组：一条向量从一行中间
+// 开始时，这一行前半属于相邻数据的 scale 不动。VU 的 SU 按整行写就靠这一条。
+TEST(BachCoreMem, PartialWriteKeepsNeighbourScale) {
+  ByteBlock scale_after;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    CoreMem mem(clk, "cmem");
+    mem.PokeScale(0, ByteBlock{0x11, 0x12, 0x13, 0x14});
+    auto blk = std::make_shared<ByteBlock>(132, 0);
+    (*blk)[128 + 2] = 0x22;
+    (*blk)[128 + 3] = 0x23;
+    OneRequest wr(clk, mem.Port(kCmemVuWr), true, 0, 64, kScaleWithData, blk,
+                  /*woff=*/64);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    scale_after = mem.PeekScale(0);
+  }
+  RT::Reset();
+  EXPECT_EQ(scale_after, (ByteBlock{0x11, 0x12, 0x22, 0x23}));
+}
+
+// Matrix Mem 也有 scale 旁带：MXFP8 的权重与 B core、R core 收下的 token 连着
+// scale 一起存。
+TEST(BachMatrixMem, ScaleGoesWithTheData) {
+  ByteBlock got;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    MatrixMem mem(clk, "mmem");
+    mem.Poke(0x1000, ByteBlock(128, 0x44));
+    mem.PokeScale(0x1000, ByteBlock{9, 8, 7, 6});
+    OneRequest rd(clk, mem.Port(kMmemMu), false, 0x1000, 128, kScaleWithData);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    got = rd.got;
+  }
+  RT::Reset();
+  ASSERT_EQ(got.size(), 132u);
+  EXPECT_EQ(got[0], 0x44);
+  EXPECT_EQ(got[128], 9);
+  EXPECT_EQ(got[131], 6);
 }
 
 // 按 Byte mask 写过的行读时不做 ECC 检测：那一行留个记录。

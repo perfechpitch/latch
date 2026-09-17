@@ -125,7 +125,10 @@ class VuSu : public BachModule {
       // 只有 MXFP8 这一档带 scale：块内取绝对值最大的那个定阶。FP8_e4m3 是
       // 定点意义上的裸格式，没有块 scale。
       std::vector<float> scale;
-      if (op == SuOp::kStMxfp8) scale = numeric::MakeScale(t, v);
+      if (op == SuOp::kStMxfp8) {
+        bool round_up = (uops.cfg.su.raw & kVuSuScaleRoundUp) != 0;
+        scale = numeric::MakeScale(t, v, round_up);
+      }
       body = numeric::Encode(t, v, scale, mode);
       scale_bytes = numeric::EncodeScale(t, scale);
     }
@@ -165,11 +168,16 @@ class VuSu : public BachModule {
                       : valid_end - block_at;
     bool has_scale = !scale_bytes.empty();
     if (has_scale) {
-      // 数据信号是 1056 bit = 128 B data + 4 B scale。一个 128 B 块 32 个 MXFP8
-      // 元素、正好一个 scale 字节，四个字节里只有第一个有效。
-      uint64_t at = sent;
-      d->push_back(at < scale_bytes.size() ? scale_bytes[at] : 0);
-      d->resize(kVuVrfEntryBytes + 4, 0);
+      // 数据信号是 1056 bit = 128 B data + 4 B scale。一个 MXFP8 元素一字节，
+      // 32 个共用一个 scale，所以这一块的 4 个 scale 字节各管块内一段 32 B：第
+      // g 段在向量里是第 (块首 + g × 32 − head) / 32 个 scale。不属于本条向量
+      // 的那几段补 0，存储只改 [from, to) 覆盖到的那几组。
+      for (uint64_t g = 0; g < 4; ++g) {
+        uint64_t at = block_at + g * 32;
+        uint64_t idx = at >= head ? (at - head) / 32 : scale_bytes.size();
+        d->push_back(at >= head && idx < scale_bytes.size() ? scale_bytes[idx]
+                                                             : 0);
+      }
     }
     cmem->Write(base + block_at, d, has_scale, from, to - from);
     mem_used = true;

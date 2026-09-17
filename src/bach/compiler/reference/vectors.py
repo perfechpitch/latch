@@ -169,6 +169,21 @@ def write_accum(path):
     # Clamp：NaN 与 Inf 都夹到该符号的最大有限值。
     for v in (float("nan"), float("inf"), float("-inf"), 1.0, -1.0, 0.0):
         lines.append(f"clamp 0 {h32(v)} - {h32(n.clamp_nan_inf(v))}")
+    # MXFP8 × MXFP8：token 与权重各一组 E8M0 scale。extra 一栏前一半是 token 的，
+    # 后一半是权重的。另用一个随机源，前面几种的输入不跟着变。
+    rng2 = random.Random(20260917)
+    for nblock in (1, 2, 4):
+        prods = []
+        for _ in range(32 * nblock):
+            prods.append(n.float_of((rng2.getrandbits(1) << 31)
+                                    | (rng2.randint(112, 136) << 23)
+                                    | rng2.getrandbits(23)))
+        a_scale = [n.from_e8m0(rng2.randint(120, 130)) for _ in range(nblock)]
+        w_scale = [n.from_e8m0(rng2.randint(120, 130)) for _ in range(nblock)]
+        lines.append(
+            f"by_block2 32 {','.join(h32(x) for x in prods)} "
+            f"{','.join(h32(x) for x in a_scale + w_scale)} "
+            f"{h32(n.accum_by_scale_block2(prods, a_scale, w_scale, 32))}")
     write(path, lines)
 
 
@@ -179,9 +194,9 @@ def write_ffn(path):
     bit 相同。数据用线性同余造，跑两次一样。
     """
     lines = ["# kind dtype args... | inputs... | result..."]
-    # 前两种形状是 MU 的两条原语，模型那一侧直接拿这几条喂 matrix exe；
-    # 其余几种只验算子本身。
-    shapes = [(256, 32), (128, 64), (32, 2), (64, 4), (128, 8)]
+    # 前两种形状是 MU 的两条原语：物理阵列 K128×N64，开 vlane = 2 就是
+    # K64×N128。模型那一侧直接拿这几条喂 matrix exe；其余几种只验算子本身。
+    shapes = [(64, 128), (128, 64), (32, 2), (64, 4), (128, 8)]
     for dtype in (n.BF16, n.MXFP8, n.MXFP4, n.NVFP4):
         block = n.SCALE_BLOCK[dtype]
         for idx, (k, cnt) in enumerate(shapes):
@@ -200,6 +215,24 @@ def write_ffn(path):
                     hbytes(scale) if scale else "-",
                     ",".join(h32(x) for x in r),
                 ]))
+
+    # MXFP8 × MXFP8：权重也带 scale，按列排，一列 K / 32 个。块内部分和乘
+    # token 与权重两个 scale 之积。
+    dtype = n.MXFP8
+    block = n.SCALE_BLOCK[dtype]
+    for idx, (k, cnt) in enumerate(shapes):
+        token = tame(dtype, pattern(k, 0x2234 + k))
+        weight = tame(dtype, pattern(cnt * k, 0x6678 + cnt))
+        scale = tame_scale(dtype, pattern(k // block, 0xAABC + idx))
+        wscale = tame_scale(dtype, pattern(cnt * (k // block), 0xBBCD + idx))
+        for out_bf16 in (0, 1):
+            r = ffn.gemm(dtype, token, weight, scale, k, cnt, out_bf16 == 1,
+                         wscale)
+            lines.append(" ".join([
+                "gemm_ws", dtype, str(k), str(cnt), str(out_bf16),
+                hbytes(token), hbytes(weight), hbytes(scale), hbytes(wscale),
+                ",".join(h32(x) for x in r),
+            ]))
 
     rng = random.Random(20260908)
     for op in ("add", "sub", "mul", "max", "min"):
@@ -280,27 +313,6 @@ def tame(dtype, data):
     return bytes(out)
 
 
-def tame_cpp(dtype, count, seed):
-    """按 C++ 那一侧 `TamePattern` 的规则造一批数，两边逐字节相同。
-
-    一层 MoE 那一份向量的权重有几百 KB，写进文件不合适，所以两侧各自按同一个
-    种子与同一套规则生成，向量里只留种子与结果。
-    """
-    bits = n.ELEM_BITS[dtype]
-    v = bytearray(pattern(count * bits // 8, seed))
-    if dtype == n.MXFP8:
-        return bytes((b & 0xFE) if (b & 0x7F) == 0x7F else b for b in v)
-    if dtype != n.BF16:
-        return bytes(v)
-    for i in range(0, len(v) - 1, 2):
-        # 高字节装符号与指数的高 7 位，指数压到 126～128。
-        sign = v[i + 1] & 0x80
-        exp = 126 + (v[i] % 3)
-        v[i + 1] = sign | (exp >> 1)
-        v[i] = ((exp & 1) << 7) | (v[i] & 0x7F)
-    return bytes(v)
-
-
 def tame_scale(dtype, data):
     """scale 字节里的 NaN 编码同样要抹掉。
 
@@ -315,320 +327,393 @@ def tame_scale(dtype, data):
 def write_e2e(path):
     """端到端那一条链的期望输出。
 
-    一个 K=256 的 BF16 token 进 core，MU 算一条 K=256 配 N=32 的原语，32 个
-    FP32 结果出 core。模型注入的字节与收到的字节都在这里给出，收到的那一份要
-    与模型跑出来的逐 bit 相同。
+    一条 MU 原语 1×K128×N64：MXFP8 的 token 乘 MXFP8 的权重，两边的 scale 都随
+    数据从 scale 旁带读出来，结果按 BF16 写回，64 个。模型注入的字节与收到的字节
+    都在这里给出，收到的那一份要与模型跑出来的逐 bit 相同。
     """
-    dtype = n.BF16
-    k, cnt = 256, 32
-    token = tame(dtype, pattern(k * 2, 0xE2E0))
-    weight = tame(dtype, pattern(cnt * k * 2, 0xE2E1))
-    out = ffn.gemm(dtype, token, weight, b"", k, cnt, False)
-    # 结果按 FP32 写回 Core Mem，出核搬的就是这些字节。
-    out_bytes = n.encode(n.FP32, out)
-    # VU 那一步逐元素平方，源与目的都是这 32 个 FP32。选四则运算而不是 silu：
-    # 超越函数硬件用查表加插值，拟合方式设计未给，拿它做逐 bit 判据立不住。
-    act = ffn.elemwise("mul", out, out)
-    act = [n.clamp_nan_inf(x) for x in act]
+    k, cnt = 128, 64
+    token = kn_data(k, 0xE2E0)
+    tscale = kn_scale(k // 32, 0xE2E0)
+    weight = kn_data(cnt * k, 0xE2E1)
+    wscale = kn_scale(cnt * (k // 32), 0xE2E1)
+    out = ffn.gemm(n.MXFP8, token, weight, tscale, k, cnt, True, wscale)
+    out_bytes = n.encode(n.BF16, out)
+    # VU 那一步读 BF16、逐元素平方、按 BF16 写回。选四则运算而不是 silu：超越函数
+    # 硬件用查表加插值，拟合方式设计未给，拿它做逐 bit 判据立不住。
+    act = [n.clamp_nan_inf(x) for x in ffn.elemwise("mul", out, out)]
+    act_bytes = n.encode(n.BF16, act)
     lines = [
-        "# 一条 K=256 配 N=32 的 BF16 原语，结果 FP32；VU 再逐元素平方一遍",
-        f"dtype {dtype}",
+        "# 一条 1×K128×N64 的 MXFP8 原语，结果 BF16；VU 再逐元素平方一遍，仍写 BF16",
+        f"dtype {n.MXFP8}",
         f"k {k}",
         f"n {cnt}",
         f"token {hbytes(token)}",
+        f"token_scale {hbytes(tscale)}",
         f"weight {hbytes(weight)}",
+        f"weight_scale {hbytes(wscale)}",
         f"out_bits {','.join(h32(x) for x in out)}",
         f"out_bytes {hbytes(out_bytes)}",
-        f"act_bits {','.join(h32(x) for x in act)}",
-        f"act_bytes {hbytes(n.encode(n.FP32, act))}",
+        f"act_bytes {hbytes(act_bytes)}",
     ]
     # 放大到 N 个：几个 token 连着进来，各自算各自的，权重共用一份。
     for i in range(4):
-        tok = tame(dtype, pattern(k * 2, 0xE2F0 + i))
-        r = ffn.gemm(dtype, tok, weight, b"", k, cnt, False)
+        tok = kn_data(k, 0xE2F0 + i)
+        tsc = kn_scale(k // 32, 0xE2F0 + i)
+        r = ffn.gemm(n.MXFP8, tok, weight, tsc, k, cnt, True, wscale)
         lines.append(f"token{i} {hbytes(tok)}")
-        lines.append(f"out_bytes{i} {hbytes(n.encode(n.FP32, r))}")
+        lines.append(f"token_scale{i} {hbytes(tsc)}")
+        lines.append(f"out_bytes{i} {hbytes(n.encode(n.BF16, r))}")
     write(path, lines)
 
 
-# 一个 core 上那一段 MoE 的形状。三个矩阵按 EP6+TP8 切完之后每 core 拿到的
-# 分片，方向与真实的一样。K 走完整的 embedding，中间维是 2048 按 TP8 切下来的
-# 那一段，输出维是 MU 的一个 tile_N。
-MOE_K = 6144         # 这个 core 分到的 embedding 那一段
-MOE_INTER = 256      # 这个 core 分到的 intermediate 那一段
-MOE_OUT = 6144       # 这个 core 要产出的 embedding 那一段
-MOE_EXPERTS = 2      # 这个 token 在本 EP Group 内激活了几个专家
+# ── 一层 MoE：EP6+TP8 的 KN 拆分 ──
+#
+# 一个 EP 组两层 × 4 列共 8 颗 chip，每颗 chip 8 个计算 core。chip 在组里的序号
+# c（层 × 4 + 列）定它分到 FC1、FC3 的哪一段 N 与 FC2 的哪一段 K；core 的逻辑槽位
+# s 定它分到 FC1、FC3 的哪一段 K 与 FC2 的哪一段 N。槽位 7 是 dot core。
+# 与 compiler/kernel/bach.h 的 MOE_* 同源，改一处要一起改。
+KN_EMBED = 6144
+KN_INTER = 2048
+KN_SLOTS = 8
+KN_DOT_SLOT = 7
+KN_EXPERTS = 2
+KN_SEG_EMBED = KN_EMBED // KN_SLOTS     # 768
+KN_SEG_INTER = KN_INTER // KN_SLOTS     # 256
+# FC1 与 FC3 按 1×K128×N64 切块，FC2 按 1×K64×N128（K128×N64 阵列开 vlane = 2）
+FC13_K, FC13_N = 128, 64
+FC2_K, FC2_N = 64, 128
+# topK 里两个专家的权重
+KN_W_EP = [0.75, 0.25]
+# chip 内那条归约链的逻辑槽位次序，链尾是 dot core
+KN_CHIP_CHAIN = [6, 5, 4, 0, 1, 2, 3, 7]
 
-# MU 物理阵列的一笔原语：1×K256×N32。K 与 N 都按这个尺寸切块。
-MU_TILE_K = 256
-MU_TILE_N = 32
 
+def kn_data(count, seed):
+    """一段 MXFP8 元素：线性同余造字节，抹掉 NaN 编码。
 
-def moe_gemm(dtype, token, weight, k_total, n_total):
-    """MU 的一笔任务：K 切 kblock 段、N 切 nblock 块，逐 tile 算。
-
-    权重按 (n_idx, k_idx) 排，一个 tile 是 K256×N32 列优先，与 AGU 的
-    WeightAddr 同序。同一列的几段顺序相加，每加一次 Clamp 一次，与 MatrixExe
-    的 ksplit 累加同一条规矩。
+    与 C++ 那一侧的 `KnData` 逐字节相同：权重与 token 两侧各自按同一个种子生成，
+    向量里只留种子与结果。
     """
-    ebytes = n.ELEM_BITS[dtype] // 8
-    kb = k_total // MU_TILE_K
-    nb = n_total // MU_TILE_N
-    tile_bytes = MU_TILE_K * MU_TILE_N * ebytes
-    seg_bytes = MU_TILE_K * ebytes
-    out = []
-    for ni in range(nb):
-        acc = None
-        for ki in range(kb):
-            at = (ni * kb + ki) * tile_bytes
-            tile = weight[at:at + tile_bytes]
-            seg = token[ki * seg_bytes:(ki + 1) * seg_bytes]
-            r = ffn.gemm(dtype, seg, tile, b"", MU_TILE_K, MU_TILE_N, False)
-            acc = r if ki == 0 else [n.clamp_nan_inf(n.f32(x + y))
-                                     for x, y in zip(acc, r)]
-        out.extend(acc)
+    return bytes((b & 0xFE) if (b & 0x7F) == 0x7F else b
+                 for b in pattern(count, seed))
+
+
+def kn_scale(count, seed):
+    """一段 E8M0 scale：收进 2^-14～2^-7，元素乘上它落在个位数上下，sigmoid 不至于
+    全饱和。
+
+    种子与同一段数据的种子相同，另异或一个常数分开两条序列。与 C++ 那一侧的
+    `KnScale` 逐字节相同。
+    """
+    return bytes(113 + (b % 8) for b in pattern(count, seed ^ 0x5CA1E))
+
+
+def kn_seed(base, group, expert):
+    """一个矩阵在第 group 个 EP 组、topK 里第 expert 个专家上的种子。
+
+    一个矩阵的 tile 编号不到 0x1000，各组各专家隔开 0x1000。"""
+    return base + (group * KN_EXPERTS + expert) * 0x1000
+
+
+class KnMatrix:
+    """一个完整形状的矩阵：rows × cols，按 tile_k × tile_n 分块播种。
+
+    第 (r0, c0) 起的那个 tile 用 `seed + tile 编号` 生成，编号只由它在完整矩阵里
+    的位置定，所以一个元素的值只由它在完整矩阵里的位置定，切到哪个 core 上都
+    一样；每个 core 也只需生成自己那几个 tile。tile 里的数据列优先，scale 每列
+    tile_k / 32 个。
+    """
+
+    def __init__(self, rows, cols, tile_k, tile_n, seed):
+        self.rows, self.cols = rows, cols
+        self.tile_k, self.tile_n = tile_k, tile_n
+        self.seed = seed
+
+    def tile(self, r0, c0):
+        tid = (c0 // self.tile_n) * (self.rows // self.tile_k) + r0 // self.tile_k
+        count = self.tile_k * self.tile_n
+        return (kn_data(count, self.seed + tid),
+                kn_scale(self.tile_n * (self.tile_k // 32), self.seed + tid))
+
+
+# 三个矩阵的基种子
+KN_W1 = 0x100000
+KN_W3 = 0x200000
+KN_W2 = 0x300000
+KN_TOKEN_SEED = 0x4001
+
+
+def kn_w13(base, group, expert):
+    """W1 或 W3：KN_EMBED 行（token 维）× KN_INTER 列，按 K128×N64 分块。"""
+    return KnMatrix(KN_EMBED, KN_INTER, FC13_K, FC13_N,
+                    kn_seed(base, group, expert))
+
+
+def kn_w2(group, expert):
+    """W2：KN_INTER 行 × KN_EMBED 列，按 K64×N128 分块。"""
+    return KnMatrix(KN_INTER, KN_EMBED, FC2_K, FC2_N,
+                    kn_seed(KN_W2, group, expert))
+
+
+def kn_token():
+    return kn_data(KN_EMBED, KN_TOKEN_SEED), kn_scale(KN_EMBED // 32,
+                                                      KN_TOKEN_SEED)
+
+
+def bf16_decode(data):
+    return n.decode(n.BF16, data, len(data) // 2)
+
+
+def kn_blocked(tokens, matrix, row0, col0, k, cnt, kblock, nblock, w_ep=None):
+    """MU 的一笔任务：K 切 kblock 段、N 切 nblock 块，逐 tile 算，结果 BF16。
+
+    tokens 是 topK 里每个专家一份 (数据, scale)：各出一份的那一档几个专家共用
+    一份，合并成一份的那一档每个专家一份。matrix 是每个专家一个 KnMatrix。
+    这一个 core 分到的那一片从完整矩阵的第 row0 行、第 col0 列起。
+
+    循环顺序与 AGU 同：由内往外是 tile_K、专家、tile_N。同一列的几段顺序相加，
+    每加一次 Clamp 一次；合并成一份时这一列的部分和乘上这个专家的权重再顺序加，
+    每一步也 Clamp。结果在一列算完之后才转 BF16。w_ep 为 None 时各出一份。
+    """
+    experts = len(matrix)
+    outs = [[] for _ in range(experts)]
+    merged = []
+    for ni in range(nblock):
+        ep_acc = None
+        for e in range(experts):
+            tok, tsc = tokens[e] if len(tokens) > 1 else tokens[0]
+            acc = None
+            for ki in range(kblock):
+                data, wsc = matrix[e].tile(row0 + ki * k, col0 + ni * cnt)
+                seg = tok[ki * k:(ki + 1) * k]
+                sc = tsc[ki * (k // 32):(ki + 1) * (k // 32)]
+                r = ffn.gemm(n.MXFP8, seg, data, sc, k, cnt, False, wsc)
+                acc = r if ki == 0 else [n.clamp_nan_inf(n.f32(x + y))
+                                         for x, y in zip(acc, r)]
+            if w_ep is None:
+                outs[e].extend(acc)
+                continue
+            w = [n.clamp_nan_inf(n.f32(x * n.f32(w_ep[e]))) for x in acc]
+            ep_acc = w if e == 0 else [n.clamp_nan_inf(n.f32(x + y))
+                                       for x, y in zip(ep_acc, w)]
+        if w_ep is not None:
+            merged.extend(ep_acc)
+    if w_ep is None:
+        return [n.encode(n.BF16, o) for o in outs]
+    return n.encode(n.BF16, merged)
+
+
+def kn_part(token, group, chip, slot):
+    """一个 core 的 FC1、FC3 部分和：token 第 slot 段乘本 core 那一片 W1、W3。
+
+    返回部分和那一包里的数据段：两个专家的 FC1，再两个专家的 FC3，各 256 个 BF16。
+    """
+    tok, tsc = token
+    k0 = slot * KN_SEG_EMBED
+    seg = (tok[k0:k0 + KN_SEG_EMBED], tsc[k0 // 32:(k0 + KN_SEG_EMBED) // 32])
+    col0 = chip * KN_SEG_INTER
+    out = b""
+    for base in (KN_W1, KN_W3):
+        mats = [kn_w13(base, group, e) for e in range(KN_EXPERTS)]
+        for one in kn_blocked([seg], mats, k0, col0, FC13_K, FC13_N,
+                              KN_SEG_EMBED // FC13_K, KN_SEG_INTER // FC13_N):
+            out += one
     return out
 
 
-def moe_one_core(token, seeds, w_ep):
-    """一个 core 上那五步算下来的中间量与结果。
+def router_reduce(parts):
+    """Router 上逐跳的 reduce：每一跳把上一跳的 BF16 结果与本 core 那一份解成 FP32
+    相加、Clamp，再按 BF16 写出去。链首只有本 core 一份，原样出去。"""
+    acc = parts[0]
+    for one in parts[1:]:
+        a, b = bf16_decode(acc), bf16_decode(one)
+        acc = n.encode(n.BF16, [n.clamp_nan_inf(n.f32(x + y))
+                                for x, y in zip(a, b)])
+    return acc
 
-    `seeds` 是 (w1, w3, w2) 三个种子，权重两侧各自按 `tame_cpp` 生成。返回
-    每个专家的 FC1、FC3、量化后的激活，以及按 topK 权重合并之后的 32 个 FP32。
-    """
-    dtype = n.BF16
-    parts = []
-    act_bytes = []
-    fc1_bytes, fc3_bytes = [], []
-    for e in range(MOE_EXPERTS):
-        w1 = tame_cpp(dtype, MOE_K * MOE_INTER, seeds[0] + e)
-        w3 = tame_cpp(dtype, MOE_K * MOE_INTER, seeds[1] + e)
-        w2 = tame_cpp(dtype, MOE_INTER * MOE_OUT, seeds[2] + e)
 
-        fc1 = moe_gemm(dtype, token, w1, MOE_K, MOE_INTER)
-        fc3 = moe_gemm(dtype, token, w3, MOE_K, MOE_INTER)
-        fc1_bytes.append(n.encode(n.FP32, fc1))
-        fc3_bytes.append(n.encode(n.FP32, fc3))
-        # 门控：silu(FC1) 逐元素乘 FC3，再量化成 BF16 写回 Core Mem。
-        act = ffn.elemwise("mul", ffn.silu(fc1), fc3)
-        act = [n.clamp_nan_inf(x) for x in act]
-        raw = n.encode(dtype, act)
-        act_bytes.append(raw)
-        # FC2 读回来的是量化之后的那一份。
-        parts.append(moe_gemm(dtype, raw, w2, MOE_INTER, MOE_OUT))
-
-    # 专家间合并：各自乘上 topK 权重再顺序相加，每一步都 Clamp。
+def kn_gate(red):
+    """dot core 的 silu·dot·量化：归约出来的 FC1、FC3 按 BF16 读，按 FP32 算，
+    量化成 MXFP8。返回每个专家一份 (数据, scale)。"""
+    vals = bf16_decode(red)
     out = []
-    for j in range(MOE_OUT):
-        acc = 0.0
-        for e in range(MOE_EXPERTS):
-            v = n.clamp_nan_inf(n.f32(parts[e][j] * n.f32(w_ep[e])))
-            acc = v if e == 0 else n.clamp_nan_inf(n.f32(acc + v))
-        out.append(acc)
-    return fc1_bytes, fc3_bytes, act_bytes, parts, out
+    for e in range(KN_EXPERTS):
+        fc1 = vals[e * KN_SEG_INTER:(e + 1) * KN_SEG_INTER]
+        fc3 = vals[(KN_EXPERTS + e) * KN_SEG_INTER:
+                   (KN_EXPERTS + e + 1) * KN_SEG_INTER]
+        act = [n.clamp_nan_inf(x)
+               for x in ffn.elemwise("mul", ffn.silu(fc1), fc3)]
+        scale = n.make_scale(n.MXFP8, act)
+        out.append((n.encode(n.MXFP8, act, scale),
+                    n.encode_scale(n.MXFP8, scale)))
+    return out
+
+
+def kn_fc2(act, group, chip, slot):
+    """一个 core 的 FC2 第 slot 段：每个专家一份 FC2 输入，乘本 core 那一片 W2，
+    按 topK 权重在 MU 内合并成一份，768 个 BF16。"""
+    mats = [kn_w2(group, e) for e in range(KN_EXPERTS)]
+    return kn_blocked(act, mats, chip * KN_SEG_INTER, slot * KN_SEG_EMBED,
+                      FC2_K, FC2_N, KN_SEG_INTER // FC2_K,
+                      KN_SEG_EMBED // FC2_N, KN_W_EP)
+
+
+def rcore_add(row, prev):
+    """R core 的两半求和：两份 BF16 读进来按 FP32 相加、Clamp，按 BF16 写回。链首
+    没有上一行，另一半一直是 0。"""
+    a = bf16_decode(row)
+    b = bf16_decode(prev) if prev is not None else [0.0] * len(a)
+    return n.encode(n.BF16, [n.clamp_nan_inf(n.f32(x + y))
+                             for x, y in zip(a, b)])
+
+
+def kn_chip(token, group, chip):
+    """一颗 chip 上的整段：8 个 core 的部分和沿 chip 内归约链归约进 dot core，dot
+    core 做 silu·dot·量化并广播，8 个 core 各算 FC2 一段，在 dot core 上拼成 6144
+    个 BF16。返回各步的中间量。"""
+    parts = [kn_part(token, group, chip, s) for s in range(KN_SLOTS)]
+    red = router_reduce([parts[s] for s in KN_CHIP_CHAIN])
+    act = kn_gate(red)
+    fc2 = [kn_fc2(act, group, chip, s) for s in range(KN_SLOTS)]
+    return {"parts": parts, "red": red, "act": act, "fc2": fc2,
+            "concat": b"".join(fc2)}
+
+
+def kn_header(note, extra):
+    lines = [
+        f"# {note}",
+        f"embed {KN_EMBED}",
+        f"inter {KN_INTER}",
+        f"slots {KN_SLOTS}",
+        f"experts {KN_EXPERTS}",
+        f"token_seed {KN_TOKEN_SEED:x}",
+        f"w1_seed {KN_W1:x}",
+        f"w3_seed {KN_W3:x}",
+        f"w2_seed {KN_W2:x}",
+        f"w_ep {','.join(h32(x) for x in KN_W_EP)}",
+    ]
+    tok, tsc = kn_token()
+    lines.append(f"token {hbytes(tok)}")
+    lines.append(f"token_scale {hbytes(tsc)}")
+    return lines + extra
+
+
+def kn_chip_lines(tag, one):
+    """一颗 chip 的中间量写进向量：各 core 的部分和与 FC2 段、归约结果、FC2 输入。"""
+    lines = []
+    for s in range(KN_SLOTS):
+        lines.append(f"{tag}part{s} {hbytes(one['parts'][s])}")
+    lines.append(f"{tag}red {hbytes(one['red'])}")
+    for e in range(KN_EXPERTS):
+        lines.append(f"{tag}act{e} {hbytes(one['act'][e][0])}")
+        lines.append(f"{tag}act_scale{e} {hbytes(one['act'][e][1])}")
+    for s in range(KN_SLOTS):
+        lines.append(f"{tag}fc2_{s} {hbytes(one['fc2'][s])}")
+    return lines
 
 
 def write_moe(path):
-    """一个 core 上 EPTP-NN 那一段的期望输出。
-
-    五步：token 进核、MU 算 FC1 与 FC3、VU 做门控与量化、MU 算 FC2 并按 topK
-    权重合并几个专家、结果出核。
-
-    权重有几百 KB，写进文件不合适，所以只给种子：两侧按 `tame_cpp` 的规则各自
-    生成同一批字节。
-    """
-    dtype = n.BF16
-    token = tame_cpp(dtype, MOE_K, 0x4001)
-    w_ep = [0.75, 0.25]
-    fc1_bytes, fc3_bytes, act_bytes, parts, out = moe_one_core(
-        token, (0x4100, 0x4200, 0x4300), w_ep)
-
-    lines = [
-        "# 一个 core 上的 EPTP-NN 五步链：FC1 与 FC3、门控与量化、FC2 合并专家",
-        f"dtype {dtype}",
-        f"k {MOE_K}",
-        f"inter {MOE_INTER}",
-        f"out_n {MOE_OUT}",
-        f"experts {MOE_EXPERTS}",
-        "token_seed 4001",
-        "w1_seed 4100",
-        "w3_seed 4200",
-        "w2_seed 4300",
-        f"w_ep {','.join(h32(x) for x in w_ep)}",
-        f"token {hbytes(token)}",
-    ]
-    for e in range(MOE_EXPERTS):
-        lines.append(f"fc1_bytes{e} {hbytes(fc1_bytes[e])}")
-        lines.append(f"fc3_bytes{e} {hbytes(fc3_bytes[e])}")
-        lines.append(f"act_bytes{e} {hbytes(act_bytes[e])}")
-        lines.append(f"part_bits{e} {','.join(h32(x) for x in parts[e])}")
-    lines.append(f"out_bits {','.join(h32(x) for x in out)}")
-    lines.append(f"out_bytes {hbytes(n.encode(n.FP32, out))}")
-    write(path, lines)
-
-
-# 一颗 chip 上 8 个计算 core。FC1 与 FC3 按中间维切成 8 份，FC2 因此按 K 切成
-# 8 份，每个 core 出一份完整长度的部分和。
-MOE_CHIP_CORES = 8
-
-# chip 内那条归约链的走法。中间列 chip 是 2×4：同行相邻 core 有 left / right 一对
-# 链路，core i 与 core i+4 有 mid 直连；四个 chip 口分别挂在 core0 的 left（N）、
-# core3 的 right（E）、core4 的 left（W）、core7 的 right（S）。
-#
-# 链上每个 core 只能有一个上游：两个数相加与先后无关，三个数相加的结果就要看
-# 谁先到了。一笔画过 8 个 core 的路径只在进出两个口一横一竖时存在（2×4 的格子
-# 两染色，N 与 S 一色、E 与 W 一色，同色的两端画不出来），所以下面按转向列。
-# 键是 (进哪个口, 出哪个口)，进的那一项为 None 表示本 chip 是整条链的起点。
-MOE_CHAIN = {
-    (None, "e"): [0, 4, 5, 1, 2, 6, 7, 3],
-    (None, "s"): [4, 0, 1, 5, 6, 2, 3, 7],
-    (None, "n"): [4, 5, 6, 7, 3, 2, 1, 0],
-    ("w", "s"): [4, 0, 1, 5, 6, 2, 3, 7],
-    ("n", "e"): [0, 4, 5, 1, 2, 6, 7, 3],
-    ("w", "n"): [4, 5, 6, 7, 3, 2, 1, 0],
-    ("s", "e"): [7, 6, 5, 4, 0, 1, 2, 3],
-}
-MOE_CHIP_ORDER = MOE_CHAIN[(None, "e")]
-
-# 一个 EP 组的 8 颗 chip 摆成 2 层 × 4 列，层内左右相接（E 对 W）、层间上下相接
-# （S 对 N），编号 gy * 4 + gx。部分和沿这条蛇形链逐跳相加，每颗 chip 进出各走
-# 一横一竖，chip 内那条链才画得出来。
-MOE_GROUP_CHIPS = 8
-MOE_GROUP_CHIP_ORDER = [0, 4, 5, 1, 2, 6, 7, 3]
-# 每颗 chip 在链上的进口与出口，次序同上。
-MOE_GROUP_TURN = [
-    (None, "s"), ("n", "e"), ("w", "n"), ("s", "e"),
-    ("w", "s"), ("n", "e"), ("w", "n"), ("s", "e"),
-]
-
-
-def write_moe_spread(path, note, chips, order, seeds, w_ep, groups=None):
-    """几个 core 各算一片、部分和沿一条链逐跳归约的期望输出。
-
-    每个 core 的五步与 `write_moe` 相同，只是权重换成自己那一片。`order` 是
-    全局 core 号（chip 号 × 8 加 chip 内号）排成的归约次序，链上每个 core 只有
-    一个上游。C++ 那一侧读它铺路由表，并按模型的拓扑核对每一跳都落在真实链路上。
-    """
-    dtype = n.BF16
-    token = tame_cpp(dtype, MOE_K, 0x4001)
-    total = chips * MOE_CHIP_CORES
-
-    parts = []
-    for g in range(total):
-        parts.append(moe_one_core(
-            token, tuple(b + g * 0x10 for b in seeds), w_ep)[4])
-
-    # Router 的 ReduceModule 逐跳做 Read-Modify-Write，中间累加固定 FP32。
-    def reduce_chain(ids):
-        out = list(parts[ids[0]])
-        for g in ids[1:]:
-            out = [n.clamp_nan_inf(n.f32(x + y)) for x, y in zip(out, parts[g])]
-        return out
-
-    if groups is None:
-        acc = reduce_chain(order)
-        group_out = []
-    else:
-        # 每组各归约成一份组结果，再在 R core 上逐组相加。
-        group_out = [reduce_chain(chain) for chain in groups]
-        acc = list(group_out[0])
-        for one in group_out[1:]:
-            acc = [n.clamp_nan_inf(n.f32(x + y)) for x, y in zip(acc, one)]
-
-    lines = [
-        f"# {note}",
-        f"dtype {dtype}",
-        f"k {MOE_K}",
-        f"inter {MOE_INTER}",
-        f"out_n {MOE_OUT}",
-        f"experts {MOE_EXPERTS}",
-        f"chips {chips}",
-        f"cores {MOE_CHIP_CORES}",
-        f"order {','.join(str(g) for g in order)}",
-        "token_seed 4001",
-        f"w1_seed {seeds[0]:x}",
-        f"w3_seed {seeds[1]:x}",
-        f"w2_seed {seeds[2]:x}",
-        "seed_stride 10",
-        f"w_ep {','.join(h32(x) for x in w_ep)}",
-        f"token {hbytes(token)}",
-    ]
-    for g in range(total):
-        lines.append(f"core_bits{g} {','.join(h32(x) for x in parts[g])}")
-    for g, one in enumerate(group_out):
-        lines.append(f"group_bits{g} {','.join(h32(x) for x in one)}")
-    lines.append(f"out_bits {','.join(h32(x) for x in acc)}")
+    """一个 core 上的 KN 那几步：它当 dot core 用，自己一个 core 就是整条 chip 内
+    归约链。FC1、FC3 部分和，归约（只有自己一份，原样），silu·dot·量化，FC2 第 7
+    段。组 0 的第 0 颗 chip。"""
+    token = kn_token()
+    part = kn_part(token, 0, 0, KN_DOT_SLOT)
+    red = router_reduce([part])
+    act = kn_gate(red)
+    fc2 = kn_fc2(act, 0, 0, KN_DOT_SLOT)
+    lines = kn_header("一个 core 的 KN 那几步：槽位 7 的部分和、silu·dot·量化、FC2 第 7 段",
+                      ["group 0", "chip 0", f"slot {KN_DOT_SLOT}",
+                       f"part {hbytes(part)}"])
+    for e in range(KN_EXPERTS):
+        lines.append(f"act{e} {hbytes(act[e][0])}")
+        lines.append(f"act_scale{e} {hbytes(act[e][1])}")
+    lines.append(f"fc2 {hbytes(fc2)}")
     write(path, lines)
 
 
 def write_moe_chip(path):
-    """一颗 chip 上 8 个 core 的那一段。链从 core0 起、在 core3 收尾，出 E 口。"""
-    write_moe_spread(path, "一颗 chip 上 8 个 core 的 EPTP-NN 那一段，部分和沿链逐跳归约",
-                     1, MOE_CHIP_ORDER, (0x5100, 0x5200, 0x5300), [0.75, 0.25])
-
-
-# 一个 LPU：48 颗 chip 摆成 12 层 × 4 列，两层一个 EP 组，共 6 组。组内那条蛇形
-# 链的走法与 MOE_GROUP_* 那一套同形，只是收尾改在最后一颗 chip 的 R core 上：链
-# 尾那颗 chip 从 N 口进来，链在坐着 E 口那一侧的 core 收尾，再经不派角色的那个
-# core 转两跳到 R core。
-MOE_LPU_GROUPS = 6
-MOE_LPU_CHIP_ORDER = [4, 0, 1, 5, 6, 2, 3, 7]
-MOE_LPU_TURN = [
-    (None, "n"), ("s", "e"), ("w", "s"), ("n", "e"),
-    ("w", "n"), ("s", "e"), ("w", "s"), ("n", "e"),
-]
-
-
-def write_moe_lpu(path):
-    """48 颗 chip、6 个 EP 组、384 个 core 的那一段。
-
-    组内的部分和沿蛇形链归约成组结果，落进本组的 R core；六个组的 R core 串成
-    一条链逐组相加，链首那一组的另一半一直是 0，加上去不改值。
-    """
-    groups = []
-    for g in range(MOE_LPU_GROUPS):
-        one = []
-        for i, chip in enumerate(MOE_LPU_CHIP_ORDER):
-            gy = g * 2 + chip // 4
-            gx = chip % 4
-            base = (gy * 4 + gx) * MOE_CHIP_CORES
-            for c in MOE_CHAIN[MOE_LPU_TURN[i]]:
-                one.append(base + c)
-        groups.append(one)
-    order = [g for one in groups for g in one]
-    write_moe_spread(path, "48 颗 chip、6 个 EP 组的 EPTP-NN 那一段",
-                     48, order, (0x20000, 0x40000, 0x60000), [0.75, 0.25],
-                     groups=groups)
+    """一颗第一列 chip：B core 起头广播，chip 内归约进 dot core，广播 FC2 输入，
+    concat 拼成 6144 个 BF16，从 E 口出去。它是一行的行首，行链只有它一跳，结果
+    原样出去。"""
+    one = kn_chip(kn_token(), 0, 0)
+    row = router_reduce([one["concat"]])
+    lines = kn_header("一颗第一列 chip 的 KN 那一段：chip 内归约、dot core、concat",
+                      ["group 0", "chips 0"] + kn_chip_lines("c0.", one) +
+                      [f"out {hbytes(row)}"])
+    write(path, lines)
 
 
 def write_moe_two_groups(path):
-    """两个 EP 组，各一颗 chip 8 个 core，两组的结果在 R core 上相加。
+    """一行两颗 chip：中间列（组内第 1 颗）加最后一列（组内第 3 颗）。两颗的结果
+    沿行链逐跳归约进最后一列那颗 chip 的 R core，它是链首，另一半一直是 0。"""
+    token = kn_token()
+    chips = [1, 3]
+    ones = [kn_chip(token, 0, c) for c in chips]
+    row = router_reduce([o["concat"] for o in ones])
+    out = rcore_add(row, None)
+    lines = []
+    for c, o in zip(chips, ones):
+        lines += kn_chip_lines(f"c{c}.", o)
+    lines = kn_header("一行两颗 chip：行链两跳落进 R core",
+                      ["group 0", f"chips {','.join(str(c) for c in chips)}"]
+                      + lines + [f"row0 {hbytes(row)}", f"out {hbytes(out)}"])
+    write(path, lines)
 
-    组内的部分和沿链逐跳归约成组结果。第一组是这个用户的链首，它的组结果直接
-    送到第二组的 R core 的后一半；第二组的组结果落前一半。R core 上 VU 把两半
-    相加，加法与 Router 上那一层同一条规矩：落回 FP32，每加一次 Clamp 一次。
-    """
-    chains = [[c for c in MOE_CHAIN[(None, "e")]],
-              [MOE_CHIP_CORES + c for c in MOE_CHAIN[(None, "s")]]]
-    order = [g for chain in chains for g in chain]
-    write_moe_spread(path, "两个 EP 组各一颗 chip，组结果在 R core 上相加",
-                     2, order, (0xC000, 0xE000, 0x10000), [0.75, 0.25],
-                     groups=chains)
+
+def kn_rows(token, groups):
+    """几个 EP 组：每组两行，每行 4 颗 chip 的结果沿行链归约进本行 R core，各行的
+    R core 逐行相加。返回每颗 chip 的中间量、每行的行链结果与每个 R core 的结果。"""
+    chips, rows, rcores = [], [], []
+    prev = None
+    for g in range(groups):
+        for layer in range(2):
+            ones = [kn_chip(token, g, layer * 4 + col) for col in range(4)]
+            chips.append(ones)
+            row = router_reduce([o["concat"] for o in ones])
+            rows.append(row)
+            prev = rcore_add(row, prev)
+            rcores.append(prev)
+    return chips, rows, rcores
 
 
 def write_moe_group(path):
-    """一个 EP 组 8 颗 chip、64 个 core 的那一段。
+    """一个 EP 组：两层 × 4 列 8 颗 chip。两行各沿行链归约进本行 R core，两个 R core
+    串成一条链，第二个的结果从右下角那颗 chip 的东口出去。"""
+    chips, rows, rcores = kn_rows(kn_token(), 1)
+    lines = []
+    for layer in range(2):
+        for col in range(4):
+            lines += kn_chip_lines(f"c{layer * 4 + col}.", chips[layer][col])
+    lines = kn_header("一个 EP 组 8 颗 chip：两行各进本行 R core，两个 R core 串链",
+                      ["group 0", "chips 0,1,2,3,4,5,6,7"] + lines +
+                      [f"row{r} {hbytes(rows[r])}" for r in range(2)] +
+                      [f"rcore{r} {hbytes(rcores[r])}" for r in range(2)] +
+                      [f"out {hbytes(rcores[-1])}"])
+    write(path, lines)
 
-    chip 之间的次序是 `MOE_GROUP_CHIP_ORDER`，每颗 chip 内部按它这一跳的转向从
-    `MOE_CHAIN` 取一条，两级拼成一条 64 跳的链。
+
+# 一个 LPU：48 颗 chip 摆成 12 层 × 4 列，两层一个 EP 组，共 6 组、12 行。
+MOE_LPU_GROUPS = 6
+
+
+def write_moe_lpu(path):
+    """48 颗 chip、6 个 EP 组、12 个 R core 的那一段。
+
+    每行 4 颗 chip 的结果进本行 R core，12 个 R core 逐行相加，第 11 行 R core 的
+    结果出核。每颗 chip 只留 concat，每行留行链结果与 R core 的结果。
     """
-    order = []
-    for i, chip in enumerate(MOE_GROUP_CHIP_ORDER):
-        for c in MOE_CHAIN[MOE_GROUP_TURN[i]]:
-            order.append(chip * MOE_CHIP_CORES + c)
-    write_moe_spread(path, "一个 EP 组 8 颗 chip、64 个 core 的 EPTP-NN 那一段",
-                     MOE_GROUP_CHIPS, order, (0x6000, 0x8000, 0xA000),
-                     [0.75, 0.25])
+    chips, rows, rcores = kn_rows(kn_token(), MOE_LPU_GROUPS)
+    lines = []
+    for r, ones in enumerate(chips):
+        for col, one in enumerate(ones):
+            lines.append(f"concat{r * 4 + col} {hbytes(one['concat'])}")
+    lines = kn_header("48 颗 chip、12 行的 KN 那一段：12 个 R core 逐行相加",
+                      [f"groups {MOE_LPU_GROUPS}"] + lines +
+                      [f"row{r} {hbytes(rows[r])}" for r in range(len(rows))] +
+                      [f"rcore{r} {hbytes(rcores[r])}"
+                       for r in range(len(rcores))] +
+                      [f"out {hbytes(rcores[-1])}"])
+    write(path, lines)
 
 
 def write(path, lines):
@@ -637,9 +722,10 @@ def write(path, lines):
     print(f"  {os.path.basename(path):<12} {len(lines) - 1} 条")
 
 
-# 一次要跑一分多钟的那几份。48 颗 chip 那一份要算 384 个 core，自检默认跳过它：
-# 同一段代码在 moe.txt 与 moe_chip.txt 上已经查过，跳的只是这一份的新鲜度。
-SLOW = ("moe_lpu.txt",)
+# 一次要跑很久的那几份。一颗 chip 的参考实现要算几秒，8 颗与 48 颗那两份自检默认
+# 跳过：同一段代码在 moe_chip.txt 与 moe_two_groups.txt 上已经查过，跳的只是这两份
+# 的新鲜度。
+SLOW = ("moe_group.txt", "moe_lpu.txt")
 
 
 def main(skip_slow=False):
@@ -652,9 +738,9 @@ def main(skip_slow=False):
     write_e2e(os.path.join(OUT_DIR, "e2e.txt"))
     write_moe(os.path.join(OUT_DIR, "moe.txt"))
     write_moe_chip(os.path.join(OUT_DIR, "moe_chip.txt"))
-    write_moe_group(os.path.join(OUT_DIR, "moe_group.txt"))
     write_moe_two_groups(os.path.join(OUT_DIR, "moe_two_groups.txt"))
     if not skip_slow:
+        write_moe_group(os.path.join(OUT_DIR, "moe_group.txt"))
         write_moe_lpu(os.path.join(OUT_DIR, "moe_lpu.txt"))
 
 

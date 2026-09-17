@@ -4,12 +4,18 @@
 // 把编译器产的那份 bundle 装进模型。
 //
 // 一套 bundle 占 `bundle/<拓扑名>/` 一个目录，里面两样：一份 .bachir 与三份
-// kernel 镜像。前者一行一条记录，装的是算好的路由表、任务链与 TS 的全局项；后者
-// 是三个 RV core 的镜像。每套自己带全，装载只看自己这个目录。
+// kernel 镜像。前者一行一条记录，装的是每颗 chip 的 core_bad_mask、算好的路由表、
+// 任务链与各 core 的全局项；后者是三个 RV core 的镜像。每套自己带全，装载只看
+// 自己这个目录。
 //
 // 真机上这是 SCP 的活：boot 期经 ctrl_noc 把每张表写进各 IP。这里走的是同一批
-// 配置口，只是直接调方法而不过 ctrl_noc，写入顺序照《SCP 工作流程》那一节：全局
-// 项与逐项任务链先写，最后写 TS_INIT_FINISH，自启动的 core 随即建满表项。
+// 配置口，只是直接调方法而不过 ctrl_noc，写入顺序照《SCP 工作流程》那一节：
+//   1. 全部 core 先写 core_bad_mask，再铺 RouterTable 与 Release 静态路由
+//   2. 好 core 写 kernel、DTE 的表、进核配置、全局项与逐项任务链，最后写
+//      TS_INIT_FINISH，自启动的 core 随即建满表项；坏 core 跳过这一步
+//
+// 应用之前先做装载检查，检查不过就断言，一项都不写。CORE 记录的角色只用在检查
+// 里，不写进模型。
 //
 // 记录的字段顺序与 compiler/hwconfig/bachir.py 的 render_plan 一一对应，改一边
 // 要一起改。
@@ -18,10 +24,12 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/log.h"
 #include "bach/ip/chip/chip.h"
+#include "bach/ip/lpu_grid.h"
 
 namespace latch {
 namespace bach {
@@ -36,11 +44,13 @@ struct BundleStat {
 
 namespace bundle_detail {
 
+using CoreKey = std::pair<uint64_t, uint64_t>;   // (chip 号, 片内 core 号)
+
 // 一个 core 上要装的全部东西，读完再一起应用：TS 的合规性检查在写
 // TS_INIT_FINISH 那一步做，任务链得先写全。
 struct CorePlan {
-  bool present = false;
-  uint64_t role = 0;              // 0 计算 1 广播 2 归约 3 不派角色
+  bool has_role = false;
+  CoreRole role = CoreRole::kSpare;
   uint64_t stream_num = 1;
   bool self_start = false;
   uint64_t bcast_dirs = 0;
@@ -55,10 +65,74 @@ struct CorePlan {
   uint64_t datain_pc = 0;
   bool datain_weights = false;
   bool has_datain = false;
+  InboundCfg dtein;                              // 业务模式下进核那一笔
+  bool has_dtein = false;
 };
 
 inline uint64_t Num(std::string const& s) {
   return uint64_t(std::stoull(s, nullptr, 0));
+}
+
+// 检查不过时报出是哪个 core、哪一条。
+inline void Require(bool ok, CoreKey const& key, char const* what) {
+  if (ok) return;
+  spdlog::error("LoadBundle: chip {} core {}：{}", key.first, key.second, what);
+  LOGCHECK(false, "LoadBundle: 装载检查没过。");
+}
+
+// core_bad_mask 至多 2 位为 1，每行至多 1 位。
+inline void CheckBadMask(uint64_t chip, uint64_t mask) {
+  uint64_t row_bad[2] = {0, 0};
+  for (uint64_t c = 0; c < kChipCoreNum; ++c) {
+    if ((mask >> c) & 1u) ++row_bad[c / kChipCols];
+  }
+  if (mask < (1ull << kChipCoreNum) && row_bad[0] <= 1 && row_bad[1] <= 1) {
+    return;
+  }
+  spdlog::error("LoadBundle: chip {} 的 core_bad_mask 是 0x{:03x}", chip, mask);
+  LOGCHECK(false, "LoadBundle: 一颗 chip 至多 2 个坏 core，一行至多 1 个。");
+}
+
+// 坏 core：不派角色，只有 RTAB 与 RELROUTE 两种记录，RTAB 表项一律不进 core、
+// op_type 为 transfer、不查 stream 表、不转存。
+inline void CheckBadCore(CoreKey const& key, CorePlan const& c) {
+  Require(c.role == CoreRole::kSpare, key, "坏 core 的角色要是不派角色");
+  Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
+              c.ts_route.empty() && c.dte_rtab.empty() && c.path_task.empty(),
+          key, "坏 core 上只能有 RTAB 与 RELROUTE");
+  for (auto const& one : c.rtab) {
+    RouteEntry const& e = one.second;
+    Require(e.path_core_bypass && e.op_type == OpType::kTransfer &&
+                !e.stream_table_enable && !e.stall_way,
+            key, "坏 core 的 RTAB 表项只能转发：不进 core、transfer、不查 stream "
+                 "表、留在 VC 等");
+  }
+}
+
+// 好 core：角色与体现角色的那几项配置对得上。
+inline void CheckRole(CoreKey const& key, CorePlan const& c) {
+  bool b = c.role == CoreRole::kBroadcast;
+  bool r = c.role == CoreRole::kReduce;
+  Require(c.bcast_dirs == 0 || b, key, "只有 B core 的 B_CORE_DIRECTION 非 0");
+  switch (c.role) {
+    case CoreRole::kCompute:
+      Require(!c.self_start, key, "计算 core 的 SELF_START 要是 0");
+      Require(c.has_dtein && c.dtein.route == Route::kRouterToCm, key,
+              "计算 core 的 DTEIN 要落 Core Mem");
+      break;
+    case CoreRole::kBroadcast:
+    case CoreRole::kReduce:
+      Require(c.has_cfg && c.self_start, key,
+              b ? "B core 的 SELF_START 要是 1" : "R core 的 SELF_START 要是 1");
+      Require(c.has_dtein && c.dtein.route == Route::kRouterToMm, key,
+              r ? "R core 的 DTEIN 要落 Matrix Mem"
+                : "B core 的 DTEIN 要落 Matrix Mem");
+      break;
+    case CoreRole::kSpare:
+      Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein,
+              key, "不派角色的 core 不能有 CFGMISC、TCHAIN、DATAIN、DTEIN");
+      break;
+  }
 }
 
 }  // namespace bundle_detail
@@ -67,8 +141,10 @@ inline uint64_t Num(std::string const& s) {
 // 配置是 name.bachir，kernel 镜像按记录里的文件名从同一个目录取。
 inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
                              std::string const& root, std::string const& name) {
+  using bundle_detail::CoreKey;
   using bundle_detail::CorePlan;
   using bundle_detail::Num;
+  using bundle_detail::Require;
 
   std::string dir = root + "/" + name;
   std::string path = dir + "/" + name + ".bachir";
@@ -78,7 +154,8 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     LOGCHECK(false, "LoadBundle: bundle 里没有这份配置。");
   }
 
-  std::map<std::pair<uint64_t, uint64_t>, CorePlan> plan;
+  std::map<CoreKey, CorePlan> plan;
+  std::map<uint64_t, uint64_t> bad_mask;   // chip 号 → core_bad_mask
   std::vector<std::string> images;   // 三个 RV core 各一份，按 RV core 号排
   images.resize(3);
   BundleStat stat;
@@ -95,13 +172,15 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     std::string const& tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && tok[1] == "8",
-               "LoadBundle: 只认 BACHIR 8 那一版产物。");
+      LOGCHECK(tok.size() == 2 && tok[1] == "9",
+               "LoadBundle: 只认 BACHIR 9 那一版产物。");
       head_ok = true;
       continue;
     }
     if (tag == "SOURCE" || tag == "NAME") continue;
     if (tag == "CHIP") {
+      LOGCHECK(tok.size() == 3, "LoadBundle: CHIP 记录要两个字段。");
+      bad_mask[Num(tok[1])] = Num(tok[2]);
       ++stat.chips;
       continue;
     }
@@ -117,13 +196,17 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       spdlog::error("LoadBundle: 记录 {} 少了 core 定位", tag);
       LOGCHECK(false, "LoadBundle: 记录少了 core 定位。");
     }
-    auto key = std::make_pair(Num(tok[1]), Num(tok[2]));
+    CoreKey key(Num(tok[1]), Num(tok[2]));
+    LOGCHECK(key.second < kChipCoreNum, "LoadBundle: core 号越界。");
     CorePlan& c = plan[key];
-    c.present = true;
 
     if (tag == "CORE") {
       LOGCHECK(tok.size() == 4, "LoadBundle: CORE 记录要三个字段。");
-      c.role = Num(tok[3]);
+      uint64_t role = Num(tok[3]);
+      LOGCHECK(role <= uint64_t(CoreRole::kSpare),
+               "LoadBundle: CORE 的角色只有 0～3。");
+      c.role = CoreRole(role);
+      c.has_role = true;
       ++stat.cores;
     } else if (tag == "CFGMISC") {
       LOGCHECK(tok.size() == 7, "LoadBundle: CFGMISC 记录要六个字段。");
@@ -151,6 +234,16 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       c.datain_pc = Num(tok[3]);
       c.datain_weights = Num(tok[4]) != 0;
       c.has_datain = true;
+    } else if (tag == "DTEIN") {
+      LOGCHECK(tok.size() == 7, "LoadBundle: DTEIN 记录要六个字段。");
+      uint64_t route = Num(tok[3]);
+      LOGCHECK(route <= 1,
+               "LoadBundle: DTEIN 的 route 只有 0 落 Core Mem、1 落 Matrix Mem。");
+      c.dtein.route = route == 0 ? Route::kRouterToCm : Route::kRouterToMm;
+      c.dtein.no_ack = Num(tok[4]) != 0;
+      c.dtein.flag_base = Num(tok[5]);
+      c.dtein.flag_entry_bytes = Num(tok[6]);
+      c.has_dtein = true;
     } else if (tag == "TSRTAB") {
       LOGCHECK(tok.size() == 6, "LoadBundle: TSRTAB 记录要五个字段。");
       c.ts_route[Num(tok[3])] = {Num(tok[4]), Num(tok[5])};
@@ -203,49 +296,71 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     LOGCHECK(false, "LoadBundle: 产物没有版本头。");
   }
 
-  // 装：kernel 与路由表先，任务链与全局项后，最后写 TS_INIT_FINISH。
+  // ── 装载检查 ──
+  for (auto const& it : bad_mask) {
+    LOGCHECK(it.first < chips.size(), "LoadBundle: chip 号越界。");
+    bundle_detail::CheckBadMask(it.first, it.second);
+    for (uint64_t core = 0; core < kChipCoreNum; ++core) {
+      auto found = plan.find(CoreKey(it.first, core));
+      Require(found != plan.end() && found->second.has_role,
+              CoreKey(it.first, core), "每颗 chip 的 10 个 core 都要有 CORE 记录");
+    }
+  }
   for (auto const& it : plan) {
-    uint64_t chip_id = it.first.first;
-    uint64_t core_id = it.first.second;
-    LOGCHECK(chip_id < chips.size(), "LoadBundle: chip 号越界。");
-    Core& core = chips[chip_id]->GetCore(core_id);
+    auto chip_it = bad_mask.find(it.first.first);
+    Require(chip_it != bad_mask.end(), it.first, "所在的 chip 没有 CHIP 记录");
+    bool bad = ((chip_it->second >> it.first.second) & 1u) != 0;
+    if (bad) {
+      bundle_detail::CheckBadCore(it.first, it.second);
+    } else {
+      bundle_detail::CheckRole(it.first, it.second);
+    }
+  }
 
-    for (auto const& one : it.second.rtab) {
+  // ── 装：先 core_bad_mask，再 Router 那两样，好 core 最后写 TS_INIT_FINISH ──
+  for (auto const& it : bad_mask) {
+    chips[it.first]->SetCoreBadMask(it.second);
+  }
+  for (auto const& it : plan) {
+    CorePlan const& c = it.second;
+    Core& core = chips[it.first.first]->GetCore(it.first.second);
+
+    for (auto const& one : c.rtab) {
       core.GetRouter().Preload(one.first, one.second);
     }
-    if (core.Context().router_only) continue;
+    for (auto const& one : c.release_route) {
+      core.GetRouter().SetCreditBypass(one.first, one.second);
+    }
+    if (core.Bad()) continue;
 
     for (uint64_t i = 0; i < images.size(); ++i) {
       if (!images[i].empty()) core.Rv(i).LoadImage(dir + "/" + images[i]);
     }
-    for (uint64_t path_id : it.second.dte_rtab) {
-      auto found = it.second.rtab.find(path_id);
-      LOGCHECK(found != it.second.rtab.end(),
+    for (uint64_t path_id : c.dte_rtab) {
+      auto found = c.rtab.find(path_id);
+      LOGCHECK(found != c.rtab.end(),
                "LoadBundle: RTABDTE 指的 path 在 RTAB 里没有。");
       core.GetDte().Tables().PreloadRtab(path_id, found->second);
     }
-    for (auto const& one : it.second.path_task) {
+    for (auto const& one : c.path_task) {
       core.GetDte().Tables().PreloadPathTask(one.first, one.second);
     }
-    for (auto const& one : it.second.ts_route) {
+    if (c.has_dtein) core.SetBusinessInboundCfg(c.dtein);
+    for (auto const& one : c.ts_route) {
       core.GetTs().Cfg().WriteRouterTable(one.first, one.second.first,
                                           one.second.second);
     }
-    for (auto const& one : it.second.release_route) {
-      core.GetRouter().SetCreditBypass(one.first, one.second);
+    if (c.has_cfg) {
+      core.GetTs().Cfg().SetStreamNum(c.stream_num);
+      core.GetTs().Cfg().SetSelfStart(c.self_start);
+      core.GetTs().Cfg().SetBCoreDirection(c.bcast_dirs);
+      core.GetTs().Cfg().SetTriggerChainEn(c.trigger_chain_en);
     }
-    if (it.second.has_cfg) {
-      core.GetTs().Cfg().SetStreamNum(it.second.stream_num);
-      core.GetTs().Cfg().SetSelfStart(it.second.self_start);
-      core.GetTs().Cfg().SetBCoreDirection(it.second.bcast_dirs);
-      core.GetTs().Cfg().SetTriggerChainEn(it.second.trigger_chain_en);
-    }
-    for (auto const& one : it.second.chain) {
+    for (auto const& one : c.chain) {
       core.GetTs().Cfg().WriteTask(one.first, one.second);
     }
-    if (it.second.has_datain) {
-      core.GetTs().Cfg().WriteDatainTask(it.second.datain_pc,
-                                         it.second.datain_weights);
+    if (c.has_datain) {
+      core.GetTs().Cfg().WriteDatainTask(c.datain_pc, c.datain_weights);
     }
     // 写 TS_INIT_FINISH：查整张配置表，自启动的 core 随即建满表项。
     core.GetTs().InitFinish();

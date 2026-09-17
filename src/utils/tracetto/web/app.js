@@ -33,7 +33,7 @@ const S = {
 
 // ── 波形上印的字 ──────────────────────────────────────────────────────
 // `User_id 77 MU 5 12拍`：单元从通道来（TS 那一行的三条通道分别是 DTE / MU / VU），
-// 不从行名里猜。认不出配对的段画淡一点、字写 `?`，颜色仍是本行的颜色。
+// 不从行名里猜。认不出是哪一笔的段画淡一点、字写 `?`，颜色仍是本行的颜色。
 function labelOf(unit, seg) {
   if (seg.user < 0 || seg.task < 0) return "?";
   return `User_id ${seg.user} ${unit} ${seg.task} ${seg.t1 - seg.t0}拍`;
@@ -59,7 +59,7 @@ async function loadInit() {
   $("title").textContent = "Tracetto · " + j.name;
   const ncore = S.chips.reduce((a, c) => a + c[1].length, 0);
   const nrole = S.chips.reduce((a, c) => a + c[1].filter((x) => x[1]).length, 0);
-  $("sub").textContent = `${S.chips.length} chip / ${nrole} 个派角色的 core（共 ${ncore}）/ `
+  $("sub").textContent = `${S.chips.length} chip / ${nrole} 个配了任务的 core（共 ${ncore}）/ `
     + `${S.lane_n.length / S.lanes_per_core} × ${S.rows.length} 行 / t_end ${S.t_end} · build ${S.build}`;
   const b = $("banner");
   if (S.missing.length) {
@@ -114,7 +114,7 @@ function renderTree() {
       };
     } else if (e.k === "core") {
       d.innerHTML = `<span class="caret">${e.role ? (S.expanded.has(e.lane_base) ? "▾" : "▸") : " "}</span>`
-        + `core${e.core}` + (e.role ? "" : " <span class=\"n\">只转发</span>");
+        + `core${e.core}` + (e.role ? "" : " <span class=\"n\">只有 Router</span>");
       if (e.role) d.onclick = () => {
         if (S.expanded.has(e.lane_base)) S.expanded.delete(e.lane_base);
         else S.expanded.add(e.lane_base);
@@ -425,7 +425,7 @@ function pick(px, py) {
 function showProps(p) {
   if (!p) { $("props").textContent = "点一个段看它的来龙去脉"; return; }
   const s = p.seg;
-  const what = s.user < 0 ? "<b>?</b>（没配对上下发）"
+  const what = s.user < 0 ? "<b>?</b>（认不出是哪一笔）"
     : `User_id <b>${s.user}</b> · ${p.unit} · task <b>${s.task}</b>`;
   $("props").innerHTML = `chip${p.chip} · core${p.core} · ${S.rows[p.row]}　${what}　`
     + `起 ${s.t0} 止 ${s.t1}　共 <b>${s.t1 - s.t0}</b> 拍`;

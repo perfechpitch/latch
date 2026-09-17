@@ -5,7 +5,8 @@
 // 过不去，所以参考实现不能图省事写成 std::inner_product。
 //
 // 三种输入格式各一条：BF16 无 block scale 走顺序加，MXFP8 与 MXFP4 走按块分组
-// 累加。再加 AGU 的地址序、结果写回的编码，和整条装配跑一笔任务。
+// 累加，MXFP8 × MXFP8 再加权重的 scale。物理阵列是 1×K128×N64，vlane = 2 时是
+// 1×K64×N128。再加 AGU 的地址序、结果写回的编码，和整条装配跑一笔任务。
 
 #include <gtest/gtest.h>
 
@@ -13,6 +14,7 @@
 #include <sstream>
 
 #include <deque>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -31,11 +33,13 @@ void EnsureSlots() { RT::Reset(8, 8); }
 
 // ── 参考实现 ──
 //
-// 按硬件的顺序算一次原语：块内先把乘积加完再乘 scale，块间顺序加。
+// 按硬件的顺序算一次原语：块内先把乘积加完再乘 scale，块间顺序加。权重也带
+// scale 时（按列排，一列 K / block 个）块内部分和乘两个 scale 之积。
 std::vector<float> Reference(MuTaskCfg const& cfg,
                              std::vector<uint8_t> const& token,
                              std::vector<uint8_t> const& weight,
-                             std::vector<uint8_t> const& scale) {
+                             std::vector<uint8_t> const& scale,
+                             std::vector<uint8_t> const& wscale = {}) {
   uint64_t k = cfg.PrimK();
   uint64_t n = cfg.PrimN();
   uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
@@ -64,12 +68,18 @@ std::vector<float> Reference(MuTaskCfg const& cfg,
     if (block == 0) {
       for (uint64_t i = 0; i < k; ++i) acc += prod[i];
     } else {
+      uint64_t nb = k / block;
       for (uint64_t blk = 0; blk * block < k; ++blk) {
         float part = 0.0f;
         for (uint64_t i = blk * block; i < (blk + 1) * block; ++i) {
           part += prod[i];
         }
-        acc += part * sc[blk];
+        float s = sc[blk];
+        if (!wscale.empty()) {
+          std::vector<uint8_t> one = {wscale[j * nb + blk]};
+          s = s * numeric::DecodeScale(cfg.dtype_ab, one, 1)[0];
+        }
+        acc += part * s;
       }
     }
     float r = numeric::ClampNanInf(acc);
@@ -169,8 +179,10 @@ class Probe : public BachModule {
   MatrixExe& exe;
 };
 
-// 跑一次原语，把 matrix exe 的结果与参考实现逐 bit 比。
-void CheckPrimitive(MuTaskCfg const& cfg, uint64_t seed) {
+// 跑一次原语，把 matrix exe 的结果与参考实现逐 bit 比。with_wscale 为真时权重
+// 也带 scale（MXFP8 × MXFP8）。
+void CheckPrimitive(MuTaskCfg const& cfg, uint64_t seed,
+                    bool with_wscale = false) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   MatrixExe exe(clk, "exe");
@@ -184,15 +196,18 @@ void CheckPrimitive(MuTaskCfg const& cfg, uint64_t seed) {
   std::vector<uint8_t> scale =
       block == 0 ? std::vector<uint8_t>()
                  : TameScale(cfg.dtype_ab, k / block, seed + 13);
+  std::vector<uint8_t> wscale =
+      with_wscale ? TameScale(cfg.dtype_ab, n * (k / block), seed + 17)
+                  : std::vector<uint8_t>();
   (void)elem_bits;
 
-  exe.Issue(cfg, token, weight, scale);
+  exe.Issue(cfg, token, weight, scale, wscale);
   clk->Continue((kMuLaneDepth + 4) * kPeriod);
   RT::JoinAll();
 
   ASSERT_TRUE(exe.HasResult());
   MatrixExe::Result r = exe.TakeResult();
-  std::vector<float> want = Reference(cfg, token, weight, scale);
+  std::vector<float> want = Reference(cfg, token, weight, scale, wscale);
   ASSERT_EQ(r.out.size(), want.size());
   for (size_t i = 0; i < want.size(); ++i) {
     EXPECT_EQ(numeric::BitsOf(r.out[i]), numeric::BitsOf(want[i]))
@@ -229,14 +244,24 @@ TEST(Mu, PrimitiveOutBf16) {
   CheckPrimitive(cfg, 0x4567);
 }
 
-TEST(Mu, PrimitiveK128N64) {
-  // 另一档物理阵列规格：1×K128×N64，输出带宽 256 B。
+TEST(Mu, PrimitiveMxfp8TimesMxfp8) {
+  // 权重也带 scale：块内部分和乘 token 与权重两个 scale 之积。
   MuTaskCfg cfg;
-  cfg.prim_k128_n64 = true;
   cfg.dtype_ab = numeric::DataType::kMxfp8;
   EXPECT_EQ(cfg.PrimK(), 128u);
   EXPECT_EQ(cfg.PrimN(), 64u);
-  CheckPrimitive(cfg, 0x5678);
+  CheckPrimitive(cfg, 0x5678, /*with_wscale=*/true);
+}
+
+TEST(Mu, PrimitiveVlane2IsK64N128) {
+  // 物理阵列 K128×N64 开 vlane = 2：每个 lane 在第 64 个输入处断开，一次出两个
+  // 半长的点积，原语就是 1×K64×N128。
+  MuTaskCfg cfg;
+  cfg.vlane = 2;
+  cfg.dtype_ab = numeric::DataType::kMxfp8;
+  EXPECT_EQ(cfg.PrimK(), 64u);
+  EXPECT_EQ(cfg.PrimN(), 128u);
+  CheckPrimitive(cfg, 0x6789, /*with_wscale=*/true);
 }
 
 TEST(Mu, AccumOrderIsPartOfResult) {
@@ -344,7 +369,7 @@ TEST(Mu, TriggerLatchesConfig) {
    protected:
     void Step() override {
       static const std::pair<uint64_t, uint64_t> kSeq[] = {
-          {kMuTaskCfg, 0x9u},          // PRIM_TYPE=1、DTYPE_AB=01（MXFP8）
+          {kMuTaskCfg, 0xBu},          // PRIM_TYPE=1、VLANE=01、DTYPE_AB=01
           {kMuTaskBlock, 0x00020003u}, // KBLOCK=3、NBLOCK=2
           {kMuAddrToken, 0x1000u},
           {kMuAddrOut, 0x8000u},
@@ -371,7 +396,9 @@ TEST(Mu, TriggerLatchesConfig) {
 
   ASSERT_TRUE(reg.HasPending());
   MuTaskCfg cfg = reg.TakePending();
-  EXPECT_TRUE(cfg.prim_k128_n64);
+  EXPECT_EQ(cfg.vlane, 2u);
+  EXPECT_EQ(cfg.PrimK(), 64u);
+  EXPECT_EQ(cfg.PrimN(), 128u);
   EXPECT_EQ(cfg.dtype_ab, numeric::DataType::kMxfp8);
   EXPECT_EQ(cfg.kblock, 3u);
   EXPECT_EQ(cfg.nblock, 2u);
@@ -435,7 +462,8 @@ namespace {
 // ── 整条装配 ──
 
 // 扮演 Core Mem 或 Matrix Mem：一块字节数组，收得下、隔若干拍回响应。
-// scale_en 置位时把 scale 段附在正文之后一起回。
+// scale 与数据地址一一映射，每 32 B 一个；正文接 scale 的读把 [addr, addr + bytes)
+// 覆盖到的那几组接在正文后面，与 BankedMem 的 scale 旁带同一个口径。
 class MuMem : public BachModule {
  public:
   MuMem(ClockPtr c, const std::string& name, MemPort& p, uint64_t bytes,
@@ -443,13 +471,17 @@ class MuMem : public BachModule {
       : BachModule(c, name), port(p), mem(bytes, 0), latency(delay) {}
 
   std::vector<uint8_t> mem;
-  // scale 与 token 一一映射：第 i 段 token 配第 i 段 scale。段号要从 token 的
-  // 基址算起，直接拿绝对地址除会落到别处去。
-  uint64_t token_base = 0, scale_base = 0, scale_stride = 0;
+  std::map<uint64_t, uint8_t> scale;   // 按组号存
   uint64_t reads = 0, writes = 0;
 
   void Poke(uint64_t at, std::vector<uint8_t> const& v) {
     for (uint64_t i = 0; i < v.size() && at + i < mem.size(); ++i) mem[at + i] = v[i];
+  }
+  // 从 at 那一组起铺几组 scale。
+  void PokeScale(uint64_t at, std::vector<uint8_t> const& v) {
+    for (uint64_t k = 0; k < v.size(); ++k) {
+      scale[at / kScaleGroupBytes + k] = v[k];
+    }
   }
   std::vector<uint8_t> Peek(uint64_t at, uint64_t n) const {
     std::vector<uint8_t> v;
@@ -491,11 +523,12 @@ class MuMem : public BachModule {
       return;
     }
     auto data = std::make_shared<ByteBlock>(Peek(addr, n));
-    if (port.req_scale_en.Get() != 0 && scale_stride != 0) {
-      // scale 与数据一一映射：一段 token 对应一段 scale。
-      uint64_t at = scale_base + ((addr - token_base) / n) * scale_stride;
-      std::vector<uint8_t> sc = Peek(at, scale_stride);
-      data->insert(data->end(), sc.begin(), sc.end());
+    if (port.req_scale_en.Get() == kScaleWithData) {
+      uint64_t groups = (n + kScaleGroupBytes - 1) / kScaleGroupBytes;
+      for (uint64_t k = 0; k < groups; ++k) {
+        auto it = scale.find(addr / kScaleGroupBytes + k);
+        data->push_back(it == scale.end() ? 0 : it->second);
+      }
     }
     pipe.push_back({now + latency, data});
     ++reads;
@@ -582,7 +615,7 @@ TEST(Mu, AssemblySingleTile) {
   mmem.Poke(want.addr_weight, weight);
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, 0);
+  writer.Push(kMuTaskCfg, kMuPrimK128N64);
   writer.Push(kMuTaskBlock, 1u | (1u << 16));
   writer.Push(kMuAddrToken, want.addr_token);
   writer.Push(kMuAddrWeight, want.addr_weight);
@@ -662,7 +695,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   mmem.Poke(want.addr_weight + 0 * want.b_expert_stride, wgt[1]);
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, 0);
+  writer.Push(kMuTaskCfg, kMuPrimK128N64);
   writer.Push(kMuTaskBlock, 1u | (1u << 16));
   writer.Push(kMuAddrToken, want.addr_token);
   writer.Push(kMuAddrWeight, want.addr_weight);
@@ -751,7 +784,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   mmem.Poke(want.addr_weight + 0 * want.b_expert_stride, wgt[1]);
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, 0);
+  writer.Push(kMuTaskCfg, kMuPrimK128N64);
   writer.Push(kMuTaskBlock, 1u | (1u << 16));
   writer.Push(kMuAddrToken, want.addr_token);
   writer.Push(kMuAddrWeight, want.addr_weight);
@@ -783,9 +816,10 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   }
 }
 
-TEST(Mu, AssemblyRunsAllTiles) {
-  // 一笔任务是 kblock × nblock 次原语。整条装配跑完，每个 tile 的结果都要与
-  // 参考实现逐 bit 相同，dsa_done 只报一次。
+// 一笔任务是 kblock × nblock 次原语。整条装配跑完，每个 tile 的结果都要与参考
+// 实现逐 bit 相同，dsa_done 只报一次。token 与权重都是 MXFP8、都带 scale，scale 由
+// 存储按数据地址一一对应地接在正文后面。
+void RunAllTiles(uint64_t vlane) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   MuCfg setting;
@@ -802,11 +836,11 @@ TEST(Mu, AssemblyRunsAllTiles) {
 
   MuTaskCfg want;
   want.dtype_ab = numeric::DataType::kMxfp8;
+  want.vlane = vlane;
   want.kblock = 2;
   want.nblock = 2;
   want.addr_token = 0x1000;
   want.addr_weight = 0x0;
-  want.addr_scale = 0x8000;
   want.addr_out = 0x20000;
   want.stream_id = 4;
   want.task_id = 11;
@@ -819,28 +853,28 @@ TEST(Mu, AssemblyRunsAllTiles) {
   MuMem cmem(clk, "cmem", *cmem_rd, 0x40000, 13);
   MuMem mmem(clk, "mmem", *mmem_rd, 0x40000, 16);
   MuMem outmem(clk, "outmem", *cmem_wr, 0x40000, 13);
-  cmem.token_base = want.addr_token;
-  cmem.scale_base = want.addr_scale;
-  cmem.scale_stride = sc_bytes;
 
-  // 每个 tile_K 一份 token 与一份 scale，每个 (n, k) 一份 weight。
+  // 每个 tile_K 一段 token 与它那几个 scale，每个 (n, k) 一块权重与它那几个
+  // scale。vlane = 2 时一段 token 只有 64 B，第二段从一行的中间开始。
   for (uint64_t ki = 0; ki < want.kblock; ++ki) {
     cmem.Poke(want.addr_token + ki * tok_bytes,
               TamePattern(want.dtype_ab, k, 0x600 + ki));
-    cmem.Poke(want.addr_scale + ki * sc_bytes,
-              TameScale(want.dtype_ab, sc_bytes, 0x700 + ki));
+    cmem.PokeScale(want.addr_token + ki * tok_bytes,
+                   TameScale(want.dtype_ab, sc_bytes, 0x700 + ki));
   }
   for (uint64_t i = 0; i < want.kblock * want.nblock; ++i) {
     mmem.Poke(want.addr_weight + i * wgt_bytes,
               TamePattern(want.dtype_ab, k * n, 0x800 + i));
+    mmem.PokeScale(want.addr_weight + i * wgt_bytes,
+                   TameScale(want.dtype_ab, n * sc_bytes, 0x900 + i));
   }
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, uint64_t(1) << 3);            // DTYPE_AB = 01（MXFP8）
+  writer.Push(kMuTaskCfg, kMuPrimK128N64 | ((vlane - 1) << 1) |
+                              (uint64_t(1) << 3));     // DTYPE_AB = 01（MXFP8）
   writer.Push(kMuTaskBlock, want.kblock | (want.nblock << 16));
   writer.Push(kMuAddrToken, want.addr_token);
   writer.Push(kMuAddrWeight, want.addr_weight);
-  writer.Push(kMuAddrScale, want.addr_scale);
   writer.Push(kMuAddrOut, want.addr_out);
   writer.Push(kMuStreamId, want.stream_id);
   writer.Push(kMuTaskId, want.task_id);
@@ -860,12 +894,15 @@ TEST(Mu, AssemblyRunsAllTiles) {
   for (uint64_t ni = 0; ni < want.nblock; ++ni) {
     std::vector<float> ref;
     for (uint64_t ki = 0; ki < want.kblock; ++ki) {
+      uint64_t i = ni * want.kblock + ki;
       std::vector<uint8_t> token = TamePattern(want.dtype_ab, k, 0x600 + ki);
       std::vector<uint8_t> scale =
           TameScale(want.dtype_ab, sc_bytes, 0x700 + ki);
       std::vector<uint8_t> weight =
-          TamePattern(want.dtype_ab, k * n, 0x800 + (ni * want.kblock + ki));
-      std::vector<float> part = Reference(want, token, weight, scale);
+          TamePattern(want.dtype_ab, k * n, 0x800 + i);
+      std::vector<uint8_t> wscale =
+          TameScale(want.dtype_ab, n * sc_bytes, 0x900 + i);
+      std::vector<float> part = Reference(want, token, weight, scale, wscale);
       if (ki == 0) {
         ref = part;
         continue;
@@ -883,6 +920,10 @@ TEST(Mu, AssemblyRunsAllTiles) {
     }
   }
 }
+
+TEST(Mu, AssemblyRunsAllTiles) { RunAllTiles(1); }
+
+TEST(Mu, AssemblyRunsAllTilesVlane2) { RunAllTiles(2); }
 
 }  // namespace
 
@@ -921,17 +962,17 @@ numeric::DataType TypeByName(std::string const& name) {
   return numeric::DataType::kFp32;
 }
 
-// ffn.txt 里的一条 gemm。
+// ffn.txt 里的一条 gemm 或 gemm_ws。后者多一栏权重的 scale。
 struct GemmCase {
   numeric::DataType dtype = numeric::DataType::kBf16;
   uint64_t k = 0, n = 0;
   bool out_bf16 = false;
-  std::vector<uint8_t> token, weight, scale;
+  std::vector<uint8_t> token, weight, scale, wscale;
   std::vector<float> want;
 };
 
-// 只取 MU 那两条原语形状的：K=256×N=32 与 K=128×N=64。别的形状 matrix exe
-// 发不出去。
+// 只取 MU 那两条原语形状的：K=128×N=64 与 vlane = 2 的 K=64×N=128。别的形状
+// matrix exe 发不出去。
 std::vector<GemmCase> ReadPrimCases() {
   std::vector<GemmCase> out;
   std::ifstream f(VectorPath());
@@ -942,17 +983,19 @@ std::vector<GemmCase> ReadPrimCases() {
     std::vector<std::string> col;
     std::string tok;
     while (is >> tok) col.push_back(tok);
-    if (col.size() != 9 || col[0] != "gemm") continue;
+    bool ws = col.size() == 10 && col[0] == "gemm_ws";
+    if (!ws && (col.size() != 9 || col[0] != "gemm")) continue;
     GemmCase c;
     c.k = std::stoull(col[2]);
     c.n = std::stoull(col[3]);
-    if (!((c.k == 256 && c.n == 32) || (c.k == 128 && c.n == 64))) continue;
+    if (!((c.k == 64 && c.n == 128) || (c.k == 128 && c.n == 64))) continue;
     c.dtype = TypeByName(col[1]);
     c.out_bf16 = col[4] == "1";
     c.token = HexBytes(col[5]);
     c.weight = HexBytes(col[6]);
     c.scale = HexBytes(col[7]);
-    c.want = HexFloats(col[8]);
+    if (ws) c.wscale = HexBytes(col[8]);
+    c.want = HexFloats(col[ws ? 9 : 8]);
     out.push_back(c);
   }
   return out;
@@ -971,14 +1014,14 @@ TEST(Mu, MatchesPythonReference) {
     MuTaskCfg cfg;
     cfg.dtype_ab = c.dtype;
     cfg.out_bf16 = c.out_bf16;
-    cfg.prim_k128_n64 = (c.k == 128);
+    cfg.vlane = c.k == 64 ? 2 : 1;
     ASSERT_EQ(cfg.PrimK(), c.k);
     ASSERT_EQ(cfg.PrimN(), c.n);
 
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     MatrixExe exe(clk, "exe");
-    exe.Issue(cfg, c.token, c.weight, c.scale);
+    exe.Issue(cfg, c.token, c.weight, c.scale, c.wscale);
     clk->Continue((kMuLaneDepth + 4) * kPeriod);
     RT::JoinAll();
 

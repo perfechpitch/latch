@@ -76,6 +76,15 @@ class TraceServer(ThreadingHTTPServer):
             cf.close()
         self._cores.clear()
         self._core_order.clear()
+        # 通道号的基址 → core 文件号。基址按有数据的 core 依次排，文件号按树上全部 core
+        # 依次排，两者在只有 Router 在用的 core 之后就错开了，所以要查表，不能相除。
+        self.core_of_base: Dict[int, int] = {}
+        ci = 0
+        for _chip, cores in manifest["chips"]:
+            for _core, _role, lane_base in cores:
+                if lane_base >= 0:
+                    self.core_of_base[lane_base] = ci
+                ci += 1
 
     def core(self, ci: int) -> index.CoreFile:
         """按需打开一个 core 文件，开着的最多 `MAX_OPEN_CORES` 个。"""
@@ -199,15 +208,14 @@ class Handler(SimpleHTTPRequestHandler):
         pos = 0
         try:
             for lane_id in lanes:
-                # 通道号是「core 序号 × 一个 core 几条通道 + 通道号」，步长与
-                # 显示成几行无关（TS 那一行是由三条通道叠出来的）。
-                ci, row = divmod(lane_id, srv.manifest["lanes_per_core"])
-                if ci >= len(srv.manifest["core_size"]):
-                    continue
-                # 不派角色的 core 没有索引文件（manifest 里 core_size 记 0），它本来
-                # 就没有行：跳过。不能落到下面那个 FileNotFoundError 上 —— 那是留给
-                # 「索引文件在跑的时候被人删了」的。
-                if srv.manifest["core_size"][ci] == 0:
+                # 通道号是「这个 core 的基址 + 通道号」，基址按有数据的 core 依次排，
+                # 步长与显示成几行无关（TS 那一行是由三条通道叠出来的）。只有 Router 在
+                # 用的 core 没有基址，也没有索引文件：查不到就跳过。不能落到下面那个
+                # FileNotFoundError 上 —— 那是留给「索引文件在跑的时候被人删了」的。
+                lpc = srv.manifest["lanes_per_core"]
+                row = lane_id % lpc
+                ci = srv.core_of_base.get(lane_id - row)
+                if ci is None:
                     continue
                 cf = srv.core(ci)
                 w = cf.window(row, t0, t1, px)

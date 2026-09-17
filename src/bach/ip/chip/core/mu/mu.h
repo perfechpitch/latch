@@ -248,13 +248,15 @@ class Mu {
         drain = MuDrain::kBlock;
         return;
       }
-      // token 请求带上 scale：block scale 与 token 一一映射，地址由 AGU 的
-      // ScaleAddr 推出来，不占独立的读通道。
+      // token 与权重的请求都带上 scale：block scale 与数据一一映射，存储把它
+      // 从 scale 旁带里取出来接在正文后面，不占独立的读通道。权重只有 MXFP8
+      // 那一档带。
       bool has_scale = f->agu.ScaleBytes() != 0;
       mu.token_ldq->Push(
           {f->agu.TokenAddr(s), f->agu.TokenBytes(), f->seq, has_scale});
       mu.weight_ldq->Push({f->agu.WeightAddr(s, mu.LocalEpOf(*f, s.e_idx)),
-                           f->agu.WeightBytes(), f->seq, false});
+                           f->agu.WeightBytes(), f->seq,
+                           f->agu.WeightScaleBytes() != 0});
       f->out_addr.push_back(f->agu.OutAddr(s));
       ++f->issued;
       f->stage = MuStage::kLoading;
@@ -297,6 +299,16 @@ class Mu {
       if (t.data.size() > body) {
         scale.assign(t.data.begin() + body, t.data.end());
       }
+      // 权重那一块同样是正文后面接 scale。
+      uint64_t wbody = f->agu.WeightBytes();
+      std::vector<uint8_t> weight(w.data.begin(),
+                                  w.data.begin() + (w.data.size() < wbody
+                                                        ? w.data.size()
+                                                        : wbody));
+      std::vector<uint8_t> wscale;
+      if (w.data.size() > wbody) {
+        wscale.assign(w.data.begin() + wbody, w.data.end());
+      }
       uint64_t at = f->computed < f->out_addr.size() ? f->out_addr[f->computed]
                                                      : 0;
       // tile 的循环顺序由内往外是 K、专家、N，所以同一列的几段与这一列的几个
@@ -305,8 +317,8 @@ class Mu {
       uint64_t ne = f->cfg.Experts();
       uint64_t ki = f->computed % kb;
       uint64_t ei = (f->computed / kb) % ne;
-      mu.exe->Issue(f->cfg, token, w.data, scale, at, ki == 0, ki + 1 == kb,
-                    ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
+      mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
+                    ki + 1 == kb, ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
       ++f->computed;
       f->stage = MuStage::kComputing;
     }

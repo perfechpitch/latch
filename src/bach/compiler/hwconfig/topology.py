@@ -1,7 +1,7 @@
 """读一份拓扑描述，展开成一套硬件配置。
 
-描述给的是参数：阵列摆几颗 chip、每颗什么形状、广播从哪进来往哪几个口出、部分
-和按什么次序归约。这一层按 `layer` 分派给对应的展开器，交出来的 Plan 里是逐
+描述给的是参数：阵列摆几行几列、每一列 chip 是哪一种、几个 EP 组、token 从不从
+B core 进来。这一层按 `layer` 分派给对应的展开器，交出来的 Plan 里是逐
 core 逐 path 的路由表与逐 core 的任务链，直接就是硬件要的形式。
 """
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import moe
 
-LAYERS = {"moe": moe.build_plan, "moe_lpu": moe.build_lpu_plan}
+LAYERS = {"moe": moe.build_plan}
 
 
 def load(path, kmap=None):

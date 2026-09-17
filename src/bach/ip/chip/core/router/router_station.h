@@ -71,7 +71,8 @@ class RouterStation : public BachModule {
     level = std::move(wire);
   }
 
-  // 只透传的 core：不投递本 core、不检查 credit、不支持阻塞重发。
+  // 透传档，坏 core 的 Router 由 core_bad_mask 打开：不投递本 core、不检查业务
+  // credit、不支持阻塞重发。
   void SetPassThrough(bool on) { pass_through = on; }
 
   uint64_t Occupancy() const { return occupancy.Get(); }

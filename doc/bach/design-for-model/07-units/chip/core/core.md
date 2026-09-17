@@ -134,7 +134,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
 <rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
 <text x="336" y="751" font-size="11" fill="#111827" font-weight="600">Matrix Mem</text>
-<text x="336.0" y="768.0" font-size="8.5" fill="#475569">mmem_bank ×64，每 bank 0.5625 MB，合计 32 + 4 MB（scale : data = 1 : 8）</text>
+<text x="336.0" y="768.0" font-size="8.5" fill="#475569">mmem_bank ×64，每 bank 0.5625 MB，合计 32 + 4 MB；scale 区按 1 : 8 留，MXFP8 每 128 B 用 4 B</text>
 <text x="336.0" y="781.5" font-size="8.5" fill="#475569">最大带宽 (8 + 1) KB/T；地址粒度 128 B，不支持 byte mask</text>
 <text x="336.0" y="795.0" font-size="8.5" fill="#475569">master：DTE DSA 读写 256 B/T（写 9T 读 8T）· MU 只读 (8+1) KB/T（8T）</text>
 <text x="336.0" y="808.5" font-size="8.5" fill="#475569">　　　　ctrl_noc 4 B/T（地址对齐 128 B，数据粒度 4 B，burst ≤ 32）</text>
@@ -163,7 +163,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 32 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
 <text x="1029.0" y="1105.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
 <text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
-<text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份，不派角色的 core 也有</text>
+<text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份；坏 core 上只有它步进，处在透传档</text>
 <polygon points="125.0,44 228.0,44 219.0,74 116.0,74" fill="#f8fafc" stroke="#374151"/>
 <text x="172.0" y="58.0" font-size="9" fill="#374151" text-anchor="middle">async_int → SCP</text>
 <text x="172.0" y="69.0" font-size="7.5" fill="#6b7280" text-anchor="middle">core 的中断异常信息</text>
@@ -267,7 +267,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1524" y="681.0" font-size="8.5" fill="#4b5563" text-anchor="start">三个 R2R 方向各 256 B/T 双向，接相邻 core 的 Router</text>
 <text x="1524" y="694.5" font-size="8.5" fill="#4b5563" text-anchor="start">　或 chip 边界的 C2C Bridge；线上跑 flit，另有</text>
 <text x="1524" y="708.0" font-size="8.5" fill="#4b5563" text-anchor="start">　vc_release / stream_release / reduce_release 回程</text>
-<text x="20" y="1298" font-size="10.5" fill="#374151" text-anchor="start">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接。不派角色的 core 只构造 Router 的八个模块，其余一律不构造。Router 贴底边朝 chip 中部：data_L / data_R 走左右，data_UD 走底边。</text>
+<text x="20" y="1298" font-size="10.5" fill="#374151" text-anchor="start">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接，坏 core 也一样构造，只是只有 Router 步进。Router 贴底边朝 chip 中部：data_L / data_R 走左右，data_UD 走底边。</text>
 </svg>
 ```
 
@@ -281,12 +281,13 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 
 | 编号 | 功能 |
 | - | - |
-| F1 | `router_only` 为假时构造七个单元的全部模块：Router 八个、TS 九个、三个 RV core、三个 DSA 的各模块、三块存储与 ctrl_noc 端点 |
-| F2 | `router_only` 为真时只构造 Router 的八个模块，这一档只有边界 chip 里不派角色的那个 core 用。CoreStation 永远不准入，ReduceModule 不累加，CoreMemCreditMonitor 空转，`stream_credit` 上电默认 0 |
+| F1 | 构造七个单元的全部模块：Router 八个、TS 九个、三个 RV core、三个 DSA 的各模块、三块存储与 ctrl_noc 端点。构造时不区分坏 core 与角色，每个 core 一律如此 |
+| F2 | 坏 core 标记运行期写入：SCP 在 Router 配置阶段写 Router 的 `core_bad_mask`，Router 取本 core 那一位，为 1 就切进透传档，只允许在业务开始前切换。坏 core 的 ready 恒为真；逐拍推进、记波形与判空闲都只算 Router，TS、RV core、DSA 与存储不步进、不配置、不记波形。透传档里 Router 怎么转发在 [`router.md`](router.md) |
 | F3 | 按各单元文档声明的端口组把生产者的出口端口与消费者的入口端口对接；两侧只看到端口束的字段，不持有对方的类型，装配顺序不受构造顺序牵制 |
 | F4 | 把 Router 三个 RouterStation 的对外端口引到 `data_L` / `data_UD` / `data_R` |
 | F5 | 把 ctrl_noc 端点的入口引到 `cfg`，出口按 `addr_map` 接到各模块的 `cfg` 口 |
-| F6 | 建立只读的 `core_context`（`core_id`、全局坐标、角色、`router_only`），core 内各模块共用 |
+| F6 | 建立只读的 `core_context`（`core_id`、全局坐标），core 内各模块共用 |
+| F6a | core 不保存角色，行为逐项取自配置：自启动取自 TS 的 `SELF_START`；B core 搬出查哪几个方向取自 `B_CORE_DIRECTION`，为 0 时按本 core 的进核资源查；进核落点、Ack 与标志表取自 DTE 的进核配置。不派角色的 core 这几项都不配，TS 没有任务链 |
 
 ### 跨单元的约定
 
@@ -334,7 +335,7 @@ port ready (master, 电平, clk)                   // 三个 RV core 都进 wait
 Core 自己只有一份只读上下文，各单元的存储在各自文档的“存储器”一章。
 
 ```
-mem core_context   FF   {core_id[3:0], gx[1:0], gy[3:0], role[2:0], router_only}   1R   构造期写入   复位由输入给   // 各模块共用的只读上下文
+mem core_context   FF   {core_id[3:0], gx[1:0], gy[3:0]}   1R   构造期写入   复位由输入给   // 各模块共用的只读上下文；坏 core 标记在 Router 的 core_bad_mask 里，运行期写入
 ```
 
 ***
@@ -355,7 +356,7 @@ Core 只有构造期的接线，没有逐级行为。各单元的第 2 层图待
 
 ```
 R2R 方向        3 个（left / right / mid），各 256 B/T 双向，进 core 与出 core 并行
-CORE_PER_CHIP   中间列 chip 8（2×4），第一列与最后一列 chip 10（2×5）；都按 row-major 编号
+CORE_PER_CHIP   10（2×5），行优先编号；中间两列 chip 的 core2、core7 是坏 core
 stream_num      1～16，软件配；决定 Core Mem 的分片数
 core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← Matrix Mem 8 KB/T
                 MU ↔ Core Mem 132 B/T · VU ↔ Core Mem 132 B/T · DTE ↔ Core / Matrix Mem 各 256 B/T
@@ -372,7 +373,8 @@ core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← 
 | 机制 | 功能 | 用例 |
 | - | - | - |
 | core 的一切进出都过 Router，没有旁路 | F4 | `core_ports` |
-| 不派角色的 core 只构造 Router 的八个模块 | F2 | `spare_core_router_only` |
+| 坏 core 照样构造全部模块，由 `core_bad_mask` 运行期切进透传档，只有 Router 步进 | F1、F2 | `bad_core_pass_through` |
+| core 不保存角色，行为逐项取自配置 | F6、F6a | `role_from_config` |
 | 模块之间只通过端口相连，装配顺序不受构造顺序牵制 | F3 | `core_wiring` |
 | 一个 task 的共同形状：RV core 发完异步指令立刻交还自己 | F7 | `task_shape` |
 | 只做标量活的 task 不调 DSA，RV core 自己报完成 | F8 | `scalar_only_task` |
@@ -393,8 +395,13 @@ core 内通路带宽  ctrl_noc 32 bit/T · Router ↔ DTE 256 B/T ×2 · MU ← 
 
 * **Core 为什么是装配容器而不是模块**
   * 它没有自己的一拍工作，全部逐拍行为在七个单元的模块里
-* **不派角色的 core 为什么仍然构造 Router**
-  * 它要承担单向转发、router multicast、router-level reduce，以及三类 credit 的透传，还坐在 chip 接 PCIe Switch 的那个口上
+* **坏 core 为什么照样构造全部模块**
+  * 硅片上 10 个 core 都在，坏 core 由上电锁存的 `core_bad_mask` 关掉
+  * 模型的装载本来就在构造之后，照这个顺序做，不必在构造 chip 之前先读 bundle
+  * 代价是坏 core 的 TS、RV core、DSA 与存储也占内存，全 LPU 96 个
+* **角色为什么不进 core**
+  * 《Task Scheduler MAS》寄存器表里没有 `core_type`，由 `SELF_START` 取代；进核落点与标志表由 SCP 逐 core 配
+  * 模型照真机的配置项走，角色只留在编译侧和装载检查里
 * **为什么地址映射交给硬件而不是软件**
   * 多用户复用同一套 kernel 代码，软件只能用统一固定的虚拟偏移地址，没法为每个用户单独改地址、单独编译
   * 纯软件管理会让相同虚拟地址落到同一块物理内存，多用户互相覆盖

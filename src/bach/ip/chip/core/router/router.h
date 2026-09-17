@@ -22,8 +22,8 @@
 //   进 core 与出 core   接本 core 的 DTE
 //   控制信号            接 TS：trigger、credit 申请与授予、reduce_done、retire
 //
-// 不派角色的 core 只构造 Router 这一组，TS、RV core、DSA 与存储都不构造。把
-// pass_through 打开，各 station 与 Xbar 就只转发不记账。
+// 坏 core 上只有 Router 工作：core_bad_mask 里本 core 那一位为 1 就进透传档，各
+// station、Xbar 与 CoreMem 重发只转发不记账。
 
 #include <array>
 #include <functional>
@@ -44,8 +44,8 @@ namespace latch {
 namespace bach {
 
 struct RouterCfg {
-  // 只透传的 core：不投递本 core、不记账、不参与重发。
-  bool pass_through = false;
+  // 本 core 在 chip 内的编号：取 core_bad_mask 的哪一位。
+  uint64_t core_id = 0;
   // 溢流重发的暂存容量，取自 cmem_part 的 reissue_pkts_per_vc。
   uint64_t reissue_pkts_per_vc = 2;
   // VC Buffer 的两级深度，软件跑起来之前经 ctrl_noc 配。本级各入方向按它判收得
@@ -82,13 +82,11 @@ class Router {
       auto st = std::make_unique<RouterStation>(
           clock, kStationName[i], kStationDir[i], *rtab, i, gid,
           setting.tick);
-      st->SetPassThrough(cfg.pass_through);
       st->SetVcDepth(cfg.vc_private_depth, cfg.vc_shared_depth);
       stations.push_back(std::move(st));
     }
 
     xbar = std::make_unique<Xbar>(clock, "xbar", gid, setting.tick);
-    xbar->SetPassThrough(cfg.pass_through);
     xbar->SetVcDepth(cfg.vc_private_depth, cfg.vc_shared_depth);
     core_station = std::make_unique<CoreStation>(clock, "core_station",
                                                  gid, setting.tick);
@@ -98,7 +96,6 @@ class Router {
     reissue = std::make_unique<CoreMemReissue>(clock, "reissue",
                                                cfg.reissue_pkts_per_vc, gid,
                                                setting.tick);
-    reissue->SetPassThrough(cfg.pass_through);
     retire = std::make_unique<Retire>(clock, "retire", gid, setting.tick);
     monitor = std::make_unique<CreditMonitor>(clock, "monitor", *rtab, 5,
                                               gid, setting.tick);
@@ -168,6 +165,20 @@ class Router {
   void SetCreditBypass(uint64_t d, uint64_t out_mask) {
     rtab->SetCreditBypass(d, out_mask);
   }
+  // core_bad_mask：上电锁存，只能在业务开始之前写。本 core 那一位为 1 就进透传
+  // 档：数据只按 RouterTable 往 mid、left、right 转发，不投递本 core、不进
+  // ReduceModule；只查、只扣下一跳链路的 VC credit；不做溢流转存。Reduce
+  // release 照旧按 Release 静态路由转发。
+  void SetCoreBadMask(uint64_t mask) {
+    LOGCHECK(NothingForwarded(),
+             "Router: core_bad_mask 只能在业务开始之前写。");
+    rtab->SetCoreBadMask(mask);
+    bool bad = rtab->CoreBad(cfg.core_id);
+    for (auto& st : stations) st->SetPassThrough(bad);
+    xbar->SetPassThrough(bad);
+    reissue->SetPassThrough(bad);
+  }
+  bool Bad() const { return rtab->CoreBad(cfg.core_id); }
 
   // ── 观测 ──
   // B core：搬出之前要查哪几个方向的下游资源。方向在 TS 的 B_CORE_DIRECTION
@@ -211,6 +222,14 @@ class Router {
   }
 
  private:
+  // 四个入口站都还没转发过一个 flit。
+  bool NothingForwarded() const {
+    for (auto const& st : stations) {
+      if (st->FwdCount() != 0) return false;
+    }
+    return true;
+  }
+
   void Wire() {
     // 三个 R2R 方向：外部链路接进站，Xbar 的出口接出去。
     for (uint64_t d = 0; d < kR2RNum; ++d) {

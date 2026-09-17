@@ -20,7 +20,7 @@
 //
 // 从某个方向进来的 release 按那个口的 Release 静态路由（RouterTable 的
 // CreditBypass，对应 RTR_RELEASE_ROUTE）走：带本级位的交给本级，放开那个方向这
-// 个用户；带方向位的原样转出去，纯透传的 core 走这一档。
+// 个用户；带方向位的原样转出去，坏 core 与只转发的 core 走这一档。
 //
 // 「全部方向」取自 RouterTable 的 reduce_in_mask：按包头的 path_id 查表，得到
 // 这条 path 在本级会有哪几个相邻方向送来分量。首份输入建上下文时把这个集合一并
@@ -282,8 +282,8 @@ class ReduceModule : public BachModule {
     uint64_t user = f.msg->user_id;
 
     RouteEntry const& e = rtab.Lookup(copy, f.msg->path_id);
-    // reduce_in_mask 为 0 表示本级不做累加：不派角色的 core 与纯透传的中继核
-    // 都是这一档，包按 flow_dir 直接转发，不该进到这里。
+    // reduce_in_mask 为 0 表示本级不做累加：只转发的 core 是这一档，包按
+    // flow_dir 直接转发，不该进到这里。坏 core 上的包一律不进 ReduceModule。
     LOGCHECK(e.reduce_in_mask != 0,
              "ReduceModule: 这条 path 在本级 reduce_in_mask 是 0，不该进来。");
 

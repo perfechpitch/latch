@@ -208,6 +208,12 @@ TEST(NumericCross, AccumOrderMatches) {
       got = numeric::AccumInOrder(in);
     } else if (kind == "by_block") {
       got = numeric::AccumByScaleBlock(in, extra, arg);
+    } else if (kind == "by_block2") {
+      // extra 前一半是 token 的 scale，后一半是权重的。
+      uint64_t half = extra.size() / 2;
+      std::vector<float> a(extra.begin(), extra.begin() + half);
+      std::vector<float> w(extra.begin() + half, extra.end());
+      got = numeric::AccumByScaleBlock2(in, a, w, arg);
     } else if (kind == "reduce_tree") {
       got = numeric::ReduceTree(in, arg);
     } else if (kind == "clamp") {
@@ -238,15 +244,19 @@ void ExpectSame(std::vector<float> const& got, std::vector<float> const& want,
 //
 // 乘积先逐个算出来存下再加：写成 acc += a[i] * b[i] 编译器会合成积和融合，
 // 少一次舍入，与硬件先乘后加差一个 bit。
+//
+// wscale 非空时是 MXFP8 × MXFP8 那一档：权重的 scale 按列排，一列 K / block 个。
 std::vector<float> Gemm(numeric::DataType t, std::vector<uint8_t> const& token,
                         std::vector<uint8_t> const& weight,
                         std::vector<uint8_t> const& scale, uint64_t k,
-                        uint64_t count_n, bool out_bf16) {
+                        uint64_t count_n, bool out_bf16,
+                        std::vector<uint8_t> const& wscale = {}) {
   uint64_t block = numeric::ScaleBlockOf(t);
   uint64_t elem_bits = numeric::ElemBitsOf(t);
+  uint64_t nb = block == 0 ? 0 : k / block;
   std::vector<float> a = numeric::Decode(t, token, k);
   std::vector<float> sc;
-  if (block != 0) sc = numeric::DecodeScale(t, scale, k / block);
+  if (block != 0) sc = numeric::DecodeScale(t, scale, nb);
 
   std::vector<float> out;
   uint64_t col_bytes = k * elem_bits / 8;
@@ -256,8 +266,17 @@ std::vector<float> Gemm(numeric::DataType t, std::vector<uint8_t> const& token,
     std::vector<float> b = numeric::Decode(t, col, k);
     std::vector<float> prod(k, 0.0f);
     for (uint64_t i = 0; i < k; ++i) prod[i] = a[i] * b[i];
-    float acc = block == 0 ? numeric::AccumInOrder(prod)
-                           : numeric::AccumByScaleBlock(prod, sc, block);
+    float acc = 0.0f;
+    if (block == 0) {
+      acc = numeric::AccumInOrder(prod);
+    } else if (!wscale.empty()) {
+      std::vector<uint8_t> ws(wscale.begin() + j * nb,
+                              wscale.begin() + (j + 1) * nb);
+      acc = numeric::AccumByScaleBlock2(prod, sc,
+                                        numeric::DecodeScale(t, ws, nb), block);
+    } else {
+      acc = numeric::AccumByScaleBlock(prod, sc, block);
+    }
     float r = numeric::ClampNanInf(acc);
     if (out_bf16) r = numeric::FromBf16(numeric::ToBf16(r));
     out.push_back(r);
@@ -294,6 +313,16 @@ TEST(NumericCross, FfnOperatorsMatch) {
       std::vector<float> got =
           Gemm(t, Bytes(f[5]), Bytes(f[6]), Bytes(f[7]), k, cnt, out_bf16);
       ExpectSame(got, Floats(f[8]), "gemm " + f[1] + " K=" + f[2]);
+      ++gemms;
+    } else if (kind == "gemm_ws") {
+      ASSERT_EQ(f.size(), 10u) << line;
+      numeric::DataType t = TypeOf(f[1]);
+      uint64_t k = std::stoull(f[2]);
+      uint64_t cnt = std::stoull(f[3]);
+      bool out_bf16 = f[4] == "1";
+      std::vector<float> got = Gemm(t, Bytes(f[5]), Bytes(f[6]), Bytes(f[7]),
+                                    k, cnt, out_bf16, Bytes(f[8]));
+      ExpectSame(got, Floats(f[9]), "gemm_ws " + f[1] + " K=" + f[2]);
       ++gemms;
     } else if (kind == "elemwise") {
       ASSERT_EQ(f.size(), 6u) << line;

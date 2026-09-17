@@ -1,7 +1,7 @@
 // Core 与 chip 两层装配的行为基线。
 //
-// 这两层自己不打拍，判据因此是结构性的：接线对不对、不派角色的 core 少构造了
-// 哪些模块、boot 序列走没走完、C2C 上的包拆了又拼回来还是不是原来那一个。
+// 这两层自己不打拍，判据因此是结构性的：接线对不对、坏 core 进没进透传档、boot
+// 序列走没走完、C2C 上的包拆了又拼回来还是不是原来那一个。
 
 #include <gtest/gtest.h>
 
@@ -39,42 +39,45 @@ class ChipDriver : public BachModule {
   Chip& chip;
 };
 
-// ── 形状与角色 ──
+// ── 布局与坏 core ──
 
-TEST(BachChip, ShapeAndRoles) {
-  // 中间列 8 个 core 全是 compute；第一列 core0 是 B core、core5 不派角色；
-  // 最后一列 core9 是 R core、core4 不派角色。
-  EXPECT_EQ(CoresOf(ChipShape::kMiddle), 8u);
-  EXPECT_EQ(CoresOf(ChipShape::kFirst), 10u);
-  EXPECT_EQ(CoresOf(ChipShape::kLast), 10u);
-
-  for (uint64_t i = 0; i < 8; ++i) {
-    EXPECT_EQ(RoleOf(ChipShape::kMiddle, i), CoreRole::kCompute) << "i=" << i;
-  }
-  EXPECT_EQ(RoleOf(ChipShape::kFirst, 0), CoreRole::kBroadcast);
-  EXPECT_EQ(RoleOf(ChipShape::kFirst, 5), CoreRole::kSpare);
-  EXPECT_EQ(RoleOf(ChipShape::kLast, 9), CoreRole::kReduce);
-  EXPECT_EQ(RoleOf(ChipShape::kLast, 4), CoreRole::kSpare);
-  // 不派角色的那个只在两种 2×5 形状里有，中间列一个都没有。
-  for (uint64_t i = 0; i < 8; ++i) {
-    EXPECT_NE(RoleOf(ChipShape::kMiddle, i), CoreRole::kSpare) << "i=" << i;
-  }
-}
-
-TEST(BachChip, SpareCoreIsRouterOnly) {
-  // 不派角色的 core 只构造 Router 的八个模块，不构造 TS、RV core、DSA 与三块
-  // 存储。它的 Ready 恒为真，因为没有 RV core 要等。
+TEST(BachChip, EveryChipIsTwoByFive) {
+  // 每颗 chip 2×5 共 10 个 core，构造时不区分所在列；写 core_bad_mask 之前没有
+  // 坏 core。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   ChipCfg cfg;
-  cfg.shape = ChipShape::kLast;
+  cfg.gx = 1;
   Chip chip(clk, "chip", cfg);
 
-  EXPECT_TRUE(chip.GetCore(4).Context().router_only);
-  EXPECT_TRUE(chip.GetCore(4).Ready());
-  EXPECT_FALSE(chip.GetCore(0).Context().router_only);
-  // Router 一个都不能少：经过它的 path 全靠这个。
-  EXPECT_EQ(chip.GetCore(4).GetRouter().Quiescent(), true);
+  EXPECT_EQ(chip.CoreNum(), 10u);
+  for (uint64_t i = 0; i < chip.CoreNum(); ++i) {
+    EXPECT_EQ(chip.GetCore(i).Context().core_id, i);
+    EXPECT_FALSE(chip.GetCore(i).Bad()) << "i=" << i;
+  }
+  RT::Reset();
+}
+
+TEST(BachChip, CoreBadMaskTurnsOnPassThrough) {
+  // 写 core_bad_mask = 0x084 之后 core2、core7 是坏 core：Router 进透传档，
+  // Ready 恒为真；其余 8 个不进。每个 core 的 Router 写的是同一个值，各自只看
+  // 本 core 那一位。
+  EnsureSlots();
+  ClockPtr clk = MakeClock(0, kPeriod);
+  ChipCfg cfg;
+  cfg.gx = 1;
+  Chip chip(clk, "chip", cfg);
+  chip.SetCoreBadMask(0x084);
+
+  EXPECT_EQ(chip.CoreBadMask(), 0x084u);
+  for (uint64_t i = 0; i < chip.CoreNum(); ++i) {
+    EXPECT_EQ(chip.GetCore(i).Bad(), i == 2 || i == 7) << "i=" << i;
+    EXPECT_EQ(chip.GetCore(i).GetRouter().Table().CoreBadMask(), 0x084u)
+        << "i=" << i;
+  }
+  EXPECT_TRUE(chip.GetCore(2).Ready());
+  EXPECT_TRUE(chip.GetCore(7).Ready());
+  RT::Reset();
 }
 
 // ── core 的对外只有 Router ──
@@ -136,30 +139,35 @@ TEST(BachCore, NoDsaDirectLink) {
 // ── boot 序列 ──
 
 TEST(BachChip, ScpBootReachesBusiness) {
-  // 自启动 → PCIe 训练 → 全 chip 每个 core 的 Router → 逐个 core 的五步 →
-  // 三个 RV core 的 ready 全高 → 开放业务接收。
+  // 自启动 → PCIe 训练 → 全 chip 每个 core 的 Router，先写 core_bad_mask →
+  // 逐个好 core 的五步 → 好 core 的三个 RV core ready 全高 → 开放业务接收。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   ChipCfg cfg;
-  cfg.shape = ChipShape::kMiddle;
+  cfg.gx = 1;
   Chip chip(clk, "chip", cfg);
   ChipDriver drv(clk, chip);
 
+  // 中间列 chip 的坏 core 是 core2、core7。
+  constexpr uint64_t kBadMask = 0x084;
   // Router 那一段：全 chip 一个 core 不落。漏掉任何一个，经过它的 path 就全断。
   for (uint64_t i = 0; i < chip.CoreNum(); ++i) {
     ScpTxn t;
     t.core = i;
-    t.addr = kCfgRouterBase;
-    t.data = 0x1234;
+    t.addr = kCfgRouterBase + kCfgRouterCoreBadMask;
+    t.data = kBadMask;
     chip.Scp().PushRouterTxn(t);
   }
-  // 每个 core 的五步之一：firmware 写进 ITCM。
+  // 每个好 core 的五步之一：firmware 写进 ITCM。坏 core 跳过。
+  uint64_t good = 0;
   for (uint64_t i = 0; i < chip.CoreNum(); ++i) {
+    if ((kBadMask >> i) & 1u) continue;
     ScpTxn t;
     t.core = i;
     t.addr = kCfgItcmBase;
     t.data = 0x13;   // nop
     chip.Scp().PushCoreTxn(t);
+    ++good;
   }
 
   clk->Continue(400 * kPeriod);
@@ -167,7 +175,11 @@ TEST(BachChip, ScpBootReachesBusiness) {
 
   EXPECT_EQ(chip.Scp().State(), ScpState::kBusiness);
   EXPECT_TRUE(chip.Scp().BusinessOpen());
-  EXPECT_EQ(chip.Scp().Issued(), 2 * chip.CoreNum());
+  EXPECT_EQ(good, 8u);
+  EXPECT_EQ(chip.Scp().Issued(), chip.CoreNum() + good);
+  for (uint64_t i = 0; i < chip.CoreNum(); ++i) {
+    EXPECT_EQ(chip.GetCore(i).Bad(), ((kBadMask >> i) & 1u) != 0) << "i=" << i;
+  }
 }
 
 TEST(BachChip, CtrlNocRoutesByAddress) {
@@ -178,9 +190,9 @@ TEST(BachChip, CtrlNocRoutesByAddress) {
   Chip chip(clk, "chip", cfg);
   ChipDriver drv(clk, chip);
 
-  // 一笔发给 core2 的、一笔广播的。
+  // 一笔发给 core3 的、一笔广播的。
   ScpTxn a;
-  a.core = 2;
+  a.core = 3;
   a.addr = kCfgTsBase + 0x40;
   chip.Scp().PushRouterTxn(a);
   ScpTxn b;
@@ -192,8 +204,8 @@ TEST(BachChip, CtrlNocRoutesByAddress) {
   clk->Continue(200 * kPeriod);
   RT::JoinAll();
 
-  // core2 收了两笔（一笔点名、一笔广播），别的 core 只收了广播那一笔。
-  EXPECT_EQ(chip.Noc(2).Taken(), 2u);
+  // core3 收了两笔（一笔点名、一笔广播），别的 core 只收了广播那一笔。
+  EXPECT_EQ(chip.Noc(3).Taken(), 2u);
   EXPECT_EQ(chip.Noc(0).Taken(), 1u);
   EXPECT_EQ(chip.Noc(5).Taken(), 1u);
 }
@@ -447,24 +459,6 @@ TEST(BachChip, FourBridgesPerChip) {
   RT::Reset();
 }
 
-// 不派角色的 core 只能转发，不承担 compute 与两个专用角色。
-TEST(BachChip, SpareCoreTakesNoRole) {
-  for (ChipShape shape : {ChipShape::kFirst, ChipShape::kLast}) {
-    for (uint64_t i = 0; i < CoresOf(shape); ++i) {
-      CoreRole r = RoleOf(shape, i);
-      if (r != CoreRole::kSpare) continue;
-      // 不派角色的那个既不是 compute，也不是 B core 或 R core。
-      EXPECT_NE(r, CoreRole::kCompute);
-      EXPECT_NE(r, CoreRole::kBroadcast);
-      EXPECT_NE(r, CoreRole::kReduce);
-    }
-  }
-  // 中间列一个不派角色的都没有。
-  for (uint64_t i = 0; i < CoresOf(ChipShape::kMiddle); ++i) {
-    EXPECT_NE(RoleOf(ChipShape::kMiddle, i), CoreRole::kSpare);
-  }
-}
-
 // 同向的数据与 credit release 之间仲裁，小包优先：release 是最小的那种。
 // 用业务层那一类来验，因为VC 那一类是 flit 粒度，跨 C2C 要先攒成包粒度。
 TEST(BachC2c, ReleaseGoesBeforeData) {
@@ -632,7 +626,6 @@ TEST(BachChip, IdleCyclesDoNotClash) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   ChipCfg cfg;
-  cfg.shape = ChipShape::kFirst;   // 2×5，带一个不派角色的 core
   Chip chip(clk, "chip", cfg);
   ChipDriver drv(clk, chip);
 
@@ -715,15 +708,17 @@ bool ChipKernelBuilt() {
   return f.good();
 }
 
+// 一个 token 的包：bytes 个 MXFP8 后面接 bytes / 32 个 scale。
 MessagePtr ChipToken(uint64_t path, uint64_t user, uint64_t bytes) {
   auto m = std::make_shared<Message>();
   m->path_id = path;
   m->user_id = user;
-  m->size = bytes;
+  m->scale_valid = 1;
+  m->size = bytes + bytes / 32;
   m->stream_id = 0;
   m->task_id = 0;
-  m->payload.resize(bytes);
-  for (uint64_t i = 0; i < bytes; ++i) {
+  m->payload.resize(m->size);
+  for (uint64_t i = 0; i < m->size; ++i) {
     m->payload[i] = uint8_t((user * 11 + i * 5) & 0xFFu);
   }
   return m;
@@ -821,8 +816,8 @@ class TwoCoreHarness : public BachModule {
 // 自己的 Core Mem 再往右发出去，出来的字节与注入的相等。
 TEST(BachChip, TokenRelaysAcrossTwoCores) {
   if (!ChipKernelBuilt()) GTEST_SKIP() << "kernel 还没编";
-  // 512 B 是一个 K=256 的 BF16 token，与 kernel 里的 TOKEN_BYTES 同一个数。
-  constexpr uint64_t kBytes = 512;
+  // 128 个 MXFP8，与 kernel 里的 E2E_TOKEN_BYTES 同一个数，scale 随它走。
+  constexpr uint64_t kBytes = 128;
   MessagePtr token = ChipToken(3, 42, kBytes);
   std::vector<MessagePtr> got;
   std::pair<uint64_t, uint64_t> heads{0, 0};
@@ -865,8 +860,8 @@ TEST(BachChip, TokenRelaysAcrossTwoCores) {
   ASSERT_FALSE(got.empty()) << "第二个 core 的出口上一个包都没有";
   MessagePtr sent = got.front();
   EXPECT_EQ(sent->user_id, token->user_id);
-  ASSERT_EQ(sent->payload.size(), kBytes);
-  for (uint64_t i = 0; i < kBytes; ++i) {
+  ASSERT_EQ(sent->payload.size(), token->payload.size());
+  for (uint64_t i = 0; i < token->payload.size(); ++i) {
     ASSERT_EQ(sent->payload[i], token->payload[i]) << "第 " << i << " 个字节";
   }
 }

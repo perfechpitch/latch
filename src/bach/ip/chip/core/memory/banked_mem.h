@@ -15,10 +15,12 @@
 // 存储内容按行稀疏存：一行 granule 字节，没写过的行读出来是全 0。真机上是
 // 未初始化，模型里给确定值，免得比对结果依赖没写过的那一段。
 //
-// scale 寄存器：Core Mem 每 bank 另有一块寄存器存 scale，与 SRAM 地址一一映射，
-// 128 B 数据配 4 B scale。scale 使能拉高时同时读写对应地址的那一份：MU 与 VU
-// 访问 CM 按 132 B 读写，读回来的块尾就是这 4 B，写进去的也照这个排。不拉高时
-// 只走 SRAM 那一段，有效带宽 128 B。
+// scale 寄存器：每 bank 另有一块寄存器存 scale，与 SRAM 地址一一映射，每 32 B
+// 数据配 1 B（MXFP8 的 32 个元素共用一个 E8M0），一行 128 B 配 4 B。访问分三档
+// （ScaleAccess）：不带时只走 SRAM 那一段；正文接 scale 时读回来的正文后面接上
+// 这一段覆盖到的那几组 scale，写进去的 wdata 也是正文后面接 scale，只改
+// [woff, woff + bytes) 覆盖到的那几组；只访问 scale 时地址与长度仍按数据的坐标
+// 给，读写的只有 scale。按组取而不按行取整：一条向量可以从一行的中间开始。
 //
 // ECC 按 128 bit 一组，编解码在 SRAM 接口处。byte_mask 非全 1 时那一行留个记录，
 // 读它时不做 ECC 检测。1 bit 错用计数器记、2 bit 错报错，这一轮只留计数器与
@@ -60,7 +62,8 @@ struct BankedMemCfg {
   // Share Mem 的四个 master 按轮询（原文未给，建模计划的默认值）。开着时忽略
   // priority，从上一拍赢家的下一个开始扫。
   bool round_robin = false;
-  // 每 granule 配几字节 scale 寄存器。0 表示这块存储没有这一段。
+  // 每 granule 配几字节 scale 寄存器，一字节管 kScaleGroupBytes 字节数据。0 表示
+  // 这块存储没有这一段。
   uint64_t scale_bytes = 0;
 };
 
@@ -110,15 +113,23 @@ class BankedMem : public BachModule {
     return masked.count(addr / cfg.granule) != 0;
   }
 
-  // 构造期或测试用：直接铺一份 scale。
+  // 构造期或测试用：从 addr 那一组起直接铺几组 scale，第 k 个管
+  // [addr + k × 32, addr + (k + 1) × 32)。
   void PokeScale(uint64_t addr, ByteBlock const& bytes) {
     LOGCHECK(cfg.scale_bytes != 0, "BankedMem: 这块存储没有 scale 寄存器。");
-    scale_store[addr / cfg.granule] = bytes;
+    for (uint64_t k = 0; k < bytes.size(); ++k) {
+      SetScaleAt(addr + k * kScaleGroupBytes, bytes[k]);
+    }
   }
-  ByteBlock PeekScale(uint64_t addr) const {
-    auto it = scale_store.find(addr / cfg.granule);
-    if (it == scale_store.end()) return ByteBlock(cfg.scale_bytes, 0);
-    return it->second;
+  // 从 addr 那一组起取 groups 组。不给就取一行那么多。
+  ByteBlock PeekScale(uint64_t addr, uint64_t groups = 0) const {
+    if (groups == 0) groups = cfg.scale_bytes;
+    ByteBlock out;
+    out.reserve(groups);
+    for (uint64_t k = 0; k < groups; ++k) {
+      out.push_back(ScaleAt(addr + k * kScaleGroupBytes));
+    }
+    return out;
   }
 
   // 构造期或测试用：直接铺一行，不走端口。
@@ -258,20 +269,33 @@ class BankedMem : public BachModule {
     ByteBlockPtr data;
     uint64_t lat;
     bool with_scale = r.scale_en && cfg.scale_bytes != 0;
+    if (r.scale_only) {
+      LOGCHECK(cfg.scale_bytes != 0, "BankedMem: 这块存储没有 scale 寄存器。");
+    }
     if (r.we) {
-      // 只改 wdata 里 [woff, woff + bytes) 那一段：一次请求搬的是一整块，而
-      // 一条向量的两端可能落在块中间，两头的字节归相邻的数据。
-      if (r.wdata) WriteBytes(r.addr + r.woff, *r.wdata, r.woff, r.bytes);
-      // 按 Byte mask 写过的行读时不做 ECC 检测，这里记一笔。
-      if (r.bytes != 0 && r.bytes < cfg.granule) {
-        masked.insert((r.addr + r.woff) / cfg.granule);
+      if (r.scale_only) {
+        // 只写 scale：wdata 全是 scale，第 k 个落在 addr + k × 32 那一组。
+        if (r.wdata) {
+          for (uint64_t k = 0; k < Groups(r.bytes) && k < r.wdata->size(); ++k) {
+            SetScaleAt(r.addr + k * kScaleGroupBytes, (*r.wdata)[k]);
+          }
+        }
+      } else {
+        // 只改 wdata 里 [woff, woff + bytes) 那一段：一次请求搬的是一整块，而
+        // 一条向量的两端可能落在块中间，两头的字节归相邻的数据。
+        if (r.wdata) WriteBytes(r.addr + r.woff, *r.wdata, r.woff, r.bytes);
+        // 按 Byte mask 写过的行读时不做 ECC 检测，这里记一笔。
+        if (r.bytes != 0 && r.bytes < cfg.granule) {
+          masked.insert((r.addr + r.woff) / cfg.granule);
+        }
+        // 正文接 scale：正文后面那几字节写进对应地址的 scale 寄存器。
+        if (with_scale && r.wdata) WriteScale(r);
       }
-      // scale 使能：块尾那几字节写进对应地址的 scale 寄存器。
-      if (with_scale && r.wdata) WriteScale(r.addr, *r.wdata, r.bytes);
       lat = masters[m].write_latency;
     } else {
-      ByteBlock got = ReadBytes(r.addr, r.bytes);
-      if (with_scale) AppendScale(r.addr, r.bytes, &got);
+      ByteBlock got;
+      if (!r.scale_only) got = ReadBytes(r.addr, r.bytes);
+      if (with_scale || r.scale_only) AppendScale(r.addr, r.bytes, &got);
       data = std::make_shared<ByteBlock>(std::move(got));
       lat = masters[m].read_latency;
     }
@@ -295,29 +319,42 @@ class BankedMem : public BachModule {
     }
   }
 
-  // 读回来的块尾接上这一段地址对应的 scale：每 granule 一份。
+  // bytes 字节数据覆盖几组 scale。
+  static uint64_t Groups(uint64_t bytes) {
+    return (bytes + kScaleGroupBytes - 1) / kScaleGroupBytes;
+  }
+
+  // 一组 scale 落在哪一行的第几个字节。
+  uint64_t ScaleAt(uint64_t addr) const {
+    auto it = scale_store.find(addr / cfg.granule);
+    if (it == scale_store.end()) return 0;
+    return it->second[(addr % cfg.granule) / kScaleGroupBytes];
+  }
+  void SetScaleAt(uint64_t addr, uint8_t v) {
+    ByteBlock& line = scale_store[addr / cfg.granule];
+    if (line.empty()) line.assign(cfg.scale_bytes, 0);
+    line[(addr % cfg.granule) / kScaleGroupBytes] = v;
+  }
+
+  // 读回来的正文后面接上 [addr, addr + bytes) 覆盖到的那几组 scale。
   void AppendScale(uint64_t addr, uint64_t bytes, ByteBlock* out) const {
-    uint64_t rows = bytes == 0 ? 1 : (bytes + cfg.granule - 1) / cfg.granule;
-    for (uint64_t k = 0; k < rows; ++k) {
-      ByteBlock one = PeekScale(addr + k * cfg.granule);
-      out->insert(out->end(), one.begin(), one.end());
+    uint64_t n = Groups(bytes == 0 ? cfg.granule : bytes);
+    for (uint64_t k = 0; k < n; ++k) {
+      out->push_back(uint8_t(ScaleAt(addr + k * kScaleGroupBytes)));
     }
   }
 
-  // 写进来的块尾那几字节是 scale，按 granule 拆开存。
-  void WriteScale(uint64_t addr, ByteBlock const& data, uint64_t bytes) {
-    uint64_t n = bytes == 0 ? (data.size() > cfg.scale_bytes
-                                   ? data.size() - cfg.scale_bytes
-                                   : 0)
-                            : bytes;
-    uint64_t rows = n == 0 ? 1 : (n + cfg.granule - 1) / cfg.granule;
-    for (uint64_t k = 0; k < rows; ++k) {
-      uint64_t at = n + k * cfg.scale_bytes;
-      ByteBlock one(cfg.scale_bytes, 0);
-      for (uint64_t i = 0; i < cfg.scale_bytes && at + i < data.size(); ++i) {
-        one[i] = data[at + i];
-      }
-      scale_store[(addr + k * cfg.granule) / cfg.granule] = one;
+  // 正文接 scale 的写：wdata 前 D 字节是正文，后面 ceil(D / 32) 字节是 scale，
+  // 两段加起来就是 wdata 的长度，D 由此反推。只改 [woff, woff + bytes) 覆盖到的
+  // 那几组，相邻数据的 scale 不动。
+  void WriteScale(MemReqView const& r) {
+    ByteBlock const& w = *r.wdata;
+    uint64_t total = w.size();
+    uint64_t body = total - (total + kScaleGroupBytes) / (kScaleGroupBytes + 1);
+    uint64_t from = r.woff / kScaleGroupBytes;
+    uint64_t to = Groups(r.woff + (r.bytes == 0 ? body : r.bytes));
+    for (uint64_t k = from; k < to && body + k < total; ++k) {
+      SetScaleAt(r.addr + k * kScaleGroupBytes, w[body + k]);
     }
   }
 

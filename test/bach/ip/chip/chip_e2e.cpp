@@ -44,8 +44,9 @@ bool KernelBuilt() {
   return f.good();
 }
 
-// 512 B 是一个 K=256 的 BF16 token，与 kernel 里的 TOKEN_BYTES 同一个数。
-constexpr uint64_t kTokenBytes = 512;
+// 128 个 MXFP8，与 kernel 里的 E2E_TOKEN_BYTES 同一个数；包里数据后面接 4 个
+// scale。
+constexpr uint64_t kTokenBytes = 128 + 4;
 
 MessagePtr MakeToken(uint64_t path, uint64_t user) {
   auto m = std::make_shared<Message>();
@@ -56,6 +57,7 @@ MessagePtr MakeToken(uint64_t path, uint64_t user) {
   m->gpu_id = 2;
   m->token_id = user;
   m->size = kTokenBytes;
+  m->scale_valid = 1;
   m->stream_id = 0;
   m->task_id = 0;
   m->payload.resize(kTokenBytes);
@@ -104,28 +106,32 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
 
-// 中间列 chip 是 2×4：W 口挂在 core4（行 1 左端）的 left，E 口挂在 core3
-// （行 0 右端）的 right。从 W 走到 E 的一条路是
-//   core4 →right→ core5 →right→ core6 →right→ core7 →mid→ core3 →right→ E
-// 落地那一颗 core 是 core4，其余四颗只转发。
-constexpr uint64_t kEnterCore = 4;
-constexpr uint64_t kRelayCore[4] = {5, 6, 7, 3};
-constexpr uint64_t kRelayFlow[4] = {kFlowRight, kFlowRight, kFlowMid,
-                                    kFlowRight};
+// 中间列 chip 是 2×5，core2、core7 是坏 core：W 口挂在 core5 的 left，E 口挂在
+// core4 的 right。从 W 走到 E 的一条路是
+//   core5 →right→ core6 →right→ core7 →right→ core8 →right→ core9 →mid→
+//   core4 →right→ E
+// 落地那一颗 core 是 core5，其余五颗只转发，core7 是坏 core，Router 在透传档。
+constexpr uint64_t kMiddleBadMask = 0x084;
+constexpr uint64_t kEnterCore = 5;
+constexpr uint64_t kRelayNum = 5;
+constexpr uint64_t kRelayCore[kRelayNum] = {6, 7, 8, 9, 4};
+constexpr uint64_t kRelayFlow[kRelayNum] = {kFlowRight, kFlowRight, kFlowRight,
+                                            kFlowMid, kFlowRight};
 
 // 把 out_path 这一条从落地 core 一直铺到 E 口。落地 core 自己也要一项：DTE 发
 // 出的包查的就是它。
 void WireExitPath(Chip& chip, uint64_t out_path) {
   chip.GetCore(kEnterCore).GetRouter().Preload(out_path, PassTo(kFlowRight));
-  for (uint64_t i = 0; i < 4; ++i) {
+  for (uint64_t i = 0; i < kRelayNum; ++i) {
     chip.GetCore(kRelayCore[i])
         .GetRouter()
         .Preload(out_path, PassTo(kRelayFlow[i]));
   }
 }
 
-// 一颗 chip 上的一段：从 W 口进来落在 core4，算完从 E 口出去。
+// 一颗 chip 上的一段：从 W 口进来落在 core5，算完从 E 口出去。
 void SetUpChip(Chip& chip, uint64_t in_path, uint64_t out_path) {
+  chip.SetCoreBadMask(kMiddleBadMask);
   Core& landing = chip.GetCore(kEnterCore);
   landing.GetRouter().Preload(in_path, EnterCore());
   landing.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
@@ -205,7 +211,7 @@ class ChipPairHarness : public BachModule {
 
 }  // namespace
 
-// 一个 token 走过两颗 chip：进第一颗落在 core4 搬进 Core Mem，再经四颗只转发
+// 一个 token 走过两颗 chip：进第一颗落在 core5 搬进 Core Mem，再经五颗只转发
 // 的 core 从 E 口出去，过 C2C 进第二颗的 W 口，在那边走一遍同样的路，从第二颗
 // 的 E 口出来。收到的字节与注入的相等。
 TEST(BachChipE2e, TokenCrossesTwoChips) {
@@ -217,10 +223,8 @@ TEST(BachChipE2e, TokenCrossesTwoChips) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     ChipCfg ca, cb;
-    ca.shape = ChipShape::kMiddle;
     ca.gx = 1;
     ca.gy = 0;
-    cb.shape = ChipShape::kMiddle;
     cb.gx = 2;
     cb.gy = 0;
     Chip a(clk, "chip_a", ca);

@@ -125,7 +125,8 @@ class Xbar : public BachModule {
     overflow_port = std::move(port);
   }
 
-  // 只透传的 core：不记账、不占坑，credit 直接 bypass。
+  // 透传档，坏 core 的 Router 由 core_bad_mask 打开：不记账、不占坑，业务
+  // credit 直接 bypass。
   void SetPassThrough(bool on) { pass_through = on; }
 
   uint64_t Granted() const { return granted.Get(); }

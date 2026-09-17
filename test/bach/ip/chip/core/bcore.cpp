@@ -10,7 +10,8 @@
 //         那一笔从 Matrix Mem 广播出去
 //
 // 这一份验的是两条链接起来之后走不走得通：一笔都没有时链二在 task 0 上等着，
-// 连着几笔时按进来的次序发出去，发出去的那一份与送进来的逐字节相同。
+// 连着几笔时按进来的次序发出去，发出去的那一份与送进来的逐字节相同，scale 随
+// token 一起进 Matrix Mem 的 scale 旁带、又一起发出去。
 
 #include <gtest/gtest.h>
 
@@ -55,7 +56,9 @@ bool KernelBuilt() {
 //
 // 与 compiler/kernel/bach.h 的 BC_* 同源，改一处要一起改。
 constexpr uint64_t kSlots = 16;
-constexpr uint64_t kTokenBytes = 6144 * 2;
+// 一笔 token 是 6144 个 MXFP8，包里数据后面接 192 个 scale。
+constexpr uint64_t kTokenBytes = 6144;
+constexpr uint64_t kScaleBytes = kTokenBytes / 32;
 constexpr uint64_t kMmBase = 0x000000;
 constexpr uint64_t kFlagOff = 0x0500;
 
@@ -68,10 +71,10 @@ uint64_t Land(uint64_t seq) {
   return kMmBase + (seq % kSlots) * kTokenBytes;
 }
 
-// 一笔 token 的内容：认得出是哪一笔就行，B core 不算它，只搬。
+// 一笔 token 的包内容：数据后面接 scale，认得出是哪一笔就行，B core 不算它，只搬。
 std::vector<uint8_t> TokenBytes(uint64_t seed) {
-  std::vector<uint8_t> b(kTokenBytes, 0);
-  for (uint64_t j = 0; j < kTokenBytes; ++j) {
+  std::vector<uint8_t> b(kTokenBytes + kScaleBytes, 0);
+  for (uint64_t j = 0; j < b.size(); ++j) {
     b[j] = uint8_t((seed * 131 + j * 7 + (j >> 8)) & 0xFFu);
   }
   return b;
@@ -87,6 +90,7 @@ MessagePtr MakeToken(uint64_t seq, uint64_t user,
   m->stream_id = 0;
   m->task_id = 0;
   m->dst_addr = Land(seq);
+  m->scale_valid = 1;
   m->payload = body;
   m->size = m->payload.size();
   return m;
@@ -192,12 +196,15 @@ class BcoreHarness : public BachModule {
   std::vector<Job> jobs;
 };
 
-CoreContext BcoreContext() {
-  CoreContext ctx;
-  ctx.role = CoreRole::kBroadcast;
-  ctx.inbound_flag_base = kFlagOff;
-  ctx.inbound_entry_bytes = kTokenBytes;
-  return ctx;
+// B core 在业务模式下进核那一笔：落 Matrix Mem、不回 Ack，搬完置 token 槽位的
+// 标志。
+InboundCfg BcoreInbound() {
+  InboundCfg in;
+  in.route = Route::kRouterToMm;
+  in.no_ack = true;
+  in.flag_base = kFlagOff;
+  in.flag_entry_bytes = kTokenBytes;
+  return in;
 }
 
 void LoadKernels(Core& core) {
@@ -215,8 +222,8 @@ TEST(BachBcore, NothingGoesOutWithoutAToken) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    CoreContext ctx = BcoreContext();
-    Core core(clk, "bcore", ctx);
+    Core core(clk, "bcore", CoreContext{});
+    core.SetBusinessInboundCfg(BcoreInbound());
     LoadKernels(core);
     core.GetRouter().Preload(kOutPath, LeaveCore());
     core.GetDte().Tables().PreloadRtab(kOutPath, LeaveCore());
@@ -242,8 +249,8 @@ TEST(BachBcore, TokensGoOutInArrivalOrder) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    CoreContext ctx = BcoreContext();
-    Core core(clk, "bcore", ctx);
+    Core core(clk, "bcore", CoreContext{});
+    core.SetBusinessInboundCfg(BcoreInbound());
     LoadKernels(core);
     core.GetRouter().Preload(kInPath, EnterCore());
     core.GetRouter().Preload(kOutPath, LeaveCore());
@@ -263,5 +270,6 @@ TEST(BachBcore, TokensGoOutInArrivalOrder) {
   ASSERT_EQ(got.size(), 3u) << "三笔都要发出去";
   for (uint64_t i = 0; i < 3; ++i) {
     EXPECT_EQ(got[i]->payload, bodies[i]) << "第 " << i << " 笔";
+    EXPECT_TRUE(got[i]->scale_valid) << "第 " << i << " 笔的 scale 要随它走";
   }
 }

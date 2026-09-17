@@ -48,6 +48,8 @@ constexpr uint64_t kCfgMmemBase = 0x600000;
 constexpr uint64_t kCfgSegSize = 0x100000;
 constexpr uint64_t kCfgDsaSize = 0x10000;
 constexpr uint64_t kCfgRvStride = 0x10000;
+// Router 段里 core_bad_mask 的偏移。
+constexpr uint64_t kCfgRouterCoreBadMask = 0x0;
 
 // 一笔配置事务落在哪个模块上，以及是三个 RV core 里的哪一个。
 struct CfgRoute {

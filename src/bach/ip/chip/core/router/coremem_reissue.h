@@ -19,8 +19,8 @@
 // 直接断言失败：不覆盖已暂存的包，不丢包，也不退回「留在当前 VC 等」，因为那条路
 // 会让同一个 stall_way 配置在两种容量下走出两种行为，把配置错误掩盖过去。
 //
-// 不派角色的 core 不接收溢流：Router 对它不发起进 core 缓存处理，此时 coremem
-// credit 直接 bypass。
+// 坏 core 不接收溢流：Router 对它不发起进 core 缓存处理，此时 coremem credit
+// 直接 bypass。
 //
 // 重发出去之后向本 core 的 TS 报一笔，至少带 UserID 与 PathID：直接发送那一路
 // 由 CoreStation 的 trigger 通知 TS，走了暂存的这一路要在这里补上，否则 TS 那边
@@ -91,14 +91,14 @@ class CoreMemReissue : public BachModule {
   ReissueDonePort& Done() { return *done; }
   std::shared_ptr<ReissueDonePort> DonePtr() const { return done; }
 
-  // 只透传的 core 不接收溢流：Router 对它不发起进 core 缓存处理，此时 coremem
-  // credit 直接 bypass。
+  // 坏 core 上 Router 处在透传档，不接收溢流：Router 对它不发起进 core 缓存处
+  // 理，此时 coremem credit 直接 bypass。
   void SetPassThrough(bool on) { pass_through = on; }
 
   // Xbar 判定要转存时调这里。
   void Store(FlitView const& f) {
     LOGCHECK(!pass_through,
-             "CoreMemReissue: 不派角色的 core 不接收溢流，这一笔不该转存。");
+             "CoreMemReissue: 坏 core 不接收溢流，这一笔不该转存。");
     LOGCHECK(f.vc < kVcNum, "CoreMemReissue: VC 号越界。");
     LOGCHECK(pending_cnt[f.vc] < cap_per_vc,
              "CoreMemReissue: 这个 VC 的暂存区满了。容量由 cmem_part 的 "

@@ -1,0 +1,10 @@
+{
+  "name": "moe_group",
+  "note": "一个 EP 组：两层 × 4 列 8 颗 chip，中间两列 chip 的 core2、core7 是坏 core。token 从左上角那颗 chip 的 W 口进它的 B core，由它广播给 64 个计算 core。每颗 chip 各做 chip 内归约、FC2 输入广播与 concat；两行各沿行链归约进本行 R core，第 0 行 R core 从 S 口下到第 1 行 R core，第 1 行 R core 的结果经 core4 从 E 口出去",
+  "layer": "moe",
+  "rows": 2,
+  "cols": 4,
+  "groups": 1,
+  "bcore": true,
+  "stream_num": 16
+}

@@ -9,10 +9,12 @@
 RELROUTE（Release 静态路由，即 RTR_RELEASE_ROUTE）与 RTAB 末尾的 reduceNeedMask。
 版本 8 的 TCHAIN 照 TASK_CHAIN_xx_PC / ATTR 的位域：TASK_TYPE 取代三个类型位，去掉
 TASK_EXE_MASK 与每项的 SELF_START；CFGMISC 的第二个字段改成全局 SELF_START；加
-TSRTAB（TS 的 ROUTER_TABLE）。PATHTASK 只给 DTE 那一份。
+TSRTAB（TS 的 ROUTER_TABLE）。PATHTASK 只给 DTE 那一份。版本 9 的 chip 统一 2×5：
+CHIP 的第二个字段从形状换成 core_bad_mask，CORE 覆盖每颗 chip 的 10 个 core，加
+DTEIN（业务模式下进核那一笔的配置）。
 """
 
-HEADER = "BACHIR 8"
+HEADER = "BACHIR 9"
 
 
 # 一层 MoE 那套拓扑的产物。core 一律按 (chip 号, 片内 core 号) 定位，与模型里
@@ -28,9 +30,9 @@ def render_plan(plan, source, images):
     """把一份展开好的 Plan 写成 .bachir。"""
     out = [HEADER, f"SOURCE {source}", f"NAME {plan.name}"]
 
-    out.append("# CHIP <chip> <形状 0 中间 1 第一列 2 最后一列>")
-    for chip, shape in enumerate(plan.shapes):
-        out.append(f"CHIP {chip} {shape}")
+    out.append("# CHIP <chip> <core_bad_mask 第 i 位为 1 表示 core i 是坏 core>")
+    for chip, mask in enumerate(plan.bad_mask):
+        out.append(f"CHIP {chip} 0x{mask:03x}")
 
     out.append("# CORE <chip> <core> <角色 0 计算 1 广播 2 归约 3 不派>")
     for (chip, core), role in sorted(plan.role.items()):
@@ -65,6 +67,11 @@ def render_plan(plan, source, images):
     out.append("# DATAIN <chip> <core> <task_pc> <weights_mode>")
     for (chip, core), pc in sorted(plan.datain_pc.items()):
         out.append(f"DATAIN {chip} {core} 0x{pc:x} 0")
+
+    out.append("# DTEIN <chip> <core> <route 0 Core Mem 1 Matrix Mem> <no_ack>"
+               " <flag_base> <flag_entry_bytes>")
+    for (chip, core), (route, no_ack, base, entry) in sorted(plan.dtein.items()):
+        out.append(f"DTEIN {chip} {core} {route} {no_ack} 0x{base:x} {entry}")
 
     out.append("# RTAB <chip> <core> <path> <op_type> <flow_dir> <cur_vc>"
                " <nxt_vc×5> <mask_en> <mask_idx> <bypass> <need_buffer>"

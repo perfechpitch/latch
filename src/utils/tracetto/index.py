@@ -13,7 +13,7 @@ moe_lpu.tracetto-index/
 - `gap = t0 - prev_t1`（空档不存 —— 段与段之间没有东西就是空档），首个段的 `prev_t1`
   取它所在块的 `t_base`；
 - `dur = t1 - t0`，恒 ≥ 1；
-- 标签内联定长 3 字节 `u16 user + u8 task`，`(0xFFFF, 0xFF)` 表示「认不出配对」。
+- 标签内联定长 3 字节 `u16 user + u8 task`，`(0xFFFF, 0xFF)` 表示「认不出是哪一笔」。
   单元名由行号推出来、拍数就是 `dur`，都不用存 —— 于是建索引没有全局状态，
   并行到什么程度结果都一样。
 
@@ -55,7 +55,7 @@ SEG_BLK = 128            # 每多少段写一条 blk
 L1_MIN_SEG = 4096        # 段数超过这个才写 L1
 L1_MAX_CELL = 4096       # L1 最多这么多格
 
-# 标签哨兵：认不出配对上下发的段。真波形上这是常态（moe_lpu 里 14%）。
+# 标签哨兵：认不出是哪一笔的段。
 TAG_NONE = (0xFFFF, 0xFF)
 
 
@@ -147,7 +147,7 @@ def decode_varint(buf, off: int) -> Tuple[int, int]:
 
 
 def tag_of(user: int, task: int) -> bytes:
-    """段标签：3 字节。认出配对就写 user/task，认不出写哨兵。"""
+    """段标签：3 字节。认得出是哪一笔就写 user/task，认不出写哨兵。"""
     if user < 0 or task < 0:
         user, task = TAG_NONE
     return struct.pack("<HB", user & 0xFFFF, task & 0xFF)

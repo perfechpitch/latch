@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/logic.h"
@@ -26,6 +27,21 @@ using ByteBlock = std::vector<uint8_t>;
 using ByteBlockPtr = std::shared_ptr<ByteBlock>;
 
 // 存储的一个 master 端口。
+// scale 旁带的三档访问。MXFP8 数据每 32 B 配 1 B scale，与数据地址一一对应。
+//   不带         只走 SRAM 那一段
+//   正文接 scale 读回来的正文后面接上 [addr, addr + bytes) 覆盖到的那几组 scale；
+//                写进来的 wdata 是正文后面接 scale
+//   只访问 scale 地址与长度仍按数据的坐标给，读回来、写进去的只有 scale 那几组。
+//                DTE 边读边发，包里 scale 排在数据后面，搬 scale 那一笔走这一档
+enum ScaleAccess : uint64_t {
+  kScaleNone = 0,
+  kScaleWithData = 1,
+  kScaleOnly = 2,
+};
+
+// 一组 scale 管多少字节的数据：MXFP8 32 个元素共用 1 B。
+constexpr uint64_t kScaleGroupBytes = 32;
+
 class MemPort : public Logic {
  public:
   // master 侧写
@@ -73,6 +89,17 @@ class MemPort : public Logic {
     req_wdata = data;
     req_seq = ++issue_seq;
   }
+  // 只读 scale：bytes 是数据那一侧的长度，读回 ceil(bytes / 32) 个 scale。
+  void ReadScale(uint64_t addr, uint64_t bytes) {
+    Read(addr, bytes);
+    req_scale_en = kScaleOnly;
+  }
+  // 只写 scale：scale 里第 k 个落在 addr + k × 32 那一组，bytes 是数据那一侧
+  // 覆盖的长度。
+  void WriteScale(uint64_t addr, ByteBlockPtr scale, uint64_t bytes) {
+    Write(addr, std::move(scale), false, 0, bytes);
+    req_scale_en = kScaleOnly;
+  }
   void IdleReq() {
     req_valid = 0;
     req_we = 0;
@@ -106,11 +133,27 @@ struct MemReqView {
   bool we = false;
   uint64_t addr = 0;
   uint64_t bytes = 0;
-  bool scale_en = false;
+  bool scale_en = false;      // 正文接 scale
+  bool scale_only = false;    // 只访问 scale
   uint64_t woff = 0;
   uint64_t seq = 0;
   ByteBlockPtr wdata;
 };
+
+// 把一笔收下来的请求原样发到另一个口上。DTE 的 DMA_XBAR 转发走这一条。
+inline void ForwardMemReq(MemPort& p, MemReqView const& r) {
+  if (r.we) {
+    if (r.scale_only) {
+      p.WriteScale(r.addr, r.wdata, r.bytes);
+    } else {
+      p.Write(r.addr, r.wdata, r.scale_en, r.woff, r.bytes);
+    }
+  } else if (r.scale_only) {
+    p.ReadScale(r.addr, r.bytes);
+  } else {
+    p.Read(r.addr, r.bytes, r.scale_en);
+  }
+}
 
 inline MemReqView ReadMemReq(MemPort const& p) {
   MemReqView v;
@@ -119,7 +162,9 @@ inline MemReqView ReadMemReq(MemPort const& p) {
   v.we = p.req_we.Get() != 0;
   v.addr = p.req_addr.Get();
   v.bytes = p.req_bytes.Get();
-  v.scale_en = p.req_scale_en.Get() != 0;
+  uint64_t scale = p.req_scale_en.Get();
+  v.scale_en = scale == kScaleWithData;
+  v.scale_only = scale == kScaleOnly;
   v.woff = p.req_woff.Get();
   v.seq = p.req_seq.Get();
   v.wdata = p.req_wdata.Get();

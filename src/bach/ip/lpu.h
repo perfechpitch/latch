@@ -4,7 +4,7 @@
 // LPU：48 颗 chip 装模型的一层 MoE，也就是当前部署下的一个机柜。
 //
 // 自己不打拍，只做构造与接线五件事：
-//   1. 按每颗 chip 的列位置定形状，构造 48 个 Chip
+//   1. 构造 48 个 Chip，每颗 2×5 共 10 个 core
 //   2. 按 12 × 4 网格接 chip 之间的 C2C：同层左右直连、同列上下直连，都不经
 //      PCIe Switch
 //   3. 每层最左最右两颗 chip 的边缘口接本 tray 的 PCIe Switch
@@ -144,10 +144,10 @@ struct EdgePair {
 
 // 哪几颗 chip 真的构造出来。
 //
-// 一颗 chip 是 8 或 10 个 core、每个 core 上百个模块，48 颗全建起来逐拍推进要
-// 几十毫秒一拍，走完一层的几万拍跑不出结果。一轮只用到其中几颗时，其余的不
-// 构造：坐标、形状、角色、链路参数仍按 12 × 4 的整机算，没建的那几颗身上的
-// 链路不登记，Switch 与两个片外桩照旧全建。
+// 一颗 chip 是 10 个 core、每个 core 上百个模块，48 颗全建起来逐拍推进要几十
+// 毫秒一拍，走完一层的几万拍跑不出结果。一轮只用到其中几颗时，其余的不构造：
+// 坐标、角色、链路参数仍按 12 × 4 的整机算，没建的那几颗身上的链路不登记，
+// Switch 与两个片外桩照旧全建。
 struct LpuCfg {
   std::array<bool, kChipNum> build;
   // 每个 core、每颗 chip 各占一个常驻协程。开着才有并行，槽位（sub_thread ×
@@ -195,6 +195,14 @@ class Lpu {
   OutStub& Out() { return *out_stub; }
   LpuTables const& Tables() const { return tbl; }
 
+  // 按 core_bad_mask 表给每颗构造出来的 chip 写 core_bad_mask，与 SCP 在 Router
+  // 配置阶段写的是同一个值。业务开始之前调。
+  void WriteCoreBadMask() {
+    for (uint64_t i = 0; i < kChipNum; ++i) {
+      if (chips[i]) chips[i]->SetCoreBadMask(tbl.core_bad_mask[i]);
+    }
+  }
+
   std::vector<C2cPair> const& C2cLinks() const { return c2c; }
   std::vector<EdgePair> const& EdgeLinks() const { return edge; }
   std::vector<EdgePair> const& ExtLinks() const { return ext; }
@@ -217,7 +225,7 @@ class Lpu {
     uint64_t n = 0;
     for (uint64_t i = 0; i < kChipNum; ++i) {
       if (!chips[i]) continue;
-      for (uint64_t c = 0; c < CoresOf(tbl.chip_shape[i]); ++c) {
+      for (uint64_t c = 0; c < kMaxCorePerChip; ++c) {
         if (tbl.logical_map[i][c].role == CoreRole::kCompute) ++n;
       }
     }
@@ -257,7 +265,7 @@ class Lpu {
   }
 
  private:
-  // ── L1 第 1 条：按列位置定形状，构造 48 个 Chip ──
+  // ── L1 第 1 条：构造 48 个 Chip ──
   //
   // 每个口的参数在这里定死：同层左右与 tray 内上下用 PCIe C2C，跨 tray 的两处
   // 换纵向参数，接 Switch 的那个口计 0（那一段由 Link 实例承担）。
@@ -266,7 +274,6 @@ class Lpu {
       for (uint64_t gx = 0; gx < kGridX; ++gx) {
         uint64_t i = ChipIdOf(gx, gy);
         ChipCfg c;
-        c.shape = tbl.chip_shape[i];
         c.gx = gx;
         c.gy = gy;
         c.port[kChipE].axi_latency =

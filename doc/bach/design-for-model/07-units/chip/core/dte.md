@@ -261,8 +261,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
 | F3 | 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配 TaskQueue 项和完成跟踪项 |
 | F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map`，由软件配成收方链上那一项搬入任务的下标：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号。一个 `path_id` 只能对一项 |
-| F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。`route` 这一项由 SCP 配：业务模式下计算 core 落 Core Mem，B core 与 R core 落 Matrix Mem；weights 加载阶段进来的都是权重，计算 core 上也落 Matrix Mem。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
-| F3d | B core 与 R core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象，因此不回 Ack |
+| F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。落哪块存储（`route`）与回不回 Ack（F3d）是本 core 的进核配置，由 SCP 在 core 配置阶段逐 core 写，对应 bundle 的 `DTEIN` 记录：业务模式下计算 core 落 Core Mem、回 Ack，B core 与 R core 落 Matrix Mem、不回 Ack。weights 加载阶段进来的都是权重，每个 core 都落 Matrix Mem、不回 Ack，切业务模式时 SCP 按 `DTEIN` 重配。坏 core 与不派角色的 core 不配这一项。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
+| F3d | B core 与 R core 的进核配置是不回 Ack（F3c）：这两种 core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象 |
 | F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
 | F4 | 一帧一任务：同一个 AXI-Stream Frame 只属于一个 Router → MM 或 Router → CM 任务，不允许任务间交织 |
 | F5 | 首拍固定为 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号 |
@@ -334,10 +334,10 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F36 | 一次搬运的对象是一个 MSG 包，进了 core 就按内容拆成四份、各存各的地方：包头、scale、topK、data |
 | F37 | topK 一律走 `cmem_wr` 写进 Core Mem 的独立 topK 区，DTE 与 MU 之间没有直连通路。MU 自己在 task 启动时把这一段读进它的 `topK_ep_table` |
 | F38 | 计算 core 上：硬件包头与软件包头**合并成一张表**存 Hmem，16 项按 `stream_id` 索引，每项 `{core_mask 2 B, sw_header 16 B}`，共 `16 × 16 B + 32 B = 288 B`，软件只配一个地址；scale 存 Core Mem 的 scale 区，topK 存 Core Mem 的独立 topK 区，data 存 Core Mem 按 stream 分片 |
-| F39 | B core / R core 上：包头存 Core Mem 独立空间，容量由软件分配；走 Hmem 还是走 Core Mem 由 `hw_header_addr` 这个地址本身选，不另设开关。scale 与 topK 与 data 在 Matrix Mem 里连排，由 GPU 侧按 pattern 排好序送来，DTE 不重排顺序 |
+| F39 | B core / R core 上：包头存 Core Mem 独立空间，容量由软件分配；走 Hmem 还是走 Core Mem 由 `hw_header_addr` 这个地址本身选，不另设开关。data 落 Matrix Mem，它的 scale 随它存进 Matrix Mem 的 scale 部分（F49a）；topK 与 data 连排，由 GPU 侧按 pattern 排好序送来，DTE 不重排顺序 |
 | F40 | **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 由 TS 直连送过来（TS 配置时就带 `user_id` / `stream_id` / `path_id` / `task_id` 四样），`size` 由 RV core 配寄存器给，或按 `data_len` 算出来 |
 | F41 | 包头分工：硬件只改硬件包头（`core_mask`），RV core 改软件包头 |
-| F42 | `data_len` 在不同方向盖的范围不同：Router ↔ Matrix Mem 时是 topK + scale + data 的总长；Router ↔ Core Mem 时只是 data 的长度，scale 与 topK 的长度另算 |
+| F42 | `data_len` 在不同方向盖的范围不同：Router ↔ Matrix Mem 时是 topK + data 的总长；Router ↔ Core Mem 时只是 data 的长度，topK 的长度另算。scale 在两个方向上都随数据走，长度按 F48 另算 |
 | F42a | `CFG_DATA_LEN` 是 16 bit，写进去的数以 8 B 为一格，硬件乘回字节，所以一段最长 64 KB 差 8 B。不足一格的尾巴配不出来 |
 | F43 | 进核时计算 core 只在这个 token 需要分配新 `stream_id` 时才存包头（`hw_header_op = 1`），中间环节的 reduce 与 concat 任务直接丢弃（`hw_header_op = 0`）；广播 token 进核必然带 topK，必须存下来 |
 | F44 | 出核时改写硬件包头：`path_id` 用 TS 送来的那个，`size` 用 RV core 配的寄存器（Concat 这类算完数据量会变的场景就靠它），`core_mask` 只在 Bach 做 MoE Route 时改；计算结果出核不带 topK |
@@ -349,6 +349,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F47 | 通用寻址式子是 `PhyAddr = base_addr + stream_id × stride + offset`，**`base_addr` 只对 Core Mem 有效**：Matrix Mem 的地址全由软件管，配任务时 `src_addr` / `dst_addr` 就是最终物理地址，硬件不再叠 `stream_id × stride`。四类地址按这个式子展开：data 在 Core Mem 侧是 `base_addr + stream_id × stream_stride`；包头（硬件加软件合并那一项）是 `header_base_addr + stream_id × 18 B`；scale 是 `scale_base_addr + stream_id × scale_stride`；topK 是 `topk_base_addr + stream_id × 256 B` |
 | F48 | 两项搬运长度硬件自己算，不用软件配：scale 是 `data_len / 32`（32 个元素共用一个 scale），topK 是 `router_ep_count × 6 B`（每项 `{expert_id 2 B, weight 4 B}`，每 stream 上限 256 B） |
 | F49 | Matrix Mem 一侧不加 stream 偏移，Core Mem 一侧加：Matrix Mem 放的是模型 weight 与按 pattern 排好序送来的 token，位置软件自己算准；Core Mem 按 stream 切成 16 片，谁占哪片由 TS 定，软件配的时候还不知道 |
+| F49a | MXFP8 数据的 scale 随数据走：`scale_valid` 置位的任务在进核、出核以及 Matrix Mem 与 Router 之间搬运时，把 scale 与数据一起读写。scale 是 E8M0，每 32 个元素 1 B；MXFP8 数据在 Core Mem 与 Matrix Mem 里都按每 128 B 配 4 B scale（Matrix Mem 的 scale 区按 1 : 8 留）。默认用例里一个 token 包是 6144 B 数据加 192 B scale，每个 core 的权重每个矩阵每个专家是 196608 B 数据加 6144 B scale |
 
 ### shareMem 写
 
@@ -356,7 +357,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F50 | 任务数据传输完成后，按 `sharemem_waddr` / `sharemem_data` 写 shareMem，然后通知 TS |
 | F51 | 只在 B core 与 R core 使用，存 user_id 与 token entry 的 valid 标志：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid |
-| F51a | 搬入那一笔的标志由 Header Parser 建描述符时一并填：表的基址与一个 token 槽位多大由 core 的配置给，第几项按包头的 `dst_addr` 除以槽位大小算，写进去的值是 valid。搬入的描述符不经软件，标志的地址因此不能由软件配（原文只说了写哪里，没说搬入这一笔的地址怎么来） |
+| F51a | 搬入那一笔的标志由 Header Parser 建描述符时一并填：表的基址与一个槽位多大是本 core 的进核配置，由 SCP 在 core 配置阶段逐 core 写，对应 bundle 的 `DTEIN` 记录，B core 配 token 槽位，R core 配行结果槽位，计算 core 不配；第几项按包头的 `dst_addr` 除以槽位大小算，写进去的值是 valid。搬入的描述符不经 RV core 软件，标志的地址因此不能逐笔由软件配（原文只说了写哪里，没说搬入这一笔的地址怎么来） |
 
 ### 出核前的资源与流控
 
@@ -455,6 +456,7 @@ mem hmem             FF 阵列   16 项 × {core_mask 2 B, sw_header 16 B} = 288
 mem fast_lut         FF 阵列   64 × {valid, length[15:0], ctrl_flags}                 1R    boot 期经 ctrl_noc 配好，按 task_id 索引  复位 valid=0   // 只加速任务配置，不改路由定义、数据通路和完成条件
 mem rtab_copy        FF 阵列   64 项，RouterTable 的外部副本                           1R1W  软件写，三方一致        复位 0
 mem path_task_map    FF 阵列   64 × task_id[5:0]，按 path_id 索引                      1R1W  boot 期由软件配          复位 0
+mem inbound_cfg      FF        {route, no_ack, flag_base, flag_entry_bytes}            1R1W  SCP 在 core 配置阶段写（bundle 的 DTEIN），weights 加载与业务模式各配一次  复位 0
 mem stream_cache     FF 阵列   3 方向 × 16 项 × {valid, user_id[15:0]}                 1R1W  Router 的 User Resource Allocation Table 的 cache，只跟随不分配  复位空
 mem pending_taskq    FIFO      16 × Descriptor                                        1W1R  排在 Commit 之前，资源没申请到的出核任务在这里等；满则拉低 dsa_cfg 的 req_ready  复位空
 mem out_vc_buf[4]    FIFO      每 VC 一个，深度按整包容量                              1W1R  某 VC 阻塞只阻塞该 buffer  复位空
@@ -980,13 +982,15 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | 出核改写 path_id / size / core_mask | F41、F44 | `header_rewrite` |
 | 进核搬运的落点取自包头，发方在出核造包时写进去 | F3c、F44c | `dst_from_header` |
 | B core 与 R core 上进核那一笔不回 Ack | F3d | `inbound_no_ack` |
+| 进核落点、回不回 Ack 与标志表几何由 SCP 按 `DTEIN` 逐 core 配 | F3c、F51a | `inbound_cfg` |
 | DPU 的 gpu_id 与 token_id 随数据出核 | F44b | `dpu_header_relay` |
 | 纯包头任务 data_len = 0 | F45 | `header_only_task` |
 | 软件只配基址，硬件用 stream_id 算偏移，进核出核都按这条算 | F46、F47 | `stream_offset` |
 | scale 与 topK 的长度硬件自己算 | F48 | `derived_length` |
 | Matrix Mem 侧不加偏移，Core Mem 侧加 | F49 | `mm_no_offset` |
+| MXFP8 的 scale 随数据进出核、在 Matrix Mem 与 Router 之间搬运 | F49a | `scale_with_data` |
 | shareMem 写：搬入置 valid、搬出置 invalid | F50、F51 | `sharemem_flag` |
-| 搬入那一笔的标志项按落点算，不由软件配 | F51a | `inbound_flag_index` |
+| 搬入那一笔的标志项按落点算，不逐笔由软件配 | F51a | `inbound_flag_index` |
 | 三份 RouterTable 副本一致 | F52 | `dte_rtab_copy` |
 | 出核前置申请，没拿到就在 PendingTaskQ 等 | F53 | `dte_pending_taskq` |
 | PendingTaskQ 排在 Commit 之前，等资源的任务不占 Completion RS | F54 | `pending_before_commit` |

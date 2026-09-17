@@ -40,17 +40,21 @@ def silu(values):
     return [n.f32(x * sigmoid(x)) for x in values]
 
 
-def gemm(dtype, token, weight, scale, k, count_n, out_bf16):
+def gemm(dtype, token, weight, scale, k, count_n, out_bf16, wscale=None):
     """MU 的一条原语：一个 1×K 的 token 乘一个 K×N 的权重块。
 
     权重按列存，一列 K 个元素连着。块内先把乘积加完再乘 scale，块间顺序加，
     与硬件的 CSA 树同一个顺序。乘积先逐个算出来再加，不合成积和融合：那样少一
     次舍入，与硬件先乘后加差一个 bit。
+
+    `wscale` 给出权重的 scale 时是 MXFP8 × MXFP8 那一档：按列排，一列 K / block
+    个，与这一列的元素一一对应，块内部分和乘 token 与权重两个 scale 之积。
     """
     block = n.SCALE_BLOCK[dtype]
     elem_bits = n.ELEM_BITS[dtype]
     a = n.decode(dtype, token, k)
-    sc = n.decode_scale(dtype, scale, k // block) if block else []
+    nb = k // block if block else 0
+    sc = n.decode_scale(dtype, scale, nb) if block else []
 
     out = []
     col_bytes = k * elem_bits // 8
@@ -60,6 +64,9 @@ def gemm(dtype, token, weight, scale, k, count_n, out_bf16):
         prod = [n.f32(a[i] * b[i]) for i in range(k)]
         if block == 0:
             acc = n.accum_in_order(prod)
+        elif wscale is not None:
+            wsc = n.decode_scale(dtype, wscale[j * nb:(j + 1) * nb], nb)
+            acc = n.accum_by_scale_block2(prod, sc, wsc, block)
         else:
             acc = n.accum_by_scale_block(prod, sc, block)
         r = n.clamp_nan_inf(acc)

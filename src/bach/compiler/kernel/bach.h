@@ -65,127 +65,138 @@ typedef unsigned long long u64;
 #define CMEM_STREAM_BASE   0x00000u
 #define CMEM_STREAM_STRIDE 0x10000u
 
+/* ===== 单 core 用例的那一条链 =====
+ *
+ * 一条 MU 原语 1×K128×N64：token 是 K 个 MXFP8，K / 32 个 scale 随它存在 scale
+ * 旁带；结果是 N 个 BF16。VU 那一步逐元素算完仍写 N 个 BF16。 */
 #define CMEM_TOKEN_OFF 0x0000u   /* datain 的落点 */
-#define CMEM_FC1_OFF   0x8000u   /* MU 算完的中间结果 */
+#define CMEM_FC1_OFF   0x8000u   /* MU 算完的结果 */
 #define CMEM_ACT_OFF   0xC000u   /* VU 算完的结果 */
 
-/* 一条 MU 原语的形状是 K=256 配 N=32：BF16 的 token 512 B，FP32 的结果 128 B */
-#define TOKEN_BYTES 512u
-#define FC1_BYTES   128u
-#define ACT_BYTES   128u
+#define E2E_TOKEN_BYTES 128u
+#define E2E_OUT_BYTES   128u
+#define E2E_ACT_BYTES   128u
 
-/* ===== 一层 MoE 那一段的形状与摆放 =====
+/* ===== 一层 MoE 那一段：EP6+TP8 的 KN 拆分 =====
  *
- * EP6+TP8 切完之后每个 core 拿到的分片。K 走完整的 embedding，中间维是 2048
- * 按 TP8 切下来的那一段，输出维占一个 tile_N。
+ * 一个 EP 组两层 × 4 列共 8 颗 chip，每颗 chip 8 个计算 core。chip 在组里的序号
+ * c 定它分到 FC1、FC3 的哪一段 N 与 FC2 的哪一段 K；core 的逻辑槽位 s 定它分到
+ * FC1、FC3 的哪一段 K 与 FC2 的哪一段 N。逻辑槽位 7 是 dot core：chip 内归约的
+ * 落点，也做 silu·dot·量化、广播 FC2 输入、收 concat、往行链上发本 chip 结果。
  * 与 reference/vectors.py 的 MOE_* 同源，改一处要一起改。 */
 
-#define MOE_K       6144u  /* 这个 core 分到的 embedding 那一段 */
-#define MOE_INTER   256u   /* 这个 core 分到的 intermediate 那一段 */
-#define MOE_OUT_N   6144u  /* 这个 core 要产出的 embedding 那一段 */
-#define MOE_EXPERTS 2u     /* 这个 token 在本 EP Group 内激活了几个专家 */
+#define MOE_EMBED    6144u  /* token 与 FC2 输出的完整维度 */
+#define MOE_INTER    2048u  /* 中间维的完整维度 */
+#define MOE_SLOTS    8u     /* 一颗 chip 的计算 core 数，也是 chip 内切的份数 */
+#define MOE_DOT_SLOT 7u
+#define MOE_EXPERTS  2u     /* 这个 token 在本 EP Group 内激活了几个专家 */
+#define MOE_SEG_EMBED (MOE_EMBED / MOE_SLOTS)   /* 768 */
+#define MOE_SEG_INTER (MOE_INTER / MOE_SLOTS)   /* 256 */
 
-/* MU 物理阵列的一笔原语是 1×K256×N32。K 与 N 都按这个尺寸切块，一笔任务走
- * kblock × 专家数 × nblock 遍 */
-#define MU_TILE_K 256u
-#define MU_TILE_N 32u
-#define MOE_KBLOCK_FC13 (MOE_K / MU_TILE_K)
-#define MOE_NBLOCK_FC13 (MOE_INTER / MU_TILE_N)
-#define MOE_KBLOCK_FC2  (MOE_INTER / MU_TILE_K)
-#define MOE_NBLOCK_FC2  (MOE_OUT_N / MU_TILE_N)
-/* 一个权重块：K256 × N32 个 BF16。权重按 N 块连着放，一个 N 块占 kblock 个 */
-#define MU_TILE_BYTES   (MU_TILE_K * MU_TILE_N * 2u)
+/* 两种 MU 原语。FC1 与 FC3 每个 core K768×N256，按 1×K128×N64 切块；FC2 每个
+ * core K256×N768，按 1×K64×N128 切块，那是 K128×N64 阵列开 vlane = 2 */
+#define MU_FC13_K 128u
+#define MU_FC13_N 64u
+#define MU_FC2_K  64u
+#define MU_FC2_N  128u
+#define MOE_KBLOCK_FC13 (MOE_SEG_EMBED / MU_FC13_K)   /* 6 */
+#define MOE_NBLOCK_FC13 (MOE_SEG_INTER / MU_FC13_N)   /* 4 */
+#define MOE_KBLOCK_FC2  (MOE_SEG_INTER / MU_FC2_K)    /* 4 */
+#define MOE_NBLOCK_FC2  (MOE_SEG_EMBED / MU_FC2_N)    /* 6 */
 
-/* Core Mem 上一个 stream 里的摆放。FC1、FC3、激活三段按专家隔开。token 占
- * MOE_K 个 BF16，整段要放得进 CMEM_STREAM_STRIDE */
-#define MOE_TOKEN_OFF     0x0000u
-#define MOE_TOPK_OFF      0x3000u
-#define MOE_FC1_OFF       0x3800u
-#define MOE_FC3_OFF       0x5800u
-#define MOE_ACT_OFF       0x7800u
-#define MOE_OUT_OFF       0x9800u
-#define MOE_EXPERT_STRIDE 0x1000u
-
-/* FC2 的结果出核时拆成 MOE_PIECE_NUM 个 reduce 包。一包最长只支持到
- * (16 K + 32) B（dte.md F69），整份 MOE_OUT_N 个 FP32（24 KiB）装不下；
- * ReduceModule 给一个用户留 32 KiB（按 FP32 驻留算，03-reduce 第二层那条对
- * 软件的硬约束），一包累加出来也不能超过它。照这两条约束按 8 KB 数据一包拆，
- * 任务链上跟着配几项逐级 reduce 任务（task_dte_send_moe_p0～p2），一项一包。
- *
- * 每包最前面 16 B 是软件辅助信息，Router 做加法时每包都跳过这一段。所以 Core
- * Mem 里一包占一格：格首 16 B 留给这一包的头，MU 把这一段结果写在它之后，DTE
- * 从格首发整包。格距按 128 B 对齐，因为收方按 128 B 对齐检查落点；一包落到
- * R core 那边也用同一个格距。 */
+/* 走归约的包最前面 16 B 是软件辅助信息，Router 做加法时跳过这一段 */
 #define MOE_SW_HEAD_BYTES 16u
-#define MOE_PIECE_DATA    8192u                                 /* 一包的数据 */
-#define MOE_PIECE_NUM     (MOE_OUT_N * 4u / MOE_PIECE_DATA)     /* 拆成几包 */
-#define MOE_PIECE_N       (MOE_PIECE_DATA / 4u)                 /* 一包几个 FP32 */
-#define MOE_PIECE_NBLOCK  (MOE_PIECE_N / MU_TILE_N)             /* 一包几个 N 块 */
-#define MOE_PIECE_BYTES   (MOE_SW_HEAD_BYTES + MOE_PIECE_DATA)  /* 一包的长度 */
-#define MOE_PIECE_STRIDE  0x2080u                               /* 一格 */
 
-_Static_assert(MOE_PIECE_NUM * MOE_PIECE_DATA == MOE_OUT_N * 4u,
-               "FC2 的结果要正好拆成整数包");
-_Static_assert(MOE_PIECE_STRIDE >= MOE_PIECE_BYTES && MOE_PIECE_STRIDE % 128u == 0,
-               "一格要装得下一包，并且按 128 B 对齐");
-_Static_assert(MOE_OUT_OFF + MOE_PIECE_NUM * MOE_PIECE_STRIDE <= CMEM_STREAM_STRIDE,
-               "出核那几格要放得进一个 stream 的 Core Mem");
+/* Core Mem 上一个 stream 里的摆放。进核那一笔的落点要按 128 B 对齐，MU 写回按
+ * 16 B 对齐。 */
+#define MOE_TOKEN_OFF   0x0000u   /* token：6144 B MXFP8 */
+#define MOE_TOPK_OFF    0x1800u
+/* 部分和那一包：16 B 头，后面依次是两个专家的 FC1、两个专家的 FC3，一份 256 个
+ * BF16。chip 内 8 个 core 沿归约链逐跳加，链尾那一份交回 dot core */
+#define MOE_PART_OFF    0x2000u
+#define MOE_PART_STRIDE 0x200u
+#define MOE_FC1_OFF     (MOE_PART_OFF + MOE_SW_HEAD_BYTES)
+#define MOE_FC3_OFF     (MOE_FC1_OFF + MOE_EXPERTS * MOE_PART_STRIDE)
+#define MOE_PART_BYTES  (MOE_SW_HEAD_BYTES + 2u * MOE_EXPERTS * MOE_PART_STRIDE)
+/* dot core：chip 内归约的结果落这里，摆法同部分和那一包 */
+#define MOE_RED_OFF     0x2880u
+/* FC2 输入：每个专家 256 个 MXFP8，scale 在旁带。dot core 算出来广播给本 chip
+ * 另外 7 个计算 core，落在各自同一处 */
+#define MOE_ACT_OFF     0x3100u
+#define MOE_ACT_STRIDE  0x100u
+#define MOE_ACT_BYTES   (MOE_EXPERTS * MOE_ACT_STRIDE)
+/* 行链那一包：16 B 头，后面是 concat 区。concat 区第 s 段是槽位 s 的 FC2，768 个
+ * BF16。计算 core 把自己那一段写在同一处再发给 dot core，落点就是 dot core 上的
+ * 第 s 段；dot core 自己那一段由 MU 直接写进去 */
+#define MOE_ROW_OFF     0x37F0u
+#define MOE_CONCAT_OFF  (MOE_ROW_OFF + MOE_SW_HEAD_BYTES)
+#define MOE_FC2_BYTES   (MOE_SEG_EMBED * 2u)
+#define MOE_ROW_BYTES   (MOE_SW_HEAD_BYTES + MOE_SLOTS * MOE_FC2_BYTES)
 
-/* ===== R core：EP 组间那一层求和 =====
+_Static_assert(MOE_CONCAT_OFF % 128u == 0, "concat 区各段要按 128 B 对齐");
+_Static_assert(MOE_RED_OFF >= MOE_PART_OFF + MOE_PART_BYTES &&
+                   MOE_RED_OFF % 128u == 0,
+               "归约结果要放在部分和之后，并按 128 B 对齐");
+_Static_assert(MOE_ACT_OFF >= MOE_RED_OFF + MOE_PART_BYTES &&
+                   MOE_ACT_OFF % 128u == 0,
+               "FC2 输入要放在归约结果之后，并按 128 B 对齐");
+_Static_assert(MOE_ROW_OFF >= MOE_ACT_OFF + MOE_ACT_BYTES,
+               "行链那一包要放在 FC2 输入之后");
+_Static_assert(MOE_ROW_OFF + MOE_ROW_BYTES <= CMEM_STREAM_STRIDE,
+               "行链那一包要放得进一个 stream 的 Core Mem");
+
+static inline u32 moe_concat(u32 s) {
+  return MOE_CONCAT_OFF + s * MOE_FC2_BYTES;
+}
+
+/* ===== R core：一行一个，各行结果逐行相加 =====
  *
- * 每个用户在本 core 占一个槽，槽里两半：本组 TP 内归约出来的组内结果落前一半，
- * 上游组送过来的中间结果落后一半。落哪一半由发方在包头的 dst_addr 里指定，槽号
- * 两个发方都按 user_id 取模算，算得一样。
+ * 每个用户在本 core 占一个槽，槽里两半：本行 4 颗 chip 的 dot core 逐跳归约出来
+ * 的本行结果落前一半，上一行 R core 送过来的累加结果落后一半。落哪一半由发方在
+ * 包头的 dst_addr 里指定，槽号按 user_id 取模算。一半一包，摆法同行链那一包。
  *
- * 一笔是 MOE_PIECE_NUM 包，一半里一包一格，格距与 Core Mem 那边相同。每包搬完
- * 硬件就把这一包的 valid 标志置起来；链二扫到一个槽两半的标志都齐了，就把整个
- * 槽搬进 Core Mem 求和。 */
+ * 一包搬完硬件就把这一半的 valid 标志置起来；链二扫到一个槽两半的标志都齐了，
+ * 就把整个槽搬进 Core Mem 求和。 */
 #define RC_SLOTS       16u
-/* 一笔占的地方：MOE_PIECE_NUM 格 */
-#define RC_HALF_BYTES  (MOE_PIECE_NUM * MOE_PIECE_STRIDE)
+#define RC_HALF_BYTES  0x3080u                     /* 一包按 128 B 对齐 */
 #define RC_SLOT_BYTES  (2u * RC_HALF_BYTES)        /* 一个用户占的地方 */
 #define RC_MM_BASE     0x000000u                   /* 槽在 Matrix Mem 的起点 */
 
-/* Share Mem 里的两张表。标志表每包一项：硬件按落点除以格距找项，搬完一包写一
- * 项，所以第 s 槽第 h 半第 k 包那一项是 (s × 2 + h) × MOE_PIECE_NUM + k。用户
- * 表每槽一项，由 datain 那一段写，链二按它认这个槽是哪个用户 */
+_Static_assert(RC_HALF_BYTES >= MOE_ROW_BYTES && RC_HALF_BYTES % 128u == 0,
+               "一半要装得下行链那一包，并按 128 B 对齐");
+
+/* Share Mem 里的两张表。标志表每半一项：硬件按落点除以一半的长度找项，所以第 s
+ * 槽第 h 半那一项是 s × 2 + h。用户表每槽一项，由 datain 那一段写，链二按它认这
+ * 个槽是哪个用户 */
 #define RC_FLAG_OFF    0x0000u
 #define RC_USER_OFF    0x0200u
 #define RC_SLOT_OFF    0x0300u                     /* 链二每 stream 记一个槽号 */
-/* 本 core 是不是这条 R core 链的链首。链首那一组只有自己的组结果，槽的另一半
- * 一直是 0，加上去不改值，所以它等一笔就走；其余组等两笔。非零表示是链首 */
+/* 本 core 是不是这条 R core 链的链首。链首那一行没有上一行，槽的另一半一直是 0，
+ * 加上去不改值，所以它等一包就走；其余行等两包。非零表示是链首 */
 #define RC_HEAD_OFF    0x0380u
 
-_Static_assert(RC_FLAG_OFF + RC_SLOTS * 2u * MOE_PIECE_NUM * 4u <= RC_USER_OFF,
-               "标志表每包一项，要放得进用户表之前那一段");
+_Static_assert(RC_FLAG_OFF + RC_SLOTS * 2u * 4u <= RC_USER_OFF,
+               "标志表每半一项，要放得进用户表之前那一段");
 
-/* Core Mem 里的摆放。两笔在 Matrix Mem 里按格连着，搬到 Core Mem 也原样连着，
- * 一笔搬运就够。每格首那 16 B 是软件辅助信息，求和逐格只算数据那一段。求和结果
- * 写回第一笔的同一格：VU 读完两边那一格才写，写的时候第一笔那一格已经进了 VRF；
- * 格首那 16 B 原样留着，DTE 从格首发整包 */
+/* Core Mem 里的摆放。两半在 Matrix Mem 里连着，搬到 Core Mem 也原样连着，一笔
+ * 搬运就够。每一半开头那 16 B 是软件辅助信息，求和只算数据那一段。求和结果写回
+ * 前一半的同一处：VU 读完两边才写；开头那 16 B 原样留着，DTE 从开头发整包 */
 #define RC_A_OFF   0x0000u
 #define RC_B_OFF   RC_HALF_BYTES
 #define RC_SUM_OFF RC_A_OFF
-/* 两笔求和借用的 VRF 起点。逐格相加，一条 VL 为 MOE_PIECE_N 的 FP32 向量占
- * MOE_PIECE_N × 4 / 128 个 entry */
+/* 两半求和借用的 VRF 起点。一条 VL 为 MOE_EMBED 的 FP32 向量占 192 个 entry */
 #define RC_VRF     16u
 
-/* 本组把结果送到 R core 的哪一半：这个用户在本组之前还有别的组时送前一半，
- * 本组是它的第一组时直接送下一组的后一半。boot 期由编译侧写进 Share Mem */
-#define MOE_SEND_HALF_OFF 0x0400u
-
-/* 出核那几格里第 k 格在本 stream 里的起点 */
-static inline u32 moe_piece(u32 k) { return MOE_OUT_OFF + k * MOE_PIECE_STRIDE; }
-
-/* 一个用户在 R core 上的落点。half 为 0 是本组结果，为 1 是上游组的中间结果 */
+/* 一个用户在 R core 上的落点。half 为 0 是本行结果，为 1 是上一行的累加结果 */
 static inline u32 rc_land(u32 user, u32 half) {
   return RC_MM_BASE + (user % RC_SLOTS) * RC_SLOT_BYTES + half * RC_HALF_BYTES;
 }
 
 /* ===== B core：组内广播的发起点 =====
  *
- * 上游把 token 一笔笔送进来，硬件按包头的落点搬进 Matrix Mem 的环形缓冲，搬完
- * 置那一格的 valid。收发两条链靠 Share Mem 里一对 head 与 tail 指针耦合：
+ * 上游把 token 一笔笔送进来，硬件按包头的落点搬进 Matrix Mem 的环形缓冲，scale
+ * 随它进 scale 旁带，搬完置那一格的 valid。收发两条链靠 Share Mem 里一对 head
+ * 与 tail 指针耦合：
  *
  *   链一  datain。只把这一笔是哪个用户记进 Share Mem，搬运与置 valid 都是硬件
  *         的事
@@ -204,7 +215,7 @@ static inline u32 rc_land(u32 user, u32 half) {
  * 一份 token 在 B core 上发两笔：一笔广播给本组各 core，落点由收方自己的配置
  * 定；一笔转给下一个 EP 组的 B core，落点要按这一条规则算好写进包头 */
 #define BC_SLOTS       16u
-#define BC_TOKEN_BYTES (MOE_K * 2u)                /* 一笔 token：K 个 BF16 */
+#define BC_TOKEN_BYTES MOE_EMBED                   /* 一笔 token：6144 个 MXFP8 */
 #define BC_MM_BASE     0x000000u
 
 /* Share Mem 里的几样。标志表由硬件搬完之后写，用户表与收包计数由链一写，一对
@@ -226,12 +237,16 @@ static inline u32 bc_land(u32 idx) {
   return BC_MM_BASE + (idx % BC_SLOTS) * BC_TOKEN_BYTES;
 }
 
-/* Matrix Mem 上三个矩阵各一段，段内按专家在本组内的序号隔开。W1 与 W3 各是
- * MOE_K × MOE_INTER 个 BF16，一个专家 3 MB */
+/* Matrix Mem 上三个矩阵各一段，段内按专家在本组内的序号隔开。一个专家一个矩阵
+ * 是 196608 个 MXFP8，按 tile 连着摆：第 n 个 tile_N 的第 k 个 tile_K 是第
+ * n × kblock + k 块，一块列优先，scale 在旁带 */
 #define MMEM_W1_OFF          0x000000u
-#define MMEM_W3_OFF          0x600000u
-#define MMEM_W2_OFF          0xC00000u
-#define MMEM_EXPERT_STRIDE   0x300000u
+#define MMEM_W3_OFF          0x100000u
+#define MMEM_W2_OFF          0x200000u
+#define MMEM_EXPERT_STRIDE   0x030000u
+
+_Static_assert(MOE_SEG_EMBED * MOE_SEG_INTER <= MMEM_EXPERT_STRIDE,
+               "一个专家的一个矩阵要放得进一格");
 
 static inline u32 dte_template(u32 idx) {
   return DTE_TEMPLATE_BASE + idx * DTE_TEMPLATE_STRIDE;
@@ -278,9 +293,10 @@ static inline u32 dte_template(u32 idx) {
 #define MU_STATE_SHIFT 1           /* [2:1] 00 Idle、01 Running、10 Error */
 
 /* TASK_CFG 位域 */
-#define MU_PRIM_TYPE_K256_N32 0u   /* [0] 0 = 1*K256*N32 */
-#define MU_PRIM_TYPE_K128_N64 1u
+#define MU_PRIM_TYPE_K128_N64 1u   /* [0] 物理阵列只有 1*K128*N64，固定写 1 */
 #define MU_VLANE_SHIFT   1         /* [2:1] 00 vlane=1、01 vlane=2 */
+#define MU_VLANE2        (1u << MU_VLANE_SHIFT)
+#define MU_DTYPE_MXFP8   (1u << 3) /* DTYPE_AB = 01 */
 #define MU_DTYPE_AB_SHIFT 3        /* [4:3] 00 BF16、01 MXFP8、10 MXFP4 */
 #define MU_DTYPE_C_BF16  (1u << 5) /* [5] 0 = FP32、1 = BF16 */
 
@@ -353,8 +369,11 @@ static inline u32 dte_template(u32 idx) {
 #define VU_SRC_VRF_P0  0x30
 
 /* 用到的 opcode */
+#define VU_LU_LD_MXFP8  0x02
+#define VU_LU_LD_BF16   0x03
 #define VU_LU_LD_FP32   0x04
 #define VU_SU_NOP       0x00
+#define VU_SU_ST_MXFP8  0x02
 #define VU_SU_ST_BF16   0x03
 #define VU_VALU_FMUL_VV 0x06
 #define VU_VALU_FADD_VV 0x01

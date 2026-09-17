@@ -173,7 +173,10 @@ class HeaderParser : public BachModule {
     desc->stream_id = d.msg->stream_id;
     desc->task_id = path_task ? path_task(d.msg->path_id) : d.msg->task_id;
     desc->frame_seq = ++frame_cnt;
-    desc->bytes = d.msg->size;
+    // 带 scale 的包：数据那一段落数据地址，包尾的 scale 落同一段地址的 scale
+    // 旁带。
+    desc->bytes = d.msg->DataBytes();
+    desc->scale = d.msg->scale_valid != 0;
     desc->dst_addr = d.msg->dst_addr;
     if (entry_bytes_of_slot != 0) {
       desc->smem_wr = true;

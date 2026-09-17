@@ -333,7 +333,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | F64 | P2P 阻塞缓冲：软件可配开关、分给 P2P 缓存的 Core Mem 容量、开启的方向（最多 3 个）、每方向的容量与项数。TS 为每方向维护一张映射表（`p2p_vld`、`user_id`、`down_direction`、`data_addr`）与对应下游 core 的 credit 计数器，下游 credit 释放后发起一个 DTE 把数据搬回 Router 的任务，并通知上游释放 credit |
 | F65 | B core 的搬出按 `B_CORE_DIRECTION` 查下游 core 的 credit；落 Matrix Mem 的那一侧不查，反压由 GPU 到 Bach 的两层 credit 兜底 |
 | F66 | 广播任务的 `CreditCounter[path_id][stream_id]` 初值等于目的 core 数量，P2P 任务初值为 1；够了一次扣掉全部目的数再下发，不够就等 credit 释放 |
-| F67 | 不派角色的 core 只按路由表透传，不检查 credit；上游要查的 credit 对应它之后那个落地的 core |
+| F67 | 坏 core 上只有 Router 工作，数据按路由表透传，不检查 credit；上游要查的 credit 对应它之后那个落地的 core |
 | F68 | Head-only 退休：只有 `head_ptr` 那一项能退休，条件是 `valid = 1` 且第 0 项到 End 的完成位全部置起。End 提前完成、当前任务停在 End 前面的也照样退休 |
 | F69 | 退休顺序：先向 Router 持续发退休请求（带 `user_id`），Router 收下后才动表项，普通模式清 `valid`、推 `head_ptr`；退休请求经本 core 的 Router 通知上游，让上游的 credit 加一 |
 | F70 | 自启动模式下 Router 收下退休请求后不清 `valid`：这条链在同一个 stream 上原地重新激活成自启动任务链（Task 0 的属性、没有用户号、`done_bitmap` 清零），`head_ptr` 与 `tail_ptr` 各推一格、按 `stream_num` 环回，这条链排到队尾。在途表项一直是 `stream_num` 个 |
@@ -423,21 +423,40 @@ mem 其余级间 latch  级间 latch 三条发射通路的命令保持、各写�
 
 DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录），给进核那一笔的完成填 `task_id`，TS 这一侧不用它。
 
-### 模型里三类 core 的任务链
+### 模型里四种 core 的任务链
 
-`recv` 一栏是 `TASK_RECV_UNIT`，`type` 一栏是 `TASK_TYPE`。
+`recv` 一栏是 `TASK_RECV_UNIT`，`type` 一栏是 `TASK_TYPE`。MU 与 VU 的项只收 RV core 那一路，四种 core 相同。
 
-**计算 core（EPTP-NN）**：FC1 与 FC3、门控、FC2 三项各在一个 task 里发几笔 DSA 任务，每笔都报一次完成，所以只收 RV core 那一路。
+默认用例是 EPTP-NK：FC1、FC3 在 chip 间切 N、chip 内切 K，FC2 在 chip 间切 K、chip 内切 N。每颗 chip 的 8 个计算 core 按逻辑槽位 `s`（0～7）分工，槽位 0～6 配计算 core 的链，槽位 7 配 dot core 的链。同一个 kernel 镜像服务全部槽位，按槽位变化的项（FC1、FC3 部分和，FC2，发给 dot core）每个槽位一个入口，由 `TASK_CHAIN_n_PC` 选。
+
+**计算 core（逻辑槽位 0～6）**
 
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
-| 0 | token 搬入（`task_dte_user_init`） | DTE | 01 | 1 | 0 | 0 | 进核 path | 0 |
-| 1 | FC1 / FC3 计算（`task_mu_fc13`） | MU | 00 | 0 | 0 | 0 | — | 0 |
-| 2 | silu × FC3 加量化（`task_vu_gate`） | VU | 00 | 0 | 0 | 0 | — | 0 |
-| 3 | FC2 计算加 EP Reduce（`task_mu_fc2`） | MU | 00 | 0 | 0 | 0 | — | 0 |
-| 4～6 | FC2 结果出核，逐级 reduce，一项一包（`task_dte_send_moe_p0～p2`） | DTE | 01 | 0 | 4 | 1 | 归约 path | 第 6 项为 1 |
+| 0 | token 搬入 | DTE | 01 | 1 | 0 | 0 | token 广播 path | 0 |
+| 1 | FC1、FC3 部分和：token 第 `s` 段乘本 core 的 W1、W3，每个专家各一份 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 2 | 部分和出核，逐级 reduce | DTE | 01 | 0 | 4 | 1 | chip 内归约 path | 0 |
+| 3 | FC2 输入搬入 | DTE | 01 | 1 | 0 | 0 | FC2 输入广播 path | 0 |
+| 4 | FC2 第 `s` 段，MU 内按 `W_ep` 做专家间累加 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 5 | 发给 dot core，包头落点是 concat 区第 `s` 段 | DTE | 01 | 0 | 0 | 待定 | 槽位 `s` 的 concat path | 1 |
 
-**B core**：`SELF_START = 1`，`STREAM_NUM = 16`，`B_CORE_DIRECTION` 配广播方向，`DATAIN_TASK_PC` 指 `task_dte_bc_datain`。
+**dot core（逻辑槽位 7）**：dot core 是每颗 chip 的逻辑 core7，chip 内 FC1、FC3 部分和的归约落点，也是做 silu·dot·量化、广播 FC2 输入、收 concat、往行链上发本 chip 结果的那个 core。它的物理位置在第一列与中间两列 chip 是 core9，在最后一列 chip 是 core8。行链是一行 4 颗 chip 的 dot core 从第一列到最后一列逐跳 reduce、最后一跳落进本行 R core 的那条链。
+
+| 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
+| - | - | - | - | - | - | - | - | - |
+| 0 | token 搬入 | DTE | 01 | 1 | 0 | 0 | token 广播 path | 0 |
+| 1 | FC1、FC3 部分和，槽位 7 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 2 | 部分和出核，逐级 reduce；它是归约链的链尾，结果交回本 core | DTE | 01 | 0 | 4 | 1 | chip 内归约 path | 0 |
+| 3 | 归约结果搬入 | DTE | 01 | 1 | 0 | 0 | chip 内归约 path | 0 |
+| 4 | silu·dot·量化：每个专家一份，BF16 读，MXFP8 写 | VU | 00 | 0 | 0 | 0 | — | 0 |
+| 5 | FC2 输入广播 | DTE | 01 | 0 | 0 | 待定 | FC2 输入广播 path | 0 |
+| 6 | FC2 第 7 段，直接写进 concat 区 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 7～13 | concat 搬入，每个上游 core 一项：第 7 + k 项收槽位 k 发来的那一段 | DTE | 01 | 1 | 0 | 0 | 槽位 k 的 concat path | 0 |
+| 14 | 行链出核，逐级 reduce | DTE | 01 | 0 | 4 | 1 | 行链 path | 1 |
+
+FC2 输入广播与发给 dot core 这两项的 `credit_en` 还没有定。
+
+**B core**：`SELF_START = 1`，`STREAM_NUM = 16`，`B_CORE_DIRECTION` 配广播方向，`DATAIN_TASK_PC` 指 `task_dte_bc_datain`。进来的 token 是 6144 B 的 MXFP8 数据加 192 B scale。
 
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
@@ -445,37 +464,28 @@ DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录）�
 | 1 | 广播出去（`task_dte_bc_send`） | DTE | 01 | 0 | 0 | 1 | 广播 path | 链尾那一组为 1 |
 | 2 | 转给下一组的 B core（`task_dte_bc_relay`），下面还有 EP 组时才配 | DTE | 01 | 0 | 0 | 0 | 转发 path | 1 |
 
-**R core**：`SELF_START = 1`，`STREAM_NUM = 16`，`DATAIN_TASK_PC` 指 `task_dte_rc_datain`。
+**R core**：`SELF_START = 1`，`STREAM_NUM = 16`，`DATAIN_TASK_PC` 指 `task_dte_rc_datain`。datain 那一路收本行结果与上一行 R core 送来的累加结果两半，每半一包 12288 B（6144 个 BF16）。LPU 每行一个 R core，12 个 R core 逐行串成一条链。
 
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
-| 0 | 查两笔是否集齐（`task_rc_find`） | MU | 00 | 0 | 0 | 0 | — | 0 |
-| 1 | 从 Matrix Mem 搬两笔进 Core Mem（`task_dte_rc_load`） | DTE | 01 | 0 | 0 | 0 | — | 0 |
-| 2 | 求和（`task_vu_add`） | VU | 00 | 0 | 0 | 0 | — | 0 |
-| 3 | 结果出核（`task_dte_rc_send`） | DTE | 01 | 0 | 0 | 0 | 出核 path | 1 |
+| 0 | 查一个用户的两半是否集齐（`task_rc_find`） | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 1 | 从 Matrix Mem 搬两半进 Core Mem（`task_dte_rc_load`） | DTE | 01 | 0 | 0 | 0 | — | 0 |
+| 2 | 求和，VL = 6144 的 BF16 相加（`task_vu_add`） | VU | 00 | 0 | 0 | 0 | — | 0 |
+| 3 | 结果出核，送下一行 R core（`task_dte_rc_send`） | DTE | 01 | 0 | 0 | 0 | 出核 path | 1 |
 
 ### 四种 core 级切分模式的任务链
 
-bring-up 用 **EPTP-NN**，它每个 core 的任务链相同，就是上面计算 core 那一条，是能跑通第一个 token 的最小实例；跑通后换 EPTP-NK 的三种 core 角色，再上两种 PPTP。
+bring-up 先通 **EPTP-NK**，每颗 chip 的计算 core 与 dot core 就配上面那两条链。另外三种模式的链如下。
 
-**EPTP-NK：三种 core 角色**。三种角色各配各的链：取下表里打勾的项，按原顺序排。
+**EPTP-NN**：每个 core 的任务链相同。
 
-| 步 | unit | 内容 | Normal | Concat | Chip Reduce |
-| - | - | - | - | - | - |
-| 0 | DTE | token data in | ✔ | ✔ | ✔ |
-| 1 | MU | FC1 / FC3 计算 | ✔ | ✔ | ✔ |
-| 2 | DTE | FC1 / FC3 out，Router 上 reduce | ✔ | ✔ | ✔ |
-| 3 | DTE | FC1 / FC3 reduce 结果 data in | | ✔ | ✔ |
-| 4 | VU | FC1 silu × FC3 加量化 | | ✔ | ✔ |
-| 5 | DTE | FC2 input data out（广播） | | ✔ | ✔ |
-| 6 | DTE | FC2 input data in | ✔ | | |
-| 7 | MU | FC2 计算加 EP Reduce | ✔ | ✔ | ✔ |
-| 8 | DTE | FC2 data out（concat） | ✔ | | |
-| 9 | DTE | 与 chip 内其他 core concat，只在 chip 内最后一个 core 上做 | | ✔ | ✔ |
-| 10 | DTE | chip FC2 结果 data out（chip reduce） | | ✔ | |
-| 11 | DTE | chip FC2 结果 data in | | | ✔ |
-| 12 | VU | chip FC2 结果 reduce | | | ✔ |
-| 13 | DTE | FC2 结果 data out | | | ✔ |
+| 步 | unit | 内容 |
+| - | - | - |
+| 0 | DTE | token data in |
+| 1 | MU | FC1 / FC3 计算 |
+| 2 | VU | silu × FC3 加量化 |
+| 3 | MU | FC2 计算加 EP Reduce |
+| 4 | DTE | FC2 结果 out，Router 上逐级 reduce |
 
 **PPTP 两种模式的共同点**：PP 把 FC1、FC3、FC2 摆在不同行的 chip 上，**silu、dot、量化三步统一落在 FC2 段 chip 的逻辑 core 0**。FC1 段与 FC3 段各自把本段的结果送到那一个 core，dot 完再由它把结果当作 FC2 的 token 在本 chip 内广播。原始文档另有两处把 dot 摆在 FC3 chip，本套文档不采用，冲突记在第 8 章。
 

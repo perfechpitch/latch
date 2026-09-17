@@ -233,17 +233,25 @@ ROUTER_SIGS = [
     "xbar_stall", "core_in", "cs_trig", "reduce_q", "rdc_ctx",
     "reissue", "retire", "cmcm_q",
 ]
-# 一个 core 记的全部信号：Router 那一组，加 core_out 与 ts_*。后面这几个不派
-# 角色的 core 没有。
+# 打包的那几个，与 Core::EmitIssue() / EmitDsa() / EmitRv() 同源。每个时刻三个：
+# 位掩码 bit0 DTE、bit1 MU、bit2 VU，task 号三路各占 8 bit，user_id 三路各占 16 bit。
+# 不画成波形，解成「哪一拍哪一路哪一笔」：下发那三个给 core 那一级分步，其余四个
+# 时刻把每一笔在 RV core 与 DSA 上的时间段配出来，画甘特图。
+PACKED_SIGS = [
+    "ts_unit", "ts_task", "ts_user",
+    "rv_start", "rv_start_task", "rv_start_user",
+    "rv_done", "rv_done_task", "rv_done_user",
+    "dsa_start", "dsa_start_task", "dsa_start_user",
+    "dsa_done", "dsa_done_task", "dsa_done_user",
+]
+# 一个 core 取的全部信号：Router 那一组，加 core_out、ts_* 与打包的那几个。后面这些
+# 只在 TS 配过任务的好 core 上有；坏 core 与没配任务的好 core 只有 Router 在用。
 CORE_SIGS = ROUTER_SIGS + [
     "core_out", "ts_inflight", "ts_issue", "ts_done",
-    # 这两个是打包值：ts_unit 是位掩码，ts_task 三路各占 8 bit。不画成波形，
-    # 解成「哪一拍哪一路下发了第几号 task」，core 那一级按它分步。
-    "ts_unit", "ts_task",
-]
-# 画成波形看的那些，打包的两个不在里面。
-WAVE_SIGS = [s for s in CORE_SIGS if s not in ("ts_unit", "ts_task")]
-# 判定一个 core 派没派角色：不派角色的只建 Router，没有这个信号。
+] + PACKED_SIGS
+# 画成波形看的那些，打包的不在里面。
+WAVE_SIGS = [s for s in CORE_SIGS if s not in PACKED_SIGS]
+# 判定一个 core 是不是只有 Router 在用：那种 core 没有这个信号。
 ROLE_SIG = "ts_inflight"
 
 # 这几个在模型里是只加不清零的累计计数器，画面上要取相邻两拍的差才是「本拍
@@ -355,8 +363,8 @@ def collect(prefix: str) -> dict:
     for c in ids:
         ks = sorted(chips[c])
         n = len(ks)
-        # 片内 core 的列数：10 个 core 摆 2×5，8 个摆 2×4，与 chip.h 的 ColsOf 一致。
-        ccols = 5 if n > 8 else max(1, (n + 1) // 2)
+        # 片内 core 的列数：每颗 chip 2×5，与 chip.h 的 kChipCols 一致。
+        ccols = 5
         topo.append({
             "id": c,
             "name": chip_names[c],
@@ -453,6 +461,9 @@ footer button.pri{background:var(--accent);border-color:var(--accent);color:#fff
 .gbar.todo rect{fill:var(--box);stroke:var(--boxb);stroke-dasharray:3 2;opacity:.75}
 .gbar text{font-family:var(--sans);font-size:10px;fill:var(--ink);pointer-events:none}
 .gbar.run text{fill:var(--hib);font-weight:700}
+.gbar rect.gdsa{fill:var(--accent);stroke:none;opacity:.85}
+.gbar.todo rect.gdsa{opacity:.3}
+.gdsaend{stroke:var(--accent);stroke-width:1.6}
 .glane{fill:var(--dim);font-size:10.5px;font-weight:600}
 .gtick{fill:var(--dim);font-size:9px;font-family:var(--mono)}
 .gcur{stroke:var(--bad);stroke-width:1.6;pointer-events:none}
@@ -536,34 +547,47 @@ function coreStat(c,k){
   return o;
 }
 
-// ── 分步：ts_unit 是位掩码，ts_task 三路各占 8 bit，0xFF 表示那一路没发。两个信号
-// 每拍都发，波形只在值变了的那一拍记事件：同一路连着几拍都下发时 ts_unit 几拍同值，
-// 事件只落在头一拍。所以非零的那一段要逐拍展开，一拍一笔，task 号按那一拍取 ──
+// ── 分步：打包的一个时刻是三个信号，位掩码 bit0 DTE、bit1 MU、bit2 VU，task 号三路
+// 各占 8 bit，user_id 三路各占 16 bit。三个信号每拍都发，波形只在值变了的那一拍记事
+// 件：同一路连着几拍都有时位掩码几拍同值，事件只落在头一拍。所以非零的那一段要逐拍
+// 展开，一拍一笔，task 号与 user_id 按那一拍取 ──
 const UNAME = ['DTE', 'MU', 'VU'];
+// user_id 打包到 48 bit，超出 JS 位运算的 32 bit，按乘除取。
+function unpack(key, mask, task, user){
+  const um = D.core[key + "." + mask] || [], tk = D.core[key + "." + task] || [];
+  const us = D.core[key + "." + user] || [];
+  const out = [];
+  for(let j = 0; j < um.length; j += 2){
+    const m = um[j+1]; if(!m) continue;
+    // 这个值保持到下一个事件；最后一个事件之后波形就停了，只算那一拍。
+    const t0 = um[j], t1 = j + 2 < um.length ? um[j+2] : t0 + 1;
+    for(let t = t0; t < t1; ++t){
+      const pt = valAt(tk, t), pu = valAt(us, t);
+      for(let u = 0; u < 3; ++u)
+        if(m & (1 << u)) out.push({t, u,
+          task: Math.floor(pt / 2 ** (8*u)) % 256,
+          user: Math.floor(pu / 2 ** (16*u)) % 65536});
+    }
+  }
+  return out;
+}
 const stepCache = {};
 function stepsOf(c, k){
   const key = c + "." + k;
   if(stepCache[key]) return stepCache[key];
-  const um = D.core[key + ".ts_unit"] || [], tk = D.core[key + ".ts_task"] || [];
-  const issue = [];
-  for(let j = 0; j < um.length; j += 2){
-    const mask = um[j+1]; if(!mask) continue;
-    // 这个值保持到下一个事件；最后一个事件之后波形就停了，只算那一拍。
-    const t0 = um[j], t1 = j + 2 < um.length ? um[j+2] : t0 + 1;
-    for(let t = t0; t < t1; ++t){
-      const pack = valAt(tk, t);
-      for(let u = 0; u < 3; ++u)
-        if(mask & (1 << u)) issue.push({t, u, task: (pack >> (8*u)) & 0xFF});
-    }
-  }
-  // 完成数是累计的，取增量当完成事件。
+  const issue = unpack(key, 'ts_unit', 'ts_task', 'ts_user');
+  // TS 的完成数是累计的，取增量当完成事件，在时间轴上画刻度。
   const dn = D.core[key + ".ts_done"] || [], done = [];
   let prev = 0;
   for(let j = 0; j < dn.length; j += 2){
     const d = dn[j+1] - prev; prev = dn[j+1];
     if(d > 0) done.push({t: dn[j], n: d});
   }
-  return stepCache[key] = {issue, done};
+  return stepCache[key] = {issue, done,
+    rvStart: unpack(key, 'rv_start', 'rv_start_task', 'rv_start_user'),
+    rvDone: unpack(key, 'rv_done', 'rv_done_task', 'rv_done_user'),
+    dsaStart: unpack(key, 'dsa_start', 'dsa_start_task', 'dsa_start_user'),
+    dsaDone: unpack(key, 'dsa_done', 'dsa_done_task', 'dsa_done_user')};
 }
 // 当前停在第几步：取时刻不晚于 T 的最后一笔。
 function stepAt(c, k){
@@ -666,7 +690,7 @@ function drawChip(cid){
     const h = heat(st.flow);
     if(h) r.setAttribute('fill', `color-mix(in srgb, var(--accent) ${Math.round(h*100)}%, var(--box))`);
     g.appendChild(r);
-    const tag = co.role ? '' : ' · 只转发';
+    const tag = co.role ? '' : ' · 只有 Router';
     g.appendChild(el('text', {class:'t', x:p.x+9, y:p.y+17, 'font-size':12,
       'font-weight':600})).textContent = 'core' + k + tag;
     g.appendChild(el('text', {class:'cnt', x:p.x+9, y:p.y+33}))
@@ -708,29 +732,52 @@ const BOX = [
 ];
 const BOXAT = {}; for(const b of BOX) BOXAT[b[0]] = b;
 
-// 每笔下发配上它的完成，画成甘特图上的一段。只有这个 core 同一时刻最多一笔在
-// 飞时才配得准：ts_done 不分路，几笔并发时分不清哪次完成是哪一笔的。B core 与
-// R core 同时挂着十几个 stream，那种 core 只画下发与完成的刻度，不配对。
+// 每笔下发配上它在 RV core 与 DSA 上的几个时刻，画成甘特图上的一段：
+//   RV core  一个 RV core 同一时刻只跑一笔，同一路的接下与交还按下发的先后一一对上，
+//            task 号相同才算
+//   DSA      开始与报完成按路、task 号、user_id 对回同一笔：落到同一身份里下发时刻
+//            不晚于它的最后一笔。DTE 的搬入没有开始只有报完成；VU 一笔发几条宏指令
+//            就有几对
+// 一段从下发画到 RV core 交还且 DSA 报完成的那一拍，DSA 开始多于报完成就算没做完。
+// 逐级 reduce 在 TS 那边要等 Router 报完成，那一拍不在这几个信号里，段只画到 DTE
+// 本地报完成。TS 的完成数另在时间轴上画刻度。
 const barCache = {};
 function barsOf(c, k){
   const key = c + "." + k;
   if(barCache[key]) return barCache[key];
   const sp = stepsOf(c, k);
-  const fl = D.core[key + ".ts_inflight"] || [];
-  let fmax = 0;
-  for(let j = 1; j < fl.length; j += 2) if(fl[j] > fmax) fmax = fl[j];
-  const serial = fmax <= 1;
   const fins = [];
   for(const d of sp.done) for(let n = 0; n < d.n; ++n) fins.push(d.t);
-  const bars = sp.issue.map(e => ({u: e.u, task: e.task, t0: e.t, t1: null}));
-  if(serial){
-    let j = 0;
+  const bars = sp.issue.map(e => ({u: e.u, task: e.task, user: e.user, t0: e.t,
+                                   rv0: null, rv1: null, ds0: [], ds1: [], t1: null}));
+  for(let u = 0; u < 3; ++u){
+    const s = sp.rvStart.filter(e => e.u === u), d = sp.rvDone.filter(e => e.u === u);
+    let i = 0, j = 0;
     for(const b of bars){
-      while(j < fins.length && fins[j] < b.t0) ++j;
-      if(j < fins.length) b.t1 = fins[j++];
+      if(b.u !== u) continue;
+      while(i < s.length && (s[i].t < b.t0 || s[i].task !== b.task)) ++i;
+      if(i === s.length) break;
+      b.rv0 = s[i++].t;
+      while(j < d.length && d[j].t < b.rv0) ++j;
+      if(j < d.length && d[j].task === b.task) b.rv1 = d[j++].t;
     }
   }
-  return barCache[key] = {bars, serial, fmax, fins};
+  const owner = e => {
+    let hit = null, first = null;
+    for(const b of bars){
+      if(b.u !== e.u || b.task !== e.task || b.user !== e.user) continue;
+      if(first === null) first = b;
+      if(b.t0 <= e.t) hit = b;
+    }
+    return hit || first;
+  };
+  for(const e of sp.dsaStart){ const b = owner(e); if(b) b.ds0.push(e.t); }
+  for(const e of sp.dsaDone){ const b = owner(e); if(b) b.ds1.push(e.t); }
+  for(const b of bars){
+    if(b.rv1 === null || b.ds0.length > b.ds1.length) continue;
+    b.t1 = Math.max(b.rv1, ...b.ds1);
+  }
+  return barCache[key] = {bars, fins};
 }
 
 // 刻度取 1、2、5 乘 10 的幂，一条轴上六个上下。
@@ -753,26 +800,20 @@ let drag = null;   // 正在甘特图上拖：记下按下那一刻的像素与�
 
 function drawCore(cid, k){
   const co = (chipById[cid].cores.find(x => x.i === k)) || {role:true};
-  const st = coreStat(cid, k), sp = stepsOf(cid, k), si = stepAt(cid, k);
+  const st = coreStat(cid, k), sp = stepsOf(cid, k);
   const bo = barsOf(cid, k);
-  const cur = si >= 0 ? sp.issue[si] : null;
   const W = 1040, H = 510;
   const svg = el('svg', {viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:'xMidYMid meet'});
 
-  // 正在跑的那一笔：配得上完成的按区间认，配不上的退回「刚下发的 40 拍内」。
-  let runU = null;
-  if(bo.serial){
-    const b = bo.bars.find(b => b.t0 <= T && (b.t1 === null || T < b.t1));
-    if(b) runU = b.u;
-  } else if(cur && T - cur.t < 40){
-    runU = cur.u;
-  }
+  // 正在跑的那几笔：本拍落在某一段里的那几路都点亮。
+  const runs = new Set(bo.bars.filter(b => b.t0 <= T && (b.t1 === null || T < b.t1))
+                              .map(b => b.u));
   const on = new Set();
-  if(runU !== null){ on.add('ts'); on.add('rv' + runU); on.add('u' + runU); }
+  for(const u of runs){ on.add('ts'); on.add('rv' + u); on.add('u' + u); }
 
   const note = {
     ts: co.role ? [`在飞 ${st.ts_inflight} 笔 · 发出 ${st.tot.ts_issue} · 完成 ${st.tot.ts_done}`,
-                   'task_chain 全序链，一笔完了才走下一笔'] : ['不派角色，本 core 没有 TS'],
+                   'task_chain 全序链，一笔完了才走下一笔'] : ['只有 Router 在用，TS 没有任务'],
     rt: [`mid ${st.fwd_mid} · left ${st.fwd_left} · right ${st.fwd_right}　(本拍收进来的 flit)`,
          `VC 占用 ${st.occ} · Xbar 没发出去 ${st.xbar_stall} · 进核压着 ${st.core_in} · 归约队列 ${st.reduce_q}`],
     u0: [`出核缓冲占用 ${st.core_out}`],
@@ -781,7 +822,7 @@ function drawCore(cid, k){
   for(let u = 0; u < 3; ++u){
     const rv = BOXAT['rv' + u], ds = BOXAT['u' + u];
     const xc = rv[1] + 52, xd = rv[1] + rv[3] - 52;
-    const act = runU === u ? ' act' : '';
+    const act = runs.has(u) ? ' act' : '';
     svg.appendChild(el('path', {class:'ed' + act,
       d:`M${xc},${BOXAT.ts[2]+BOXAT.ts[4]} L${xc},${rv[2]}`}));
     svg.appendChild(el('text', {class:'edl', x:xc+5, y:rv[2]-4})).textContent = 'task_cmd';
@@ -820,8 +861,8 @@ function drawCore(cid, k){
   const tx = t => GX0 + (GX1 - GX0) * (t - w0) / (w1 - w0);
 
   svg.appendChild(el('text', {class:'grpl', x:GX0, y:TY + 8})).textContent =
-    `甘特图　${sp.issue.length} 笔下发 · ${bo.fins.length} 次完成 · 第 ${w0} ～ ${w1} 拍`
-    + (bo.serial ? '' : `　同时最多 ${bo.fmax} 笔在飞，完成不配对`);
+    `甘特图　${sp.issue.length} 笔下发 · TS 完成 ${bo.fins.length} 次 · 第 ${w0} ～ ${w1} 拍`
+    + '　深色是 DSA 在算，底下的绿刻度是 TS 的完成';
 
   // 底板：在这上面按住拖动，逐拍移动当前拍。
   const bg = el('rect', {class:'gbg', x:GX0 - 6, y:GY, width:GX1 - GX0 + 12,
@@ -850,47 +891,55 @@ function drawCore(cid, k){
       'text-anchor':'middle'})).textContent = t;
   }
 
-  if(bo.serial){
-    const lastEnd = [-1e9, -1e9, -1e9];
-    bo.bars.forEach((b, n) => {
-      const X0 = tx(b.t0), X1 = b.t1 === null ? GX1 : tx(b.t1);
-      const w = Math.max(4, X1 - X0);
-      const state = T < b.t0 ? 'todo' : (b.t1 === null || T < b.t1 ? 'run' : 'done');
-      const g = el('g', {class:'gbar ' + state});
-      g.appendChild(el('rect', {x:X0, y:LANE[b.u], width:w, height:LH, rx:3}));
-      const dur = b.t1 === null ? '未完成' : `${b.t1 - b.t0} 拍`;
-      const long = `${UNAME[b.u]} ${b.task} · ${dur}`, short = `${UNAME[b.u]} ${b.task}`;
-      // 标签先往段里放，放不下放到段右边；右边挨着同一行的下一段也放不下，就不写，
-      // 悬停看得到，右栏的表里也有。
-      const nxt = bo.bars.slice(n + 1).find(x => x.u === b.u);
-      const room = (nxt ? tx(nxt.t0) - 6 : GX1) - (X0 + w) - 4;
-      let txt = null, lx = 0;
-      if(w >= textW(long)){ txt = long; lx = X0 + 5; }
-      else if(w >= textW(short)){ txt = short; lx = X0 + 5; }
-      else if(room >= textW(long) && X0 + w + 4 > lastEnd[b.u]){ txt = long; lx = X0 + w + 4; }
-      else if(room >= textW(short) && X0 + w + 4 > lastEnd[b.u]){ txt = short; lx = X0 + w + 4; }
-      if(txt){
-        g.appendChild(el('text', {x:lx, y:LANE[b.u] + 13})).textContent = txt;
-        lastEnd[b.u] = lx + textW(txt);
+  const lastEnd = [-1e9, -1e9, -1e9];
+  bo.bars.forEach((b, n) => {
+    const X0 = tx(b.t0), X1 = b.t1 === null ? GX1 : tx(b.t1);
+    const w = Math.max(4, X1 - X0);
+    const state = T < b.t0 ? 'todo' : (b.t1 === null || T < b.t1 ? 'run' : 'done');
+    const g = el('g', {class:'gbar ' + state});
+    g.appendChild(el('rect', {x:X0, y:LANE[b.u], width:w, height:LH, rx:3}));
+    // DSA 在算的那几段，开始与报完成按先后成对；只有报完成的画一道竖线。
+    for(let q = 0; q < b.ds1.length; ++q){
+      const XE = tx(b.ds1[q]);
+      if(q < b.ds0.length){
+        const XS = tx(b.ds0[q]);
+        g.appendChild(el('rect', {class:'gdsa', x:XS, y:LANE[b.u] + LH - 5,
+          width:Math.max(2, XE - XS), height:4}));
+      } else {
+        g.appendChild(el('path', {class:'gdsaend',
+          d:`M${XE},${LANE[b.u] + 2} L${XE},${LANE[b.u] + LH - 2}`}));
       }
-      g.appendChild(el('title', {})).textContent = long + `，第 ${b.t0} 拍下发`
-        + (b.t1 === null ? '' : `、第 ${b.t1} 拍完成`);
-      g.addEventListener('pointerdown', (e) => {
-        e.stopPropagation(); play(false); T = b.t0; syncFi(); render();
-      });
-      svg.appendChild(g);
+    }
+    const dur = b.t1 === null ? '未完成' : `${b.t1 - b.t0} 拍`;
+    const long = `${UNAME[b.u]} ${b.task} · ${dur}`, short = `${UNAME[b.u]} ${b.task}`;
+    // 标签先往段里放，放不下放到段右边；右边挨着同一行的下一段也放不下，就不写，
+    // 悬停看得到，右栏的表里也有。
+    const nxt = bo.bars.slice(n + 1).find(x => x.u === b.u);
+    const room = (nxt ? tx(nxt.t0) - 6 : GX1) - (X0 + w) - 4;
+    let txt = null, lx = 0;
+    if(w >= textW(long)){ txt = long; lx = X0 + 5; }
+    else if(w >= textW(short)){ txt = short; lx = X0 + 5; }
+    else if(room >= textW(long) && X0 + w + 4 > lastEnd[b.u]){ txt = long; lx = X0 + w + 4; }
+    else if(room >= textW(short) && X0 + w + 4 > lastEnd[b.u]){ txt = short; lx = X0 + w + 4; }
+    if(txt){
+      g.appendChild(el('text', {x:lx, y:LANE[b.u] + 13})).textContent = txt;
+      lastEnd[b.u] = lx + textW(txt);
+    }
+    g.appendChild(el('title', {})).textContent = long + `，第 ${b.t0} 拍下发`
+      + (b.rv0 === null ? '' : `、第 ${b.rv0} 拍 RV core 接下`)
+      + (b.rv1 === null ? '' : `、第 ${b.rv1} 拍交还`)
+      + (b.ds0.length ? `、DSA 第 ${b.ds0.join('、')} 拍开始` : '')
+      + (b.ds1.length ? `、第 ${b.ds1.join('、')} 拍报完成` : '')
+      + (b.t1 === null ? '' : `，第 ${b.t1} 拍做完`);
+    g.addEventListener('pointerdown', (e) => {
+      e.stopPropagation(); play(false); T = b.t0; syncFi(); render();
     });
-  } else {
-    for(const e of sp.issue){
-      const X = tx(e.t);
-      svg.appendChild(el('path', {class:'ed act', 'stroke-width':1.4,
-        d:`M${X},${LANE[e.u]} L${X},${LANE[e.u] + LH}`}));
-    }
-    for(const f of bo.fins){
-      const X = tx(f);
-      svg.appendChild(el('path', {d:`M${X},${AXIS - 7} L${X},${AXIS}`,
-        stroke:'var(--ok)', 'stroke-width':1.4}));
-    }
+    svg.appendChild(g);
+  });
+  for(const f of bo.fins){
+    const X = tx(f);
+    svg.appendChild(el('path', {d:`M${X},${AXIS - 7} L${X},${AXIS}`,
+      stroke:'var(--ok)', 'stroke-width':1.4}));
   }
 
   if(T >= w0 && T <= w1){
@@ -1017,8 +1066,8 @@ function drawRouter(cid, k){
     dte: co.role ? R('fwd_core') : 0,
   };
   const note = {
-    ts:   [co.role ? `在飞 ${R('ts_inflight')} 笔` : '不派角色，没有 TS'],
-    dte:  [co.role ? `出核缓冲 ${R('core_out')}` : '不派角色，没有 DTE'],
+    ts:   [co.role ? `在飞 ${R('ts_inflight')} 笔` : '只有 Router 在用，TS 没有任务'],
+    dte:  [co.role ? `出核缓冲 ${R('core_out')}` : '只有 Router 在用，DTE 没有任务'],
     cmcm: [`排队等资源 ${R('cmcm_q')} 笔`, '出核前查下游 stream credit'],
     cs:   [`进核那一段压着 ${R('core_in')} flit`,
            `出核进 Router 本拍 ${R('fwd_core')} · VC 占用 ${R('occ_core')}`,
@@ -1178,8 +1227,8 @@ function panel(){
   const co = chipById[view.c].cores.find(x => x.i === view.k2) || {role:true};
   const sp = stepsOf(view.c, view.k2), si = stepAt(view.c, view.k2);
   name.textContent = `${chipName(view.c)} · core${view.k2}`;
-  sub.textContent = co.role ? '派了角色，Router / TS / DTE 都在跑'
-                            : '不派角色，只有 Router 转发';
+  sub.textContent = co.role ? 'TS 配了任务，Router / TS / DTE 都在跑'
+                            : '只有 Router 在用：坏 core，或 TS 没配任务的好 core';
   if(sp.issue.length){
     const h = document.createElement('h3'); h.className = 'sec';
     h.textContent = `第 ${si + 1} / ${sp.issue.length} 步`;
@@ -1187,10 +1236,14 @@ function panel(){
     const bo = barsOf(view.c, view.k2);
     if(si >= 0){
       const e = sp.issue[si], b = bo.bars[si], nxt = sp.issue[si+1];
-      const fin = !bo.serial ? '几笔并发，分不清是哪一笔的'
-                : (b.t1 === null ? '到结束还没完成' : `第 ${b.t1} 拍，用了 ${b.t1 - b.t0} 拍`);
-      kv([['下发给', UNAME[e.u]], ['task 号', e.task], ['下发', `第 ${e.t} 拍`],
-          ['离本拍', `${T - e.t} 拍`], ['完成', fin],
+      const fin = b.t1 === null ? '到结束还没做完' : `第 ${b.t1} 拍，用了 ${b.t1 - b.t0} 拍`;
+      const at = t => t === null ? '—' : `第 ${t} 拍`;
+      kv([['下发给', UNAME[e.u]], ['task 号', e.task], ['user_id', e.user],
+          ['下发', `第 ${e.t} 拍`], ['离本拍', `${T - e.t} 拍`],
+          ['RV core 接下', at(b.rv0)], ['RV core 交还', at(b.rv1)],
+          ['DSA 开始', b.ds0.length ? b.ds0.map(t => `第 ${t} 拍`).join('、') : '—'],
+          ['DSA 报完成', b.ds1.length ? b.ds1.map(t => `第 ${t} 拍`).join('、') : '—'],
+          ['做完', fin],
           ['下一笔', nxt ? `第 ${nxt.t} 拍 · ${UNAME[nxt.u]} task ${nxt.task}` : '没有了']]);
     } else {
       kv([['还没下发', '第一笔在第 ' + sp.issue[0].t + ' 拍']]);
@@ -1202,7 +1255,7 @@ function panel(){
     t.innerHTML = '<tr><th>#</th><th>单元</th><th>task</th><th>下发</th><th>用时</th></tr>' +
       sp.issue.map((e, n) => {
         const b = bo.bars[n];
-        const d = !bo.serial ? '' : (b.t1 === null ? '未完成' : b.t1 - b.t0);
+        const d = b.t1 === null ? '未完成' : b.t1 - b.t0;
         return `<tr class="${n === si ? 'chg' : ''}">` +
           `<td>${n}</td><td>${UNAME[e.u]}</td><td class="n">${e.task}</td>` +
           `<td class="n">${e.t}</td><td class="n">${d}</td></tr>`; }).join('');

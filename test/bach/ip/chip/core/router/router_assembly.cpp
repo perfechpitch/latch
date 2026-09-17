@@ -587,16 +587,26 @@ TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
   EXPECT_EQ(stored, overflow);
 }
 
-// 只透传的 core：整个 Router 打开 pass_through 后不投递本 core、不记账。
+// 坏 core：core_bad_mask 里本 core 那一位为 1，整个 Router 进透传档，不投递本
+// core、不记账。
 TEST(BachRouterAsm, PassThroughRouterKeepsNoState) {
   uint64_t got = 0, cs_used = 0, stream = 0, flits = 0;
+  bool bad = false, neighbour_bad = true;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterCfg cfg;
-    cfg.pass_through = true;
+    cfg.core_id = 2;
     Router rt(clk, "router", cfg);
-    // 表里写的是进核加查坑，透传核要把这两样都抹掉
+    RouterCfg cfg3;
+    cfg3.core_id = 3;
+    Router rt3(clk, "router3", cfg3);
+    // 中间列 chip 的坏 core 是 core2 与 core7。
+    rt.SetCoreBadMask(0x084);
+    rt3.SetCoreBadMask(0x084);
+    bad = rt.Bad();
+    neighbour_bad = rt3.Bad();
+    // 表里写的是进核加查坑，透传档要把这两样都抹掉
     RouteEntry e = Forward(kFlowRight, /*enters_core=*/true);
     e.stream_table_enable = true;
     rt.Preload(3, e);
@@ -613,10 +623,95 @@ TEST(BachRouterAsm, PassThroughRouterKeepsNoState) {
     flits = core.got_flits;
   }
   RT::Reset();
+  EXPECT_TRUE(bad);
+  EXPECT_FALSE(neighbour_bad) << "每个 Router 只看本 core 那一位";
   EXPECT_EQ(got, 1u);      // 照转
   EXPECT_EQ(flits, 0u);    // 不投递本 core
   EXPECT_EQ(cs_used, 0u);  // 不占进核的坑
   EXPECT_EQ(stream, 0u);   // 不记出方向的账
+}
+
+// 不派角色的好 core：Router 走正常档，表项只转发就只转发，不进核、不记账。
+TEST(BachRouterAsm, SpareGoodCoreOnlyForwards) {
+  uint64_t got = 0, cs_used = 0, stream = 0, flits = 0;
+  bool bad = true;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RouterCfg cfg;
+    cfg.core_id = 5;
+    Router rt(clk, "router", cfg);
+    rt.SetCoreBadMask(0x084);
+    bad = rt.Bad();
+    rt.Preload(3, Forward(kFlowRight, /*enters_core=*/false));
+
+    Pusher push(clk, rt.InWire(kLeft), {{2, MakeMsg(3, 42)}});
+    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+    CoreSide core(clk, rt);
+    AsmProbe probe(clk, rt);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    got = down.got;
+    cs_used = probe.cs_used;
+    stream = probe.stream_right;
+    flits = core.got_flits;
+  }
+  RT::Reset();
+  EXPECT_FALSE(bad);
+  EXPECT_EQ(got, 1u);
+  EXPECT_EQ(flits, 0u);
+  EXPECT_EQ(cs_used, 0u);
+  EXPECT_EQ(stream, 0u);
+}
+
+// 坏 core 上的 Reduce release：从下游一侧进来，按 RTR_RELEASE_ROUTE 原样转往上游
+// 一侧，UserID 不变。归约链隔着坏 core 的那一跳靠这一项把 credit 还回上游。
+TEST(BachRouterAsm, BadCoreRelaysReduceReleaseUpstream) {
+  // 从 right 口灌一笔 Reduce release，并看 left 口出去的那一路。
+  class ReleaseFeed : public BachModule {
+   public:
+    ReleaseFeed(ClockPtr c, LinkEndPtr in, LinkEndPtr out)
+        : BachModule(c, "rel_feed"), from_down(std::move(in)),
+          to_up(std::move(out)) {}
+    uint64_t seen = 0, user = 0;
+
+   protected:
+    void Step() override {
+      ReleaseView r = ReadRelease(to_up->release);
+      if (r.reduce_valid) {
+        ++seen;
+        user = r.reduce_user;
+      }
+      from_down->flit.Idle();
+      if (CycleNow() == 3) {
+        from_down->release.Drive(false, 0, false, 0, /*reduce_rel=*/true, 57);
+      } else {
+        from_down->release.Idle();
+      }
+    }
+
+   private:
+    LinkEndPtr from_down, to_up;
+  };
+
+  uint64_t seen = 0, user = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RouterCfg cfg;
+    cfg.core_id = 2;
+    Router rt(clk, "router", cfg);
+    rt.SetCoreBadMask(0x084);
+    rt.SetCreditBypass(kRight, kFlowLeft);
+    ReleaseFeed feed(clk, rt.InWire(kRight), rt.OutWire(kLeft));
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    seen = feed.seen;
+    user = feed.user;
+  }
+  RT::Reset();
+  EXPECT_EQ(seen, 1u) << "left 口应当转出一笔";
+  EXPECT_EQ(user, 57u);
 }
 
 // tick 关掉之后由外层统一驱动，结果要与各模块自己挂时钟逐拍相同。
