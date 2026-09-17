@@ -26,6 +26,7 @@
 // 读它时不做 ECC 检测。1 bit 错用计数器记、2 bit 错报错，这一轮只留计数器与
 // 接口名，不注错。
 
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <set>
@@ -45,6 +46,9 @@ struct MemMaster {
   uint64_t priority = 0;   // 数字小的先得
   uint64_t read_latency = 1;
   uint64_t write_latency = 1;
+  // exclusive_bank 那一档的冲突按组算：同一组里的几个口（如 DTE 的读与写）是
+  // 同一个 master 的两只口，不算两个 master，撞了排队不报硬约束。默认 0。
+  uint64_t exclusive_group = 0;
 };
 
 struct BankedMemCfg {
@@ -218,13 +222,25 @@ class BankedMem : public BachModule {
 
     for (auto const& kv : by_bank) {
       std::vector<uint64_t> const& cands = kv.second;
-      if (cfg.exclusive_bank && cands.size() > 1) {
-        ++conflict_pending;
-        // 同一 bank 两个 master 同时访问是硬约束被违反，不是正常工作点。
-        // 真硬件上只执行 MU、被让路的那一笔直接丢弃，DTE 没有重传通路，丢一笔
-        // 结果就错。所以这里直接停，不做等价的重试掩盖。
-        LOGCHECK(!cfg.halt_on_conflict,
-                 "BankedMem: 同一 bank 上有两个 master 同时访问，硬约束被违反。");
+      if (cfg.exclusive_bank) {
+        // 硬约束按组数：同一组（DTE 的读与写）不算两个 master，跨组才违反。
+        std::set<uint64_t> groups;
+        for (uint64_t m : cands) groups.insert(masters[m].exclusive_group);
+        if (groups.size() > 1) {
+          ++conflict_pending;
+          // 同一 bank 两个 master 同时访问是硬约束被违反，不是正常工作点。
+          // 真硬件上只执行 MU、被让路的那一笔直接丢弃，DTE 没有重传通路，丢一笔
+          // 结果就错。所以这里直接停，不做等价的重试掩盖。
+          std::fprintf(stderr, "BankedMem: bank %llu 撞了",
+                       (unsigned long long)kv.first);
+          for (uint64_t m : cands) {
+            std::fprintf(stderr, " %s@0x%llx", masters[m].name.c_str(),
+                         (unsigned long long)slots[m].req.addr);
+          }
+          std::fprintf(stderr, "\n");
+          LOGCHECK(!cfg.halt_on_conflict,
+                   "BankedMem: 同一 bank 上有两个 master 同时访问，硬约束被违反。");
+        }
       }
       uint64_t win = cands.front();
       if (cfg.round_robin) {

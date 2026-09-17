@@ -203,6 +203,27 @@ TEST(BachMatrixMem, SameBankIsDetected) {
   EXPECT_GT(conflicts, 0u);
 }
 
+// DTE 的读与写是同一个 master 的两只口，撞同一个 bank 不算违反硬约束，排队即可。
+TEST(BachMatrixMem, DteReadWriteSameBankQueuesNotConflicts) {
+  uint64_t conflicts = 0, rd_rsp = 0, wr_rsp = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    MatrixMem mm(clk, "mmem");
+    MemDriver rd(clk, mm.Port(kMmemDteRd), 1, 0, 4);
+    MemDriver wr(clk, mm.Port(kMmemDteWr), 1, 0, 4, Bytes({9, 9, 9, 9}));
+    ConflictProbe probe(clk, mm);
+    clk->Continue(120 * kPeriod);
+    RT::JoinAll();
+    conflicts = probe.conflicts;
+    rd_rsp = rd.rsp_cycle;
+    wr_rsp = wr.rsp_cycle;
+  }
+  RT::Reset();
+  EXPECT_EQ(conflicts, 0u);
+  EXPECT_GT(rd_rsp, 0u);
+  EXPECT_GT(wr_rsp, 0u);
+}
+
 // Matrix Mem 读 8T、写 9T。
 TEST(BachMatrixMem, DteReadWriteLatency) {
   uint64_t rd_lat = 0, wr_lat = 0;

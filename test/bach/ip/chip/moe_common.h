@@ -163,8 +163,13 @@ constexpr uint64_t kLocal[kn::kExperts] = {1, 0};
 inline void SetUpCoreData(Core& core, uint64_t group, uint64_t chip,
                           uint64_t slot) {
   core.GetMu().EpInfo().SetLocalEpTable({5, 17});
-  core.Cmem().Poke(kn::kTopkOff,
-                   TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
+  // topK 表按 stream 放：MU 按 topk_addr + stream_id × stride 读，每个 stream 各
+  // 占一段。多 token 各自落在自己的 stream 上，得各有一份，否则只有 0 号 stream
+  // 有专家、别的 stream 算出全 0。
+  auto topk = TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}});
+  for (uint64_t s = 0; s < kn::kStreamNum; ++s) {
+    core.Cmem().Poke(kn::kTopkOff + s * kn::kStreamStride, topk);
+  }
   kn::PokeCoreWeights(core.Mmem(), group, chip, slot, kLocal);
 }
 
@@ -223,6 +228,18 @@ inline MessagePtr MakeToken(uint64_t path, uint64_t dst) {
   std::vector<uint8_t> scale = kn::TokenScale();
   m->payload.insert(m->payload.end(), scale.begin(), scale.end());
   m->size = m->payload.size();
+  return m;
+}
+
+// 第 seq 个 token：与单 token 版差在 user_id / token_id / stream_id。三者按 seq
+// 错开，让每个 token 各占一条 stream 片（Core Mem 落点、Hmem、topK）与一个 R
+// core 槽（RcLand 按 user_id % 16），结果互不覆盖；token_id 经 Hmem 原样带进
+// 出口包，用来按 token 区分结果。seq 从 0 起，同飞上限 kn::kStreamNum。
+inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t seq) {
+  MessagePtr m = MakeToken(path, dst);
+  m->user_id = kUserId + seq;
+  m->token_id = seq + 1;
+  m->stream_id = seq % kn::kStreamNum;
   return m;
 }
 
@@ -355,6 +372,10 @@ class SpreadHarness : public BachModule {
   uint64_t weights_gap = 0;
   std::function<bool()> weights_done;
   std::function<void()> to_business;
+  // 业务 token 留空时用构造时传进来的那一笔；非空时按 token_gap 从注入那一拍起
+  // 连续注入，每个 token 各占一条 stream 片。
+  std::vector<MessagePtr> tokens;
+  uint64_t token_gap = 0;
   // 切进业务模式、同时把 token 发出去的那一拍。
   uint64_t switched_at = 0;
   // 每个计算 core 的任务链都走空了才算这一笔真的走完。core 各占协程时这个数只
@@ -366,7 +387,7 @@ class SpreadHarness : public BachModule {
   void Step() override {
     // 结果还没出来就不必挨个问：判停要两件事同时成立，先看便宜的那件。
     bool all_empty = false;
-    if (!out_msgs.empty()) {
+    if (out_msgs.size() >= ExpectedOutMsgs()) {
       inflight.clear();
       all_empty = true;
       for (Chip* c : chips) {
@@ -405,9 +426,10 @@ class SpreadHarness : public BachModule {
     FlitView f = ReadFlit(out_stub.ToCore()->flit);
     if (f.valid && f.msg) out_msgs.push_back(f.msg);
 
-    // 结果那一包收到、所有计算 core 的任务链都走空就停表。拍数上限只作兜底：
-    // 卡住时要停得下来，跑通时不必空转。
-    if ((!out_msgs.empty() && all_empty) || CycleNow() >= limit) {
+    // 每个 token 的结果包都收到、所有计算 core 的任务链都走空就停表。拍数上限
+    // 只作兜底：卡住时要停得下来，跑通时不必空转。
+    if ((out_msgs.size() >= ExpectedOutMsgs() && all_empty) ||
+        CycleNow() >= limit) {
       stopped_at = CycleNow();
       clk->Stop();
     }
@@ -418,7 +440,7 @@ class SpreadHarness : public BachModule {
   // 再发 token。
   MessagePtr Pick() {
     uint64_t now = CycleNow();
-    if (weights.empty()) return now == fire_at ? msg : MessagePtr();
+    if (weights.empty()) return PickToken(now, fire_at);
     LOGCHECK(weights_gap != 0, "SpreadHarness: weights 那一段要给注入间隔。");
     if (now < fire_at) return MessagePtr();
     if (sent < weights.size()) {
@@ -432,9 +454,25 @@ class SpreadHarness : public BachModule {
       switched_at = now + weights_gap;
       return MessagePtr();
     }
-    if (now != switched_at) return MessagePtr();
-    if (to_business) to_business();
-    return msg;
+    if (now == switched_at && to_business) to_business();
+    return PickToken(now, switched_at);
+  }
+
+  // 业务 token：留空时在 base 那一拍发构造时传进来的那一笔；非空时按 token_gap
+  // 从 base 起连续注入，每个 token 各占一条 stream 片。
+  MessagePtr PickToken(uint64_t now, uint64_t base) {
+    if (tokens.empty()) return now == base ? msg : MessagePtr();
+    LOGCHECK(token_gap != 0, "SpreadHarness: 多 token 要给注入间隔。");
+    if (now < base) return MessagePtr();
+    uint64_t off = now - base;
+    if (off % token_gap != 0) return MessagePtr();
+    uint64_t i = off / token_gap;
+    return i < tokens.size() ? tokens[i] : MessagePtr();
+  }
+
+  // 出口上应收到几个结果包：单 token 一包，多 token 每个 token 一包。
+  uint64_t ExpectedOutMsgs() const {
+    return tokens.empty() ? 1 : tokens.size();
   }
 
   static void Move(C2cBridge& x, C2cBridge& y) {
@@ -456,11 +494,13 @@ class SpreadHarness : public BachModule {
 //
 // 读的都是 stream 0 那一片：一个 token 在各 core 上占的是同一个 stream。
 
-// 一颗 chip 上 dot core 拼好的 concat 区。
-inline std::vector<uint8_t> ConcatOf(Chip& chip) {
+// 一颗 chip 上 dot core 拼好的 concat 区。stream 是 token 占的槽位，落点按
+// stream 切片偏移。
+inline std::vector<uint8_t> ConcatOf(Chip& chip, uint64_t stream = 0) {
   return chip.GetCore(CoreOfSlot(chip.Gx(), kn::kDotSlot))
       .Cmem()
-      .Peek(kn::kConcatOff, kn::kSlots * kn::kFc2Bytes);
+      .Peek(kn::kConcatOff + stream * kn::kStreamStride,
+            kn::kSlots * kn::kFc2Bytes);
 }
 
 // 一颗 chip 的中间量逐项与参考实现对：各 core 的部分和、FC2 输入与 FC2 那一段，
@@ -495,21 +535,34 @@ inline void CheckChip(Chip& chip, Vectors const& want, std::string const& tag) {
 }
 
 // R core 的 Matrix Mem 里这个用户那一槽的一半：跳过 16 B 头。half 为 0 是本行
-// 结果，为 1 是上一行 R core 送来的累加结果。
-inline std::vector<uint8_t> RcoreHalf(Chip& chip, uint64_t half) {
+// 结果，为 1 是上一行 R core 送来的累加结果。user 默认 kUserId，多 token 时每个
+// token 用 kUserId + seq。
+inline std::vector<uint8_t> RcoreHalf(Chip& chip, uint64_t half,
+                                      uint64_t user = kUserId) {
   return chip.GetCore(kRcoreId).Mmem().Peek(
-      kn::RcLand(kUserId, half) + kn::kSwHead, kn::kRowBytes - kn::kSwHead);
+      kn::RcLand(user, half) + kn::kSwHead, kn::kRowBytes - kn::kSwHead);
 }
 
-// 出口上收到的那一包：16 B 头后面是结果，落点是 dst。
+// 出口上收到的结果包：单 token 一包，多 token 每个 token 一包，按 token_id 区分。
+// 每个 token 的落点是它自己的 R core 槽（kUserId + i）。所有 token 输入数据相同，
+// 所以每一包的正文都该等于同一份 want。
 inline void CheckOut(std::vector<MessagePtr> const& got,
-                     std::vector<uint8_t> const& want, uint64_t dst) {
-  ASSERT_EQ(got.size(), 1u) << "出口上要收到一包结果";
-  ASSERT_EQ(got[0]->payload.size(), kn::kRowBytes);
-  EXPECT_EQ(got[0]->dst_addr, dst);
-  ExpectSame(std::vector<uint8_t>(got[0]->payload.begin() + kn::kSwHead,
-                                  got[0]->payload.end()),
-             want, "出口上收到的结果");
+                     std::vector<uint8_t> const& want,
+                     uint64_t token_count = 1) {
+  ASSERT_EQ(got.size(), token_count) << "出口上要收到每个 token 一包结果";
+  std::map<uint64_t, MessagePtr> by_token;
+  for (MessagePtr const& m : got) by_token[m->token_id] = m;
+  ASSERT_EQ(by_token.size(), token_count) << "每个 token 都要有一组输出";
+  for (uint64_t i = 0; i < token_count; ++i) {
+    auto it = by_token.find(i + 1);
+    ASSERT_NE(it, by_token.end()) << "token " << i << " 的结果没收到";
+    MessagePtr const& m = it->second;
+    ASSERT_EQ(m->payload.size(), kn::kRowBytes);
+    EXPECT_EQ(m->dst_addr, kn::RcLand(kUserId + i, 1));
+    ExpectSame(std::vector<uint8_t>(m->payload.begin() + kn::kSwHead,
+                                    m->payload.end()),
+               want, "token " + std::to_string(i) + " 出口上收到的结果");
+  }
 }
 
 inline void CheckInflight(std::vector<uint64_t> const& inflight) {

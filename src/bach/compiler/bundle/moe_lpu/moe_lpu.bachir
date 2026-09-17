@@ -1,5 +1,5 @@
 BACHIR 9
-SOURCE topo/moe_lpu.json
+SOURCE src/bach/compiler/topo/moe_lpu.json
 NAME moe_lpu
 # CHIP <chip> <core_bad_mask 第 i 位为 1 表示 core i 是坏 core>
 CHIP 0 0x000

@@ -34,10 +34,12 @@ constexpr uint64_t kMatrixMemBytes = 36ull * 1024 * 1024;
 
 inline std::vector<MemMaster> MatrixMemMasters() {
   return {
-      {"mu", 0, 8, 8},        // 只读
-      {"dte_rd", 1, 8, 8},    // DTE 的读与写各占一个端口，读 8T、写 9T
-      {"dte_wr", 1, 9, 9},
-      {"cfg", 2, 50, 50},  // ctrl_noc 取 Mmem 的上界
+      // DTE 的读与写各占一个端口，读 8T、写 9T，但它们是同一个 master 的两只口，
+      // 独占检查按组算：两者撞同一个 bank 排队，不算违反硬约束。
+      {"mu", 0, 8, 8, 0},        // 只读
+      {"dte_rd", 1, 8, 8, 1},
+      {"dte_wr", 1, 9, 9, 1},
+      {"cfg", 2, 50, 50, 2},  // ctrl_noc 取 Mmem 的上界
   };
 }
 

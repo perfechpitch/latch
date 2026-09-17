@@ -23,6 +23,12 @@ constexpr uint64_t kRowsPerGroup = 2;
 // 小、把那一段的头一颗挪到 0 号位。
 constexpr uint64_t kTraceChips = kLpuChips;
 
+// 同时注入的 token 数：每个 token 各占一条 stream 片与一个 R core 槽，数据相同、
+// 结果该一模一样，用来验证多 token 互不覆盖。同飞上限 kn::kStreamNum（16）。
+constexpr uint64_t kTokenCount = 1;
+// 相邻两个 token 的注入间隔（拍）。小于单个 token 的流程长时它们是并发同飞的。
+constexpr uint64_t kTokenGap = 4000;
+
 // 第 gy 行的 R core 坐在那一行最后一颗 chip 上。
 uint64_t RcoreChip(uint64_t gy) { return gy * kGridX + kGridX - 1; }
 
@@ -82,34 +88,56 @@ TEST(BachMoeLpu, OneLayerAcrossFortyEightChips) {
     all[RcoreChip(0)]->GetCore(kRcoreId).Smem().Poke(kn::kRcHeadOff,
                                                      {1, 0, 0, 0});
 
+    std::vector<MessagePtr> tokens;
+    for (uint64_t seq = 0; seq < kTokenCount; ++seq) {
+      tokens.push_back(MakeToken(kBcastInPath, BcoreLand(seq), seq));
+    }
     SpreadHarness harness(clk, all, GridLinks(kGridY, kGridX), feed, sink, 0,
                           kChipW, kLpuChips - 1, kChipE, /*at=*/2, kMaxCycles,
-                          MakeToken(kBcastInPath, BcoreLand(0)));
+                          tokens.front());
+    harness.tokens = tokens;
+    harness.token_gap = kTokenGap;
     clk->Continue();
     RT::JoinAll();
     got = harness.out_msgs;
     inflight = harness.inflight;
     std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
-    for (uint64_t i = 0; i < kLpuChips; ++i) concat.push_back(ConcatOf(*all[i]));
+    for (uint64_t i = 0; i < kLpuChips; ++i) {
+      for (uint64_t s = 0; s < kTokenCount; ++s) {
+        concat.push_back(ConcatOf(*all[i], s));
+      }
+    }
     for (uint64_t gy = 0; gy < kGridY; ++gy) {
-      rows.push_back(RcoreHalf(*all[RcoreChip(gy)], 0));
-      prev.push_back(RcoreHalf(*all[RcoreChip(gy)], 1));
+      for (uint64_t s = 0; s < kTokenCount; ++s) {
+        rows.push_back(RcoreHalf(*all[RcoreChip(gy)], 0, kUserId + s));
+        prev.push_back(RcoreHalf(*all[RcoreChip(gy)], 1, kUserId + s));
+      }
     }
   }
   TraceDone();
   RT::Reset();
   for (uint64_t i = 0; i < kLpuChips; ++i) {
-    ExpectSame(concat[i], want.Bytes("concat" + std::to_string(i)),
-               "chip " + std::to_string(i) + " 的 concat");
+    for (uint64_t s = 0; s < kTokenCount; ++s) {
+      ExpectSame(concat[i * kTokenCount + s],
+                 want.Bytes("concat" + std::to_string(i)),
+                 "chip " + std::to_string(i) + " token " + std::to_string(s) +
+                     " 的 concat");
+    }
   }
   for (uint64_t gy = 0; gy < kGridY; ++gy) {
-    ExpectSame(rows[gy], want.Bytes("row" + std::to_string(gy)),
-               "第 " + std::to_string(gy) + " 行落进 R core 的行链结果");
-    if (gy > 0) {
-      ExpectSame(prev[gy], want.Bytes("rcore" + std::to_string(gy - 1)),
-                 "第 " + std::to_string(gy) + " 行 R core 收到的上一行累加结果");
+    for (uint64_t s = 0; s < kTokenCount; ++s) {
+      ExpectSame(rows[gy * kTokenCount + s],
+                 want.Bytes("row" + std::to_string(gy)),
+                 "第 " + std::to_string(gy) + " 行 token " + std::to_string(s) +
+                     " 落进 R core 的行链结果");
+      if (gy > 0) {
+        ExpectSame(prev[gy * kTokenCount + s],
+                   want.Bytes("rcore" + std::to_string(gy - 1)),
+                   "第 " + std::to_string(gy) + " 行 token " + std::to_string(s) +
+                       " R core 收到的上一行累加结果");
+      }
     }
   }
   CheckInflight(inflight);
-  CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 1));
+  CheckOut(got, want.Bytes("out"), kTokenCount);
 }
