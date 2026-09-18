@@ -1,9 +1,17 @@
 
-.globl coctx_swap
+#ifdef __APPLE__
+#define CO_SYMBOL(name) _##name
+#else
+#define CO_SYMBOL(name) name
+#endif
+
+.text
+.p2align 2
+.globl CO_SYMBOL(coctx_swap)
 #if !defined( __APPLE__ )
 .type  coctx_swap, @function
 #endif
-coctx_swap:
+CO_SYMBOL(coctx_swap):
 
 #if defined(__i386__)
     movl 4(%esp), %eax
@@ -63,6 +71,58 @@ coctx_swap:
 
     movq 64(%rsi), %rsi
 	ret
+#elif defined(__aarch64__)
+    // x18 belongs to the platform. Never touch it or migrate thread state.
+    stp x19, x20, [x0, #0]
+    stp x21, x22, [x0, #16]
+    stp x23, x24, [x0, #32]
+    stp x25, x26, [x0, #48]
+    stp x27, x28, [x0, #64]
+    stp x29, x30, [x0, #80]
+    mov x9, sp
+    str x9, [x0, #96]
+    stp d8, d9, [x0, #112]
+    stp d10, d11, [x0, #128]
+    stp d12, d13, [x0, #144]
+    stp d14, d15, [x0, #160]
+    mrs x9, fpcr
+    mrs x10, fpsr
+    stp w9, w10, [x0, #176]
+
+    ldp x19, x20, [x1, #0]
+    ldp x21, x22, [x1, #16]
+    ldp x23, x24, [x1, #32]
+    ldp x25, x26, [x1, #48]
+    ldp x27, x28, [x1, #64]
+    ldp x29, x30, [x1, #80]
+    ldp d8, d9, [x1, #112]
+    ldp d10, d11, [x1, #128]
+    ldp d12, d13, [x1, #144]
+    ldp d14, d15, [x1, #160]
+    ldp w9, w10, [x1, #176]
+    msr fpcr, x9
+    msr fpsr, x10
+    ldr x9, [x1, #96]
+    mov sp, x9
+    ret
+
+.p2align 2
+.globl CO_SYMBOL(coctx_entry)
+#ifndef __APPLE__
+.type coctx_entry, @function
+#endif
+CO_SYMBOL(coctx_entry):
+    // Establish a terminating frame record for Apple's frame-chain unwinder.
+    stp xzr, xzr, [sp, #-16]!
+    mov x29, sp
+    mov x0, x20
+    mov x1, x21
+    blr x19
+    // CoRoutineFunc yields on completion; a raw entry must not return.
+    bl CO_SYMBOL(abort)
+    brk #0
+#else
+#error "Unsupported libco context architecture"
 #endif
 
 #if defined(__linux__)

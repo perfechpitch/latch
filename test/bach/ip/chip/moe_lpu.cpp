@@ -40,7 +40,6 @@ uint64_t RcoreChip(uint64_t gy) { return gy * kGridX + kGridX - 1; }
 // chip 的 E 口出来。每颗 chip 的 concat、每行的行链结果、每个 R core 收到的上一
 // 行累加结果与出口上的结果都与参考实现逐字节相同。
 TEST(BachMoeLpu, OneLayerAcrossFortyEightChips) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 200000;
   Vectors want = ReadVectors("moe_lpu.txt");
   ASSERT_FALSE(want.Empty())

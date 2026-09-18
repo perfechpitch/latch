@@ -45,4 +45,51 @@ $ cmake ..
 $ make
 ```
 
+## 协程上下文切换
 
+`co_create / co_resume / co_yield_ct / co_reset` 接口保持不变。CPU 架构由编译器
+宏选择，macOS 使用 Mach-O 的下划线符号名，Linux 使用 ELF 符号名。
+
+## macOS Apple Silicon
+
+ARM64 的 `coctx_swap.S` 保存并恢复：
+
+- `x19`～`x28`、帧指针 `x29`、返回地址 `x30`、栈指针 `sp`。
+- `d8`～`d15`（AAPCS64 要求保留的 SIMD 寄存器低 64 位）。
+- `FPCR` 和 `FPSR`，隔离各协程的舍入模式与浮点异常标志。
+
+不修改 Apple 保留的 `x18`。新栈按 16 字节对齐，入口跳板把两个参数送入
+`x0/x1` 后调用入口函数。新协程继承创建现场的浮点环境；入口返回会终止进程，
+正常完成仍由现有 `CoRoutineFunc` 标记完成并 yield。上下文结构中的汇编偏移
+在 C++ 侧用 `static_assert` 校验。
+
+这是普通 `arm64` ABI 的协作式切换，不支持 `arm64e`，也不支持从信号处理器
+抢占或把已创建的协程迁移到另一个 OS 线程。每个线程拥有独立协程环境。
+原有 i386/x86_64 路径保留；本次浮点环境隔离仅加在 ARM64 路径。
+
+ABI 依据：
+[Apple ARM64 ABI](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms)、
+[AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)。
+
+## 独立验证
+
+macOS 安装 Xcode Command Line Tools 后，在仓库根目录运行：
+
+```sh
+sh test/libco/run.sh
+```
+
+脚本分别以 `-O0/-O2/-O3` 编译并运行，产物默认写入 `build-libco/`。
+可设置 `CXX` 和 `LIBCO_TEST_BUILD_DIR`。测试包含 ARM64 寄存器探针、浮点状态、
+独立栈/共享栈、递归栈数据、反复 resume/yield、reset 后重跑、嵌套协程和多线程。
+
+也可单独用 CMake 构建，不依赖仿真器、HP-Socket 或 GoogleTest：
+
+```sh
+cmake -S test/libco -B build-libco-cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build-libco-cmake
+ctest --test-dir build-libco-cmake --output-on-failure
+```
+
+完整项目的 CTest 也注册了 `libco_context`。此实现只解决协程层的 macOS
+兼容性；完整仿真器的 HP-Socket 等 Linux 依赖仍需另行移植。

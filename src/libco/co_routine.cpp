@@ -35,10 +35,6 @@ namespace latch {
   extern void SetThreadId(uint64_t id);
 }
 
-extern "C"
-{
-	extern void coctx_swap( coctx_t *,coctx_t* ) asm("coctx_swap");
-};
 using namespace std;
 stCoRoutine_t *GetCurrCo( stCoRoutineEnv_t *env );
 struct stCoEpoll_t;
@@ -394,8 +390,9 @@ inline void TakeAllTimeout( stTimeout_t *apTimeout,unsigned long long allNow,stT
 	apTimeout->llStartIdx += cnt - 1;
 
 }
-static int CoRoutineFunc( stCoRoutine_t *co,void * )
+static void* CoRoutineFunc( void *arg,void * )
 {
+	stCoRoutine_t *co = static_cast<stCoRoutine_t*>(arg);
 	if( co->pfn )
 	{
 		co->pfn( co->arg );
@@ -510,7 +507,7 @@ void co_resume( stCoRoutine_t *co )
 	stCoRoutine_t *lpCurrRoutine = env->pCallStack[ env->iCallStackSize - 1 ];
 	if( !co->cStart )
 	{
-		coctx_make( &co->ctx,(coctx_pfn_t)CoRoutineFunc,co,0 );
+		coctx_make( &co->ctx,CoRoutineFunc,co,0 );
 		co->cStart = 1;
 	}
 	env->pCallStack[ env->iCallStackSize++ ] = co;

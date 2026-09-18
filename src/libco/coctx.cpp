@@ -2,6 +2,7 @@
 #include "coctx.h"
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 
 #define ESP 0
 #define EIP 1
@@ -37,9 +38,6 @@ enum {
   kRSP = 13,
 };
 
-extern "C" {
-extern void coctx_swap(coctx_t*, coctx_t*) asm("coctx_swap");
-};
 #if defined(__i386__)
 int coctx_init(coctx_t* ctx) {
   memset(ctx, 0, sizeof(*ctx));
@@ -84,4 +82,34 @@ int coctx_init(coctx_t* ctx) {
   return 0;
 }
 
+#elif defined(__aarch64__)
+// Keep these offsets in sync with coctx_swap.S.
+static_assert(offsetof(coctx_t, regs) == 0, "context register offset");
+static_assert(offsetof(coctx_t, fpregs) == 112, "context FP register offset");
+static_assert(offsetof(coctx_t, fpcr) == 176, "context FPCR offset");
+static_assert(offsetof(coctx_t, fpsr) == 180, "context FPSR offset");
+extern "C" void coctx_entry();
+
+int coctx_init(coctx_t* ctx) {
+  memset(ctx, 0, sizeof(*ctx));
+  return 0;
+}
+
+int coctx_make(coctx_t* ctx, coctx_pfn_t pfn, const void* s, const void* s1) {
+  memset(ctx->regs, 0, sizeof(ctx->regs));
+  memset(ctx->fpregs, 0, sizeof(ctx->fpregs));
+  ctx->regs[0] = reinterpret_cast<void*>(pfn);  // x19: entry function
+  ctx->regs[1] = const_cast<void*>(s);         // x20: first argument
+  ctx->regs[2] = const_cast<void*>(s1);        // x21: second argument
+  ctx->regs[11] = reinterpret_cast<void*>(coctx_entry);  // x30
+  ctx->regs[12] = reinterpret_cast<void*>(
+      reinterpret_cast<uintptr_t>(ctx->ss_sp + ctx->ss_size) & ~uintptr_t(15));
+  // A new coroutine inherits its creator's FP environment.
+  uint64_t control, status;
+  asm volatile("mrs %0, fpcr" : "=r"(control));
+  asm volatile("mrs %0, fpsr" : "=r"(status));
+  ctx->fpcr = static_cast<uint32_t>(control);
+  ctx->fpsr = static_cast<uint32_t>(status);
+  return 0;
+}
 #endif

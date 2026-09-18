@@ -10,17 +10,26 @@
 #endif
 
 #include <functional>
+#include <cstdio>
+#include <cstdlib>
 
 #include "spdlog/spdlog.h"
 
-extern void __assert_fail(const char* __assertion, const char* __file, unsigned int __line, const char* __function)
-    __attribute__((__noreturn__));
-
 namespace latch {
+
+[[noreturn]] inline void LogCheckFail(const char* assertion, const char* file,
+                                      unsigned int line,
+                                      const char* function) {
+  std::fprintf(stderr, "%s:%u: %s: assertion failed: %s\n", file, line,
+               function, assertion);
+  std::abort();
+}
 
 #define LOGCHECK(condition, ...)               \
   __builtin_expect(!!(condition), 1) ? (void)0 \
-                                     : __assert_fail(#condition ": " __VA_ARGS__, __FILE__, __LINE__, __FUNCTION__)
+                                     : ::latch::LogCheckFail(               \
+                                           #condition ": " __VA_ARGS__,    \
+                                           __FILE__, __LINE__, __FUNCTION__)
 
 }
 #endif

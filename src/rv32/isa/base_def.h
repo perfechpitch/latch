@@ -5,6 +5,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <type_traits>
 
 #include "isa/data_type.h"
 
@@ -146,19 +147,17 @@ inline bool IsUnsignedInteger(DataType dataType) {
   return false;
 }
 
-template <typename T>
+template <typename T, typename = void>
 struct DataTypeMap {};
 
 template <>
 struct DataTypeMap<bool> {
   static const DataType type = DataType::bit;
 };
-template <>
-struct DataTypeMap<uint64_t> {
-  static const DataType type = DataType::uint64;
-};
-template <>
-struct DataTypeMap<long long unsigned int> {
+template <typename T>
+struct DataTypeMap<
+    T, std::enable_if_t<std::is_integral_v<T> && std::is_unsigned_v<T> &&
+                        sizeof(T) == 8 && !std::is_same_v<T, bool>>> {
   static const DataType type = DataType::uint64;
 };
 template <>
