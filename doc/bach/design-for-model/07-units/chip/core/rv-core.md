@@ -61,7 +61,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <text x="172.0" y="371.5" font-size="8.5" fill="#475569">覆盖 Decode 接入 custom-0 自定义指令：</text>
 <text x="172.0" y="385.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
 <text x="172.0" y="398.5" font-size="8.5" fill="#475569">　dsaw / dsawi 写 DSA 寄存器，一条写一个</text>
-<text x="172.0" y="412.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· flag_check · loop</text>
+<text x="172.0" y="412.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· loop</text>
 <text x="172.0" y="425.5" font-size="8.5" fill="#475569">每条指令 1 拍；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
 <text x="172.0" y="439.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch / 双发射 /</text>
 <text x="172.0" y="452.5" font-size="8.5" fill="#475569">　gpr 端口 / SEU 的乘除多拍 / DTCM 的 bank 冲突都折算成 1 拍</text>
@@ -165,7 +165,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F2a | 一笔命令连着几拍出现在端口上，按 `seq` 认它，同一笔只入队一次。不按 `stream_id` 与 `task_id` 认：B core 与 R core 的 datain 任务不占 stream 表项，几笔的这两项都是 0 |
 | F3 | 下发信息七个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，只读；`user_id` 与 `task_id` 6 bit 由 TS 从 stream_table 取出一起下发；`path_id` 是当前任务的实际 PID；`task_dsa_en`；DTE 任务另带 `vcid`，由 TS 按 PID 查 `ROUTER_TABLE` 得到。三个身份与 `path_id` 硬件写入自定义 CSR |
 | F4 | 自定义 CSR 四个：`stream_id`、`task_id` 只读，`user_id` 与 `path_id` 可读写。`path_id` 是当前任务的 PID，PID 更新任务里 kernel 把新 PID 写进去，随 `task_done` 带回 TS。`user_id` 有两条写入路径，写的是同一个字段：普通计算 core 上 TS 下发 task 时硬件写入；B core 与 R core 上 TS 下发时还没有用户身份，软件认出之后自己写。软件读它算 R core 的用户映射表与 Matrix Mem 地址，Router 与 credit 记账认的也是它 |
-| F5 | 自启动的 B core 与 R core 上，软件在 `flag_check` 认出这一笔属于哪个用户后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
+| F5 | 自启动的 B core 与 R core 上，软件扫 Share Mem 的标志表认出这一笔属于哪个用户后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
 | F6 | 完成信息四个字段：`stream_id`、`user_id`、`task_id`、`pid`（`path_id` 这个 CSR 的当前值）。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
 | F6a | 自定义 CSR 读它当场拿到当前这一笔 task 的身份，不排队也不异步返回。DSA 寄存器读是另一档：发出去就走，数据由 dsa_rq 按记录的顺序写回 |
 | F7 | 身份到 DSA 有两条路，各 DSA 用哪条不同。DTE 与 VU 走 `dsa_ids` 直连，DSA 在写 Trigger 那一拍采样，软件不必再写一遍：DTE 取 `streamID` / `taskID` / `userID` / `pathID` / `vcid` 五项，VU 取前两项。MU 走软件写：RV core 把 TS 下发的这几个值放进自定义 CSR 供软件读，读出来在启动那一笔 DSA 任务之前写进它的动态配置寄存器。两条路填的都是同一组值，`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它 |
@@ -178,12 +178,12 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F9 | 特权级只支持 M 态，实现 M 态 CSR，不支持 S / U / H；`fence` 指令实现为 nop |
 | F10 | 每条指令 1 拍。不建流水线：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突都折算进这 1 拍 |
 | F11 | 复位后按 io_reg 的 `boot_pc` 启动；收到 TS 下发的 task 后按 `task_pc` 起始执行 |
-| F12 | 自定义指令 `dsar` / `dsari`：读 DSA 寄存器，地址分别来自 rs1 与立即数 `reg_addr1[4:0]` |
-| F13 | 自定义指令写 DSA 寄存器一次写 1 个：《软件计算流程详细评估》的指令表现在只有 `dsaw` / `dsawi`，与 RV Core MAS 的“每条最多配置 1 个 DSA 寄存器”一致。ISA 描述表里还留着 `.d` 两档编码，模型解码它但展开成两条单寄存器写。立即数是 16 bit 字节地址，覆盖 0～64K |
-| F14 | 自定义指令 `task_done`：通知当前 task 完成。队列有待执行 task 则跳转到队头 task 起始 PC，否则阻塞取指等待；带 `TS` 标志时通知 TS。firmware 程序结束时要执行一条不通知 TS 的 `task_done`，等待业务流 task |
-| F15 | 自定义指令 `flag_check`：从 Share Mem 的起始地址查到结束地址，找第一个 1 并把位置偏移量写回 rd，查到结束地址仍没找到则返回全 1。B core 与 R core 轮询软件映射表靠它 |
-| F16 | 这是唯一一条不止 1 拍的指令：它按 4 B 一步扫，复用 `sm_lsq` 每拍发一个 Share Mem 读，找到第一个 1 就停。拍数 = 实际扫过的步数 + Share Mem 的一次访问延迟，最坏是 `ceil(扫描长度 / 4 B) + 10`。扫描期间该 RV core 不取下一条指令，`gpr_ready[rd]` 保持为 0 |
-| F17 | 自定义指令 `loop`：rs1 是最大循环次数、rs2 是当前循环次数，rs2 ≥ rs1 时退出循环，imm 是分支偏移 |
+| F12 | 自定义指令 `dsar` / `dsari`：读 DSA 寄存器，地址分别来自 rs1 与指令里的 16 bit 字节地址，`bit31` 区分这两种寻址。读不同步返回：目的寄存器的就绪位在发出读那一拍清掉，数据由 `dsa_rq` 写回时才补进 gpr |
+| F13 | 自定义指令写 DSA 寄存器一次写 1 个：`dsaw` 的地址取自 rs2、`dsawi` 的地址是指令里的 16 bit 字节地址，同样由 `bit31` 区分。与 RV Core MAS 的“每条最多配置 1 个 DSA 寄存器”一致；早期 ISA 描述表里的 `.d` 那一档（一次写 2 个）已经不在这一版设计里 |
+| F14 | 自定义指令 `task_done`：通知当前 task 完成。队列有待执行 task 则跳转到队头 task 起始 PC，否则阻塞取指等待；`bit31` 是 `ts` 标志，置位时通知 TS。firmware 程序结束时要执行一条不通知 TS 的 `task_done`，等待业务流 task |
+| F15 | 这一版《RV Core自定义指令详细设计》总计 6 条自定义指令，**不再有 `flag_check`**：B core 与 R core 轮询软件映射表改用普通 Share Mem 读，kernel 里就是 `task_rc_find` / `task_bc_wait` 那种 `for (;;)` 扫表 |
+| F16 | 因此**没有多拍的自定义指令**，6 条都按 1 拍记。原先给 `flag_check` 留的“唯一一条多拍指令、拍数按实际扫过的步数记”随之取消 |
+| F17 | 自定义指令 `loop`：rs1 是最大循环次数、rs2 是当前循环次数，rs2 ≥ rs1 时退出循环，imm 是分支偏移。字段按标准 B 型排，偏移是**有符号字节偏移**，范围 ±4094、低 1 bit 隐含为 0 |
 | F18 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
 | F19 | 任务的启动靠写 DSA 的 trigger 寄存器；last 标志（该任务包是 task 的最后一个，DSA 执行完后通知 TS task 完成）包含在 trigger 寄存器里 |
 | F20 | 性能约束：单个用户各 DSA 对应的软件调度程序在 RV core 上执行时间不超过 200 cycle |
@@ -619,7 +619,7 @@ kernel 清单按 RV core 分：
 
 ```
 指令集          RV32IMC，只支持 M 态；fence = nop
-每条指令        1 拍（flag_check 例外，按实际扫过的步数记）
+每条指令        1 拍（含 6 条自定义指令）
 ITCM / DTCM     4 KB / 8 KB
 gpr             32 × 32 bit
 task_queue      深度 2（待定）
@@ -635,41 +635,35 @@ custom-0 字段布局   见下一节
 
 ### custom-0 的字段布局
 
-照《ISA 描述表》的 `RV Core` 表。`opcode` 取 custom-0，即 `0b0001011`。九条都按 32 位定长排，`loop` 用 B 型，其余用 R 型的字段位置。
+照《RV Core自定义指令详细设计》。`opcode` 取 custom-0，即 `0b0001011`。**总计 6 条**，都按 32 位定长排：`loop` 用 B 型的字段位置，其余 5 条用 R 型的。
 
-两个高位标志把同一个 `funct3` 下的几条分开：
+一个标志位把同一 `funct3` 下的两条分开，剩下靠 `funct3` 认：
 
 | bit | 含义 |
 | - | - |
-| 31 | 0 = DSA 寄存器地址取自通用寄存器，1 = 地址是立即数 |
-| 30 | 0 = 一次访问 1 个 DSA 寄存器，1 = 一次 2 个 |
+| 31 | 0 = DSA 寄存器地址取自通用寄存器，1 = 地址是指令里的立即数 |
 
-| 助记符 | 31 | 30 | 29:25 | 24:20 | 19:15 | 14:12 | 11:7 |
-| - | - | - | - | - | - | - | - |
-| `dsar` | 0 | 0 | 00000 | 00000 | rs1 | 000 | rd |
-| `dsari` | 0 | 0 | 00000 | 00000 | `reg_addr1[4:0]` | 000 | rd |
-| `dsaw.s` | 0 | 0 | 00000 | 00000 | rs1 | 001 | rd1 |
-| `dsaw.d` | 0 | 1 | rd2 | rs2 | rs1 | 001 | rd1 |
-| `dsawi.s` | 1 | 0 | 00000 | 00000 | rs1 | 001 | `reg_addr1[4:0]` |
-| `dsawi.d` | 1 | 1 | `reg_addr2[4:0]` | rs2 | rs1 | 001 | `reg_addr1[4:0]` |
-| `task_done` | TS | FC | 00000 | 00000 | 00000 | 010 | 00000 |
-| `flag_check` | 0 | 0 | 00001 | rs2 | rs1 | 010 | rd1 |
+| 助记符 | 31 | 30:25 | 24:20 | 19:15 | 14:12 | 11:7 |
+| - | - | - | - | - | - | - |
+| `dsaw` | 0 | 000000 | rs2 = 地址 | rs1 = 数据 | 001 | 00000 |
+| `dsawi` | 1 | `imm[15:10]` | `imm[9:5]` | rs1 = 数据 | 001 | `imm[4:0]` |
+| `dsar` | 0 | 000000 | 00000 | rs1 = 地址 | 000 | rd |
+| `dsari` | 1 | `imm[15:10]` | `imm[9:5]` | `imm[4:0]` | 000 | rd |
+| `task_done` | TS | 000000 | 00000 | 00000 | 010 | 00000 |
+| `loop` | B 型 | B 型 | rs2 = 当前次数 | rs1 = 最大次数 | 110 | B 型 |
 
-`loop` 不在上表里，它按 B 型排：`imm[12]` 在 bit31、`imm[10:5]` 在 bit[30:25]、rs2 在 bit[24:20]、rs1 在 bit[19:15]、`funct3` 110、`imm[4:1]` 与 `imm[11]` 在 bit[11:7]。
+`loop` 按标准 B 型排：`imm[12]` 在 bit31、`imm[10:5]` 在 bit[30:25]、rs2 在 bit[24:20]、rs1 在 bit[19:15]、`funct3` 110、`imm[4:1]` 与 `imm[11]` 在 bit[11:7]。字节偏移 = `sext(imm[12:1]) << 1`，低 1 bit 隐含为 0。
 
-读上表要注意三处字段位置：
+读上表要注意四处：
 
-* **写 DSA 的那四条，DSA 寄存器地址在 bit[11:7]，数据源在 bit[19:15]**。这个位置在读指令上是目的寄存器 `rd`，在写指令上是地址，不是目的寄存器
-* `dsari` 与 `dsawi` 的立即数是 5 位，正好等于一个寄存器号字段的宽度，直接占那个字段
-* `task_done` 与 `flag_check` 同为 `funct3` 010，靠 bit[29:25] 分开：`00000` 是 `task_done`，`00001` 是 `flag_check`
+* **写 DSA 的那两条，数据在 bit[19:15]**。同一个字段位置在读指令上是目的寄存器 `rd`，在写指令上是写数据的来源
+* `dsawi` 与 `dsari` 的地址是 **16 bit**，拆成三段塞进 `funct7` 的低 6 位、`rs2` 与 `rd`（`dsari` 是 `funct7` 低 6 位、`rs2` 与 `rs1`）三个字段——这三个字段平时放寄存器号，放常量正是把它们当成编码的一部分
+* 立即数是**窗口内偏移**，不是绝对地址：DSA 的 IO reg 不落在 RV core 的访存地址空间里，`dsaw` / `dsawi` 里的地址就是本核那个 DSA 的窗口内偏移，不带基址
+* `task_done` 没有 `FC` 位。RV Core MAS 的“task完成指令”一节写着 `FC` 带 fence 语义，《软件计算流程详细评估》已经把它删成 `task_done ts`，这一版设计跟的是后者
 
-两处与本模型的建法有出入，按下面处理：
+**立即数的可用范围受窗口限制**：编码给的是 0～64K，但一个核的 DSA IO 窗口 DTE / MU 只有 4 KB、VU 20 KB，窗口之外的路由不到（模型里会报 `deviceAddr not mapping` 并把这笔丢掉）。所以实际能用的是 16 bit 里的低 12 位（DTE / MU）或低 15 位（VU）那一块。
 
-* `task_done` 的 `FC` 位在编码里有。RV Core MAS 的 Features 一节只列 TS 标志，《软件计算流程详细评估》已经把它删成 `task_done ts`，但 MAS 的“task完成指令”一节仍写着 FC 带 fence 语义。模型解码这一位但不实现它的 fence 语义
-* `dsaw.d` / `dsawi.d` 一次配 2 个 DSA 寄存器，与 RV Core MAS 的“每条最多配置 1 个”不一致，《软件计算流程详细评估》的指令表也已经不再列这两条。模型把它们展开成两条单寄存器写，编码照上表解码
-* 表里的立即数写作 `reg_addr[4:0]`，《软件计算流程详细评估》已改成 **16 bit 字节地址**（0～64K）。模型按 16 bit 建，ISA 描述表这一侧未同步
-
-**待定**：`dsar` 与 `dsari` 在表里的编码完全相同，bit31 都是 0，没有区分两者的位。按其余四条的规律，`dsari` 应当是 bit31 为 1。模型先按这条规律解码，等设计方确认。
+**软件侧的编码宏**：`src/bach/compiler/kernel/self_inst.h`，宏名与汇编助记符一致，另外封装了 `loop_goto(max_cnt, cur_cnt, target)` —— 用 asm goto 把 `loop` 写成 C 标签形式的回边，编译器才感知这条回边、正确分配寄存器。kernel 经 `bach.h` 的 `dsa_write` / `dsa_read` 用它，`task_done` 直接写成 `task_done(1)`（通知 TS）与 `task_done(0)`（交还自己）。模型侧译码见 `src/bach/ip/chip/core/rv_core/custom0.h`，字段布局与 `self_inst.h` 一字不差，改一处要一起改。
 
 ***
 
@@ -687,12 +681,12 @@ custom-0 字段布局   见下一节
 | DTE 与 VU 的身份走 dsa_ids 直连，MU 由软件写寄存器 | F7 | `dsa_id_paths` |
 | RV32IMC + 只支持 M 态 + fence 为 nop | F8、F9 | `isa_scope` |
 | 每条指令 1 拍，流水线细节折算进这 1 拍 | F10 | `one_cycle_per_inst` |
-| 八条 custom-0 自定义指令 | F12～F17 | `custom0_insts` |
-| 写 DSA 寄存器一次写 1 个，`.d` 展开成两条 | F13 | `dsaw_single` |
-| task_done 的三种行为：跳队头 / 阻塞等待 / 通知 TS | F14 | `task_done_inst` |
-| flag_check 查第一个 1，查不到返回全 1 | F15 | `flag_check` |
-| flag_check 是唯一的多拍指令，拍数按实际扫过的步数记 | F17 | `flag_check_cycles` |
-| loop 指令按 rs1 / rs2 比较退出 | F17 | `loop_inst` |
+| 六条 custom-0 自定义指令的译码与执行 | F12～F17 | `custom0` |
+| 写 DSA 寄存器两种寻址各就位 | F13 | `custom0` · `WritesDsaRegisterBothAddressModes` |
+| 16 bit 立即数拆进三个字段后仍拼得回来 | F13 | `custom0` · `ImmediateAddressLandsInWindow`、`DecodeMapsEachEncoding` |
+| 读 DSA 寄存器经 dsa_rq 异步写回目的寄存器 | F12、F23 | `custom0` · `ReadsDsaRegisterAndValueReachesConsumer` |
+| task_done 的两种行为：交还自己 / 另外通知 TS | F14 | `custom0` · `TaskDoneNotifyFlagPicksThePath` |
+| loop 按 rs1 / rs2 比较退出，退出后不跳 | F17 | `custom0` · `LoopBranchesUntilCurrentReachesMax`、`LoopFallsThroughWhenAlreadyDone` |
 | 任务启动靠写 trigger 寄存器，last 标志在 trigger 里 | F19 | `dsa_trigger` |
 | dsa_iss 每拍最多一条，按反压判断是否下发成功 | F21、F22 | `dsa_iss_rate` |
 | DSA 读不阻塞，dsa_rq 8 项按序写回 gpr | F23、F24 | `dsa_read_async` |

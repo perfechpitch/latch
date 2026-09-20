@@ -337,20 +337,22 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 
 ### <mde-comment id="nou6r0">自定义指令</mde-comment>（custom-0 编码空间）
 
-下面八条自定义指令建模时必须实现，编码取自 ISA 描述表：
+下面六条自定义指令建模时必须实现，编码取自《RV Core自定义指令详细设计》：
 
-| 助记符 | funct3 | opcode | 作用 |
-| - | - | - | - |
-| `dsar` | 000 | custom-0 | 读 DSA 寄存器，地址来自 rs1 |
-| `dsari` | 000 | custom-0 | 读 DSA 寄存器，地址为立即数 |
-| `dsaw.s` | 001 | custom-0 | 写 1 个 DSA 寄存器 |
-| `dsaw.d` | 001 | custom-0 | 写 2 个 DSA 寄存器（rd2/rs2 + rd1/rs1） |
-| `dsawi.s` / `dsawi.d` | 001 | custom-0 | 同上，寄存器地址用立即数编码 |
-| `task_done` | 010 | custom-0 | 带 `TS` 标志位 |
-| `flag_check` | 010 | custom-0 | 映射表快速查找，rs1/rs2 给起止地址，rd1 返回偏移 |
-| `loop` | 110 | custom-0 | 自定义循环分支，rs1=最大循环次数，rs2=当前循环次数，rs2 ≥ rs1 时退出循环，imm 为分支偏移；它替代的是 `blt`，偏移量要按循环体的指令长度算 |
+| 助记符 | funct3 | bit31 | opcode | 作用 |
+| - | - | - | - | - |
+| `dsar` | 000 | 0 | custom-0 | 读 DSA 寄存器，地址来自 rs1，结果写 rd |
+| `dsari` | 000 | 1 | custom-0 | 读 DSA 寄存器，地址是 16 bit 立即数，结果写 rd |
+| `dsaw` | 001 | 0 | custom-0 | 写 1 个 DSA 寄存器，数据来自 rs1，地址来自 rs2 |
+| `dsawi` | 001 | 1 | custom-0 | 写 1 个 DSA 寄存器，数据来自 rs1，地址是 16 bit 立即数 |
+| `task_done` | 010 | `TS` | custom-0 | 交还当前 task；`bit31` 置位时另外通知 TS |
+| `loop` | 110 | B 型 | custom-0 | 自定义循环分支，rs1=最大循环次数，rs2=当前循环次数，rs2 ≥ rs1 时退出循环，imm 为分支偏移；它替代的是 `blt` |
 
-**写指令按单寄存器写建模**：《软件计算流程详细评估》的指令表已经只剩 `dsaw` / `dsawi` 两条，一次写 1 个 DSA 寄存器，与 RV Core MAS 的“每条最多配置 1 个”一致；上表的 `.s` / `.d` 两档编码取自 ISA 描述表，那一侧尚未同步。**立即数是 16 bit 的字节地址，覆盖 0～64K**，超出这个范围的寄存器只能用 `dsar` / `dsaw` 走寄存器寻址。
+**写指令按单寄存器写建模**：一次写 1 个 DSA 寄存器，与 RV Core MAS 的“每条最多配置 1 个”一致；早期 ISA 描述表里的 `.s` / `.d` 两档已经不在这一版设计里，`bit31` 现在只用来区分寄存器寻址与立即数寻址。
+
+**立即数是 16 bit 的窗口内偏移**，不是绝对地址：DSA 的 IO reg 不落在 RV core 的访存地址空间里。编码给的是 0～64K，但一个核的 DSA IO 窗口 DTE / MU 只有 4 KB、VU 20 KB，窗口之外路由不到，所以实际能用的是低 12 位（DTE / MU）或低 15 位（VU）那一块。
+
+**这一版没有 `flag_check`**：B core 与 R core 轮询软件映射表改用普通 Share Mem 读扫表，也就没有多拍的自定义指令，6 条都按 1 拍记。软件侧的编码宏在 `src/bach/compiler/kernel/self_inst.h`。
 
 #### DSA 任务配置指令的语义
 
@@ -365,14 +367,11 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 * `TS` 标志有效 → 通知 TS 当前 task 完成
 * firmware 程序结束时需执行一条**不通知 TS** 的 task_done，等待业务流 task
 
-#### flag_check（映射表快速查找）
+#### flag_check（映射表快速查找）——已移出设计
 
-该指令只见于 ISA 描述表，RV Core MAS 不再列出。
+《RV Core自定义指令详细设计》只列 6 条自定义指令，没有这一条；RV Core MAS 的 Features 也早已删除“内存 flag 查询指令”。B core / R core 轮询软件映射表改用普通 Share Mem 读自己扫表，kernel 里是 `task_rc_find` 与 `task_bc_wait` 那种 `for (;;)`。
 
-* 输入：起始地址与结束地址
-* 行为：share mem 从起始地址开始查找第一个 1，把位置偏移量写回 rd
-* 查到结束地址仍没找到则返回全 1
-* 用处：“自发创建任务链”一节里 R core / B core 轮询软件映射表靠的就是这条指令
+留下这条记录是为了对上旧稿：见到“R core 执行 flag_check 对应的 task”这类说法，按“软件扫 Share Mem 的标志表”读。
 
 ### 流水线微架构
 
@@ -444,7 +443,7 @@ TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 T
 | - | - | - | - |
 | `task_pc` | 有 | — | 起始取指 PC |
 | `stream_id` | 有 | 有 | 4 bit，用于计算该用户的 Core Mem 与 share_mem 区域基址；硬件写入自定义 CSR，只读 |
-| `user_id` | 有 | 有 | 用户号，软件读它算 R-core 的用户映射表和 Matrix Mem 地址，Router 与 credit 记账认的也是它；**可读写**，普通计算 core 上 TS 下发 task 时硬件写入，B core 与 R core 上由软件在 flag_check 认出用户后写入 |
+| `user_id` | 有 | 有 | 用户号，软件读它算 R-core 的用户映射表和 Matrix Mem 地址，Router 与 credit 记账认的也是它；**可读写**，普通计算 core 上 TS 下发 task 时硬件写入，B core 与 R core 上由软件扫 Share Mem 标志表认出用户后写入 |
 | `task_id` | — | 有 | 6 bit，只读；**异步 datain 任务由软件识别包头后写入**，用于告诉 TS 是任务链中哪一步完成 |
 
 ### dsa_iss 的下发规则

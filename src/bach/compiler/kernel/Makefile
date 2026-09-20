@@ -37,7 +37,7 @@ all: $(ELFS) $(HEXS) $(SYMS) $(DUMPS)
 $(OUT):
 	mkdir -p $(OUT)
 
-$(OUT)/kernel_%.elf: kernel_%.c start.s link.ld bach.h | $(OUT)
+$(OUT)/kernel_%.elf: kernel_%.c start.s link.ld bach.h self_inst.h | $(OUT)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< start.s
 
 $(OUT)/kernel_%.hex: $(OUT)/kernel_%.elf

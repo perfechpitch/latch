@@ -18,10 +18,10 @@
  * 做完它才通知 TS。前一笔还没交出去时寄存器接口顶住写，所以几笔可以接着配 */
 static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
   u32 tpl = dte_template(0);
-  mmio_write(DTE_IO_BASE, tpl + DTE_SRC_ADDR, src);
-  mmio_write(DTE_IO_BASE, tpl + DTE_DST_ADDR, dst);
-  mmio_write(DTE_IO_BASE, tpl + DTE_DATA_LEN, len / DTE_DATA_LEN_GRAIN);
-  mmio_write(DTE_IO_BASE, tpl + DTE_TRIGGER, mode | (last ? DTE_TASK_LAST : 0u));
+  dsa_write(tpl + DTE_SRC_ADDR, src);
+  dsa_write(tpl + DTE_DST_ADDR, dst);
+  dsa_write(tpl + DTE_DATA_LEN, len / DTE_DATA_LEN_GRAIN);
+  dsa_write(tpl + DTE_TRIGGER, mode | (last ? DTE_TASK_LAST : 0u));
 }
 
 /* 把 Core Mem 上某一段搬到 Router 发出去。段的起点与长度由 shape 定。
@@ -38,10 +38,10 @@ static void send_seg(u32 off, u32 bytes) {
  * 落点与 scale 由包头带着，DTE 自己办。 */
 TASK void task_dte_user_init(void) {
   u32 tpl = dte_template(0);
-  u32 head = mmio_read(DTE_IO_BASE, tpl + DTE_HW_HEADER_ADDR);
-  mmio_write(DTE_IO_BASE, tpl + DTE_SW_HEADER_ADDR, head);
+  u32 head = dsa_read(tpl + DTE_HW_HEADER_ADDR);
+  dsa_write(tpl + DTE_SW_HEADER_ADDR, head);
   hdr_pop();
-  task_done();
+  task_done(1);
 }
 
 /* ===== 单 core 用例的几笔 ===== */
@@ -50,19 +50,19 @@ TASK void task_dte_user_init(void) {
 TASK void task_dte_move(void) {
   dte_move(CMEM_TOKEN_OFF, 0, E2E_TOKEN_BYTES,
            DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
-  task_done();
+  task_done(1);
 }
 
 /* 把 MU 算完的那一段发给下游 */
 TASK void task_dte_send_fc1(void) {
   send_seg(CMEM_FC1_OFF, E2E_OUT_BYTES);
-  task_done();
+  task_done(1);
 }
 
 /* 把 VU 算完的那一段发给下游 */
 TASK void task_dte_send_act(void) {
   send_seg(CMEM_ACT_OFF, E2E_ACT_BYTES);
-  task_done();
+  task_done(1);
 }
 
 /* ===== 一层 MoE 那一段 ===== */
@@ -73,14 +73,14 @@ TASK void task_dte_send_act(void) {
 TASK void task_dte_send_part(void) {
   dte_move(MOE_PART_OFF, MOE_RED_OFF, MOE_PART_BYTES, DTE_MODE_CMEM_TO_ROUTER,
            1);
-  task_done();
+  task_done(1);
 }
 
 /* dot core：FC2 输入广播给本 chip 另外 7 个计算 core，scale 随它走，落在各自同一处 */
 TASK void task_dte_send_fc2in(void) {
   dte_move(MOE_ACT_OFF, MOE_ACT_OFF, MOE_ACT_BYTES,
            DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
-  task_done();
+  task_done(1);
 }
 
 /* 计算 core：把 FC2 第 s 段发给 dot core，落点是 concat 区第 s 段。按槽位变化，
@@ -88,7 +88,7 @@ TASK void task_dte_send_fc2in(void) {
 static void send_concat(u32 s) {
   dte_move(moe_concat(s), moe_concat(s), MOE_FC2_BYTES, DTE_MODE_CMEM_TO_ROUTER,
            1);
-  task_done();
+  task_done(1);
 }
 TASK void task_dte_send_concat_s0(void) { send_concat(0); }
 TASK void task_dte_send_concat_s1(void) { send_concat(1); }
@@ -108,7 +108,7 @@ TASK void task_dte_send_concat_s6(void) { send_concat(6); }
 TASK void task_dte_send_row(void) {
   dte_move(MOE_ROW_OFF, rc_land(user_id(), 0), MOE_ROW_BYTES,
            DTE_MODE_CMEM_TO_ROUTER, 1);
-  task_done();
+  task_done(1);
 }
 
 /* ===== R core 的两段 =====
@@ -128,7 +128,7 @@ TASK void task_dte_rc_load(void) {
   u32 slot = smem_read(RC_SLOT_OFF + stream_id() * 4);
   dte_move(RC_MM_BASE + slot * RC_SLOT_BYTES, RC_A_OFF, RC_SLOT_BYTES,
            DTE_MODE_MMEM_TO_CMEM, 1);
-  task_done();
+  task_done(1);
 }
 
 /* 链二的最后一步：求和结果送下一行的 R core，一包，与收进来时同一个摆法。落到那
@@ -136,7 +136,7 @@ TASK void task_dte_rc_load(void) {
 TASK void task_dte_rc_send(void) {
   dte_move(RC_SUM_OFF, rc_land(user_id(), 1), MOE_ROW_BYTES,
            DTE_MODE_CMEM_TO_ROUTER, 1);
-  task_done();
+  task_done(1);
 }
 
 /* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点、scale 与 valid 标志都由
@@ -156,7 +156,7 @@ TASK void task_dte_bc_send(void) {
   u32 slot = smem_read(BC_SLOT_OFF + stream_id() * 4);
   dte_move(bc_land(slot), MOE_TOKEN_OFF, BC_TOKEN_BYTES,
            DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
-  task_done();
+  task_done(1);
 }
 
 /* B core 的链二第三步：同一格再送一份给下一个 EP 组的 B core。落点要自己算好
@@ -168,12 +168,12 @@ TASK void task_dte_bc_relay(void) {
   smem_write(BC_SENT_OFF, n + 1);
   dte_move(bc_land(slot), bc_land(n), BC_TOKEN_BYTES,
            DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
-  task_done();
+  task_done(1);
 }
 
 /* 用户退休：本核这个用户的搬运都做完了，向上游还 credit */
 TASK void task_dte_retire(void) {
-  task_done();
+  task_done(1);
 }
 
 /* weights 加载模式下由 datain_task 的 pc 指到这里。
@@ -191,17 +191,17 @@ TASK void task_dte_weights_loader(void) {
 /* MSG 解析：DTE 要能解析包头并执行，MU 与 VU 不需要 */
 TASK void task_dte_msg_parse(void) {
   u32 tpl = dte_template(0);
-  u32 head = mmio_read(DTE_IO_BASE, tpl + DTE_HW_HEADER_ADDR);
-  mmio_write(DTE_IO_BASE, tpl + DTE_SW_HEADER_ADDR, head);
-  task_done();
+  u32 head = dsa_read(tpl + DTE_HW_HEADER_ADDR);
+  dsa_write(tpl + DTE_SW_HEADER_ADDR, head);
+  task_done(1);
 }
 
 /* 不调 DSA 的那一档：TS 的 unit 是 CU 或 SKIP，只跑 RV core。
  * 这类 task 在链上只起占位与推进作用，做完直接报完成。 */
 TASK void task_rv_nop(void) {
-  task_done();
+  task_done(1);
 }
 
 void kernel_init(void) {
-  mmio_write(DTE_IO_BASE, dte_template(0) + DTE_STREAM_STRIDE, 0);
+  dsa_write(dte_template(0) + DTE_STREAM_STRIDE, 0);
 }

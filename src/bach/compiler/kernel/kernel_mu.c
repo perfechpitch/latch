@@ -21,15 +21,15 @@ static u32 stream_base(void) {
  * 寄存器里的值，不写的话 TS 收到的完成对不上任何一个 stream */
 static void mu_launch(u32 token, u32 weight, u32 out, u32 cfg,
                       u32 kblock, u32 nblock) {
-  mmio_write(MU_IO_BASE, MU_STREAM_ID, stream_id());
-  mmio_write(MU_IO_BASE, MU_TASK_ID, task_id());
-  mmio_write(MU_IO_BASE, MU_USER_ID, user_id());
-  mmio_write(MU_IO_BASE, MU_TASK_CFG, cfg);
-  mmio_write(MU_IO_BASE, MU_TASK_BLOCK, kblock | (nblock << MU_NBLOCK_SHIFT));
-  mmio_write(MU_IO_BASE, MU_ADDR_TOKEN, token);
-  mmio_write(MU_IO_BASE, MU_ADDR_WEIGHT, weight);
-  mmio_write(MU_IO_BASE, MU_ADDR_OUT, out);
-  mmio_write(MU_IO_BASE, MU_SYS_CTRL, MU_TASK_START);
+  dsa_write(MU_STREAM_ID, stream_id());
+  dsa_write(MU_TASK_ID, task_id());
+  dsa_write(MU_USER_ID, user_id());
+  dsa_write(MU_TASK_CFG, cfg);
+  dsa_write(MU_TASK_BLOCK, kblock | (nblock << MU_NBLOCK_SHIFT));
+  dsa_write(MU_ADDR_TOKEN, token);
+  dsa_write(MU_ADDR_WEIGHT, weight);
+  dsa_write(MU_ADDR_OUT, out);
+  dsa_write(MU_SYS_CTRL, MU_TASK_START);
 }
 
 /* 一条原语：从 Core Mem 读 token、Matrix Mem 读权重，结果写回 Core Mem。
@@ -38,7 +38,7 @@ TASK void task_mu_compute(void) {
   u32 base = stream_base();
   mu_launch(base + CMEM_TOKEN_OFF, MMEM_WEIGHT_BASE, base + CMEM_FC1_OFF,
             MU_PRIM_TYPE_K128_N64 | MU_DTYPE_MXFP8 | MU_DTYPE_C_BF16, 1, 1);
-  task_done();
+  task_done(1);
 }
 
 /* ===== 一层 MoE 那一段 =====
@@ -49,26 +49,25 @@ TASK void task_mu_compute(void) {
 static void mu_moe(u32 token_off, u32 weight_off, u32 out_off, u32 cfg,
                    u32 kblock, u32 nblock, u32 ac_stride, u32 ep_reduce) {
   u32 base = stream_base();
-  mmio_write(MU_IO_BASE, MU_STREAM_ID, stream_id());
-  mmio_write(MU_IO_BASE, MU_TASK_ID, task_id());
-  mmio_write(MU_IO_BASE, MU_USER_ID, user_id());
-  mmio_write(MU_IO_BASE, MU_TASK_CFG, cfg);
-  mmio_write(MU_IO_BASE, MU_TASK_BLOCK, kblock | (nblock << MU_NBLOCK_SHIFT));
-  mmio_write(MU_IO_BASE, MU_ADDR_TOKEN, base + token_off);
-  mmio_write(MU_IO_BASE, MU_ADDR_WEIGHT, weight_off);
-  mmio_write(MU_IO_BASE, MU_ADDR_OUT, base + out_off);
-  mmio_write(MU_IO_BASE, MU_AC_EXPERT_STRIDE, ac_stride);
-  mmio_write(MU_IO_BASE, MU_B_EXPERT_STRIDE, MMEM_EXPERT_STRIDE);
-  mmio_write(MU_IO_BASE, MU_EP_CTRL,
-             MOE_EXPERTS | (ep_reduce ? MU_EP_REDUCE_EN : 0u));
-  mmio_write(MU_IO_BASE, MU_TOPK_ADDR, MOE_TOPK_OFF);
-  mmio_write(MU_IO_BASE, MU_TOPK_STRIDE, CMEM_STREAM_STRIDE);
-  mmio_write(MU_IO_BASE, MU_SYS_CTRL, MU_TASK_START);
+  dsa_write(MU_STREAM_ID, stream_id());
+  dsa_write(MU_TASK_ID, task_id());
+  dsa_write(MU_USER_ID, user_id());
+  dsa_write(MU_TASK_CFG, cfg);
+  dsa_write(MU_TASK_BLOCK, kblock | (nblock << MU_NBLOCK_SHIFT));
+  dsa_write(MU_ADDR_TOKEN, base + token_off);
+  dsa_write(MU_ADDR_WEIGHT, weight_off);
+  dsa_write(MU_ADDR_OUT, base + out_off);
+  dsa_write(MU_AC_EXPERT_STRIDE, ac_stride);
+  dsa_write(MU_B_EXPERT_STRIDE, MMEM_EXPERT_STRIDE);
+  dsa_write(MU_EP_CTRL, MOE_EXPERTS | (ep_reduce ? MU_EP_REDUCE_EN : 0u));
+  dsa_write(MU_TOPK_ADDR, MOE_TOPK_OFF);
+  dsa_write(MU_TOPK_STRIDE, CMEM_STREAM_STRIDE);
+  dsa_write(MU_SYS_CTRL, MU_TASK_START);
 }
 
 /* 等 MU 把手上这一笔做完 */
 static void mu_wait(void) {
-  while (mmio_read(MU_IO_BASE, MU_SYS_STATUS) & MU_BUSY) {
+  while (dsa_read(MU_SYS_STATUS) & MU_BUSY) {
   }
 }
 
@@ -86,7 +85,7 @@ static void mu_part(u32 s) {
   mu_moe(token, MMEM_W3_OFF, MOE_FC3_OFF, cfg, MOE_KBLOCK_FC13,
          MOE_NBLOCK_FC13, MOE_PART_STRIDE, 0);
   mu_wait();
-  task_done();
+  task_done(1);
 }
 
 /* FC2 第 s 段：每个专家一份 FC2 输入，按 topK 权重在 MU 内合并成一份，写进 concat
@@ -96,7 +95,7 @@ static void mu_fc2(u32 s) {
          MU_PRIM_TYPE_K128_N64 | MU_VLANE2 | MU_DTYPE_MXFP8 | MU_DTYPE_C_BF16,
          MOE_KBLOCK_FC2, MOE_NBLOCK_FC2, MOE_ACT_STRIDE, 1);
   mu_wait();
-  task_done();
+  task_done(1);
 }
 
 /* 按槽位变化的任务每个槽位一个入口，由 TCHAIN 的 PC 选 */
@@ -147,7 +146,7 @@ TASK void task_rc_find(void) {
       smem_write(rc_flag(s, 1), 0);
       smem_write(RC_SLOT_OFF + stream_id() * 4, s);
       set_user_id(smem_read(RC_USER_OFF + s * 4));
-      task_done();
+      task_done(1);
       return;
     }
     s = s + 1;
@@ -179,7 +178,7 @@ TASK void task_bc_wait(void) {
       smem_write(BC_HEAD_OFF, head + 1);
       smem_write(BC_SLOT_OFF + stream_id() * 4, slot);
       set_user_id(smem_read(BC_USER_OFF + slot * 4));
-      task_done();
+      task_done(1);
       return;
     }
   }
@@ -187,5 +186,5 @@ TASK void task_bc_wait(void) {
 
 void kernel_init(void) {
   /* 异常复位默认全屏蔽，写 0 打开上报 */
-  mmio_write(MU_IO_BASE, MU_EXCEPT_MASK, 0);
+  dsa_write(MU_EXCEPT_MASK, 0);
 }

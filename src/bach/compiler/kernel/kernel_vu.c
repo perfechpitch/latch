@@ -17,13 +17,13 @@
 
 static void vu_launch(u32 config_idx, u32 ld, u32 st, u32 fence) {
   u32 sid = stream_id();
-  mmio_write(VU_IO_BASE, VU_LD_ADDR, ld);
-  mmio_write(VU_IO_BASE, VU_ST_ADDR, st);
-  mmio_write(VU_IO_BASE, VU_MACRO_INST_TRIGGER,
-             (ADDR_DYNAMIC << VU_STATIC_DYNAMIC_MASK_SHIFT)
-                 | (config_idx << VU_CONFIG_IDX_SHIFT)
-                 | VU_STREAM_ID_OVERRIDE | (sid << VU_STREAM_ID_SHIFT)
-                 | (fence ? VU_MACRO_INST_FENCE : 0u));
+  dsa_write(VU_LD_ADDR, ld);
+  dsa_write(VU_ST_ADDR, st);
+  dsa_write(VU_MACRO_INST_TRIGGER,
+            (ADDR_DYNAMIC << VU_STATIC_DYNAMIC_MASK_SHIFT)
+                | (config_idx << VU_CONFIG_IDX_SHIFT)
+                | VU_STREAM_ID_OVERRIDE | (sid << VU_STREAM_ID_SHIFT)
+                | (fence ? VU_MACRO_INST_FENCE : 0u));
 }
 
 /* 单 core 用例的 VU 那一步：MU 算出来的 BF16 逐元素算一遍，仍按 BF16 写回。
@@ -31,7 +31,7 @@ static void vu_launch(u32 config_idx, u32 ld, u32 st, u32 fence) {
 TASK void task_vu_compute(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   vu_launch(0, base + CMEM_FC1_OFF, base + CMEM_ACT_OFF, 0);
-  task_done();
+  task_done(1);
 }
 
 /* ===== dot core：silu·dot·量化 =====
@@ -53,7 +53,7 @@ TASK void task_vu_compute(void) {
 #define VRF_GATE 8u
 
 static void vu_static(u32 group, u32 off, u32 data) {
-  mmio_write(VU_IO_BASE, vu_static_group(group) + off, data);
+  dsa_write(vu_static_group(group) + off, data);
 }
 
 static u32 op_word(u32 opcode, u32 src1, u32 src2) {
@@ -91,11 +91,11 @@ static void gate_setup(void) {
 
 /* 发一条宏指令：地址走动态副本，逐条置 fence */
 static void vu_fire(u32 group, u32 ld, u32 st) {
-  mmio_write(VU_IO_BASE, VU_LD_ADDR, ld);
-  mmio_write(VU_IO_BASE, VU_ST_ADDR, st);
-  mmio_write(VU_IO_BASE, VU_MACRO_INST_TRIGGER,
-             VU_MASK_LD_ADDR | VU_MASK_ST_ADDR
-                 | (group << VU_CONFIG_IDX_SHIFT) | VU_MACRO_INST_FENCE);
+  dsa_write(VU_LD_ADDR, ld);
+  dsa_write(VU_ST_ADDR, st);
+  dsa_write(VU_MACRO_INST_TRIGGER,
+            VU_MASK_LD_ADDR | VU_MASK_ST_ADDR
+                | (group << VU_CONFIG_IDX_SHIFT) | VU_MACRO_INST_FENCE);
 }
 
 /* 每个专家一份：silu(FC1)·FC3，量化成 MXFP8 作为 FC2 输入。
@@ -115,9 +115,9 @@ TASK void task_vu_gate(void) {
     vu_fire(1, fc1, act);
     vu_fire(2, fc3, act);
   }
-  while (mmio_read(VU_IO_BASE, VU_MACRO_INST_LEFT) != 0) {
+  while (dsa_read(VU_MACRO_INST_LEFT) != 0) {
   }
-  task_done();
+  task_done(1);
 }
 
 /* ===== R core：两半求和 =====
@@ -156,12 +156,12 @@ TASK void task_vu_add(void) {
   add_setup();
   vu_fire(3, base + RC_A_OFF + at, base + RC_SUM_OFF + at);
   vu_fire(4, base + RC_B_OFF + at, base + RC_SUM_OFF + at);
-  while (mmio_read(VU_IO_BASE, VU_MACRO_INST_LEFT) != 0) {
+  while (dsa_read(VU_MACRO_INST_LEFT) != 0) {
   }
-  task_done();
+  task_done(1);
 }
 
 void kernel_init(void) {
   /* VL 与精度用第 0 组静态配置里的 static_TYPE_VL，这里不覆盖动态值 */
-  mmio_write(VU_IO_BASE, VU_TYPE_VL, 0);
+  dsa_write(VU_TYPE_VL, 0);
 }

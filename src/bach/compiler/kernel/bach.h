@@ -7,6 +7,8 @@
 #ifndef BACH_KERNEL_H
 #define BACH_KERNEL_H
 
+#include "self_inst.h"
+
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
@@ -14,6 +16,28 @@ typedef unsigned long long u64;
 #define DTE_IO_BASE 0x00008000u
 #define MU_IO_BASE  0x00009000u
 #define VU_IO_BASE  0x0000C000u
+
+/* ===== DSA 寄存器的读写：custom-0 的自定义指令 =====
+ *
+ * 硬件上 DSA 的 IO reg 不在 RV core 的访存地址空间里，普通 store / load 够不着，
+ * 只有 dsaw / dsawi / dsar / dsari 这四条自定义指令到得了（编码见 self_inst.h）。
+ * 下面这一对是 kernel 的收口，地址一律是本核那个 DSA 窗口内的偏移，不带基址。
+ *
+ * 两条寻址方式硬件上等价，区别只是地址从哪来：上面那几条 DSA 基址常量只是给
+ * 存档用，指令里的地址已经是核内偏移了。
+ *
+ * 立即数寻址那一档要求 off 在 RTL 展开时已经被常量替换掉，所以这两个是
+ * always_inline：调用点传的一定是常量（寄存器偏移表全是 #define），编译器内联
+ * 之后常量直接拼进指令。地址要是算出来的（随 stream / 槽位变），这里用不了，
+ * 得直接用寄存器寻址的 dsaw / dsar。 */
+static inline __attribute__((always_inline)) void dsa_write(u32 off, u32 val) {
+  dsawi(val, off);
+}
+static inline __attribute__((always_inline)) u32 dsa_read(u32 off) {
+  u32 v;
+  dsari(v, off);
+  return v;
+}
 
 /* ===== DTE：《DTE寄存器配置参数》§DTE地址空间和寄存器配置 ===== */
 
@@ -391,16 +415,20 @@ static inline u32 vu_static_group(u32 idx) {
 /* 《寄存器描述》RV Core 页给了「自定义 task 信息寄存器」三项的位宽：
  * stream_id 4 位、task_id 6 位、user_id 16 位；CSR 地址一列是空的。
  *
- * 硬件上这几样是自定义 CSR 加 custom-0 的 task_done 指令。模型里走 MMIO：
- * rv32 的功能模型认标准 RV32IM，加一条自定义指令要动 codegen 出来的解码表；
- * 走约定地址读写，行为等价，而且配 DSA 寄存器本来就是 store。 */
+ * 硬件上这几样是自定义 CSR，走 csrrs / csrrw 那一套；task_done 是 custom-0 的
+ * 自定义指令（编码在 self_inst.h，模型侧译码见 custom0.h）。task_done 这一路已经
+ * 换成真指令了，下面 TC_TASK_DONE 那个地址只剩模型里的兼容通路。
+ *
+ * 身份 CSR 还留在这里的原因：这些 CSR 的编号在原始文档里是空的（上面那句
+ * 「CSR 地址一列是空的」），没有号就没法用 csrrs 读。编号定下来之前，模型用
+ * 这一段 MMIO 约定地址代替，kernel 跟着走同一个约定。 */
 #define TASK_CTRL_BASE 0x00030000u
 #define TC_STREAM_ID     0x00   /* 只读，4 位 */
 #define TC_TASK_ID       0x04   /* 只读，6 位 */
 #define TC_USER_ID       0x08   /* 只读，16 位 */
 /* TC_USER_ID 可读写：普通计算 core 上 TS 下发 task 时硬件写进来，B core 与
  * R core 上软件认出这一笔属于哪个用户之后自己写 */
-#define TC_TASK_DONE     0x10   /* 写 1 通知 TS，写 0 不通知 */
+#define TC_TASK_DONE     0x10   /* 模型里的 task_done 口，真编码见 self_inst.h */
 #define TC_WAIT_TASK     0x14
 /* 当前任务的 PID：TS 随任务送来，可读写。PID 更新任务把新值写进来，随 task_done
  * 回 TS */
@@ -435,20 +463,15 @@ static inline void set_user_id(u32 v) {
   mmio_write(TASK_CTRL_BASE, TC_USER_ID, v);
 }
 
-/* 任务做完通知 TS，带 stream_id、task_id、user_id */
-static inline void task_done(void) {
-  mmio_write(TASK_CTRL_BASE, TC_TASK_DONE, 1);
-}
+/* task 做完：交还自己，通知 TS（带 stream_id、task_id、user_id）。这一条是
+ * custom-0 的 task_done 指令，ts 标志就编码在指令里，写 1 = 通知 TS。
+ * 实现见 self_inst.h 的 task_done(ts)。 */
 
 /* firmware 结束时的那一条：停下等业务流 task，不通知 TS */
-static inline void wait_for_task(void) {
-  mmio_write(TASK_CTRL_BASE, TC_TASK_DONE, 0);
-}
+static inline void wait_for_task(void) { task_done(0); }
 
 /* 交还自己但不通知 TS。自启动 core 上 Bypass 那一路 datain 与权重加载用它：
  * 这两类不占 stream 表项，完成不回 TS */
-static inline void task_yield(void) {
-  mmio_write(TASK_CTRL_BASE, TC_TASK_DONE, 0);
-}
+static inline void task_yield(void) { task_done(0); }
 
 #endif

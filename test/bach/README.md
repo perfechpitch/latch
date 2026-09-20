@@ -96,7 +96,7 @@ weights 加载那一条 path 只在那个用例里用，不进 bundle，由用�
 | DTE | `dte`、`dte_inbound`、`dte_commit`、`dte_lane`、`dte_completion`、`dte_tables` | 52 |
 | MU | `mu`、`mu_issue` | 27 |
 | VU | `vu` | 36 |
-| RV core | `rv_core`、`rv_lsq`、`rv_task` | 18 |
+| RV core | `rv_core`、`rv_lsq`、`rv_task`、`custom0` | 25 |
 | 三块存储 | `memory` | 22 |
 | 数值格式 | `numeric`、`numeric_cross` | 21 |
 | 片外与链路 | `link`、`external`、`pcie_switch` | 20 |

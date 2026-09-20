@@ -18,6 +18,9 @@
 // 自定义指令走 MMIO：rv32 的功能模型认标准 RV32IM，加 custom-0 那一组要动 gen/
 // 里 codegen 出来的解码表。改成往约定地址写一笔，行为等价：都是「往一个约定
 // 地址写一笔就触发」，kernel 那边本来也是用 store 配 DSA 寄存器的。
+// custom-0 现在另有真实编码：SystemRv32Bach（custom0.h）覆盖 Decode 译那一组，
+// 指令体仍走这条 MMIO 通路（对 DSA IO 窗口与 task 控制区做标量读写），所以
+// kernel 两条路都认，迁移与否行为等价。
 
 #include <array>
 #include <deque>
@@ -27,6 +30,7 @@
 #include <vector>
 
 #include "base/log.h"
+#include "bach/ip/chip/core/rv_core/custom0.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
 #include "bach/ip/chip/core/rv_core/task_queue.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
@@ -78,6 +82,22 @@ inline RvRegUse RvDecodeRegs(uint32_t inst) {
       u.has_rd = true;
       u.has_rs1 = true;
       break;
+    case 0x0B: {                            // custom-0（custom0.h，字段同 self_inst.h）
+      uint32_t funct3 = (inst >> 12) & 0x7u;
+      bool imm = (inst >> 31) & 1u;
+      if (funct3 == 0) {                    // dsar / dsari
+        u.has_rd = true;
+        if (!imm) u.has_rs1 = true;         // dsar 的地址在 rs1；dsari 是 imm16
+      } else if (funct3 == 1) {             // dsaw / dsawi
+        u.has_rs1 = true;                   // 写数据都在 rs1
+        if (!imm) u.has_rs2 = true;         // dsaw 的地址在 rs2；dsawi 是 imm16
+      } else if (funct3 == 6) {             // loop：rs1 最大次数、rs2 当前次数
+        u.has_rs1 = true;
+        u.has_rs2 = true;
+      }
+      // task_done（funct3=010）不碰寄存器。
+      break;
+    }
     default:                                // FENCE 与未识别的，当作不碰寄存器
       break;
   }
@@ -236,7 +256,7 @@ class RvExec : public BachModule {
   void BuildFunctional() {
     isa = std::make_shared<rv32::Rv32>();
     router = std::make_shared<systeml::MemoryRouter>();
-    sys = std::make_shared<rv32::SystemRv32>(isa, kItcmBase, 1);
+    sys = std::make_shared<SystemRv32Bach>(isa, kItcmBase, 1, DsaIoBase());
     auto mem = std::make_shared<rv32::MemorySysRouted>(router);
     sys->memorySystem = mem;
 

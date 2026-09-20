@@ -288,7 +288,7 @@ src/bach/
           task_done.h              七路完成合流
         rv_core/
           rv_core.h                驱动 src/rv32 的 SystemRv32 逐条执行；task_queue、dsa_iss、dsa_rq、lsq、gpr 就绪表、自定义 CSR
-          exec.h                   自定义指令（dsar、dsari、dsaw、dsawi、task_done、flag_check、loop）走约定地址的读写
+          exec.h                   自定义指令（dsar、dsari、dsaw、dsawi、task_done、loop）的译码接入点，指令体走 DSA IO 与 task 控制区那两条通路
           rv_ports.h               RV core 地址空间：ITCM、DTCM、Share Mem、Core Mem、Router I/O reg 各一个 MemoryPort
         dte/
           header_parser.h  commit.h  task_queue.h  lane.h  agcu.h  buffer.h  completion_rs.h  hmem.h
