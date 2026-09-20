@@ -94,6 +94,7 @@ TEST(BachMoeChip, BcoreStartsTheBroadcast) {
                           MakeToken(kBcastInPath, BcoreLand(0)));
     clk->Continue();
     RT::JoinAll();
+    CheckStreamDrained(all);
     got = harness.out_msgs;
     inflight = harness.inflight;
     std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";

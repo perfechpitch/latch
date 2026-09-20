@@ -40,24 +40,27 @@
 namespace latch {
 namespace bach {
 
+// master 自成一方：party 取这个值时，它与别的 master 都不是同一方。
+constexpr uint64_t kOwnParty = ~0ull;
+
 // 一个 master 在这块存储上的口径。
 struct MemMaster {
   std::string name;
   uint64_t priority = 0;   // 数字小的先得
   uint64_t read_latency = 1;
   uint64_t write_latency = 1;
-  // exclusive_bank 那一档的冲突按组算：同一组里的几个口（如 DTE 的读与写）是
-  // 同一个 master 的两只口，不算两个 master，撞了排队不报硬约束。默认 0。
-  uint64_t exclusive_group = 0;
+  // 属于哪一方。exclusive_bank 管的是不同方之间撞车，同一方的几个口（如 DTE 的
+  // 读与写）撞在同一个 bank 上照常排队。
+  uint64_t party = kOwnParty;
 };
 
 struct BankedMemCfg {
   uint64_t bank_num = 8;
   uint64_t granule = 128;      // 地址粒度，一行的字节数
   uint64_t capacity = 1 << 20;
-  // Matrix Mem 的硬约束：同一 bank 不许两个 master 同时访问。撞了不重试、不排队，
-  // 直接断言失败。这是软件排算子时就该保证的事，用重试掩盖会让配置错误一直
-  // 查不出来。Core Mem 不设这条，撞了排队。
+  // Matrix Mem 的硬约束：同一 bank 不许两方同时访问。撞了不重试、不排队，直接
+  // 断言失败。这是软件排算子时就该保证的事，用重试掩盖会让配置错误一直查不出
+  // 来。同一方的几个口撞了照常排队。Core Mem 不设这条，撞了都排队。
   bool exclusive_bank = false;
   // exclusive_bank 撞车时是停下还是只记一笔。默认停下：真硬件上被让路的那一笔
   // 直接丢弃，DTE 没有重传通路，丢一笔结果就错，所以模型不能让它悄悄过去。
@@ -70,6 +73,9 @@ struct BankedMemCfg {
   // 这块存储没有这一段。
   uint64_t scale_bytes = 0;
 };
+
+// 每个 master 的前端有两格：M1 刚锁存的与 M2 等 bank 仲裁的。
+constexpr uint64_t kStageNum = 2;
 
 class BankedMem : public BachModule {
  public:
@@ -147,8 +153,8 @@ class BankedMem : public BachModule {
 
   bool Quiescent() const override {
     if (!pipe.empty()) return false;
-    for (auto const& s : slots) {
-      if (s.busy) return false;
+    for (auto const& q : slots) {
+      if (!q.empty()) return false;
     }
     return true;
   }
@@ -164,9 +170,7 @@ class BankedMem : public BachModule {
     granted = granted_pending;
     conflicts = conflict_pending;
     uint64_t busy = 0;
-    for (auto const& s : slots) {
-      if (s.busy) ++busy;
-    }
+    for (auto const& q : slots) busy += q.size();
     pending_cnt = busy;
     TracePerCycle("granted", granted_pending);
     TracePerCycle("pending", busy);
@@ -174,7 +178,6 @@ class BankedMem : public BachModule {
 
  private:
   struct Slot {
-    bool busy = false;
     MemReqView req;
     uint64_t arrive_cycle = 0;  // 请求进槽的那一拍，同优先级按它排先到先得
     uint64_t seq = 0;
@@ -189,24 +192,25 @@ class BankedMem : public BachModule {
     return (addr / cfg.granule) % cfg.bank_num;
   }
 
-  // M1：槽空才收，收下的原地待命。ready 是本拍算出来的，master 下一拍才看到。
+  // M1：锁存请求。每个 master 两格：一格在 M1 刚锁存，一格在 M2 等 bank 仲裁。
+  // 两级分开，master 才能背靠背地每拍发一笔，只有在 M2 被拒时才压回去
+  // （memory.md M1 第 4 条：req_ready = 该 master 在 M2 没有被拒的请求压着）。
   void Accept(uint64_t now) {
     for (uint64_t m = 0; m < masters.size(); ++m) {
       MemReqView r = ReadMemReq(*ports[m]);
-      if (r.valid && !slots[m].busy) {
-        slots[m].busy = true;
-        slots[m].req = r;
-        slots[m].arrive_cycle = now;
-        slots[m].seq = next_seq++;
-      }
+      if (!r.valid) continue;
+      LOGCHECK(slots[m].size() < kStageNum,
+               "BankedMem: 两格都占着还发进来，master 没按 ready 停。");
+      slots[m].push_back({r, now, next_seq++});
     }
-    // ready 在本拍末按槽的状态给：空 = 下一拍能收。
+    // ready 在本拍末按余量给：还剩一格 = 下一拍收得下。
     for (uint64_t m = 0; m < masters.size(); ++m) {
+      bool room = slots[m].size() < kStageNum;
       auto it = rsp_this_cycle.find(m);
       if (it != rsp_this_cycle.end()) {
-        ports[m]->DriveSlave(!slots[m].busy, true, it->second);
+        ports[m]->DriveSlave(room, true, it->second);
       } else {
-        ports[m]->DriveSlave(!slots[m].busy, false, ByteBlockPtr());
+        ports[m]->DriveSlave(room, false, ByteBlockPtr());
       }
     }
     rsp_this_cycle.clear();
@@ -216,31 +220,26 @@ class BankedMem : public BachModule {
   void Arbitrate(uint64_t now) {
     std::map<uint64_t, std::vector<uint64_t>> by_bank;
     for (uint64_t m = 0; m < masters.size(); ++m) {
-      if (!slots[m].busy) continue;
-      by_bank[BankOf(slots[m].req.addr)].push_back(m);
+      if (slots[m].empty()) continue;
+      by_bank[BankOf(slots[m].front().req.addr)].push_back(m);
     }
 
     for (auto const& kv : by_bank) {
       std::vector<uint64_t> const& cands = kv.second;
-      if (cfg.exclusive_bank) {
-        // 硬约束按组数：同一组（DTE 的读与写）不算两个 master，跨组才违反。
-        std::set<uint64_t> groups;
-        for (uint64_t m : cands) groups.insert(masters[m].exclusive_group);
-        if (groups.size() > 1) {
-          ++conflict_pending;
-          // 同一 bank 两个 master 同时访问是硬约束被违反，不是正常工作点。
-          // 真硬件上只执行 MU、被让路的那一笔直接丢弃，DTE 没有重传通路，丢一笔
-          // 结果就错。所以这里直接停，不做等价的重试掩盖。
-          std::fprintf(stderr, "BankedMem: bank %llu 撞了",
-                       (unsigned long long)kv.first);
-          for (uint64_t m : cands) {
-            std::fprintf(stderr, " %s@0x%llx", masters[m].name.c_str(),
-                         (unsigned long long)slots[m].req.addr);
-          }
-          std::fprintf(stderr, "\n");
-          LOGCHECK(!cfg.halt_on_conflict,
-                   "BankedMem: 同一 bank 上有两个 master 同时访问，硬约束被违反。");
+      if (cfg.exclusive_bank && PartyCount(cands) > 1) {
+        ++conflict_pending;
+        // 同一 bank 两方同时访问是硬约束被违反，不是正常工作点。真硬件上只执行
+        // MU、被让路的那一笔直接丢弃，DTE 没有重传通路，丢一笔结果就错。所以这里
+        // 直接停，不做等价的重试掩盖。停之前先把是谁撞在哪个地址上打出来。
+        std::fprintf(stderr, "BankedMem: bank %llu 撞了",
+                     (unsigned long long)kv.first);
+        for (uint64_t m : cands) {
+          std::fprintf(stderr, " %s@0x%llx", masters[m].name.c_str(),
+                       (unsigned long long)slots[m].front().req.addr);
         }
+        std::fprintf(stderr, "\n");
+        LOGCHECK(!cfg.halt_on_conflict,
+                 "BankedMem: 同一 bank 上有两个 master 同时访问，硬约束被违反。");
       }
       uint64_t win = cands.front();
       if (cfg.round_robin) {
@@ -252,6 +251,17 @@ class BankedMem : public BachModule {
       }
       Serve(win, now);
     }
+  }
+
+  // 这几个 master 分属几方。
+  uint64_t PartyCount(std::vector<uint64_t> const& cands) const {
+    std::set<uint64_t> parties;
+    for (uint64_t m : cands) {
+      uint64_t p = masters[m].party;
+      // 自成一方的按 master 编号算，编号与 party 取值分在两段，不会撞。
+      parties.insert(p == kOwnParty ? (1ull << 63) | m : p);
+    }
+    return parties.size();
   }
 
   // 从上一拍赢家的下一个开始扫，第一个在候选里的就是本拍的赢家。
@@ -273,14 +283,14 @@ class BankedMem : public BachModule {
     if (masters[a].priority != masters[b].priority) {
       return masters[a].priority < masters[b].priority;
     }
-    if (slots[a].arrive_cycle != slots[b].arrive_cycle) {
-      return slots[a].arrive_cycle < slots[b].arrive_cycle;
+    if (slots[a].front().arrive_cycle != slots[b].front().arrive_cycle) {
+      return slots[a].front().arrive_cycle < slots[b].front().arrive_cycle;
     }
-    return slots[a].seq < slots[b].seq;
+    return slots[a].front().seq < slots[b].front().seq;
   }
 
   void Serve(uint64_t m, uint64_t now) {
-    MemReqView const& r = slots[m].req;
+    MemReqView const& r = slots[m].front().req;
     LOGCHECK(r.addr + r.woff + r.bytes <= cfg.capacity, "BankedMem: 访存越界。");
     ByteBlockPtr data;
     uint64_t lat;
@@ -319,7 +329,7 @@ class BankedMem : public BachModule {
     // 剩下的记在延迟线上。
     uint64_t rest = lat > 2 ? lat - 2 : 1;
     pipe.push_back({m, now + rest, data});
-    slots[m].busy = false;
+    slots[m].pop_front();
     ++granted_pending;
   }
 
@@ -415,7 +425,8 @@ class BankedMem : public BachModule {
   std::vector<std::shared_ptr<MemPort>> ports;
 
   // Step 独占。
-  std::vector<Slot> slots;
+  // 每个 master 两格：M1 刚锁存的与 M2 等仲裁的。
+  std::vector<std::deque<Slot>> slots;
   std::deque<PipeItem> pipe;
   std::map<uint64_t, ByteBlockPtr> rsp_this_cycle;
   std::map<uint64_t, ByteBlock> store;        // 按行稀疏

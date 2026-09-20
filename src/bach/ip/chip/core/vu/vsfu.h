@@ -37,7 +37,7 @@ class VuVsfu : public VuExeStage {
     VuOpReg const& r = f.uops.cfg.vsfu;
     VsfuOp op = VsfuOp(r.opcode);
     VuOperand const& a = VuSrcOf(f, r.src1);
-    uint64_t vl = f.uops.inst.Vl();
+    uint64_t vl = f.SegLen();
     std::vector<bool> const& m = VuMaskOf(f, uint64_t(VuUnit::kVsfu) - 2);
     VuOperand prev = f.vsfu;
 

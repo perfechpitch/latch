@@ -35,7 +35,7 @@ namespace bach {
 class XbarReqPort : public Logic {
  public:
   Logic64 valid, out_mask, vc, head, tail, bytes;
-  Logic64 path_id, user_id, enters_core, stall_way, need_stream;
+  Logic64 path_id, user_id, enters_core, stall_way, stream_need;
   // 这个入口的队列里从队首起有没有一整个包。仲裁的第二档看它：手里攥着整包的
   // 入口先走，免得几个只来了半个包的入口互相插队，谁都拼不齐。
   Logic64 whole_packet;
@@ -43,7 +43,7 @@ class XbarReqPort : public Logic {
   // nxt_credit_require：广播的量含提前预留的输出结果空间，不只是数据本身。
   Logic64 credit_require;
   LogicPtr<Message> msg;
-  // Xbar 写、station 读：入口缓冲还收不收得下。
+  // Xbar 写、station 读：入口缓冲里各个 VC 还收不收得下，第 v 位是 VC v。
   Logic64 room;
   // 每交出一笔加一。Xbar 按它认这一笔见没见过：两侧各自打拍，station 一拍
   // 不写端口就会回落成上一拍的值，只看 valid 会把同一笔收两遍。
@@ -51,10 +51,10 @@ class XbarReqPort : public Logic {
 
   explicit XbarReqPort(ClockPtr c)
       : valid(c), out_mask(c), vc(c), head(c), tail(c), bytes(c), path_id(c),
-        user_id(c), enters_core(c), stall_way(c), need_stream(c),
+        user_id(c), enters_core(c), stall_way(c), stream_need(c),
         whole_packet(c), credit_require(c), msg(c), room(c), seq(c) {
     Fields(valid, out_mask, vc, head, tail, bytes, path_id, user_id,
-           enters_core, stall_way, need_stream, whole_packet, credit_require,
+           enters_core, stall_way, stream_need, whole_packet, credit_require,
            msg, room, seq);
   }
 
@@ -69,14 +69,15 @@ class XbarReqPort : public Logic {
     user_id = 0;
     enters_core = 0;
     stall_way = 0;
-    need_stream = 0;
+    stream_need = 0;
     whole_packet = 0;
     credit_require = 0;
     msg = MessagePtr();
   }
 
-  void DriveRoom(bool ok) { room = ok ? 1 : 0; }
-  bool Room() const { return room.Get() != 0; }
+  void DriveRoom(uint64_t vc_mask) { room = vc_mask; }
+  // 往第 v 个 VC 上交一笔收不收得下。
+  bool RoomFor(uint64_t v) const { return ((room.Get() >> v) & 1u) != 0; }
 };
 
 struct XbarReqView {
@@ -86,7 +87,8 @@ struct XbarReqView {
   bool head = false, tail = false;
   uint64_t bytes = 0;
   uint64_t path_id = 0, user_id = 0;
-  bool enters_core = false, stall_way = false, need_stream = false;
+  bool enters_core = false, stall_way = false;
+  uint64_t stream_need = 0;
   bool whole_packet = false;
   uint64_t credit_require = 0;
   MessagePtr msg;
@@ -106,7 +108,7 @@ inline XbarReqView ReadXbarReq(XbarReqPort const& p) {
   v.user_id = p.user_id.Get();
   v.enters_core = p.enters_core.Get() != 0;
   v.stall_way = p.stall_way.Get() != 0;
-  v.need_stream = p.need_stream.Get() != 0;
+  v.stream_need = p.stream_need.Get();
   v.whole_packet = p.whole_packet.Get() != 0;
   v.credit_require = p.credit_require.Get();
   v.msg = p.msg.Get();
@@ -321,6 +323,36 @@ class RetireBroadcastPort : public Logic {
     seq = seq.Get();
   }
   bool Valid() const { return valid.Get() != 0; }
+  uint64_t User() const { return user_id.Get(); }
+  uint64_t Seq() const { return seq.Get(); }
+};
+
+// Retire → Xbar：方向 dir 的下游还回来一笔 stream release，那个方向上这个用户的
+// 表项可以删了。本级退休走 RetireBroadcastPort，两者不是一回事：一个放的是下游
+// 的坑，一个放的是本 core 自己的坑。
+class StreamReleasePort : public Logic {
+ public:
+  Logic64 valid, dir, user_id, seq;
+
+  explicit StreamReleasePort(ClockPtr c)
+      : valid(c), dir(c), user_id(c), seq(c) {
+    Fields(valid, dir, user_id, seq);
+  }
+
+  void Drive(uint64_t d, uint64_t user, uint64_t n) {
+    valid = 1;
+    dir = d;
+    user_id = user;
+    seq = n;
+  }
+  void Idle() {
+    valid = 0;
+    dir = 0;
+    user_id = 0;
+    seq = seq.Get();
+  }
+  bool Valid() const { return valid.Get() != 0; }
+  uint64_t Dir() const { return dir.Get(); }
   uint64_t User() const { return user_id.Get(); }
   uint64_t Seq() const { return seq.Get(); }
 };

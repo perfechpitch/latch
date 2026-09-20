@@ -307,7 +307,7 @@
 <path d="M920.0 343.0 L920.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
 <path d="M1160.0 343.0 L1160.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
 <path d="M1400.0 343.0 L1400.0 487.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
-<text x="470.0" y="411.0" font-size="8.5" fill="#6b7280" text-anchor="start">left / right：同行相邻 Router，256 B/T，40T</text>
+<text x="470.0" y="411.0" font-size="8.5" fill="#6b7280" text-anchor="start">left / right：同行相邻 Router，256 B/T，走线 10T</text>
 <text x="470.0" y="425.0" font-size="8.5" fill="#6b7280" text-anchor="start">mid：另一行对称位置的 Router，mid-to-mid 直连</text>
 <text x="950.0" y="411.0" font-size="8.5" fill="#6b7280" text-anchor="start">Router 在 core 的内侧边：第 0 排在底边，第 1 排在顶边，</text>
 <text x="950.0" y="425.0" font-size="8.5" fill="#6b7280" text-anchor="start">十个 Router 排成中间一条带，C2C Bridge 接在这条带的四个端点上</text>
@@ -397,7 +397,7 @@
 | - | - |
 | F28 | 简化 Router：RC / VA / SA 完整流水线，与 core 内 Router 同一套逻辑 |
 | F29 | TX Engine 拆包：按 4 KB 边界拆分，加 4-bit `seq_id` 与 tail 标记；位宽 2048 转 1024 |
-| F30 | RX Engine 拼包：按 `seq_id` 缓存，tail 到齐后还原原始包；位宽 1024 转 2048 |
+| F30 | RX Engine 拼包：按 `seq_id` 缓存，一个 flit 拆出来的段到齐就还原这个 flit 交给 core；位宽 1024 转 2048。攒的是 flit 不是整个包：Flit 仲裁无需整包存储，core 侧的 Router 也按 flit 收发 |
 | F31 | AXI Bridge 做 credit 与 AXI4 的协议转换 |
 | F31a | AXI Bridge 的延迟按发送侧计：出方向记这一段物理链路的延迟，入方向只做协议转换、不计拍。两座桥对接时一段线的时间因此只算一次 |
 | F32 | 同向的数据与 credit release 之间做仲裁，小包优先；反向按类型 demux 分流 |
@@ -407,7 +407,7 @@
 | F35a | 与本片 core 之间照 VC credit 那一套：一个 flit 离开桥的输入缓冲、交给下一级时，才把那个 VC 的位置还给 core。收下就还是不行的，那时它还占着位置，core 拿回额度又发，本级已经没地方收，那些 flit 只能丢，而 credit 已经扣掉了。收不收得下只看这个缓冲，容量与 Router 给这个方向的 VC credit 总量一致；对侧还有没有位置是往线上发那一步的事，两件事不能混 |
 | F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发 |
 | F36a | 链路层 credit 的归还跨片走：收方收下一段之后发一笔回给发方，发方收到才恢复额度。这一笔到对侧的桥为止，不往 core 送，与三类业务 release 的透传是两回事。单向流量下尤其要走这条路，否则发方的额度用完就再也回不来 |
-| F37 | 跨 chip 时同步上下游的 Reduce credit，防止上游超发；release 的粒度是 flit，在 C2C 上压缩包数量后再传 |
+| F37 | release 与数据反向走，桥两侧照原样透传；VC credit 的粒度是 flit，在 C2C 上压缩包数量后再传 |
 | F38 | 三类 credit 的 release 一律透传，Bridge 自身不建 stream credit 表，也不参与 Reduce 累加 |
 | F39 | 三类 credit 可以共享同一个 AXI 传输包同步组包以提高效率，接收侧按分段还原。VC credit 在 Router 上是 flit 粒度，跨 C2C 要先转换成包粒度；业务层的两类本身就是包或 stream 粒度，不转换 |
 | F40 | 反向 AXI write 携带 `{vc_id, vc_type, credit_release_length, credit_release_user}`，用 side band 信息与正常数据包区分，经 Demux 分流后更新本地的 `credit_cnt[vc]` 或 credit user table |
@@ -450,10 +450,10 @@ mem noc_latch[N]   级间 latch {valid, addr[23:0], we, wdata[31:0]}            
 mem noc_rdata      1-deep 寄存器 {rdata[31:0]}                                      1W1R  每拍覆写        —
 mem tx_vc_buf[4]   FIFO      每 VC 20 flit                                          1W1R  满 → 不再准入   复位空         // C2C Bridge TX 的 private buffer
 mem tx_shared      FIFO      约 20 flit                                             1W1R  private 满时借用 复位空
-mem rx_vc_buf[4]   FIFO      每 VC 80 flit                                          1W1R  满 → 向 PCIe 侧反压  复位空
+mem rx_vc_buf[4]   FIFO      每 VC 20 flit                                          1W1R  满 → 向 PCIe 侧反压  复位空
 mem rx_shared      FIFO      约 300 flit                                            1W1R  同上            复位空
-mem rx_reasm       FF 阵列   按 seq_id 的重组缓冲，16 项                             1RW   tail 到齐即还原 复位空         // C2C Bridge RX 拼包
-mem c2c_credit     FF 阵列   每方向每 VC 一个 private 计数器，加每方向一个 shared 计数器，另加每 UserID 的 Reduce credit  1RW  与对侧 VC Buffer 的占用规则一一对应：先扣 private 再扣 shared，归还先补 private  复位 TX private 20 / shared 20，RX private 80 / shared 300
+mem rx_reasm       FF 阵列   按 seq_id 的重组缓冲，16 项                             1RW   一个 flit 的段到齐即还原 复位空 // C2C Bridge RX 拼包
+mem c2c_credit     FF 阵列   每方向每 VC 一个 private 计数器，加每方向一个 shared 计数器  1RW  与对侧 VC Buffer 的占用规则一一对应：先扣 private 再扣 shared，归还先补 private  复位成对侧该方向的 buffer 容量：往线上发的那一组是对侧 RX 的 private 20 / VC 加 shared 300
 ```
 
 ***
@@ -620,7 +620,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="659" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D3</text>
   <text x="250" y="56" font-size="12" fill="#111827">C2C Bridge · 与 core 内 Router 同一套三关</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. RC：按 path_id 查得出口方向与下一跳 VC</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. VA：查 c2c_credit[方向][VC] &gt; 0，跨 chip 另同步下游的 Reduce credit</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. VA：查 c2c_credit[方向][VC] &gt; 0</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SA：同向的数据与 credit release 之间仲裁，小包优先</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，三类 release 一律透传</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">反向按类型 demux 分流</text>
@@ -692,9 +692,9 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <rect x="232" y="25" width="390" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="41" font-size="8.5" fill="#6b7280">M5</text>
   <text x="608" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="250" y="61" font-size="12" fill="#111827">RX Engine · 按 seq_id 还原原始包</text>
+  <text x="250" y="61" font-size="12" fill="#111827">RX Engine · 按 seq_id 还原 flit</text>
   <text x="250" y="83" font-size="10.5" fill="#475569">1. rx_reasm[seq_id] 缓存收到的段</text>
-  <text x="250" y="103" font-size="10.5" fill="#475569">2. tail 到齐 → 按 seq_id 顺序拼回原始包</text>
+  <text x="250" y="103" font-size="10.5" fill="#475569">2. 一个 flit 的段到齐 → 按 seq_id 顺序拼回这个 flit</text>
   <text x="250" y="123" font-size="10.5" fill="#475569">3. 位宽 1024 转 2048</text>
   <text x="250" y="143" font-size="10.5" fill="#475569">4. AXI Bridge 回 dummy response，释放 PCIe 的 outstanding 资源</text>
   <text x="250" y="167" font-size="10" fill="#9ca3af">RX private 80 加 shared 约 300 flit，覆盖 PCIe 往返 600 ns</text>
@@ -743,7 +743,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
 ARRAY             一律 2×5 共 10 个 core，行优先编号；core0 → N，core4 → E，core5 → W，core9 → S
 BAD_CORE          core_bad_mask 10 bit；第一列与最后一列 0x000，中间两列 0x084（core2、core7）；每颗至多 2 个、每行至多 1 个
 ROLES             一律 8 个计算 core；第一列组头 chip 的 core0 是 B core，最后一列 chip 的 core9 是 R core；第一列的 core5 与非组头 chip 的 core0、最后一列的 core4 不派角色
-MESH              同行 left / right 相邻，跨行 mid 接 core[i+5]；每方向 256 B/T、40T
+MESH              同行 left / right 相邻，跨行 mid 接 core[i+5]；每方向 256 B/T。走线左右每跳 10T，mid 没有走线段填 0T，Router 内部那一段由 Router 自己的流水级走
 CTRL_NOC_BW       32 bit/T（待定）；每笔事务一拍
 CTRL_NOC_BCAST    开关，默认关
 PCIE_TRAIN_CYCLES 待定
@@ -751,9 +751,9 @@ ITCM 装载拍数      镜像字节数 / 4 B
 C2C_BRIDGE        每 chip 4 个，分布在 mesh 两侧，不是每 core 一个
 C2C_SPLIT         4 KB 边界拆包，seq_id 4 bit
 C2C_WIDTH         TX 2048 → 1024，RX 1024 → 2048
-C2C_VC_BUF        合计约 138.7 KB；TX private 20 flit/VC ×4 + shared 约 20，RX private 80 + shared 约 300
+C2C_VC_BUF        合计约 138.7 KB；TX private 20 flit/VC ×4 + shared 约 20，RX private 20 flit/VC ×4 + shared 约 300
 C2C_LATENCY       Router 到 Router 400T，PCIe C2C 64 GB/s；HAS 记跨 chip 单向 ≤ 200～300 ns
-C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB；RX private 80 + shared 300 = 380 flit ≈ 109.4 KB
+C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB；RX private 20 flit/VC × 4 + shared 300 = 380 flit ≈ 109.4 KB
 ```
 
 ***
@@ -780,10 +780,10 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
 | credit 分 private 与 shared 两级，总量等于对侧 buffer 容量 | F37 | `c2c_credit_two_level` |
 | C2C 拆包：4 KB 边界 + seq_id + tail | F29 | `c2c_split` |
 | 一段线的时间只算一次：出方向记延迟，入方向计 0 | F31a | `c2c_latency_once` |
-| C2C 拼包：按 seq_id 缓存，tail 到齐还原 | F30 | `c2c_reassemble` |
+| C2C 拼包：按 seq_id 缓存，一个 flit 的段到齐还原 | F30 | `c2c_reassemble` |
 | 同向数据与 credit release 仲裁，小包优先 | F32 | `c2c_arb_small_first` |
 | TX posted write 丢响应，RX 返回 dummy response | F33、F34 | `c2c_axi_response` |
-| 跨 chip 同步上下游 Reduce credit，release 按 flit 压缩后再传 | F37 | `c2c_reduce_credit` |
+| release 照原样透传，VC credit 按 flit 压缩后再传 | F37 | `c2c_release_pass` |
 | 三类 credit 共享一个 AXI 包，VC credit 由 flit 粒度转包粒度 | F39 | `c2c_credit_pack` |
 | 对 PCIe Switch 一侧 bypass 掉 Bridge 的业务层逻辑 | F41 | `c2c_bridge_bypass` |
 | C2C 只做透明传输，左收右发、右收左发 | F42 | `c2c_transparent` |

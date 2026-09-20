@@ -91,9 +91,6 @@ class Core : public BachModule {
   LinkEndPtr OutWire(uint64_t d) const { return router->OutWire(d); }
   LinkEndPtr BackWire(uint64_t d) const { return router->BackWire(d); }
   LinkEndPtr UpBackWire(uint64_t d) const { return router->UpBackWire(d); }
-  LinkEndPtr UpReleaseWire(uint64_t d) const {
-    return router->UpReleaseWire(d);
-  }
 
   // core_bad_mask：本 chip 每个 core 一位，SCP 在 Router 配置阶段写，业务开始之
   // 前写完。本 core 那一位为 1 就是坏 core。
@@ -447,7 +444,6 @@ class Core : public BachModule {
   void Wire() {
     // B core 的搬出查的是广播那几个方向的下游资源。方向由软件写进 TS 的
     // B_CORE_DIRECTION，Router 用的时候现读；为 0 时按本 core 的进核资源查。
-    router->SetBcastDirs([this] { return ts->Cfg().BCoreDirection(); });
     WireRouterToTs();
     WireTsToRv();
     WireRvToDsa();

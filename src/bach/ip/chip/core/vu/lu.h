@@ -14,6 +14,7 @@
 //
 // 14 拍的访问延迟由 Core Mem 那一侧给，本级只按 valid/ready 收发。
 
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,9 +64,12 @@ class VuLu : public BachModule {
     if (busy) ++busy_cnt;
     beats = beat_cnt;
     TracePerCycle("busy", busy ? 1 : 0);
+    TracePerCycle("segq", ready_q.size());
+    TracePerCycle("hold", holding ? 1 : 0);
   }
 
  private:
+  // 攒好的段排队往下发，一拍一个。下游没收下就原样压着。
   void Drain() {
     if (!holding) return;
     if (!out->Ready()) {
@@ -74,11 +78,19 @@ class VuLu : public BachModule {
     }
     holding = false;
     held = VuFlowPtr();
+    if (!ready_q.empty()) {
+      held = ready_q.front();
+      ready_q.pop_front();
+      holding = true;
+      out_seq = ++emit_seq;
+      out->Drive(held, out_seq);
+    }
   }
 
   void Accept() {
-    in->DriveReady(!busy && !holding);
-    if (busy || holding) {
+    bool full = busy || holding || !ready_q.empty();
+    in->DriveReady(!full);
+    if (full) {
       if (!holding) out->Idle();
       return;
     }
@@ -99,9 +111,10 @@ class VuLu : public BachModule {
 
     if (!uops->cfg.lu.Active()) {
       // 本条不读 CM，直接往下走。
+      flow->seg_len = uops->inst.Vl();
       held = flow;
       holding = true;
-      out_seq = seq;
+      out_seq = ++emit_seq;
       out->Drive(held, out_seq);
       return;
     }
@@ -121,6 +134,17 @@ class VuLu : public BachModule {
                     : op == LuOp::kLdSFp32
                         ? 4
                         : (vl * elem_bits + 7) / 8;
+
+    // 能拆的那一档按 RF entry 拆段：一段的元素数就是一个 entry 装得下的数，
+    // 在 CM 上占 seg_bytes 个字节。拆不了的照旧整条走一份。
+    seg_len = 0;
+    seg_total = 1;
+    seg_done = 0;
+    if (VuCanSegment(uops)) {
+      seg_len = inst.Bf16() ? 64 : 32;
+      seg_bytes = seg_len * elem_bits / 8;
+      seg_total = (vl + seg_len - 1) / seg_len;
+    }
 
     uint64_t addr = inst.LdAddr();
     // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。违反置 CM_ADDR_ERROR，
@@ -169,6 +193,10 @@ class VuLu : public BachModule {
       buf.insert(buf.end(), d->begin(), d->begin() + body_len);
     }
     ++got;
+    if (seg_len != 0) {
+      EmitSegments();
+      return;
+    }
     if (got < blocks) return;
 
     // 收齐了：截掉对齐多读的两头，再按 CM 侧格式解成 FP32。
@@ -178,27 +206,70 @@ class VuLu : public BachModule {
       if (end > buf.size()) end = buf.size();
       body.assign(buf.begin() + head, buf.begin() + end);
     }
-    Convert(body);
+    flow->seg_len = flow->uops.inst.Vl();
+    Convert(flow, body);
 
     busy = false;
-    held = flow;
+    ready_q.push_back(flow);
+    flow = VuFlowPtr();
+    PumpQueue();
+  }
+
+  // 已经收到的字节够哪几段，就把那几段各做成一份交下去。最后一段按实际剩下的
+  // 元素数算，整条不一定正好铺满一个 entry。
+  void EmitSegments() {
+    uint64_t have = got * kVuVrfEntryBytes;
+    uint64_t vl = flow->uops.inst.Vl();
+    while (seg_done < seg_total) {
+      uint64_t from = head + seg_done * seg_bytes;
+      uint64_t to = from + seg_bytes;
+      bool last = seg_done + 1 == seg_total;
+      if (last) to = head + want_bytes;
+      if (to > have && !(last && got >= blocks)) break;
+      if (to > buf.size()) to = buf.size();
+
+      auto seg = std::make_shared<VuFlow>();
+      seg->uops = flow->uops;
+      seg->error = flow->error;
+      seg->seg = seg_done;
+      seg->seg_base = seg_done * seg_len;
+      seg->seg_len = last ? vl - seg->seg_base : seg_len;
+      seg->seg_last = last;
+      std::vector<uint8_t> body;
+      if (from < to) body.assign(buf.begin() + from, buf.begin() + to);
+      Convert(seg, body);
+      ready_q.push_back(seg);
+      ++seg_done;
+    }
+    if (seg_done >= seg_total) {
+      busy = false;
+      flow = VuFlowPtr();
+    }
+    PumpQueue();
+  }
+
+  // 队首没人压着就立刻发一个出去。
+  void PumpQueue() {
+    if (holding || ready_q.empty()) return;
+    held = ready_q.front();
+    ready_q.pop_front();
     holding = true;
-    out_seq = seq;
+    out_seq = ++emit_seq;
     out->Drive(held, out_seq);
   }
 
-  void Convert(std::vector<uint8_t> const& body) {
-    VuUops const& uops = flow->uops;
+  void Convert(VuFlowPtr const& f, std::vector<uint8_t> const& body) {
+    VuUops const& uops = f->uops;
     VuMacroInst const& inst = uops.inst;
     LuOp op = LuOp(uops.cfg.lu.opcode);
-    uint64_t vl = inst.Vl();
+    uint64_t vl = f->SegLen();
 
     if (op == LuOp::kLdVmMask) {
       // Mask 一位一个元素，唯一能写 MRF 的 LU 指令。
-      flow->lu.mask.reserve(vl);
+      f->lu.mask.reserve(vl);
       for (uint64_t i = 0; i < vl; ++i) {
         uint64_t at = i / 8;
-        flow->lu.mask.push_back(at < body.size() &&
+        f->lu.mask.push_back(at < body.size() &&
                                 ((body[at] >> (i % 8)) & 1u) != 0);
       }
       return;
@@ -209,8 +280,8 @@ class VuLu : public BachModule {
       for (int k = 0; k < 4 && uint64_t(k) < body.size(); ++k) {
         b |= uint32_t(body[k]) << (8 * k);
       }
-      flow->lu.scalar = numeric::FloatOf(b);
-      flow->lu.has_scalar = true;
+      f->lu.scalar = numeric::FloatOf(b);
+      f->lu.has_scalar = true;
       return;
     }
 
@@ -235,11 +306,11 @@ class VuLu : public BachModule {
       numeric::RoundMode mode = inst.Round();
       for (uint64_t i = 0; i < v.size(); ++i) {
         uint16_t h = numeric::NarrowBf16(v[i], mode);
-        if (numeric::NarrowMakesNan(v[i], h)) flow->error |= kVuErrDataCvt;
+        if (numeric::NarrowMakesNan(v[i], h)) f->error |= kVuErrDataCvt;
         v[i] = numeric::FromBf16(h);
       }
     }
-    flow->lu.vec = std::move(v);
+    f->lu.vec = std::move(v);
   }
 
   static numeric::DataType CmType(LuOp op) {
@@ -256,9 +327,13 @@ class VuLu : public BachModule {
   std::shared_ptr<MemPort> cmem;
 
   VuFlowPtr flow, held;
+  std::deque<VuFlowPtr> ready_q;
   bool busy = false, holding = false, mem_used = false;
-  uint64_t seq = 0, out_seq = 0, last_seq = 0;
+  uint64_t seq = 0, out_seq = 0, last_seq = 0, emit_seq = 0;
   uint64_t base = 0, head = 0, blocks = 0, sent = 0, got = 0, want_bytes = 0;
+  // 分段走的那一档：一段多少元素、在 CM 上多少字节、共几段、已经交出去几段。
+  // seg_len 为 0 表示本条不分段。
+  uint64_t seg_len = 0, seg_bytes = 0, seg_total = 1, seg_done = 0;
   uint64_t beat_cnt = 0, busy_cnt = 0, stall_cnt = 0;
   std::vector<uint8_t> buf, scale_buf;
 

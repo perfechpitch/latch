@@ -140,16 +140,40 @@ TASK void task_rc_find(void) {
   u32 head = smem_read(RC_HEAD_OFF);
   u32 s = 0;
   for (;;) {
-    if (smem_read(rc_flag(s, 0)) != 0 &&
-        (head != 0 || smem_read(rc_flag(s, 1)) != 0)) {
-      smem_write(rc_flag(s, 0), 0);
-      smem_write(rc_flag(s, 1), 0);
-      smem_write(RC_SLOT_OFF + stream_id() * 4, s);
-      set_user_id(smem_read(RC_USER_OFF + s * 4));
+    /* 一圈查四个槽，两半的标志一次都读出来：八笔读连着发出去，在 lsq 里重叠，
+       一圈就是一次访存的往返。读一个等一个的话，扫一遍要八倍的时间。四个槽里
+       有几个齐了就取槽号最小的，与一圈查一个槽、从头扫起是同一个次序。两半要
+       一次读齐：只看前半、回头再查后半的话，一个槽前半先到后半没到时会停在它
+       身上，把同一圈里两半都齐的槽跳过去。
+       一圈再多查几个就不划算了：命中多半落在头几个槽上，多读的那些白发一趟，
+       实测一圈查八个反而比四个慢。RC_SLOTS 是 4 的倍数，这四个槽不会跨过表尾 */
+    u32 a0 = smem_read(rc_flag(s, 0));
+    u32 b0 = smem_read(rc_flag(s, 1));
+    u32 a1 = smem_read(rc_flag(s + 1, 0));
+    u32 b1 = smem_read(rc_flag(s + 1, 1));
+    u32 a2 = smem_read(rc_flag(s + 2, 0));
+    u32 b2 = smem_read(rc_flag(s + 2, 1));
+    u32 a3 = smem_read(rc_flag(s + 3, 0));
+    u32 b3 = smem_read(rc_flag(s + 3, 1));
+    u32 hit = RC_SLOTS;
+    if (a0 != 0 && (head != 0 || b0 != 0)) {
+      hit = s;
+    } else if (a1 != 0 && (head != 0 || b1 != 0)) {
+      hit = s + 1;
+    } else if (a2 != 0 && (head != 0 || b2 != 0)) {
+      hit = s + 2;
+    } else if (a3 != 0 && (head != 0 || b3 != 0)) {
+      hit = s + 3;
+    }
+    if (hit < RC_SLOTS) {
+      smem_write(rc_flag(hit, 0), 0);
+      smem_write(rc_flag(hit, 1), 0);
+      smem_write(RC_SLOT_OFF + stream_id() * 4, hit);
+      set_user_id(smem_read(RC_USER_OFF + hit * 4));
       task_done(1);
       return;
     }
-    s = s + 1;
+    s = s + 4;
     if (s >= RC_SLOTS) s = 0;
   }
 }

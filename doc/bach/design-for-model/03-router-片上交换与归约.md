@@ -1231,7 +1231,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | - | - |
 | 简化 Router | RC / VA / SA 完整流水线，RTL 复用 |
 | TX Engine | 拆包：按 4 KB 边界拆分加 4-bit `seq_id` 加 tail 标记；位宽 2048 转 1024 |
-| RX Engine | 拼包：按 `seq_id` 缓存，tail 到齐还原原始包；位宽 1024 转 2048 |
+| RX Engine | 拼包：按 `seq_id` 缓存，一个 flit 拆出来的段到齐就还原这个 flit 交给 core；位宽 1024 转 2048 |
 | AXI Bridge | Credit 与 AXI4 协议转换；同向数据与 credit release 仲裁（小包优先）；反向 demux 分流 |
 
 VC Buffer 规格，合计约 138.7 KB：
@@ -1299,7 +1299,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 | R2R 往返 | ≤ 20 cycle（shared pool 深度的依据） |
 | Crossbar | 5 入 7 出，每 cycle 最多 7 组 input → output 交换 |
 | 拓扑 | 两行的简化二维 Mesh。left / right 连同行相邻 Router，mid 连另一行对称位置那一个；**中间各列的 mid 也连**，作为备份通路（HAS REQ-ARCH-037：提供多路径选择） |
-| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。HAS 新增 ASM-03“R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300 ns”，单跳约 10 cycle 以内，与这一档相符；第 5 章的 T_R2R = 40 T 对不上，待确认是不是含 core 侧往返的端到端值 |
+| 单跳延迟拆分 | 横向 R2R 每跳 = internal 6 ns + 走线 10 ns = 16 ns；mid 无走线延迟；PCIe 出入口只有 internal 6 ns。HAS 新增 ASM-03“R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300 ns”，单跳约 10 cycle 以内，与这一档相符。建模按这一档拆开：Router 内部那 6 ns 由 Router 自己的流水级走掉，链路只担走线，左右填 10 T、mid 填 0 T。Top 模拟器参数表的 T_R2R = 40 T 是把两段并在一处的口径 |
 | 全 chip 广播延迟 | 82 ns（按 2×5 算，两行并行：Row 1 从 PCIe 进、横穿 5 个 core 共 6 跳 76 ns；Row 0 经 mid 多一跳，共 7 跳 82 ns，是关键路径） |
 | 单 VC 传输效率 | 每包额外开销 2 cycles（RC 与 VA 不传 flit）：8 KB 包 94%、16 KB 97%、32 KB 98.5%；多输入竞争时按 80% 折算 |
 | Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |

@@ -6,10 +6,9 @@
 // 进 core 与出 core 两条数据通路完全并行，互不共享仲裁状态。
 //
 // 进 core（M7、M8）：
-//   三态准入：UserID 已分配则直接收；未分配但 stream credit 表有空项则记录
-//   占用后收；无空项时该 VC 不能向 Core 发数据，但 VC 还有空位时仍可继续从上游
-//   收。已通过 Stream 检查的包进 core 不再查 Core 方向的 VC credit，一定有
-//   Core Mem 空间。
+//   三态准入在 Xbar 那一级做：进本 core 的表也在它手里，没有空项就不往 core 出口
+//   发，那一笔留在它那个 VC 上等，VC 还有空位时照样能继续从上游收（F-021）。
+//   到这里的包已经过了那一档，一定有 Core Mem 空间，不再查 Core 方向的 VC credit。
 //
 //   Header 写进 HeaderFIFO，Payload 写进 OutputBuffer，两者保持同一包的顺序与
 //   边界。Header 就绪即通知 TS，不等整包收完，OutputBuffer 因此是流水缓冲
@@ -75,7 +74,6 @@ class CoreStation : public BachModule {
         to_station(std::make_shared<LinkEnd>(clock)),
         hdr(std::make_shared<MemPort>(clock)),
         admitted(clock),
-        rejected(clock),
         triggers(clock) {}
 
   // Xbar 的 core 出口接这里。
@@ -111,18 +109,7 @@ class CoreStation : public BachModule {
   uint64_t OutBufDepth() const { return out_buf.size(); }
   uint64_t Popped() const { return pop_cnt; }
 
-  // 进 core 的 stream credit 表：16 项。
-  bool HoldsUser(uint64_t user) const { return stream_tab.count(user) != 0; }
-  uint64_t StreamUsed() const { return stream_tab.size(); }
-  // Retire 从这个口广播退休的 user。表由本模块的协程改，Retire 只送号。
-  void AttachRetire(std::shared_ptr<RetireBroadcastPort> p) {
-    retire_in = std::move(p);
-  }
-
-  void RetireUser(uint64_t user) { stream_tab.erase(user); }
-
   uint64_t Admitted() const { return admitted.Get(); }
-  uint64_t Rejected() const { return rejected.Get(); }
   uint64_t Triggers() const { return triggers.Get(); }
 
   // Xbar 读它决定 core 方向能不能收。电平每拍发布，Xbar 读上一拍的值，所以拉高
@@ -140,7 +127,6 @@ class CoreStation : public BachModule {
 
  protected:
   void Step() override {
-    TakeRetire();
     // 末级先做。
     ServeHdr();
     DrainToDte();
@@ -153,24 +139,12 @@ class CoreStation : public BachModule {
     level->Drive(CoreReady());
     from_dte->DriveReady(DteReady());
     admitted = admitted_pending;
-    rejected = rejected_pending;
     triggers = trigger_pending;
     TracePerCycle("out_buf", out_buf.size());
     TracePerCycle("hdr_fifo", hdr_fifo.size());
   }
 
  private:
-  // 收 Retire 的广播。同一笔会连着两拍出现在端口上，按序号认它。
-  void TakeRetire() {
-    if (!retire_in || !retire_in->Valid()) return;
-    if (retire_in->Seq() == last_retire_seq) return;
-    last_retire_seq = retire_in->Seq();
-    RetireUser(retire_in->User());
-  }
-
-  std::shared_ptr<RetireBroadcastPort> retire_in;
-  uint64_t last_retire_seq = 0;
-
   struct Pending {
     uint64_t user_id = 0, path_id = 0;
     bool reissue = false;
@@ -227,30 +201,19 @@ class CoreStation : public BachModule {
     return out;
   }
 
-  // M7：三态准入。
+  // M7：收下 Xbar 发进来的 flit。
+  //
+  // 收不下就断言，不静默丢：进核那一段没有重发通路，丢一个 flit 是半个包，丢一个
+  // 包头就等于丢一个 token 的搬运任务，DTE RV core 再也拿不到它。两处余量都由准入
+  // 电平（CoreReady）留够：电平拉低到 Xbar 停下来隔着一拍，那一拍它还会再发一笔。
   void AcceptFromXbar() {
     FlitView f = ReadFlit(from_xbar->flit);
     if (!f.valid || !f.msg) return;
     uint64_t user = f.msg->user_id;
-    if (stream_tab.count(user) == 0) {
-      if (stream_tab.size() >= kStreamTabEntries) {
-        // 无空项：该 VC 不能向 Core 发数据。上游的 VC 还有空位时照样能继续收，
-        // 所以这里只是不收本笔，不影响别的方向。
-        ++rejected_pending;
-        return;
-      }
-      stream_tab.insert(user);
-    }
-    if (out_buf.size() >= kOutBufFlits) {
-      ++rejected_pending;
-      return;
-    }
-    // 头 flit 要占一个包头槽。队列满就整笔不收：丢一个包头就等于丢一个
-    // token 的搬运任务，DTE RV core 再也拿不到它。
-    if (f.head && hdr_fifo.size() >= kHeaderFifoDepth) {
-      ++rejected_pending;
-      return;
-    }
+    LOGCHECK(out_buf.size() < kOutBufFlits,
+             "CoreStation: 进核缓冲满了还发进来，Xbar 没按准入电平停。");
+    LOGCHECK(!f.head || hdr_fifo.size() < kHeaderFifoDepth,
+             "CoreStation: 包头队列满了还发进来，Xbar 没按准入电平停。");
     out_buf.push_back(f);
     ++admitted_pending;
     // 头 flit 同时进 HeaderFIFO，并排一笔 trigger。
@@ -365,11 +328,10 @@ class CoreStation : public BachModule {
   std::deque<FlitView> out_buf;
   std::deque<MessagePtr> hdr_fifo;
   std::deque<Pending> trig_q;
-  std::set<uint64_t> stream_tab;
   bool trig_hold = false, sent_hold = false;
   ByteBlockPtr hdr_rsp;
   uint64_t hdr_rsp_at = 0, last_hdr_seq = 0, pop_cnt = 0;
-  uint64_t admitted_pending = 0, rejected_pending = 0, trigger_pending = 0;
+  uint64_t admitted_pending = 0, trigger_pending = 0;
   // 出核那一侧对 core 方向那个站的 VC credit。
   VcDepth priv_depth = kVcPrivateDepthDefault;
   uint64_t shared_depth = kVcSharedDepth;
@@ -377,7 +339,7 @@ class CoreStation : public BachModule {
   uint64_t shared_cr = kVcSharedDepth;
   uint64_t last_dte_seq = 0;
 
-  Logic64 admitted, rejected, triggers;
+  Logic64 admitted, triggers;
 };
 
 }  // namespace bach

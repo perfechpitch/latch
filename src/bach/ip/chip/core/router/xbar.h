@@ -1,18 +1,19 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_ROUTER_XBAR_
 #define _LATCH_BACH_IP_CHIP_CORE_ROUTER_XBAR_
 
-// Xbar：5 入 7 出的交换点，同时持有下游方向的两样资源。
+// Xbar：5 入 7 出的交换点，持有各出口那一侧的两样资源。
 //
 // 入是 left / right / mid / local（core 方向的 station）/ ReduceModule 回注；
 // 出是 left / right / mid / core / reduce_0 / reduce_1 / reduce_2。
 //
 // 三级在一拍里做完：
-//   M3 VA  查目标方向的 VC credit 与 Stream 授权
+//   M3 VA  查目标方向的 VC credit 与 Stream 资源表
 //   M4 SA  每个 output port 一个独立的 RoundRobin，每拍独立仲裁，不跨拍锁定
 //   M5 ST  发出后统一扣各目标的 credit
 //
-// 每个入口一个小的输入缓冲：station 那一侧按「收得下就发」交进来，本级从缓冲的
-// 队首仲裁。资源不够时这一笔留在缓冲里等，同一个入口后面的不越过它。
+// 每个入口按 VC 各一个小的输入缓冲：station 那一侧按「这个 VC 收得下就发」交进
+// 来，本级从各 VC 的队首仲裁。资源不够时这一笔留在缓冲里等，同一个 VC 后面的不
+// 越过它；同一个入口别的 VC 照走，与 station 里四个 VC 互不侵占是同一件事。
 //
 // 多播全有全无：任一目标没握手就不推进任何分支。只发一半会让同一个 User 的数据
 // 在不同分支上错位，已发方向占了资源却完不成整体传输。
@@ -29,8 +30,10 @@
 // 扣 private，否则扣 shared[o]，两者都为 0 时该 VC 不能发。归还按同一条规则回填。
 // 两边规则相同，计数因此不会漂移。
 
+#include <algorithm>
 #include <array>
 #include <deque>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -51,7 +54,7 @@ constexpr uint64_t kStreamTabEntries = 16;
 // 广播等于目的 core 数。
 constexpr uint64_t kCoreCreditKb = 128;
 
-// 每个入口的输入缓冲深度与报「收得下」的门限。
+// 每个入口每个 VC 的输入缓冲深度与报「收得下」的门限。
 //
 // station 读的是上一拍发布的 room，所以从 room 拉低到它停下来隔着一拍，那一拍
 // 它还会再交一笔进来。门限之外留两格就是给这一笔加一格余量的。
@@ -147,7 +150,7 @@ class Xbar : public BachModule {
   }
   // 停钟之后取的那一份。
   uint64_t SentCount(uint64_t o) const { return sent_total[o]; }
-  uint64_t StreamUsed(uint64_t o) const { return stream_tab[o].size(); }
+  uint64_t StreamUsed(uint64_t o) const { return stream_tab.at(o).size(); }
   // B core 广播之前查的那一档：mask 指的每个方向都要能给这个 user 留一个 stream
   // 坑，有一个方向留不出来就整笔不发。mask 的位与出口编号同序。
   bool BroadcastRoom(uint64_t mask, uint64_t user) const {
@@ -159,43 +162,62 @@ class Xbar : public BachModule {
     return true;
   }
   bool StreamHolds(uint64_t o, uint64_t user) const {
-    return stream_tab[o].count(user) != 0;
+    return stream_tab.at(o).count(user) != 0;
   }
   // 这个方向还剩多少 Core Mem credit，单位 1 KB。
   uint64_t CoreCredit(uint64_t o) const { return core_credit[o]; }
   void SetCoreCredit(uint64_t o, uint64_t kb) { core_credit[o] = kb; }
 
-  // Retire：停止该 UserID 的新发送，删掉它全部的 stream 授权表项。
-  // Retire 从这个口广播退休的 user。表由本模块的协程改，Retire 只送号。
+  // 下游还回来的 release 从这个口进来，Retire 只送方向与 user，表由本模块的协程
+  // 改。
+  void AttachRelease(std::shared_ptr<StreamReleasePort> p) {
+    release_in = std::move(p);
+  }
+
+  // 本级退休从这个口来：只放进本 core 那一项（F-036）。各下游方向那几项不动，
+  // 它们等那些下游各自退休时还回来。
   void AttachRetire(std::shared_ptr<RetireBroadcastPort> p) {
     retire_in = std::move(p);
   }
+  void RetireUser(uint64_t user) { stream_tab[kOutCore].erase(user); }
 
-  // Retire 的动作只有一条：删掉这个用户在各方向上的 stream credit 授权。
-  // 已经进了本级、正在等仲裁的包照发。「停止新发送」说的是新包要重新申请
-  // 授权，而 Retire 之后本来就不会再有新包。挡住在途的那些包会把出核的最后
-  // 一笔卡死在 Router 里。
-  void RetireUser(uint64_t user) {
+  // 方向 o 的下游上这个用户跑完了：删那个方向这一项，它占的那些 KB 一起还回来。
+  // 没有这一项说明本 core 没向那个方向申请过，丢掉。
+  void ReleaseUser(uint64_t o, uint64_t user) {
+    LOGCHECK(o < kR2RNum, "Xbar: release 的方向越界。");
+    if (stream_tab[o].erase(user) == 0) return;
+    auto it = taken_kb[o].find(user);
+    if (it == taken_kb[o].end()) return;
+    core_credit[o] += it->second;
+    if (core_credit[o] > kCoreCreditKb) core_credit[o] = kCoreCreditKb;
+    taken_kb[o].erase(it);
+  }
+
+  // CreditMonitor 授予时就占坑：TS 拿到的授权与这里记的是同一项，不然授了之后
+  // 到发包之间还会被别的用户抢走。
+  void TakeStream(uint64_t mask, uint64_t user) {
     for (uint64_t o = 0; o < kR2RNum; ++o) {
-      if (stream_tab[o].erase(user) == 0) continue;
-      // 这个用户占的那些 KB 跟着退休一起还回来。
-      auto it = taken_kb[o].find(user);
-      if (it == taken_kb[o].end()) continue;
-      core_credit[o] += it->second;
-      if (core_credit[o] > kCoreCreditKb) core_credit[o] = kCoreCreditKb;
-      taken_kb[o].erase(it);
+      if ((mask & (1ull << o)) == 0) continue;
+      if (!stream_tab[o].insert(user).second) continue;
+      LOGCHECK(stream_tab[o].size() <= kStreamTabEntries,
+               "Xbar: stream 表满了还授权。");
     }
   }
 
+
+
   bool Quiescent() const override {
-    for (auto const& q : in_q) {
-      if (!q.empty()) return false;
+    for (auto const& per_vc : in_q) {
+      for (auto const& q : per_vc) {
+        if (!q.empty()) return false;
+      }
     }
     return true;
   }
 
  protected:
   void Step() override {
+    TakeRelease();
     TakeRetire();
     ReturnCredit();
     // 先收再仲裁：本拍交进来的这一笔，没有冲突时本拍就发出去，入口缓冲上不多
@@ -213,6 +235,14 @@ class Xbar : public BachModule {
   }
 
  private:
+  // 收 Retire 转过来的下游 release。同一笔会连着两拍出现在端口上，按序号认它。
+  void TakeRelease() {
+    if (!release_in || !release_in->Valid()) return;
+    if (release_in->Seq() == last_release_seq) return;
+    last_release_seq = release_in->Seq();
+    ReleaseUser(release_in->Dir(), release_in->User());
+  }
+
   // 收 Retire 的广播。同一笔会连着两拍出现在端口上，按序号认它。
   void TakeRetire() {
     if (!retire_in || !retire_in->Valid()) return;
@@ -221,8 +251,9 @@ class Xbar : public BachModule {
     RetireUser(retire_in->User());
   }
 
+  std::shared_ptr<StreamReleasePort> release_in;
   std::shared_ptr<RetireBroadcastPort> retire_in;
-  uint64_t last_retire_seq = 0;
+  uint64_t last_release_seq = 0, last_retire_seq = 0;
 
   // 下游 flit 离开它的 VC Buffer 就还一个 credit。回填规则与占用规则对称：
   // private 没满补 private，满了补 shared。
@@ -250,18 +281,35 @@ class Xbar : public BachModule {
       XbarReqView v = ReadXbarReq(*reqs[in]);
       if (!v.valid || v.seq == last_seq[in]) continue;
       last_seq[in] = v.seq;
-      LOGCHECK(in_q[in].size() < kXbarInDepth,
+      LOGCHECK(v.vc < kVcNum, "Xbar: VC 号越界。");
+      LOGCHECK(in_q[in][v.vc].size() < kXbarInDepth,
                "Xbar: 入口缓冲满了。上游按 room 发，满就说明门限留少了。");
-      in_q[in].push_back(v);
+      in_q[in][v.vc].push_back(v);
     }
   }
 
-  // 每拍发布各入口还收不收得下。
+  // 每拍发布各入口的各个 VC 还收不收得下。
   void PublishRoom() {
     for (uint64_t in = 0; in < kXbarInNum; ++in) {
       if (!reqs[in]) continue;
-      reqs[in]->DriveRoom(in_q[in].size() < kXbarInMark);
+      uint64_t room = 0;
+      for (uint64_t v = 0; v < kVcNum; ++v) {
+        if (in_q[in][v].size() < kXbarInMark) room |= 1ull << v;
+      }
+      reqs[in]->DriveRoom(room);
     }
+  }
+
+  // 一个入口各 VC 的队首按交进来的先后排：station 的序号一笔加一，小的先到。
+  std::vector<uint64_t> VcsByAge(uint64_t in) const {
+    std::vector<uint64_t> vcs;
+    for (uint64_t v = 0; v < kVcNum; ++v) {
+      if (!in_q[in][v].empty()) vcs.push_back(v);
+    }
+    std::sort(vcs.begin(), vcs.end(), [&](uint64_t a, uint64_t b) {
+      return in_q[in][a].front().seq < in_q[in][b].front().seq;
+    });
+    return vcs;
   }
 
   void Arbitrate() {
@@ -271,64 +319,10 @@ class Xbar : public BachModule {
     std::vector<uint64_t> order = IssueOrder();
 
     for (uint64_t in : order) {
-      if (in_q[in].empty()) continue;
-      XbarReqView const& v = in_q[in].front();
-
-      // 多播全有全无：先看所有目标出口是不是都空着、资源都够。另一个入口的包
-      // 正占着这个出口的这个 VC 时只能等，不算资源不够，不走转存。
-      bool ok = true, owner_busy = false;
-      for (uint64_t o = 0; o < kXbarOutNum; ++o) {
-        if (((v.out_mask >> o) & 1u) == 0) continue;
-        if (!OwnerOk(o, v.vc, in)) {
-          owner_busy = true;
-          ok = false;
-          break;
-        }
-        if (taken[o] || !ResourceOk(o, v)) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok) {
-        ++stalled_pending;
-        // 拿不到资源时按 stall_way 二选一：留在当前 VC 等（什么都不做，下一拍
-        // 再来），或转进本地 Core Mem 由 DTE 重发。
-        //
-        // 走转存这一档时这一笔就算处理完了：交给 CoreMemReissue，同时给 station
-        // 发 grant 把 VC 槽腾出来，不腾的话这一笔既在暂存区里、又占着 VC，
-        // 同一份数据记了两处。Router 上的 Bypass 因此被映射成「进 core 加出 core」
-        // 两段。每拍最多转存一笔，因为端口一拍只搬一个 flit。
-        if (v.stall_way && !owner_busy && !overflow_used) {
-          FlitView f;
-          f.valid = true;
-          f.vc = v.vc;
-          f.head = v.head;
-          f.tail = v.tail;
-          f.bytes = v.bytes;
-          f.msg = v.msg;
-          overflow_port->Drive(f);
-          overflow_used = true;
-          in_q[in].pop_front();
-          ++overflow_pending;
-        }
-        continue;
-      }
-
-      for (uint64_t o = 0; o < kXbarOutNum; ++o) {
-        if (((v.out_mask >> o) & 1u) == 0) continue;
-        taken[o] = true;
-        Consume(o, v);
-        Emit(o, v);
-        vc_owner[o][v.vc] = v.tail ? 0 : in + 1;
-      }
-
-      ++granted_pending;
-      // 这个入口上的包发完没有。记在入口上而不是记「上一拍发的是谁」：一个包
-      // 的两个 flit 之间可能隔着一拍，那一拍会被别的入口占掉，记后者的话本包
-      // 剩下的 flit 就丢了优先级，包被拆散在多拍里交织出去。
-      in_packet[in] = !v.tail;
-      in_q[in].pop_front();
-      continue;
+      // 各 VC 的队首按先后逐个试，一个入口一拍最多授予一笔。最早那一笔卡住时
+      // 别的 VC 照样能走。
+      std::vector<uint64_t> vcs = VcsByAge(in);
+      if (!vcs.empty() && !TryInput(in, vcs, taken)) ++stalled_pending;
     }
     // 没人用的出口置 idle。
     // 出线的 release 上只写 VC 那一类：Reduce 那一类由 ReduceModule 写。
@@ -351,6 +345,83 @@ class Xbar : public BachModule {
     if (!overflow_used) overflow_port->Idle();
   }
 
+  // 一个入口这一拍：vcs 是它各 VC 的队首按先后排好的次序，授予了一笔返回真。
+  bool TryInput(uint64_t in, std::vector<uint64_t> const& vcs,
+                std::array<bool, kXbarOutNum>& taken) {
+    for (uint64_t k = 0; k < vcs.size(); ++k) {
+      std::deque<XbarReqView>& q = in_q[in][vcs[k]];
+      XbarReqView const& v = q.front();
+
+      // 多播全有全无：先看所有目标出口是不是都空着、资源都够。另一个入口的包
+      // 正占着这个出口的这个 VC 时只能等，不算资源不够，不走转存。
+      bool ok = true, owner_busy = false;
+      for (uint64_t o = 0; o < kXbarOutNum; ++o) {
+        if (((v.out_mask >> o) & 1u) == 0) continue;
+        if (!OwnerOk(o, v.vc, in)) {
+          owner_busy = true;
+          ok = false;
+          break;
+        }
+        if (taken[o] || !ResourceOk(o, v)) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) {
+        // 拿不到资源时按 stall_way 二选一：留在当前 VC 等（什么都不做，下一拍
+        // 再来），或转进本地 Core Mem 由 DTE 重发。
+        //
+        // 走转存这一档时这一笔就算处理完了：交给 CoreMemReissue，同时给 station
+        // 发 grant 把 VC 槽腾出来，不腾的话这一笔既在暂存区里、又占着 VC，
+        // 同一份数据记了两处。Router 上的 Bypass 因此被映射成「进 core 加出 core」
+        // 两段。每拍最多转存一笔，因为端口一拍只搬一个 flit。转存只看这个入口
+        // 最早的那一笔，转存了这个入口这一拍就不再试别的 VC。
+        if (k == 0 && v.stall_way && !owner_busy && !overflow_used) {
+          FlitView f;
+          f.valid = true;
+          f.vc = v.vc;
+          f.head = v.head;
+          f.tail = v.tail;
+          f.bytes = v.bytes;
+          f.msg = v.msg;
+          overflow_port->Drive(f);
+          overflow_used = true;
+          q.pop_front();
+          ++overflow_pending;
+          return false;
+        }
+        continue;
+      }
+
+      for (uint64_t o = 0; o < kXbarOutNum; ++o) {
+        if (((v.out_mask >> o) & 1u) == 0) continue;
+        taken[o] = true;
+        Consume(o, v);
+        Emit(o, v);
+        vc_owner[o][v.vc] = v.tail ? 0 : in + 1;
+      }
+
+      ++granted_pending;
+      // 这个入口上的包发完没有。记在入口上而不是记「上一拍发的是谁」：一个包
+      // 的两个 flit 之间可能隔着一拍，那一拍会被别的入口占掉，记后者的话本包
+      // 剩下的 flit 就丢了优先级，包被拆散在多拍里交织出去。
+      in_packet[in] = !v.tail;
+      q.pop_front();
+      return true;
+    }
+    return false;
+  }
+
+  // 这个入口最早交进来、还在等的那一笔；没有返回空。
+  XbarReqView const* Oldest(uint64_t in) const {
+    XbarReqView const* p = nullptr;
+    for (uint64_t v = 0; v < kVcNum; ++v) {
+      if (in_q[in][v].empty()) continue;
+      if (!p || in_q[in][v].front().seq < p->seq) p = &in_q[in][v].front();
+    }
+    return p;
+  }
+
   // 贪婪整包，三档：还没发完一个包的入口排在最前，其次是队列里攥着一整个包的，
   // 其余按 RoundRobin。每一档内部都按 RoundRobin 的顺序走，所以同一档里的几个
   // 入口仍然轮流。
@@ -362,13 +433,15 @@ class Xbar : public BachModule {
     }
     for (uint64_t k = 1; k <= kXbarInNum; ++k) {
       uint64_t in = (rr_last + k) % kXbarInNum;
-      if (in_packet[in] || in_q[in].empty()) continue;
-      if (in_q[in].front().whole_packet) order.push_back(in);
+      XbarReqView const* p = Oldest(in);
+      if (in_packet[in] || !p) continue;
+      if (p->whole_packet) order.push_back(in);
     }
     for (uint64_t k = 1; k <= kXbarInNum; ++k) {
       uint64_t in = (rr_last + k) % kXbarInNum;
       if (in_packet[in]) continue;
-      if (!in_q[in].empty() && in_q[in].front().whole_packet) continue;
+      XbarReqView const* p = Oldest(in);
+      if (p && p->whole_packet) continue;
       order.push_back(in);
     }
     rr_last = (rr_last + 1) % kXbarInNum;
@@ -377,13 +450,27 @@ class Xbar : public BachModule {
 
   // 同一出口同一 VC 上一个包从首 flit 到尾 flit 独占：包中间隔了几拍，别的入口
   // 也不能在这个 VC 上插进来，否则下游按首尾拼包会拼乱。
+  //
+  // 进 core 那个出口整个独占，不分 VC：core 内的输入不支持几个包交织，发完一
+  // 个包才调度下一个。下游 CoreStation 到 DTE 只有一条通路，不按 VC 分开缓冲。
   bool OwnerOk(uint64_t o, uint64_t vc, uint64_t in) const {
     LOGCHECK(vc < kVcNum, "Xbar: VC 号越界。");
+    if (o == kOutCore) {
+      for (uint64_t v = 0; v < kVcNum; ++v) {
+        if (v != vc && vc_owner[o][v] != 0) return false;
+      }
+    }
     return vc_owner[o][vc] == 0 || vc_owner[o][vc] == in + 1;
   }
 
   bool ResourceOk(uint64_t o, XbarReqView const& v) const {
-    if (o == kOutCore) return force_ready || core_level->Ready();
+    if (o == kOutCore) {
+      if (!force_ready && !core_level->Ready()) return false;
+      // 进本 core 的三态准入在这一级做（F-021）：已占的直接过，没占但有空项也
+      // 过，满了就不往 core 发，这一笔留在它那个 VC 上等，别的 VC 照走。落
+      // Matrix Mem 的 B core 与 R core 不占这一项，表项那一位不置。
+      return !Needs(v, kOutCore) || StreamOk(kOutCore, v.user_id);
+    }
     if (o >= kOutReduce0) {
       return force_ready || reduce_level[o - kOutReduce0]->Ready();
     }
@@ -392,13 +479,16 @@ class Xbar : public BachModule {
     // stream 坑、不扣 Core Mem 的量，所以只查这一项。
     if (private_cr[o][v.vc] == 0 && shared_cr[o] == 0) return false;
     if (pass_through) return true;
-    if (v.need_stream && !StreamOk(o, v.user_id)) return false;
+    if (!Needs(v, o)) return true;
+    if (!StreamOk(o, v.user_id)) return false;
     // 已经占过坑的用户不再扣量：坑按 user 记，量也跟着那一次记。
-    if (v.need_stream && stream_tab[o].count(v.user_id) == 0 &&
-        core_credit[o] < v.credit_require) {
-      return false;
-    }
-    return true;
+    return stream_tab[o].count(v.user_id) != 0 ||
+           core_credit[o] >= v.credit_require;
+  }
+
+  // 这一笔往出口 o 发之前查不查那一侧的 stream 资源，看表项的 streamNeedMask。
+  static bool Needs(XbarReqView const& v, uint64_t o) {
+    return ((v.stream_need >> o) & 1u) != 0;
   }
 
   // 三态准入：已占的直接过；没占但有空项则过（占用在 Consume 里做）；满了不过。
@@ -409,7 +499,11 @@ class Xbar : public BachModule {
 
   void Consume(uint64_t o, XbarReqView const& v) {
     ++sent_total[o];
-    if (o == kOutCore || o >= kOutReduce0) return;
+    if (o == kOutCore) {
+      if (!pass_through && Needs(v, o)) stream_tab[o].insert(v.user_id);
+      return;
+    }
+    if (o >= kOutReduce0) return;
     if (private_cr[o][v.vc] > 0) {
       --private_cr[o][v.vc];
     } else {
@@ -418,7 +512,7 @@ class Xbar : public BachModule {
     if (pass_through) return;
     // 坑按 user 记，不按包记：同一个 user 第二次发送余额不变。credit 的量也
     // 只在第一次占坑时扣，单位 1 KB。
-    if (v.need_stream && stream_tab[o].insert(v.user_id).second) {
+    if (Needs(v, o) && stream_tab[o].insert(v.user_id).second) {
       LOGCHECK(core_credit[o] >= v.credit_require,
                "Xbar: Core Mem credit 不够就发了。");
       core_credit[o] -= v.credit_require;
@@ -471,14 +565,15 @@ class Xbar : public BachModule {
   uint64_t shared_depth = kVcSharedDepth;
   std::array<VcDepth, kR2RNum> private_cr{};
   std::array<uint64_t, kR2RNum> shared_cr{};
-  std::array<std::set<uint64_t>, kR2RNum> stream_tab;
+  // 四张 Stream Resource Table：三个下游方向各一张，进本 core 那一侧一张。
+  std::array<std::set<uint64_t>, kOutCore + 1> stream_tab;
   std::array<uint64_t, kR2RNum> core_credit{};
   std::array<std::map<uint64_t, uint64_t>, kR2RNum> taken_kb;
   bool force_ready = false;
   bool overflow_used = false;
   bool pass_through = false;
   std::array<uint64_t, kXbarOutNum> sent_total{};
-  std::array<std::deque<XbarReqView>, kXbarInNum> in_q;
+  std::array<std::array<std::deque<XbarReqView>, kVcNum>, kXbarInNum> in_q;
   std::array<uint64_t, kXbarInNum> last_seq{};
   std::array<bool, kXbarInNum> in_packet{};
   // 各出口各 VC 正被哪个入口的包占着：入口号加一，0 表示空着。

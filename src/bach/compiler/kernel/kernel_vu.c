@@ -129,7 +129,11 @@ TASK void task_vu_gate(void) {
  *
  * 向量长度是 MOE_EMBED，与门控那三条的 MOE_SEG_INTER 不同，所以另占两组静态配置。 */
 static void add_setup(void) {
-  u32 type_vl = MOE_EMBED;   /* 读写都是 BF16，中间按 FP32 算，RNE */
+  /* 读写与中间一律 BF16，RNE。向量通路的一拍吃多少个 element 由 DATA_TYPE 定：
+     BF16 一拍 64 个，正好是 CM 一拍 128 B 装的个数，一个块一段流过去；配成 FP32
+     的话通路一拍只吃 32 个，一个块要拆成两段，通路就成了瓶颈，一条 VL = 6144 的
+     向量在通路上要 192 拍而不是 96 拍 */
+  u32 type_vl = MOE_EMBED | (1u << VU_DATA_TYPE_SHIFT);
 
   vu_static(3, VU_LU_OP, op_word(VU_LU_LD_BF16, 0, 0));
   vu_static(3, VU_SU_OP, op_word(VU_SU_NOP, 0, 0));

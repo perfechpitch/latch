@@ -10,6 +10,11 @@
 //   W1 收包查目的端口，组播时复制到多个出口队列，全有全无（按最慢收端反压）
 //   W2 每端口每拍出 1 flit
 //
+// 出口队列满了不再收，位置由 credit 反压回上游：一个 flit 从它的全部目的队列都
+// 发走之后，往它进来的那个端口回一个 VC credit。组播的那一份要等最慢的那个出口
+// 发走才回，所以几份共用一个计数。上游的额度等于本级为那个入口留的容量，收不下
+// 说明两边的账记错了。
+//
 // 双路 x16 各自独立计时、不保序：计时是外侧那两条 Link 实例的事，Switch 这一层
 // 只按 flit 轮流把它们分到两路上。
 //
@@ -17,6 +22,7 @@
 
 #include <deque>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,7 +33,7 @@
 namespace latch {
 namespace bach {
 
-// 出口队列深度，待定。
+// 出口队列深度，待定。上游一个入口的发送额度按它取。
 constexpr uint64_t kSwitchQueueDepth = 32;
 
 // 双路 x16，不支持 x32。
@@ -42,6 +48,7 @@ class PcieSwitch : public BachModule {
       in.push_back(std::make_shared<LinkEnd>(clock));
       out.push_back(std::make_shared<LinkEnd>(clock));
       out_q.emplace_back();
+      credit_back.emplace_back();
       lane_rr.push_back(0);
     }
     accepted = std::make_shared<Logic64>(clock);
@@ -91,6 +98,9 @@ class PcieSwitch : public BachModule {
     for (auto const& q : out_q) {
       if (!q.empty()) return false;
     }
+    for (auto const& q : credit_back) {
+      if (!q.empty()) return false;
+    }
     return true;
   }
 
@@ -99,6 +109,7 @@ class PcieSwitch : public BachModule {
     // 末级先做：先把出口队列里的送走，腾出的空位本拍就能收新的。
     Drain();
     Accept();
+    DriveRelease();
 
     *accepted = accepted_pending;
     *forwarded = forwarded_pending;
@@ -121,10 +132,14 @@ class PcieSwitch : public BachModule {
         if (out_q[d].size() >= kSwitchQueueDepth) room = false;
       }
       if (!room) {
+        // 上游按 credit 发，额度就是本级为这个入口留的容量。收不下说明两边的
+        // 账记错了，这一个 flit 已经从上游发出、额度也扣掉了，不收就丢在线上。
         ++stalled_pending;
+        LOGCHECK(false, "PcieSwitch: 出口队列满了，上游的 credit 记错了。");
         continue;
       }
-      for (uint64_t d : dsts) out_q[d].push_back(f);
+      auto left = std::make_shared<uint64_t>(dsts.size());
+      for (uint64_t d : dsts) out_q[d].push_back({f, p, left});
       ++accepted_pending;
     }
   }
@@ -133,16 +148,29 @@ class PcieSwitch : public BachModule {
     for (uint64_t p = 0; p < ports; ++p) {
       if (out_q[p].empty()) {
         out[p]->flit.Idle();
-        out[p]->release.Idle();
         continue;
       }
-      FlitView const& f = out_q[p].front();
-      out[p]->flit.Drive(f.vc, f.head, f.tail, f.bytes, f.msg);
-      out[p]->release.Idle();
+      QueuedFlit const& q = out_q[p].front();
+      out[p]->flit.Drive(q.f.vc, q.f.head, q.f.tail, q.f.bytes, q.f.msg);
+      // 组播的几份共用一个计数，最后一份发走才把位置还给来的那个端口。
+      if (--(*q.left) == 0) credit_back[q.src].push_back(q.f.vc);
       out_q[p].pop_front();
       // 按 flit 轮流走两路 x16，外侧那两条 Link 各自计时。
       ++lane_rr[p];
       ++forwarded_pending;
+    }
+  }
+
+  // release 与数据反向走：从端口 p 进来的 flit，位置从同一个端口的出方向还。
+  // 一个端口一拍还一个。
+  void DriveRelease() {
+    for (uint64_t p = 0; p < ports; ++p) {
+      if (credit_back[p].empty()) {
+        out[p]->release.Idle();
+        continue;
+      }
+      out[p]->release.Drive(true, credit_back[p].front(), false, 0);
+      credit_back[p].pop_front();
     }
   }
 
@@ -158,8 +186,16 @@ class PcieSwitch : public BachModule {
   std::map<uint64_t, std::vector<uint64_t>> mcast_tbl;
   std::vector<LinkEndPtr> in, out;
 
+  // 排在出口队列里的一个 flit：它从哪个端口进来，组播的几份还剩几份没发走。
+  struct QueuedFlit {
+    FlitView f;
+    uint64_t src = 0;
+    std::shared_ptr<uint64_t> left;
+  };
+
   // Step 独占。
-  std::vector<std::deque<FlitView>> out_q;
+  std::vector<std::deque<QueuedFlit>> out_q;
+  std::vector<std::deque<uint64_t>> credit_back;
   std::vector<uint64_t> lane_rr;
   uint64_t accepted_pending = 0, forwarded_pending = 0, stalled_pending = 0;
 

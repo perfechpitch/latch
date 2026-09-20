@@ -81,7 +81,7 @@ class OutCatcher : public BachModule {
     }
     rel.flit.Idle();
     if (release_on && f.valid) {
-      rel.release.Drive(true, f.vc, false, 0, false, 0);
+      rel.release.Drive(true, f.vc, false, 0);
     } else {
       rel.release.Idle();
     }
@@ -124,7 +124,7 @@ RouteEntry ForwardRight(bool need_stream, bool enters_core = false) {
   e.nxt_vc = {0, 0, 0, 0, 0};
   e.path_core_mask_enable = false;
   e.path_core_bypass = !enters_core;
-  e.stream_table_enable = need_stream;
+  e.stream_need = need_stream ? kFlowRight : 0;
   e.operation = Operation::kForward;
   e.stall_way = false;
   return e;

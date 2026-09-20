@@ -94,7 +94,6 @@ RouteEntry Bypass(uint64_t flow) {
   RouteEntry e;
   e.flow_dir = flow;
   e.path_core_bypass = true;   // 1 不进核
-  e.stream_table_enable = false;
   e.cur_credit_require = 0;
   e.operation = Operation::kForward;
   return e;
@@ -149,7 +148,7 @@ TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
     // 表里配的是进核加转发，但这个 core 是坏 core，进核那一位要被抹掉
     RouteEntry e = Bypass(kFlowRight);
     e.path_core_bypass = false;   // 表里写的是进核
-    e.stream_table_enable = true;
+    e.stream_need = kStreamNeedCore;
     rtab.Preload(3, e);
     // 中间列 chip 的 core_bad_mask，本 core 是 core2。透传档由这一位打开。
     constexpr uint64_t kSelf = 2;
@@ -177,7 +176,7 @@ TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
     RT::JoinAll();
     got = cat.got;
     stream_used = xb.StreamUsed(kOutIdxRight);
-    triggers = cs.StreamUsed();
+    triggers = xb.StreamUsed(kOutCore);
   }
   RT::Reset();
   EXPECT_EQ(got, 1u);          // 照样转发出去
@@ -239,45 +238,7 @@ TEST(BachRouterScenario, A16ChainedPassThroughAccumulatesHops) {
 // A17 的三个 reduce 用例走完整装配，见 router_assembly.cpp：ReduceModule 的结果
 // 直接给 Xbar 提请求，单独拎出来测就没有下家收它。
 
-// CoreStation 三态准入：坑满之后不再收，但不算丢包。
-TEST(BachRouterScenario, CoreStationAdmitsUntilSlotsRunOut) {
-  uint64_t used = 0, rejected = 0;
-  {
-    ClockPtr clk = MakeClock(0, kPeriod);
-    CoreStation cs(clk, "cs");
-    LinkEndPtr in = MakeWire(clk);
-    cs.AttachFromXbar(in);
-
-    std::vector<Pusher::Job> jobs;
-    for (uint64_t i = 0; i < kStreamTabEntries + 3; ++i) {
-      jobs.push_back({1 + i * 2, MakeMsg(1, 200 + i)});
-    }
-    Pusher push(clk, *in, jobs);
-
-    class CsProbe : public BachModule {
-     public:
-      CsProbe(ClockPtr c, CoreStation& s) : BachModule(c, "p"), cs(s) {}
-      uint64_t used = 0, rejected = 0;
-
-     protected:
-      void Step() override {
-        used = cs.StreamUsed();
-        rejected = cs.Rejected();
-      }
-
-     private:
-      CoreStation& cs;
-    };
-    CsProbe probe(clk, cs);
-    clk->Continue(200 * kPeriod);
-    RT::JoinAll();
-    used = probe.used;
-    rejected = probe.rejected;
-  }
-  RT::Reset();
-  EXPECT_EQ(used, kStreamTabEntries);
-  EXPECT_EQ(rejected, 3u);
-}
+// 进核三态准入挪到了 Xbar 那一级（F-021），用例见 router_arbiter.cpp。
 
 // CoreMem 重发：同 VC 保序，先存的先出。
 TEST(BachRouterScenario, ReissueKeepsOrderWithinVc) {
@@ -340,63 +301,52 @@ TEST(BachRouterScenario, ReissueKeepsOrderWithinVc) {
   EXPECT_EQ(users[2], 302u);
 }
 
-// Retire 的广播一根线同时到 Xbar 与 ReduceModule：Router 立即删 stream 授权；
-// ReduceModule 上这个用户没有在做的任务，本地分区也不留。
-TEST(BachRouterScenario, RetireReachesXbarAndReduceAtOnce) {
-  bool xbar_holds = true, rdc_holds = true, rdc_after = true;
+// 本级退休放的是进本 core 那一项（F-036）：各下游方向那几项不动，它们要等那些
+// 下游各自退休时还回来。
+TEST(BachRouterScenario, RetireFreesTheCoreEntryAndKeepsTheDownstreamOnes) {
+  bool core_after = true, down_after = false;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterTable rtab(clk, "rtab");
-    rtab.Preload(9, ReduceEntry(0b001));
     Xbar xb(clk, "xbar");
-    ReduceModule rdc(clk, "rdc", rtab, 0);
-    Retire rt(clk, "retire");
-
-    // 退休广播走一根线：Retire 送号，两张表各由自己的模块改。
-    auto bcast = rt.BroadcastPtr();
-    xb.AttachRetire(bcast);
-    rdc.AttachRetire(bcast);
+    Retire rt(clk, "retire", rtab);
+    xb.AttachRetire(rt.BroadcastPtr());
+    // 进本 core 与往右各给这个用户占一项。
+    xb.TakeStream(kStreamNeedCore | (1ull << kOutIdxRight), 88);
 
     class Driver : public BachModule {
      public:
-      Driver(ClockPtr c, Retire& r, Xbar& x, ReduceModule& m)
-          : BachModule(c, "d"), rt(r), xb(x), rdc(m) {}
-      bool xbar_holds = true, rdc_holds = true, rdc_after = true;
+      Driver(ClockPtr c, Retire& r, Xbar& x)
+          : BachModule(c, "d"), rt(r), xb(x) {}
+      bool core_after = true, down_after = false;
 
      protected:
       void Step() override {
         uint64_t now = CycleNow();
-        if (now == 1) {
-          // 先让 Xbar 占一个坑
-          rt.Req().Idle();
-        } else if (now == 3) {
+        if (now == 3 || now == 4) {
           rt.Req().Drive(88);
-        } else if (now == 6) {
-          rt.Req().Idle();
-          xbar_holds = xb.StreamHolds(2, 88);
-          rdc_holds = rdc.HoldsUser(88);
-        } else if (now == 20) {
-          rdc_after = rdc.HoldsUser(88);
         } else {
           rt.Req().Idle();
+        }
+        if (now == 10) {
+          core_after = xb.StreamHolds(kOutCore, 88);
+          down_after = xb.StreamHolds(kOutIdxRight, 88);
         }
       }
 
      private:
       Retire& rt;
       Xbar& xb;
-      ReduceModule& rdc;
     };
-    Driver d(clk, rt, xb, rdc);
+    Driver d(clk, rt, xb);
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
-    xbar_holds = d.xbar_holds;
-    rdc_holds = d.rdc_holds;
-    rdc_after = d.rdc_after;
+    core_after = d.core_after;
+    down_after = d.down_after;
   }
   RT::Reset();
-  EXPECT_FALSE(xbar_holds);  // Router 立即删
-  EXPECT_FALSE(rdc_after);
+  EXPECT_FALSE(core_after) << "退休当场放进本 core 那一项";
+  EXPECT_TRUE(down_after) << "下游那几项不跟着本级退休放";
 }
 
 // CreditMonitor：多个事件同时满足时按 StreamID 选最老的。

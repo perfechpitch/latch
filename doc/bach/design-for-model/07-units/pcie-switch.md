@@ -99,7 +99,7 @@ mem sw_lane_busy[2]  FF        每路 x16 一个 last_busy_until  1RW   双路�
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `sw_out_q[p]`、`sw_lane_busy` | 1. 每端口每拍出 1 flit 到 `port[p].out`（接对应 Link）<br>2. chip 侧双路 x16：按 flit 轮流走两路，各自独立计时，不保序 | `port[p].out` | D1 |
+| `sw_out_q[p]`、`sw_lane_busy` | 1. 每端口每拍出 1 flit 到 `port[p].out`（接对应 Link）<br>2. chip 侧双路 x16：按 flit 轮流走两路，各自独立计时，不保序<br>3. 一个 flit 从它的全部目的队列都发走之后，往它进来的那个端口的出方向回一个 VC release；组播的几份共用一个计数，最后一份发走才回 | `port[p].out` | D1 |
 
 ***
 
@@ -108,7 +108,9 @@ mem sw_lane_busy[2]  FF        每路 x16 一个 last_busy_until  1RW   双路�
 ```
 SW_PER_TRAY  4 个，左右各 2，每个接两层 chip 的边缘口
 LANES        双路 x16，不支持 x32；C2C 是否支持 x32 待定
-SW_Q_DEPTH   32 flit                            // 待定
+SW_Q_DEPTH   32 flit                            // 待定。上游一个入口的发送额度按它取：
+                                                // 一个出口队列可能被两个 chip 端口同时灌
+                                                // （第三个端口挂片外桩），各留一半
 MULTICAST    开关，默认关（《软件栈》“先假设 PCIe 没有组播能力”）
 ```
 
@@ -120,6 +122,7 @@ MULTICAST    开关，默认关（《软件栈》“先假设 PCIe 没有组播�
 | - | - | - |
 | 双路 x16 各自独立计时，不保序 | W2 第 2 条，两条 Link 实例 | `pcie_two_lanes_unordered` |
 | 组播：一份数据复制到多个收端 Matrix Mem，反压按最慢收端 | W1 第 2、3 条 | `pcie_multicast` |
+| 出口队列的位置在 flit 发走之后还给上游，组播几份只还一个 | W2 第 3 条 | `pcie_credit_back` |
 | 只支持双路 x16，不支持 x32 | 参数 | `pcie_lane_width` |
 | 同层与同列 chip 直连不经 Switch | LPU 的接线 | `chip_direct_link` |
 

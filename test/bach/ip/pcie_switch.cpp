@@ -1,6 +1,7 @@
-// PCIe Switch 的行为基线：一份数据落到哪几个端口、队列满了怎么反压、两路怎么轮。
+// PCIe Switch 的行为基线：一份数据落到哪几个端口、位置怎么还给上游、两路怎么轮。
 //
-// 观察量是收端记的条数与 Switch 自己的计数器，不去翻它的出口队列。
+// 观察量是收端记的条数、上游端口上回来的 release 与 Switch 自己的计数器，不去翻
+// 它的出口队列。
 
 #include <gtest/gtest.h>
 
@@ -18,23 +19,40 @@ namespace {
 
 constexpr Time kPeriod = 1;
 
-// 每拍往入口推一个 flit，推 n 拍。
+// 每拍往入口推一个 flit，推 n 拍。额度给了就照额度发：发一个扣一个，Switch 把
+// 它发走后从同一个端口的出方向回一个位置，收到才补回来。额度给 0 表示不看额度。
 class Feeder : public BachModule {
  public:
-  Feeder(ClockPtr c, LinkEnd& port, uint64_t to, uint64_t how_many)
-      : BachModule(c, "feeder"), sink(port), dst(to), count(how_many) {}
+  Feeder(ClockPtr c, LinkEnd& port, uint64_t to, uint64_t how_many,
+         LinkEnd* back_port = nullptr, uint64_t budget = 0)
+      : BachModule(c, "feeder"),
+        sink(port),
+        back(back_port),
+        dst(to),
+        count(how_many),
+        cap(budget),
+        room(budget) {}
 
   uint64_t pushed = 0;
+  uint64_t given_back = 0;
 
  protected:
   void Step() override {
-    if (pushed < count) {
+    if (back != nullptr) {
+      ReleaseView r = ReadRelease(back->release);
+      if (r.vc_valid) {
+        ++given_back;
+        ++room;
+      }
+    }
+    if (pushed < count && (cap == 0 || room > 0)) {
       auto m = std::make_shared<Message>();
       m->dst = dst;
       m->size = 256;
       m->token_id = pushed;
       sink.flit.Drive(0, true, true, 256, m);
       ++pushed;
+      if (cap != 0) --room;
     } else {
       sink.flit.Idle();
     }
@@ -43,7 +61,8 @@ class Feeder : public BachModule {
 
  private:
   LinkEnd& sink;
-  uint64_t dst, count;
+  LinkEnd* back;
+  uint64_t dst, count, cap, room;
 };
 
 // 只收不回压。
@@ -135,28 +154,50 @@ TEST(BachPcieSwitch, Multicast) {
 
 // 收端不取时出口队列会满，满了就不再收，计入 stalled。这是反压不是丢弃：
 // 上游本拍的那一笔留在原地。
-TEST(BachPcieSwitch, BackpressureWhenQueueFull) {
-  uint64_t accepted = 0, stalled = 0;
+TEST(BachPcieSwitch, GivesTheSlotBackWhenAFlitLeaves) {
+  uint64_t pushed = 0, given_back = 0, got = 0, stalled = 0;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
-    // 没有 Catcher，出口 flit 没人读，但 Switch 每拍照样出队一个，所以队列
-    // 不会满。这里改成推得比出得快：一拍推一个、一拍出一个，正好持平。
-    // 要制造满，得让入口多于一个。
+    // 额度只有 4：发满 4 个就停下，Switch 每发走一个回一个位置，才能接着发。
+    // 出口每拍出一个，所以 n 个 flit 全部走完，位置也回来 n 个。
     PcieSwitch sw(clk, "sw", 3);
     sw.SetRoute(7, {2});
-    Feeder f0(clk, sw.In(0), 7, 100);
-    Feeder f1(clk, sw.In(1), 7, 100);
+    Feeder f(clk, sw.In(0), 7, 20, &sw.Out(0), 4);
     Catcher c(clk, sw.Out(2));
     Probe probe(clk, sw);
-    clk->Continue(80 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
-    accepted = probe.accepted;
+    pushed = f.pushed;
+    given_back = f.given_back;
+    got = c.got;
     stalled = probe.stalled;
   }
   RT::Reset();
-  // 两个入口共抢一个出口，出口每拍只出一个，所以一定有被挡住的
-  EXPECT_GT(stalled, 0u);
-  EXPECT_GT(accepted, 0u);
+  EXPECT_EQ(pushed, 20u) << "位置回来了就该接着发完";
+  EXPECT_EQ(got, 20u);
+  EXPECT_EQ(given_back, 20u) << "发走一个回一个位置";
+  EXPECT_EQ(stalled, 0u) << "照额度发就不会撞上满队列";
+}
+
+// 组播那一份要等最慢的出口把它发走才回一个位置：两份只回一个，不是两个。
+TEST(BachPcieSwitch, MulticastGivesBackOneSlotPerFlit) {
+  uint64_t pushed = 0, given_back = 0;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    PcieSwitch sw(clk, "sw", 3);
+    sw.EnableMulticast(true);
+    sw.SetRoute(7, {1, 2});
+    Feeder f(clk, sw.In(0), 7, 6, &sw.Out(0), 4);
+    Catcher c1(clk, sw.Out(1));
+    Catcher c2(clk, sw.Out(2));
+    clk->Continue(120 * kPeriod);
+    RT::JoinAll();
+    pushed = f.pushed;
+    given_back = f.given_back;
+  }
+  RT::Reset();
+  EXPECT_EQ(pushed, 6u);
+  EXPECT_EQ(given_back, 6u) << "一个 flit 复制成两份，回来的还是一个位置";
 }
 
 // 按 flit 轮流走两路 x16。

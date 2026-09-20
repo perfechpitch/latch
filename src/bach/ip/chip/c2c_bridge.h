@@ -12,7 +12,8 @@
 //                  查 credit、同向的数据与 release 之间仲裁（小包优先）
 //   TX Engine      按 4 KB 边界拆包，加 4 位 seq_id 与 tail 标记，位宽 2048
 //                  转 1024，一拍拆两拍发
-//   RX Engine      按 seq_id 缓存，tail 到齐后还原原始包，位宽 1024 转 2048
+//   RX Engine      按 seq_id 缓存，一个 flit 的段到齐就还原这个 flit 发给 core，
+//                  位宽 1024 转 2048
 //   AXI Bridge     credit 与 AXI4 的协议转换。出方向按这一段物理链路的延迟
 //                  计时（PCIe C2C 300 ns，按 1 T = 1 ns 折算），入方向只做转
 //                  换不再计时，一段线的时间算在发送侧。Router 到 Router 的
@@ -43,7 +44,7 @@ namespace bach {
 // VC Buffer 按方向分档，credit 与它一一对应。
 constexpr uint64_t kC2cTxPrivate = 20;    // 每 VC，覆盖本级 R2R 往返约 20 拍
 constexpr uint64_t kC2cTxShared = 20;
-constexpr uint64_t kC2cRxPrivate = 80;    // 每 VC
+constexpr uint64_t kC2cRxPrivate = 20;    // 每 VC，四个 VC 合计 80
 constexpr uint64_t kC2cRxShared = 300;    // 覆盖 PCIe 往返 600 ns @1024-bit
 constexpr uint64_t kC2cSegBytes = 4096;   // 拆包的边界
 constexpr uint64_t kC2cSeqNum = 16;       // seq_id 4 位
@@ -51,18 +52,22 @@ constexpr uint64_t kC2cReasmNum = 16;
 constexpr uint64_t kC2cAxiLatency = 300;  // PCIe C2C 300 ns，1 T = 1 ns
 constexpr uint64_t kC2cRcStages = 3;      // RC / VA / SA 三关
 // 从本片 core 收 flit 的缓冲容量。桥收下就把 VC 位置还给 core，所以这个数要与
-// Router 给这个方向的 VC credit 总量一致，否则 core 那一侧按自己的额度发，桥这
-// 一侧收不下，flit 就丢在线上而 credit 已经扣掉了。
-constexpr uint64_t kC2cInCap = kC2cTxPrivate + kC2cTxShared;
+// Router 给这个方向的 VC credit 总量一致：每个 VC 一份 private，四个 VC 共用一
+// 份 shared。
+constexpr uint64_t kC2cInCap = kVcNum * kC2cTxPrivate + kC2cTxShared;
 // VC credit 攒到几个 flit 打成一笔。原文只说「转成包粒度」，没给数，按 4 KB 的
 // 分段边界除以一拍 256 B 取 16 偏大，这里取 4：攒太多会让上游等得久。
 constexpr uint64_t kC2cCreditPackFlits = 4;
 
-// 一段：TX 拆出来、RX 拼回去的单位。
+// 一段：TX 拆出来、RX 拼回去的单位。head 与 tail 是这一段所属的那个 flit 在包
+// 里的位置，原样带过桥；seg_last 是这个 flit 拆出来的最后一段，RX 按它认一个
+// flit 的段收齐了没有。
 struct C2cSeg {
   uint64_t vc = 0;
   uint64_t seq_id = 0;
+  bool head = false;
   bool tail = false;
+  bool seg_last = false;
   uint64_t bytes = 0;
   MessagePtr msg;
 };
@@ -124,12 +129,12 @@ class C2cCredit {
 // 交给 TX Engine。三关合起来 D3。
 class C2cRcVaSa : public BachModule {
  public:
-  C2cRcVaSa(ClockPtr clock, const std::string& name, uint64_t parent = 0,
-            bool tick = true)
+  C2cRcVaSa(ClockPtr clock, const std::string& name, uint64_t priv,
+            uint64_t shared, uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         from_core(std::make_shared<LinkEnd>(clock)),
         to_core_back(std::make_shared<LinkEnd>(clock)),
-        credit(kC2cTxPrivate, kC2cTxShared),
+        credit(priv, shared),
         granted(clock),
         blocked(clock) {}
 
@@ -141,8 +146,9 @@ class C2cRcVaSa : public BachModule {
   LinkEndPtr ToCoreBack() const { return to_core_back; }
   void AttachToCoreBack(LinkEndPtr p) { to_core_back = std::move(p); }
 
-  // 往线上发要看对侧还有没有位置。release 不占 credit：它是让对侧腾出位置的那
-  // 一笔，被数据堵住就两边互等。
+  // 往线上发要看对侧还有没有位置，额度是对侧 RX 的 buffer 容量，不是本级自己
+  // 的：本级收不收得下是从 core 收那一步的事，两件事不能混。release 不占
+  // credit：它是让对侧腾出位置的那一笔，被数据堵住就两边互等。
   bool HasBeat() const {
     if (out.empty()) return false;
     C2cBeat const& b = out.front();
@@ -189,7 +195,7 @@ class C2cRcVaSa : public BachModule {
     if (back_pend.empty()) {
       to_core_back->release.Idle();
     } else {
-      to_core_back->release.Drive(true, back_pend.front(), false, 0, false, 0);
+      to_core_back->release.Drive(true, back_pend.front(), false, 0);
       back_pend.pop_front();
     }
 
@@ -225,7 +231,7 @@ class C2cRcVaSa : public BachModule {
       LOGCHECK(r.vc_id < kVcNum, "C2cRcVaSa: 归还的 VC 号越界。");
       ++vc_pend[r.vc_id];
     }
-    if (r.stream_valid || r.reduce_valid) {
+    if (r.stream_valid) {
       C2cBeat b;
       b.is_release = true;
       b.rel = r;
@@ -243,12 +249,17 @@ class C2cRcVaSa : public BachModule {
     // 额度与 core 那一侧的 VC credit 是同一个账，只数数据：release 与链路层
     // credit 不占那一份额度。对侧还有没有位置是往线上发那一步的事。
     if (DataHeld() >= kC2cInCap) {
+      // core 那一侧按 VC credit 发，额度与本级容量是同一个账，收不下说明两边
+      // 的账记错了：这一个 flit 已经从 core 那一侧发出、credit 也扣掉了，不收
+      // 就丢在线上。
       ++block_cnt;
+      LOGCHECK(false, "C2cRcVaSa: 收不下 core 那一侧发来的 flit，VC credit 记错了。");
       return;
     }
     C2cBeat b;
     b.seg.vc = f.vc;
     b.seg.bytes = f.bytes;
+    b.seg.head = f.head;
     b.seg.tail = f.tail;
     b.seg.msg = f.msg;
     pipe.push_back({now + kC2cRcStages, b});
@@ -322,7 +333,9 @@ class C2cTxEngine : public BachModule {
     for (uint64_t i = 0; i < nseg; ++i) {
       C2cBeat s = b;
       s.seg.seq_id = (next_seq + i) % kC2cSeqNum;
+      s.seg.head = (i == 0) && b.seg.head;
       s.seg.tail = (i + 1 == nseg) && b.seg.tail;
+      s.seg.seg_last = (i + 1 == nseg);
       uint64_t take = left > kC2cSegBytes ? kC2cSegBytes : left;
       s.seg.bytes = take;
       left -= take;
@@ -456,19 +469,18 @@ class C2cRxEngine : public BachModule {
       // 收方按这一笔代表的 flit 数展开：下游的 VC credit 一拍只加一个。
       --ready.front().vc_len;
       to_core->flit.Idle();
-      to_core->release.Drive(b.rel.vc_valid, b.rel.vc_id, false, 0, false, 0);
+      to_core->release.Drive(b.rel.vc_valid, b.rel.vc_id, false, 0);
       return;
     }
     ready.pop_front();
     if (b.is_release) {
       to_core->flit.Idle();
       to_core->release.Drive(b.rel.vc_valid, b.rel.vc_id, b.rel.stream_valid,
-                             b.rel.stream_user, b.rel.reduce_valid,
-                             b.rel.reduce_user);
+                             b.rel.stream_user);
       return;
     }
     to_core->release.Idle();
-    to_core->flit.Drive(b.seg.vc, /*is_head=*/true, b.seg.tail, b.seg.bytes,
+    to_core->flit.Drive(b.seg.vc, b.seg.head, b.seg.tail, b.seg.bytes,
                         b.seg.msg);
   }
 
@@ -497,14 +509,17 @@ class C2cRxEngine : public BachModule {
     credit_back.push_back(whole.seg.vc);
 
     reasm[whole.seg.vc].push_back(whole);
-    if (!whole.seg.tail) return;
-    // tail 到齐：按 seq_id 顺序拼回原始包。段的字节数合起来就是原始包的长度。
+    if (!whole.seg.seg_last) return;
+    // 一个 flit 的段到齐：按 seq_id 顺序拼回这个 flit。段的字节数合起来就是这个
+    // flit 的长度。攒的是一个 flit 而不是一整个包：core 侧的 Router 按 flit 收
+    // 发、VC credit 也是 flit 粒度，攒整个包的话一个包要在桥上停到最后一个 flit
+    // 到齐，后面每一跳还得整包收齐才往下发。
     auto& segs = reasm[whole.seg.vc];
     C2cBeat out = segs.front();
     uint64_t total = 0;
     for (auto const& s : segs) total += s.seg.bytes;
     out.seg.bytes = total;
-    out.seg.tail = true;
+    out.seg.tail = whole.seg.tail;
     segs.clear();
     ready.push_back(out);
     ++asm_cnt;
@@ -528,6 +543,10 @@ struct C2cCfg {
   // 对着 PCIe Switch 或 CPU 的那一侧没有对端的 PCIe Bridge：业务层逻辑 bypass
   // 掉，只保留位宽转换与拆包合包。
   bool bypass_business = false;
+  // 往线上发的额度，等于对侧收方为这个口留的容量。对面是另一座桥时就是它 RX
+  // 的 VC Buffer；对面是 PCIe Switch 时由装配层按 Switch 的入口容量填。
+  uint64_t tx_private = kC2cRxPrivate;
+  uint64_t tx_shared = kC2cRxShared;
   // 这一段物理链路一个方向的延迟。到达拍算在发送侧，与链路模型同一条规矩：
   // 一段线的占用只有一个 owner，对接的两座桥因此不会把同一段各计一次，计
   // 两次的话 Router 到 Router 就是 600T，超过规格书给的 400T。
@@ -540,7 +559,8 @@ class C2cBridge {
             uint64_t parent = 0)
       : clk(clock), cfg(setting) {
     const uint64_t gid = TraceGroup(name, parent);
-    rcvasa = std::make_unique<C2cRcVaSa>(clock, "rcvasa", gid, false);
+    rcvasa = std::make_unique<C2cRcVaSa>(clock, "rcvasa", setting.tx_private,
+                                        setting.tx_shared, gid, false);
     tx = std::make_unique<C2cTxEngine>(clock, "tx", gid, false);
     out_axi = std::make_unique<C2cAxiBridge>(clock, "axi_out",
                                              setting.axi_latency, gid, false);

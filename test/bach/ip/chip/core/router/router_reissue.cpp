@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -217,14 +218,24 @@ TEST(BachReissue, NoReportBeforeTheReissue) {
 
 namespace {
 
-// 推 Retire 并读三个方向回程线。
+// 推 Retire 与下游还回来的 release，读三个方向出线上的回程。
 class RetireHarness : public BachModule {
  public:
-  RetireHarness(ClockPtr c, Retire& target, std::vector<LinkEndPtr> up)
-      : BachModule(c, "harness"), rt(target), wires(std::move(up)) {}
+  RetireHarness(ClockPtr c, Retire& target, std::vector<LinkEndPtr> up,
+                std::vector<LinkEndPtr> down = {})
+      : BachModule(c, "harness"), rt(target), wires(std::move(up)),
+        down_wires(std::move(down)) {}
 
-  uint64_t relay_at = 0, relay_from = 0, relay_user = 0;
+  // 下游还回来的那一笔：在这一拍从 down_from 方向的进线上推 down_user。
+  uint64_t down_at = 0, down_from = 0, down_user = 0;
+  // TS 那一侧的退休请求：在这几拍拉高 valid，带 req_user。
+  std::set<uint64_t> req_at;
+  uint64_t req_user = 0;
   std::vector<uint64_t> got_dirs, got_users;
+  // 交给 Xbar 那一路：方向与用户。
+  std::vector<uint64_t> self_dirs, self_users;
+  // 广播口上出现过的退休用户，一笔记一次。
+  std::vector<uint64_t> retired;
 
  protected:
   void Step() override {
@@ -236,45 +247,124 @@ class RetireHarness : public BachModule {
         got_users.push_back(r.stream_user);
       }
     }
-    if (relay_at != 0 && now == relay_at) {
-      rt.RelayRelease(relay_from, relay_user);
+    auto rel = rt.ReleasePtr();
+    if (rel->Valid() && rel->Seq() != last_rel_seq) {
+      last_rel_seq = rel->Seq();
+      self_dirs.push_back(rel->Dir());
+      self_users.push_back(rel->User());
     }
-    rt.Req().Idle();
+    for (uint64_t d = 0; d < down_wires.size(); ++d) {
+      if (down_at != 0 && now == down_at && d == down_from) {
+        down_wires[d]->release.DriveStream(true, down_user);
+      } else {
+        down_wires[d]->release.DriveStream(false, 0);
+      }
+    }
+    auto bcast = rt.BroadcastPtr();
+    if (bcast->Valid() && bcast->Seq() != last_bcast_seq) {
+      last_bcast_seq = bcast->Seq();
+      retired.push_back(bcast->User());
+    }
+    if (req_at.count(now) != 0) {
+      rt.Req().Drive(req_user);
+    } else {
+      rt.Req().Idle();
+    }
     rt.RunStep();
   }
 
  private:
   Retire& rt;
-  std::vector<LinkEndPtr> wires;
+  std::vector<LinkEndPtr> wires, down_wires;
+  uint64_t last_bcast_seq = 0, last_rel_seq = 0;
+};
+
+// 一套接好的 Retire：三个方向的出线与进线各一根。
+struct RetireBench {
+  std::unique_ptr<RouterTable> tab;
+  std::unique_ptr<Retire> rt;
+  std::vector<LinkEndPtr> up, down;
+
+  explicit RetireBench(ClockPtr clk) {
+    tab = std::make_unique<RouterTable>(clk, "rtab", 0, false);
+    rt = std::make_unique<Retire>(clk, "retire", *tab, 0, false);
+    for (uint64_t d = 0; d < kR2RNum; ++d) {
+      up.push_back(MakeWire(clk));
+      down.push_back(MakeWire(clk));
+      rt->AttachUpLink(d, up.back());
+      rt->AttachDownLink(d, down.back());
+    }
+  }
 };
 
 }  // namespace
 
-// stream release 逐跳往上游传：发往除来向以外的另两个 R2R 口。
-TEST(BachRetire, ReleaseGoesToTheOtherTwoDirections) {
+// 本级退休往三个 R2R 方向各发一笔：哪个上游申请过，删的就是它那一项，没申请过
+// 的查无此项丢掉。
+TEST(BachRetire, LocalRetireReleasesAllThreeDirections) {
   std::vector<uint64_t> dirs, users;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Retire rt(clk, "retire", 0, false);
-    std::vector<LinkEndPtr> up;
-    for (uint64_t d = 0; d < kR2RNum; ++d) {
-      up.push_back(MakeWire(clk));
-      rt.AttachUpLink(d, up.back());
-    }
-    RetireHarness h(clk, rt, up);
-    h.relay_at = 3;
-    h.relay_from = kDirLeft;
-    h.relay_user = 88;
+    RetireBench b(clk);
+    RetireHarness h(clk, *b.rt, b.up, b.down);
+    h.req_at = {3, 4};
+    h.req_user = 88;
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
     dirs = h.got_dirs;
     users = h.got_users;
   }
   RT::Reset();
-  ASSERT_EQ(dirs.size(), 2u) << "三个方向里除来向以外的两个";
-  EXPECT_EQ(dirs[0], uint64_t(kDirMid));
-  EXPECT_EQ(dirs[1], uint64_t(kDirRight));
+  ASSERT_EQ(dirs.size(), 3u) << "三个方向各一笔";
+  EXPECT_EQ(dirs, std::vector<uint64_t>({kDirMid, kDirLeft, kDirRight}));
+  EXPECT_EQ(users, std::vector<uint64_t>({88, 88, 88}));
+}
+
+// 下游还回来的那一笔：交给本级删那个方向的表项，同时按那个口的 RTR_RELEASE_ROUTE
+// 转出去。坏 core 上配的是左进转左、右进转右。
+TEST(BachRetire, DownstreamReleaseGoesToTheLocalTableAndTheStaticRoute) {
+  std::vector<uint64_t> dirs, users, self_dirs, self_users;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RetireBench b(clk);
+    b.tab->SetCreditBypass(kDirRight, kFlowLeft);
+    RetireHarness h(clk, *b.rt, b.up, b.down);
+    h.down_at = 3;
+    h.down_from = kDirRight;
+    h.down_user = 88;
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    dirs = h.got_dirs;
+    users = h.got_users;
+    self_dirs = h.self_dirs;
+    self_users = h.self_users;
+  }
+  RT::Reset();
+  ASSERT_EQ(self_dirs.size(), 1u);
+  EXPECT_EQ(self_dirs[0], uint64_t(kDirRight)) << "删的是来向那个方向那一项";
+  EXPECT_EQ(self_users[0], 88u);
+  ASSERT_EQ(dirs.size(), 1u) << "掩码里只有左边那一位";
+  EXPECT_EQ(dirs[0], uint64_t(kDirLeft));
   EXPECT_EQ(users[0], 88u);
-  EXPECT_EQ(users[1], 88u);
+}
+
+// 同一个用户先后退休两次，各广播一次：一笔请求连着两拍拉高只算一笔，valid 掉下
+// 去过再来的是新的一笔。同一个用户在一个 core 上先后跑两个 token 就是这样。
+TEST(BachRetire, SameUserRetiringTwiceBroadcastsTwice) {
+  std::vector<uint64_t> retired;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RetireBench b(clk);
+    RetireHarness h(clk, *b.rt, b.up, b.down);
+    h.req_at = {3, 4, 8, 9};
+    h.req_user = 88;
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    retired = h.retired;
+  }
+  RT::Reset();
+  EXPECT_EQ(retired, std::vector<uint64_t>({88, 88}));
 }

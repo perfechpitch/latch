@@ -56,7 +56,7 @@ class FlitSender : public BachModule {
   std::vector<Job> jobs;
 };
 
-// 在指定拍推一笔 release，三种各推一次。
+// 在指定拍推一笔 release，两种各推一次。
 class ReleaseSender : public BachModule {
  public:
   ReleaseSender(ClockPtr c, LinkEnd& port, uint64_t fire_at)
@@ -67,7 +67,7 @@ class ReleaseSender : public BachModule {
     uint64_t now = CycleNow();
     dst.flit.Idle();
     if (now == at) {
-      dst.release.Drive(true, 2, true, 7, true, 9);
+      dst.release.Drive(true, 2, true, 7);
     } else {
       dst.release.Idle();
     }
@@ -84,8 +84,8 @@ class Sink : public BachModule {
 
   std::vector<uint64_t> flit_at;
   std::vector<uint64_t> flit_user;
-  std::vector<uint64_t> vc_at, stream_at, reduce_at;
-  uint64_t vc_id = 0, stream_user = 0, reduce_user = 0;
+  std::vector<uint64_t> vc_at, stream_at;
+  uint64_t vc_id = 0, stream_user = 0;
 
  protected:
   void Step() override {
@@ -104,10 +104,6 @@ class Sink : public BachModule {
       stream_at.push_back(now);
       stream_user = r.stream_user;
     }
-    if (r.reduce_valid) {
-      reduce_at.push_back(now);
-      reduce_user = r.reduce_user;
-    }
   }
 
  private:
@@ -116,8 +112,8 @@ class Sink : public BachModule {
 
 struct RunResult {
   std::vector<uint64_t> sent_at, flit_at, flit_user;
-  std::vector<uint64_t> vc_at, stream_at, reduce_at;
-  uint64_t vc_id = 0, stream_user = 0, reduce_user = 0;
+  std::vector<uint64_t> vc_at, stream_at;
+  uint64_t vc_id = 0, stream_user = 0;
 };
 
 RunResult RunFlits(LinkParams const& cfg, std::vector<FlitSender::Job> jobs,
@@ -140,22 +136,22 @@ RunResult RunFlits(LinkParams const& cfg, std::vector<FlitSender::Job> jobs,
 
 }  // namespace
 
-// 一笔 256 B 走 R2R：发送侧写进入口，经 ceil(256/256) + 40T 到达，收端再晚一拍
-// 看到（端口本身的一拍，被 latency 吸收，不额外扣时）。
+// 一笔 256 B 走 R2R：发送侧写进入口，经 ceil(256/256) + 10T 的走线到达，收端再
+// 晚一拍看到（端口本身的一拍，被 latency 吸收，不额外扣时）。
 TEST(BachLink, Arrive) {
   RunResult r = RunFlits(LinkR2R(), {{1, 256, 0}}, 80);
   ASSERT_EQ(r.sent_at.size(), 1u);
   ASSERT_EQ(r.flit_at.size(), 1u);
   EXPECT_EQ(r.sent_at[0], 1u);
-  // 入口那一拍 + 1 + 40 + 出口那一拍
-  EXPECT_EQ(r.flit_at[0], 1u + 1u + 1u + 40u + 1u);
+  // 入口那一拍 + 1 + 10 + 出口那一拍
+  EXPECT_EQ(r.flit_at[0], 1u + 1u + 1u + 10u + 1u);
 }
 
 // 空包按一拍算，与 CalcCycles 的 size ≤ 0 走同一条路。
 TEST(BachLink, EmptyPacketCostsOneCycle) {
   RunResult r = RunFlits(LinkR2R(), {{1, 0, 0}}, 80);
   ASSERT_EQ(r.flit_at.size(), 1u);
-  EXPECT_EQ(r.flit_at[0], 1u + 1u + 1u + 40u + 1u);
+  EXPECT_EQ(r.flit_at[0], 1u + 1u + 1u + 10u + 1u);
 }
 
 // 同一拍发不了两笔，但连着几拍发进来的要按占用排队：第二笔的到达拍不早于第一笔。
@@ -186,7 +182,7 @@ TEST(BachLink, C2CLatency) {
   RunResult r2r = RunFlits(LinkR2R(), {{1, 256, 0}}, 600);
   RunResult c2c = RunFlits(LinkC2C(), {{1, 256, 0}}, 600);
   ASSERT_EQ(c2c.flit_at.size(), 1u);
-  EXPECT_EQ(c2c.flit_at[0] - r2r.flit_at[0], 400u - 40u);
+  EXPECT_EQ(c2c.flit_at[0] - r2r.flit_at[0], 400u - 10u);
 }
 
 // PCIe ↔ Router 左右：128 B/T，10T + 25T。256 B 要两拍。
@@ -196,10 +192,10 @@ TEST(BachLink, PcieRouterLeftRight) {
   EXPECT_EQ(r.flit_at[0], 1u + 1u + 2u + 35u + 1u);
 }
 
-// 三种 release 各走各的通道，同一拍进去同一拍出来，互不排队。
+// 两种 release 各走各的通道，同一拍进去同一拍出来，互不排队。
 TEST(BachLink, ReleaseChannelsAreIndependent) {
-  std::vector<uint64_t> vc_at, stream_at, reduce_at;
-  uint64_t vc_id = 0, stream_user = 0, reduce_user = 0;
+  std::vector<uint64_t> vc_at, stream_at;
+  uint64_t vc_id = 0, stream_user = 0;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
     Link link(clk, "link", LinkR2R());
@@ -209,18 +205,13 @@ TEST(BachLink, ReleaseChannelsAreIndependent) {
     RT::JoinAll();
     vc_at = sink.vc_at;
     stream_at = sink.stream_at;
-    reduce_at = sink.reduce_at;
     vc_id = sink.vc_id;
     stream_user = sink.stream_user;
-    reduce_user = sink.reduce_user;
   }
   RT::Reset();
   ASSERT_EQ(vc_at.size(), 1u);
   ASSERT_EQ(stream_at.size(), 1u);
-  ASSERT_EQ(reduce_at.size(), 1u);
   EXPECT_EQ(vc_at[0], stream_at[0]);
-  EXPECT_EQ(stream_at[0], reduce_at[0]);
   EXPECT_EQ(vc_id, 2u);
   EXPECT_EQ(stream_user, 7u);
-  EXPECT_EQ(reduce_user, 9u);
 }

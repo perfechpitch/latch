@@ -47,8 +47,11 @@
 namespace latch {
 namespace bach {
 
-// 读的 outstanding 限额，建模计划的默认值。
-constexpr uint64_t kRdOutstanding = 4;
+// 读的 outstanding 限额。原文只说领先量由 Buffer credit、读 outstanding 与可保留
+// 的任务边界数共同约束（F20），没给这一项的值。取与一个通道的 Buffer 项数相同：
+// 让 Buffer 成为真正卡住的那一个，读这一半才填得满 256 B/T —— 在飞读数少于访存
+// 延迟的拍数时，带宽就是「在飞数 ÷ 延迟」，取 4 只有 4/13。
+constexpr uint64_t kRdOutstanding = kDteBufFlits;
 
 // 一侧同时能保留几个已经 issue_done、还在等 drain 的任务边界。原文只说「可保留
 // 的任务边界数」是领先量的三项约束之一，没给数，取 2：一笔在等收敛，一笔在发。
@@ -295,10 +298,13 @@ class Lane : public BachModule {
     if (!rd_reported) rd_done->Idle();
 
     // Buffer 的位置在发请求这一刻就要占下：响应回来时没位置，那一块数据就只能
-    // 丢，而请求已经发出去、outstanding 也已经记上。所以余量要够本笔已经在飞
-    // 的那些，加上这一笔自己。
-    bool room = buffer.Credit(idx) > c.outstanding;
-    bool slot = c.outstanding < kRdOutstanding;
+    // 丢，而请求已经发出去、outstanding 也已经记上。所以余量要够已经在飞的那
+    // 些，加上这一笔自己。已经在飞的除了本笔的，还有前面几笔 issue_done 之后
+    // 还没收齐的响应；读的 outstanding 限额也按这个总数算。
+    uint64_t flying = c.outstanding;
+    for (ActiveCtx const& d : drain_q[kRd]) flying += d.outstanding;
+    bool room = buffer.Credit(idx) > flying;
+    bool slot = flying < kRdOutstanding;
     if (!room || !slot) return;
     bool from_cm = c.desc.route == Route::kCmToRouter;
     MemPort& port = from_cm ? *cmem : *mmem;

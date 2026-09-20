@@ -324,6 +324,9 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F47 | `TYPE_VL.ROUND_MODE` 在 bit[19:17]，只作用于三处高转低转换：LU 的 `ld.fp32.vm` 在 DATA_TYPE=BF16 下把 FP32 窄化为 BF16；SU 的高转低写出（`st.fp8e4m3.vm` / `st.mxfp8.vm` / `st.bf16.vm`）；DATA_TYPE=BF16 时标量进入向量通路的 FP32 → BF16 转换 |
 | F48 | 向量长度 VL 为 1～16384 element，单条宏指令内完成；`0` 等效于 `1`，大于 `16384` 等效于 `16384`，不报错 |
 | F49 | VL 取上限 16384 时单个 FP32 Token 恰好占满全部 VRF；VL 更小时按实际长度占用，剩余容量可同时驻留多个 Token 或宏指令之间传递的中间结果 |
+| F49a | 一条宏指令在向量通路上逐段流过，一段是一个 RF entry（FP32 32 个 element、BF16 64 个），段数为 ⌈VL ÷ LANES⌉。LU 每凑齐一段就往下交，SU 收到一段就写，Load 与 Store 因此在同一条宏指令内重叠；各执行单元每拍收一段、走完自己的级数、每拍交一段，跨分组串联只增加首拍填充延迟，不降低稳态吞吐 |
+| F49b | 跨 element 的运算看的是整条，所在的宏指令不分段：VALU 的归约与 Top-16 排序、MEXE 的数 1 与按第一个 1 生成、标量迭代 SEXE、MXFP8 的块 scale（按整条定阶） |
+| F49c | 一段在 CM 上占 段长 × CM 元素宽度 个字节，与 128 B 的块边界不一定对齐：一段的尾巴与下一段的头合起来才是一个整块。SU 按块攒，一段排一笔写，不为跨边界那几个字节多写一次 |
 
 ### 状态与同步
 
@@ -444,7 +447,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="458" y="342" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="362" font-size="11" fill="#111827">退休与 dsa_done</text>
   <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
-  <text x="20" y="438" font-size="10.5" fill="#374151">M6 里 VALU0 / VALU1 / VALU2 / VSFU / MEXE / SEXE 的级数各不相同，设计未给值，本轮各取 4 拍（待定）；SEXE0/1/2 是同一物理单元的三次串行迭代，因此是 3 倍。</text>
+  <text x="20" y="438" font-size="10.5" fill="#374151">M6 里 VALU0 / VALU1 / VALU2 / VSFU / MEXE / SEXE 的级数各不相同，设计未给值，本轮各取 4 拍（待定）；SEXE0/1/2 是同一物理单元的三次串行迭代，因此是 3 倍。各级是流水的：每拍收一段、每拍交一段，级数只决定首拍延迟。</text>
   <text x="20" y="466" font-size="10.5" fill="#374151">一条宏指令内多条并行通路经过的执行分组级数不同，合并点的两个源操作数会不同拍到达，配平是软件的责任：差一级用 VALU2 的 vmv.v.v 对齐，差得多就拆成多条宏指令。</text>
   <text x="20" y="494" font-size="10.5" fill="#374151">CM 访存依赖硬件不追踪，靠 MACRO_INST_FENCE；建模时若默认硬件会挡，结果会偏乐观。</text>
 </svg>
@@ -882,3 +885,7 @@ Top-K              K 固定为 16
 * **为什么执行单元之间不提供软件可见的缓冲队列**
   * 提供队列就要提供队列的调度与观测，接口面积大
   * 只提供 bypass 与广播，配平交给软件：级数差一级用 `vmv.v.v` 对齐，差得多就拆成多条宏指令
+* **模型把向量通路的 element 一律按 FP32 存，`DATA_TYPE` 因此只改吞吐不改数**
+  * 硬件上 `DATA_TYPE` 定的是向量通路内部的精度：置 BF16 时一拍吃 64 个 element，中间的加乘也是 BF16 的
+  * 模型只取了前一半：`VuOperand.vec` 是一串 `float`，`DATA_TYPE` 影响 LANES（一段几个 element）与 F47 那三处窄化点，通路内部的加乘仍按 FP32 算
+  * **这一处的差看不出来**：把一条链改成 BF16 通路，模型上只体现为拍数减半，中间累加掉的精度一位都不显。逐字节比对照样过，因为参考值与模型走的是同一套算法。R core 那条 12 行的累加链是全流水里对中间精度最敏感的地方，它现在配的就是 BF16 通路，真实精度要另找办法核

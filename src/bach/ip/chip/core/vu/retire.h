@@ -84,6 +84,12 @@ class VuRetire : public BachModule {
     // 通路上一路带下来的转换异常这时候记进 error_code。
     if (f->error != 0) cfg_reg.RaiseError(f->error);
 
+    // 一条宏指令拆成几段流过时，前几段只是它的一截，走完最后一段这一条才算完。
+    if (!f->seg_last) {
+      done->Idle();
+      return;
+    }
+
     isq.Retire();
     pipe.Retire(inst.seq);
     cfg_reg.ReleaseCfg(inst.cfg_idx);

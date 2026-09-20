@@ -172,10 +172,13 @@ void PokeCoreWeights(Mem& mm, uint64_t group, uint64_t chip, uint64_t slot,
   }
 }
 
-// token：kEmbed 个 MXFP8 与它的 scale。
-inline std::vector<uint8_t> TokenData() { return Data(kEmbed, kTokenSeed); }
-inline std::vector<uint8_t> TokenScale() {
-  return Scale(kEmbed / 32, kTokenSeed);
+// 第 k 个 token：kEmbed 个 MXFP8 与它的 scale，都用种子 kTokenSeed + k 生成。只
+// 发一个 token 的用例用第 0 个。
+inline std::vector<uint8_t> TokenData(uint64_t k = 0) {
+  return Data(kEmbed, kTokenSeed + k);
+}
+inline std::vector<uint8_t> TokenScale(uint64_t k = 0) {
+  return Scale(kEmbed / 32, kTokenSeed + k);
 }
 
 }  // namespace kn

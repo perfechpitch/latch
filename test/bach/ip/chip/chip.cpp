@@ -94,8 +94,9 @@ TEST(BachCore, PortsAreRouterOnly) {
     EXPECT_NE(core.InWire(d), nullptr) << "d=" << d;
     EXPECT_NE(core.OutWire(d), nullptr) << "d=" << d;
     EXPECT_NE(core.BackWire(d), nullptr) << "d=" << d;
-    // VC credit 与 stream release 的回程各走各的实例。
-    EXPECT_NE(core.UpBackWire(d), core.UpReleaseWire(d)) << "d=" << d;
+    // 还给上游的 VC credit 单走一根；stream release 与数据反向走，写在出线上。
+    EXPECT_NE(core.UpBackWire(d), nullptr) << "d=" << d;
+    EXPECT_NE(core.UpBackWire(d), core.OutWire(d)) << "d=" << d;
   }
   EXPECT_EQ(core.Context().core_id, 3u);
 }
@@ -277,6 +278,52 @@ TEST(BachC2c, CreditIsPrivateThenShared) {
   c.Give(0);
   EXPECT_EQ(c.Private(0), 2u);
   EXPECT_EQ(c.Shared(), 3u);
+}
+
+// 从 core 收 flit 的那一级按 Router 给这个方向的 credit 总量留位置：两个 VC 各
+// 发满 20 个 private，再用掉 20 个 shared，桥这一侧一个都不丢。对侧不还 credit，
+// 收下的一个都发不出去。
+TEST(BachC2c, CoreSideHoldsEveryVcsPrivateAndTheShared) {
+  uint64_t blocked = 0, held = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    C2cRcVaSa rc(clk, "rc", kC2cRxPrivate, kC2cRxShared, 0, false);
+    class Feeder : public BachModule {
+     public:
+      Feeder(ClockPtr c, C2cRcVaSa& target)
+          : BachModule(c, "feed"), rv(target) {}
+
+     protected:
+      void Step() override {
+        LinkEndPtr w = rv.FromCore();
+        if (sent < 3 * kVcPrivateDepth) {
+          auto m = std::make_shared<Message>();
+          m->size = 256;
+          // 前 40 个两个 VC 轮流，各用满 private；后 20 个都在 VC0，用 shared。
+          uint64_t vc = sent < 2 * kVcPrivateDepth ? (sent % 2) * 3 : 0;
+          w->flit.Drive(vc, true, true, 256, m);
+          ++sent;
+        } else {
+          w->flit.Idle();
+        }
+        w->release.Idle();
+        rv.RunStep();
+      }
+
+     private:
+      C2cRcVaSa& rv;
+      uint64_t sent = 0;
+    };
+    Feeder feed(clk, rc);
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    blocked = rc.Blocked();
+    held = rc.Granted();
+  }
+  RT::Reset();
+  EXPECT_EQ(blocked, 0u);
+  EXPECT_EQ(held, 3 * kVcPrivateDepth) << "60 个 flit 都收下了";
 }
 
 TEST(BachC2c, TxSplitsAtSegmentBoundary) {
@@ -486,7 +533,7 @@ TEST(BachC2c, ReleaseGoesBeforeData) {
         m->user_id = 7;
         m->size = 256;
         wire->flit.Drive(1, true, true, 256, m);
-        wire->release.Drive(false, 0, /*stream_rel=*/true, 42, false, 0);
+        wire->release.Drive(false, 0, /*stream_rel=*/true, 42);
         sent = true;
       }
 
@@ -547,7 +594,7 @@ TEST(BachC2c, VcCreditIsPackedAcrossC2c) {
       void Step() override {
         wire->flit.Idle();
         if (sent < 8) {
-          wire->release.Drive(true, 1, false, 0, false, 0);
+          wire->release.Drive(true, 1, false, 0);
           ++sent;
         } else {
           wire->release.Idle();

@@ -14,10 +14,10 @@
 // 同 VC 保序：VC Buffer 是 FIFO，同 VC 内 flit 严格按到达顺序读出，资源检查与仲裁
 // 都不重排。跨 VC、跨 input port 之间不保证顺序。
 //
-// 队首在四个 VC 之间轮询选一个交给 Xbar。Xbar 每拍发布它那个入口还收不收得下，
-// 收得下就发，发了当场出队并归还 VC credit。等授予的话一笔要占两拍，一个方向
-// 的吞吐就只剩每两拍一个 flit。credit 不足的 VC 被跳过，同一个 input port 的其他
-// VC 不受影响。
+// 队首在四个 VC 之间轮询选一个交给 Xbar。Xbar 每拍按 VC 发布它那个入口还收不收
+// 得下，这个 VC 收得下就发，发了当场出队并归还 VC credit。等授予的话一笔要占两
+// 拍，一个方向的吞吐就只剩每两拍一个 flit。资源不足的那一笔在 Xbar 那个 VC 的
+// 入口缓冲里等，同一个 input port 的其他 VC 不受影响。
 //
 // 不派角色的 core 上只走直通：数据走完整流水线但不投递本 core，不检查 credit、
 // 不支持阻塞重发。
@@ -146,13 +146,6 @@ class RouterStation : public BachModule {
   // Xbar 那一侧上一拍说收得下就发，发了当场出队并把 VC 槽还给上游：等授予的话
   // 一笔要占两拍，一个方向的吞吐就砍掉一半。
   void IssueRequest() {
-    if (!req->Room()) {
-      // 下游入口缓冲快满了，本拍不发，队列原地不动。
-      req->IdleReq();
-      up_back->flit.Idle();
-      up_back->release.Idle();
-      return;
-    }
     for (uint64_t k = 1; k <= kVcNum; ++k) {
       uint64_t v = (rr_last + k) % kVcNum;
       if (vc_buf[v].empty()) continue;
@@ -174,9 +167,12 @@ class RouterStation : public BachModule {
         Drop(v);
         return;
       }
+      // Xbar 那一侧这个 VC 的入口缓冲快满了，这个 VC 本拍不发，队列原地不动。
+      uint64_t nvc = NextVcOf(e, mask, f.vc);
+      if (!req->RoomFor(nvc)) continue;
       req->valid = 1;
       req->out_mask = mask;
-      req->vc = NextVcOf(e, mask, f.vc);
+      req->vc = nvc;
       req->head = f.head ? 1 : 0;
       req->tail = f.tail ? 1 : 0;
       req->bytes = f.bytes;
@@ -185,7 +181,7 @@ class RouterStation : public BachModule {
       req->enters_core = (!pass_through && e.EntersCore(f.msg->path_core_mask))
                              ? 1 : 0;
       req->stall_way = (!pass_through && e.stall_way) ? 1 : 0;
-      req->need_stream = (!pass_through && e.stream_table_enable) ? 1 : 0;
+      req->stream_need = pass_through ? 0 : e.stream_need;
       req->whole_packet = HasWholePacket(v) ? 1 : 0;
       req->credit_require = pass_through ? 0 : RequireOf(e, mask);
       req->msg = f.msg;
@@ -201,7 +197,7 @@ class RouterStation : public BachModule {
       }
       ++forwarded_pending;
       up_back->flit.Idle();
-      up_back->release.Drive(true, v, false, 0, false, 0);
+      up_back->release.Drive(true, v, false, 0);
       return;
     }
     req->IdleReq();
@@ -221,7 +217,7 @@ class RouterStation : public BachModule {
     rr_last = v;
     req->IdleReq();
     up_back->flit.Idle();
-    up_back->release.Drive(true, v, false, 0, false, 0);
+    up_back->release.Drive(true, v, false, 0);
   }
 
   // 这一笔在下游要占多少 credit。多个出方向时取第一个置位方向那一份，多播

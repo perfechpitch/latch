@@ -14,7 +14,7 @@
 //
 // 端口固有的一拍延迟被 latency 吸收，不额外扣时：R2R 40T、C2C 400T 都远大于一拍。
 //
-// 数据与三种 release 各走各的实例、参数相同，所以这里是四条互不相干的通道，各
+// 数据与两种 release 各走各的实例、参数相同，所以这里是三条互不相干的通道，各
 // 记各的 last_busy_until。
 
 #include <deque>
@@ -55,8 +55,7 @@ class Link : public BachModule {
   uint64_t Inflight() const { return inflight.Get(); }
 
   bool Quiescent() const override {
-    return flit_q.empty() && vc_q.empty() && stream_q.empty() &&
-           reduce_q.empty();
+    return flit_q.empty() && vc_q.empty() && stream_q.empty();
   }
 
  protected:
@@ -67,7 +66,7 @@ class Link : public BachModule {
     DeliverAll(now);
     Accept(now);
 
-    inflight = flit_q.size() + vc_q.size() + stream_q.size() + reduce_q.size();
+    inflight = flit_q.size() + vc_q.size() + stream_q.size();
     sent = sent_pending;
     delivered = delivered_pending;
     EmitTraces();
@@ -117,11 +116,6 @@ class Link : public BachModule {
       PushMonotonic(stream_q, arrive);
       stream_q.push_back({r.stream_user, arrive});
     }
-    if (r.reduce_valid) {
-      uint64_t arrive = reduce_chan.Schedule(now, 0, cfg);
-      PushMonotonic(reduce_q, arrive);
-      reduce_q.push_back({r.reduce_user, arrive});
-    }
   }
 
   void DeliverAll(uint64_t now) {
@@ -135,18 +129,14 @@ class Link : public BachModule {
       out->flit.Idle();
     }
 
-    // 三种 release 各自独立，一拍可以同时送。
+    // 两种 release 各自独立，一拍可以同时送。
     bool vc_rel = !vc_q.empty() && vc_q.front().arrive <= now;
     bool stream_rel = !stream_q.empty() && stream_q.front().arrive <= now;
-    bool reduce_rel = !reduce_q.empty() && reduce_q.front().arrive <= now;
     uint64_t vc_id = vc_rel ? vc_q.front().user_or_vc : 0;
     uint64_t stream_u = stream_rel ? stream_q.front().user_or_vc : 0;
-    uint64_t reduce_u = reduce_rel ? reduce_q.front().user_or_vc : 0;
-    out->release.Drive(vc_rel, vc_id, stream_rel, stream_u, reduce_rel,
-                       reduce_u);
+    out->release.Drive(vc_rel, vc_id, stream_rel, stream_u);
     if (vc_rel) vc_q.pop_front();
     if (stream_rel) stream_q.pop_front();
-    if (reduce_rel) reduce_q.pop_front();
   }
 
   // 同一条链路上到达拍单调递增：发送侧的占用时刻单调，所以队首不会挡住更早到达
@@ -170,8 +160,8 @@ class Link : public BachModule {
 
   // Step 独占，不需要任何同步。
   std::deque<FlitItem> flit_q;
-  std::deque<RelItem> vc_q, stream_q, reduce_q;
-  Chan flit_chan, vc_chan, stream_chan, reduce_chan;
+  std::deque<RelItem> vc_q, stream_q;
+  Chan flit_chan, vc_chan, stream_chan;
   uint64_t sent_pending = 0, delivered_pending = 0;
 
   // 跨拍可读，末尾一次性 commit。

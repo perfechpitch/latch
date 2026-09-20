@@ -727,7 +727,7 @@ Core Mem 优先级       非同组 MU > VU = DTE > {重发、DTE RV core、ctrl_
 Matrix Mem 容量      32 + 4 MB，64 bank × 0.5625 MB；scale 区按 1 : 8 留，MXFP8 每 128 B 数据用 4 B
 Matrix Mem 带宽      (8 + 1) KB/T；地址粒度 128 B，不支持 byte mask
 Matrix Mem 延迟      50T 以内；DTE 写 9T 读 8T · MU 读 8T
-Matrix Mem 硬约束    同一 bank 不许两个 master 同时访问，冲突时只执行 MU、被让路的一笔丢弃并计数；模型直接断言失败
+Matrix Mem 硬约束    DTE、ctrl_noc、MU 三方中两方同时访问同一 bank，只执行 MU、被让路的一笔丢弃并计数；模型直接断言失败。DTE 读口与写口同属一方，两口撞同一 bank 时仲裁二选一、只反压冲突的 bank
 Core Mem 分区        由 cmem_part 定：stream 分片、scale、topk、包头、溢流重发暂存（每 VC 2 个整包，待定）、P2P 阻塞缓冲（≤ 3 个方向）
 Share Mem            32 KB，5～10 拍，不需要初始化；仲裁按轮询（待定）
 时钟域               三块都是 1 GHz

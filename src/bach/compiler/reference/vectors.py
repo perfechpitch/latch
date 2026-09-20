@@ -455,9 +455,11 @@ def kn_w2(group, expert):
                     kn_seed(KN_W2, group, expert))
 
 
-def kn_token():
-    return kn_data(KN_EMBED, KN_TOKEN_SEED), kn_scale(KN_EMBED // 32,
-                                                      KN_TOKEN_SEED)
+def kn_token(k=0):
+    """第 k 个 token：数据与 scale 都用种子 KN_TOKEN_SEED + k 生成。只发一个 token
+    的那几份用第 0 个。"""
+    seed = KN_TOKEN_SEED + k
+    return kn_data(KN_EMBED, seed), kn_scale(KN_EMBED // 32, seed)
 
 
 def bf16_decode(data):
@@ -716,16 +718,39 @@ def write_moe_lpu(path):
     write(path, lines)
 
 
+# 同一个 LPU 上连续跑的那一份有几个 token。
+MOE_LPU_TOKENS = 32
+
+
+def kn_lpu_out(k):
+    """第 k 个 token 走完 48 颗 chip、从第 11 行 R core 出来的结果。"""
+    return kn_rows(kn_token(k), MOE_LPU_GROUPS)[2][-1]
+
+
+def moe_lpu_tokens_lines(outs):
+    """连续跑那一份的全部行：outs 是各 token 出口上的结果，按序号排。"""
+    return kn_header("48 颗 chip 上连续跑 32 个 token：每个 token 出口上的结果",
+                     [f"groups {MOE_LPU_GROUPS}", f"tokens {len(outs)}"] +
+                     [f"out{k} {hbytes(o)}" for k, o in enumerate(outs)])
+
+
+def write_moe_lpu_tokens(path):
+    """48 颗 chip 上连续跑 32 个 token，各 token 内容不同、topK 相同，每个只留
+    出口上的结果。"""
+    outs = [kn_lpu_out(k) for k in range(MOE_LPU_TOKENS)]
+    write(path, moe_lpu_tokens_lines(outs))
+
+
 def write(path, lines):
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"  {os.path.basename(path):<12} {len(lines) - 1} 条")
 
 
-# 一次要跑很久的那几份。一颗 chip 的参考实现要算几秒，8 颗与 48 颗那两份自检默认
-# 跳过：同一段代码在 moe_chip.txt 与 moe_two_groups.txt 上已经查过，跳的只是这两份
+# 一次要跑很久的那几份。一颗 chip 的参考实现要算几秒，8 颗与 48 颗那三份自检默认
+# 跳过：同一段代码在 moe_chip.txt 与 moe_two_groups.txt 上已经查过，跳的只是这三份
 # 的新鲜度。
-SLOW = ("moe_group.txt", "moe_lpu.txt")
+SLOW = ("moe_group.txt", "moe_lpu.txt", "moe_lpu_tokens.txt")
 
 
 def main(skip_slow=False):
@@ -742,6 +767,7 @@ def main(skip_slow=False):
     if not skip_slow:
         write_moe_group(os.path.join(OUT_DIR, "moe_group.txt"))
         write_moe_lpu(os.path.join(OUT_DIR, "moe_lpu.txt"))
+        write_moe_lpu_tokens(os.path.join(OUT_DIR, "moe_lpu_tokens.txt"))
 
 
 if __name__ == "__main__":

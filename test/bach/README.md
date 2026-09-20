@@ -16,7 +16,7 @@ cmake --build build -j
 cd build/test && ctest --output-on-failure
 ```
 
-构建类型不给就是 `Debug`。跑三层整体那几份要给 `Release`：48 颗 chip 那一份要推 36195 拍，`Debug` 下一份就要跑掉好几分钟。这台机器（16 核 32 线程）上 `ctest -j 4` 全量一遍约 2 分钟，最长的是 `moe_lpu`。
+构建类型不给就是 `Debug`。跑三层整体那几份要给 `Release`：48 颗 chip 那两份要推 15398 拍与 41653 拍，`Debug` 下一份就要跑掉好几分钟。这台机器（16 核 32 线程）上 `ctest -j 4` 全量一遍约 4 分钟，最长的是 `moe_lpu_tokens`，单独跑约 2 分半，`moe_lpu` 约 45 秒。
 
 `test/bach/` 下每个 `.cpp` 自动成为一个 CTest 目标，目标名取文件名。跑单个目标：
 
@@ -55,23 +55,24 @@ bundle 下各套配置的目录。镜像不在就跳过，用例自己会报 `ke
 | 目标 | 用例 | 规模与拍数 |
 | - | - | - |
 | `chip_e2e` | `TokenCrossesTwoChips` | 一个 token 过 C2C 从一颗中间列 chip 到另一颗，片内经过坏 core7，中间隔一段 300 拍的 PCIe 链路 |
-| `moe_chip` | `BcoreStartsTheBroadcast` | 一颗第一列 chip 八个计算 core：B core 广播 token，chip 内归约进 dot core，FC2 输入广播回本 chip，concat 从 E 口出去，3094 拍 |
-| `moe_chip` | `OneRowOfTwoChipsLandsInTheReductionCore` | 一行两颗 chip，左边那颗带坏 core2、core7，行链两跳落进右边那颗的 R core，5598 拍 |
-| `moe_chip` | `OneEpGroupHasTwoReductionCores` | 一个 EP 组八颗 chip 六十四个计算 core，中间两列 chip 带坏 core2、core7，两行各进本行 R core，两个 R core 串链，11068 拍 |
-| `moe_chip` | `WeightsComeInBeforeTheFirstToken` | 权重与 scale 先走数据面进 Matrix Mem，切业务模式之后再发 token，9972 拍 |
+| `moe_chip` | `BcoreStartsTheBroadcast` | 一颗第一列 chip 八个计算 core：B core 广播 token，chip 内归约进 dot core，FC2 输入广播回本 chip，concat 从 E 口出去，1940 拍 |
+| `moe_chip` | `OneRowOfTwoChipsLandsInTheReductionCore` | 一行两颗 chip，左边那颗带坏 core2、core7，行链两跳落进右边那颗的 R core，3045 拍 |
+| `moe_chip` | `OneEpGroupHasTwoReductionCores` | 一个 EP 组八颗 chip 六十四个计算 core，中间两列 chip 带坏 core2、core7，两行各进本行 R core，两个 R core 串链，4958 拍 |
+| `moe_chip` | `WeightsComeInBeforeTheFirstToken` | 权重与 scale 先走数据面进 Matrix Mem，切业务模式之后再发 token，8704 拍 |
 
 ### LPU 层
 
 | 目标 | 用例 | 规模 |
 | - | - | - |
 | `lpu_e2e` | 2 | 一个 token 从入口桩进阵列、穿 15 颗 chip、从出口桩出来。走 `Lpu` 那一层的装配与 PCIe Switch，只验链路不算数 |
-| `moe_lpu` | `OneLayerAcrossFortyEightChips` | 48 颗 chip 摆成 12 层 × 4 列，每颗 2×5，共 480 个 core、三百八十四个计算 core，两层一个 EP 组共 6 组，12 个 R core 逐行串链，36195 拍 |
+| `moe_lpu` | `OneLayerAcrossFortyEightChips` | 48 颗 chip 摆成 12 层 × 4 列，每颗 2×5，共 480 个 core、三百八十四个计算 core，两层一个 EP 组共 6 组，12 个 R core 逐行串链；发一个 token，逐颗 chip、逐行核对中间量，15398 拍 |
+| `moe_lpu_tokens` | `ThirtyTwoTokensWithSixteenCredits` | 同 `moe_lpu` 的 48 颗 chip；GPU 一侧有 16 份额度，连续发 32 个 token，额度一直用满。每个 token 一个用户号，R core 上落同一个槽的两个 token 前一个的结果出来才发后一个；核对出口上的每一包，41653 拍 |
 
-`moe_chip` 与 `moe_lpu` 的配置不写在用例里：任务链、路由表、进核配置、TS 的全局项与
+`moe_chip`、`moe_lpu` 与 `moe_lpu_tokens` 的配置不写在用例里：任务链、路由表、进核配置、TS 的全局项与
 三份 kernel 都由 `LoadBundle()` 装。一份拓扑描述编出一套 bundle，落在
 `src/bach/compiler/bundle/<拓扑名>/` 下，里面是 `<拓扑名>.bachir` 加三份 kernel 镜像，
 每套自己带全。`compiler/topo/` 下四份拓扑描述各对一套：`moe_chip`、`moe_two_groups`、
-`moe_group`、`moe_lpu`。改了拓扑或者改了 kernel 都要重编一次：
+`moe_group`、`moe_lpu`，`moe_lpu_tokens` 装的也是 `moe_lpu` 那一套。改了拓扑或者改了 kernel 都要重编一次：
 
 ```shell
 make -C src/bach/compiler/kernel                                    # kernel 变了
@@ -81,7 +82,7 @@ python3 src/bach/compiler/gen_hwconfig.py --topo src/bach/compiler/topo/<拓扑�
 权重、topK 表、本组专家表，以及第 0 行 R core 在 Share Mem 里表示“只等本行结果”的那个标志，仍由用例铺：那几样是模型参数不是配置。
 weights 加载那一条 path 只在那个用例里用，不进 bundle，由用例自己铺。
 
-`moe_lpu` 的 chip 之间由用例直接对接，走的不是 `Lpu` 那一层的装配，也没有 PCIe Switch 与进出口桩。算得对与装配对这两件因此分在两份用例里。
+`moe_lpu` 与 `moe_lpu_tokens` 的 chip 之间由用例直接对接，走的不是 `Lpu` 那一层的装配，也没有 PCIe Switch 与进出口桩。算得对与装配对这两件因此分在不同的用例里。
 
 ***
 
@@ -91,15 +92,15 @@ weights 加载那一条 path 只在那个用例里用，不进 bundle，由用�
 
 | 模块 | 目标 | 用例数 |
 | - | - | - |
-| Router | `router_basic`、`router_config`、`router_arbiter`、`router_core_station`、`router_reduce`、`router_reissue`、`router_assembly`、`router_scenarios` | 76 |
-| TS | `ts`、`ts_config`、`ts_chain`、`ts_issue`、`ts_done`、`ts_credit` | 58 |
-| DTE | `dte`、`dte_inbound`、`dte_commit`、`dte_lane`、`dte_completion`、`dte_tables` | 52 |
+| Router | `router_basic`、`router_config`、`router_arbiter`、`router_core_station`、`router_reduce`、`router_reissue`、`router_assembly`、`router_scenarios` | 77 |
+| TS | `ts`、`ts_config`、`ts_chain`、`ts_issue`、`ts_done`、`ts_credit` | 59 |
+| DTE | `dte`、`dte_inbound`、`dte_commit`、`dte_lane`、`dte_completion`、`dte_tables` | 53 |
 | MU | `mu`、`mu_issue` | 27 |
 | VU | `vu` | 36 |
 | RV core | `rv_core`、`rv_lsq`、`rv_task`、`custom0` | 25 |
-| 三块存储 | `memory` | 22 |
+| 三块存储 | `memory` | 23 |
 | 数值格式 | `numeric`、`numeric_cross` | 21 |
-| 片外与链路 | `link`、`external`、`pcie_switch` | 20 |
+| 片外与链路 | `link`、`external`、`pcie_switch` | 21 |
 
 ## 装配基线
 
@@ -107,7 +108,7 @@ weights 加载那一条 path 只在那个用例里用，不进 bundle，由用�
 
 | 目标 | 用例数 | 验什么 |
 | - | - | - |
-| `chip` | 21 | core 与 chip 两层的装配，含写 `core_bad_mask` 之后坏 core 进透传档、C2C 上的包拆了又拼回来还是不是原来那一个 |
+| `chip` | 22 | core 与 chip 两层的装配，含写 `core_bad_mask` 之后坏 core 进透传档、C2C 上的包拆了又拼回来还是不是原来那一个 |
 | `lpu` | 17 | 48 颗 chip 的坐标换算、按列的 `core_bad_mask` 与角色分配表、同层左右与同列上下的直连、跨 tray 那两处的参数、每层两端接的 PCIe Switch |
 | `bundle_load` | 13 | 装载检查：坏 core 的个数与位置、坏 core 上只有 Router 的配置、角色与体现角色的那几项配置对得上，每条一个反例 |
 
@@ -124,13 +125,14 @@ weights 加载那一条 path 只在那个用例里用，不进 bundle，由用�
 
 ## 波形
 
-八份 moe 用例各写一份波形，落在跑测试时的当前目录：
+九份 moe 用例各写一份波形，落在跑测试时的当前目录：
 
 | 目标 | 波形 |
 | - | - |
 | `moe` | `moe_one_core.trace`、`moe_vu_gate.trace`、`moe_dot_chain.trace` |
 | `moe_chip` | `moe_chip_bcast.trace`、`moe_chip_group.trace`、`moe_chip_two_groups.trace`、`moe_chip_weights.trace` |
 | `moe_lpu` | `moe_lpu.trace` |
+| `moe_lpu_tokens` | `moe_lpu_tokens.trace` |
 
 打开：
 
@@ -293,10 +295,10 @@ chip 这一级另记四座 C2C 桥各 5 个，加 `scp.state` 一个。
 
 ## 判据从哪来
 
-算数值的那几份（`moe`、`moe_chip`、`moe_lpu`、`e2e` 的后三个、`numeric`）不写期望值，与 `src/bach/compiler/reference/` 的 Python 参考实现逐 bit 比对。向量存在 `src/bach/compiler/reference/vectors/`，由 `vectors.py` 产出：
+算数值的那几份（`moe`、`moe_chip`、`moe_lpu`、`moe_lpu_tokens`、`e2e` 的后三个、`numeric`）不写期望值，与 `src/bach/compiler/reference/` 的 Python 参考实现逐 bit 比对。向量存在 `src/bach/compiler/reference/vectors/`，由 `vectors.py` 产出：
 
 ```shell
-python3 src/bach/compiler/reference/vectors.py     # 全部重算，约 4 分钟
+python3 src/bach/compiler/reference/vectors.py     # 全部重算，约 2 小时，几乎都花在 moe_lpu_tokens.txt 上
 ```
 
 一个 core 的权重约 1.2 MiB，向量里只给种子，两侧按同一个规则逐 tile 生成。改了尺寸才需要重算。
@@ -308,7 +310,7 @@ python3 src/bach/compiler/reference/vectors.py     # 全部重算，约 4 分钟
 放进 `test/bach/` 下与被测模块对应的目录，文件名就是目标名。共用的东西按 `test/...` 引：
 
 * `test/bach/ip/chip/kn_data.h`：KN 拆分的尺寸、Core Mem 与 Matrix Mem 上的摆放、权重与 token 的生成，core 层与 chip 层的 MoE 用例共用
-* `test/bach/ip/chip/moe_common.h`：chip 层与 LPU 层 MoE 用例共用的比对向量读入、每个 core 的数据、weights 加载阶段、注入与收取的 harness、按 chip 与按 R core 核对中间量
+* `test/bach/ip/chip/moe_common.h`：chip 层与 LPU 层 MoE 用例共用的比对向量读入、每个 core 的数据、weights 加载阶段、48 颗 chip 的建立与装载、注入与收取的 harness（含连续发 token 时 GPU 一侧的额度），按 chip、按 R core 与按出口上的每一包核对
 * `test/bach/ip/chip/core/` 下按模块分目录，与 `src/bach/ip/chip/core/` 一一对应
 
 协程槽位要自己数够：每个挂时钟的模块占一个常驻协程，槽位不够时多出来的协程永远等不到空位，表现是进程卡住而不是报错。`moe_common.h` 的 `EnsureSlots(n)` 收的是本次要各占协程的 core 数。

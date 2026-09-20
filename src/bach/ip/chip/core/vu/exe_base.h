@@ -13,8 +13,13 @@
 // 且有依赖的耗两段，这正是「合并点的两个源操作数不同拍到达」那件事。链序原文
 // 没给，标为待定。
 //
-// 硬件不提供软件可见的缓冲队列，所以这一段每级只压一条，不排队。
+// 这一段是流水的：每拍收一个 RF entry，内部走 stages 级，每拍交出一个。MAS 记
+// 的「全吞吐为常态，每周期接受 1 个 VRF entry；跨分组串联只增加首拍填充延迟，
+// 不降低稳态吞吐」就是这个意思。本条不动这个单元时当拍透传，不占级数。
+//
+// 硬件不提供软件可见的缓冲队列：在飞的条数就等于级数，压不住就往上游报不收。
 
+#include <deque>
 #include <memory>
 #include <string>
 
@@ -90,7 +95,7 @@ class VuExeStage : public BachModule {
   uint64_t Done() const { return done.Get(); }
   // 本单元处于 Busy 状态的累计拍数，Profile 那一档要它。
   uint64_t BusyCycles() const { return busy_cnt; }
-  bool Quiescent() const override { return !busy && !holding; }
+  bool Quiescent() const override { return pipe.empty() && !holding; }
 
  protected:
   // 本条要不要动这个单元。不动就当拍透传。
@@ -99,76 +104,85 @@ class VuExeStage : public BachModule {
   virtual void Compute(VuFlow& f) = 0;
 
   void Step() override {
-    Drain();
-    Advance();
+    // 先把在飞的推进一级，再收本拍新来的，最后看出口。收在推进之后，所以当拍
+    // 收下的那一个不会被本拍推掉；透传的那一档 left 是 0，当拍就走。
+    Tick();
     Accept();
-    if (busy) ++busy_cnt;
+    Emit();
+    if (!pipe.empty() || holding) ++busy_cnt;
     done = done_cnt;
     busy_cycles = busy_cnt;
-    TracePerCycle("busy", busy ? 1 : 0);
+    TracePerCycle("busy", (!pipe.empty() || holding) ? 1 : 0);
+    TracePerCycle("depth", pipe.size());
+    TracePerCycle("hold", holding ? 1 : 0);
   }
 
  private:
-  void Drain() {
-    if (!holding) return;
-    if (!out->Ready()) {
-      out->Drive(held, out_seq);
-      return;
-    }
-    holding = false;
-    held = VuFlowPtr();
-  }
+  // 在飞的一级：本段的现场、它的序号、还差几拍出得来。
+  struct Slot {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+    uint64_t left = 0;
+  };
 
-  void Advance() {
-    if (!busy || holding) return;
-    if (left > 0) {
-      --left;
-      out->Idle();
-      return;
+  void Tick() {
+    for (Slot& s : pipe) {
+      if (s.left > 0) --s.left;
     }
-    Compute(*flight);
-    busy = false;
-    held = flight;
-    flight = VuFlowPtr();
-    holding = true;
-    out_seq = flight_seq;
-    ++done_cnt;
-    out->Drive(held, out_seq);
   }
 
   void Accept() {
-    in->DriveReady(!busy && !holding);
-    if (busy || holding) return;
-    if (!in->Valid() || in->Seq() == last_seq) {
-      out->Idle();
-      return;
-    }
+    // 上游读的是本级上一拍发布的 ready，所以级数之外要再留一格：压到正好满
+    // 才说不收的话，上游那一拍已经不发了，稳态下每两拍就空掉一拍。
+    uint64_t depth = (stages > 0 ? stages : 1) + 1;
+    bool room = pipe.size() < depth;
+    in->DriveReady(room);
+    if (!room) return;
+    if (!in->Valid() || in->Seq() == last_seq) return;
     VuFlowPtr f = in->Flow();
-    if (!f) {
-      out->Idle();
-      return;
-    }
+    if (!f) return;
     last_seq = in->Seq();
-    flight_seq = in->Seq();
-    if (!Active(f->uops)) {
+
+    Slot s;
+    s.f = f;
+    s.seq = in->Seq();
+    if (Active(f->uops)) {
+      Compute(*f);
+      s.left = stages;
+    } else {
       // 本条不动这个单元：当拍透传，不占级数。
-      held = f;
+      s.left = 0;
+    }
+    pipe.push_back(s);
+  }
+
+  void Emit() {
+    if (holding) {
+      if (!out->Ready()) {
+        out->Drive(held, out_seq);
+        return;
+      }
+      holding = false;
+      held = VuFlowPtr();
+    }
+    if (!pipe.empty() && pipe.front().left == 0) {
+      held = pipe.front().f;
+      out_seq = pipe.front().seq;
+      pipe.pop_front();
       holding = true;
-      out_seq = flight_seq;
+      ++done_cnt;
       out->Drive(held, out_seq);
       return;
     }
-    flight = f;
-    busy = true;
-    left = stages > 0 ? stages - 1 : 0;
     out->Idle();
   }
 
   uint64_t stages;
   std::shared_ptr<VuFlowPort> in, out;
-  VuFlowPtr flight, held;
-  bool busy = false, holding = false;
-  uint64_t left = 0, out_seq = 0, flight_seq = 0, last_seq = 0, done_cnt = 0;
+  std::deque<Slot> pipe;
+  VuFlowPtr held;
+  bool holding = false;
+  uint64_t out_seq = 0, last_seq = 0, done_cnt = 0;
   uint64_t busy_cnt = 0;
 
   Logic64 done, busy_cycles;

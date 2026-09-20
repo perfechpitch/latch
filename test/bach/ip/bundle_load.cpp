@@ -107,8 +107,12 @@ TEST_F(BachBundleCheck, TheCompiledBundleLoads) {
 // core5 不派角色、只有 RTAB，标成坏 core 也对得上：装得进去，只有它进透传档。
 TEST_F(BachBundleCheck, BadCoreWithOnlyRouterRecordsLoads) {
   Mutation m;
-  m.replace = {{"CHIP 0 0x000", "CHIP 0 0x020"}};
-  ASSERT_EQ(WriteMutated("bad_core5", m), 1u);
+  // 坏 core 只转发、不记账：改成坏 core 的同时把它那条 streamNeedMask 清掉。
+  m.replace = {
+      {"CHIP 0 0x000", "CHIP 0 0x020"},
+      {"RTAB 0 5 4 1 4 0 0 0 0 0 0 0 0 1 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+       "RTAB 0 5 4 1 4 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"}};
+  ASSERT_EQ(WriteMutated("bad_core5", m), 2u);
   std::vector<Chip*> all = {chip.get()};
   LoadBundle(all, kCheckRoot, "bad_core5");
   for (uint64_t i = 0; i < kChipCoreNum; ++i) {
@@ -143,8 +147,8 @@ TEST_F(BachBundleCheck, BadCoreEnteringCoreIsRejected) {
   ExpectRejected(
       "bad_enters_core",
       {{{"CHIP 0 0x000", "CHIP 0 0x020"},
-        {"RTAB 0 5 5 1 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
-         "RTAB 0 5 5 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"}},
+        {"RTAB 0 5 5 1 1 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
+         "RTAB 0 5 5 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"}},
        {}});
 }
 

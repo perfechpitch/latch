@@ -203,25 +203,26 @@ TEST(BachMatrixMem, SameBankIsDetected) {
   EXPECT_GT(conflicts, 0u);
 }
 
-// DTE 的读与写是同一个 master 的两只口，撞同一个 bank 不算违反硬约束，排队即可。
-TEST(BachMatrixMem, DteReadWriteSameBankQueuesNotConflicts) {
-  uint64_t conflicts = 0, rd_rsp = 0, wr_rsp = 0;
+// DTE 的读口与写口是同一方：两个口撞在同一个 bank 上排队，不算硬约束被违反。
+// 同一拍到的两笔，读先得，写等一拍，所以写从收下到回响应比 9T 多。
+TEST(BachMatrixMem, DteReadAndWriteOnOneBankQueue) {
+  uint64_t conflicts = 0, rd_lat = 0, wr_lat = 0;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
     MatrixMem mm(clk, "mmem");
     MemDriver rd(clk, mm.Port(kMmemDteRd), 1, 0, 4);
     MemDriver wr(clk, mm.Port(kMmemDteWr), 1, 0, 4, Bytes({9, 9, 9, 9}));
     ConflictProbe probe(clk, mm);
-    clk->Continue(120 * kPeriod);
+    clk->Continue(60 * kPeriod);
     RT::JoinAll();
     conflicts = probe.conflicts;
-    rd_rsp = rd.rsp_cycle;
-    wr_rsp = wr.rsp_cycle;
+    rd_lat = rd.rsp_cycle - rd.issue_cycle;
+    wr_lat = wr.rsp_cycle - wr.issue_cycle;
   }
   RT::Reset();
   EXPECT_EQ(conflicts, 0u);
-  EXPECT_GT(rd_rsp, 0u);
-  EXPECT_GT(wr_rsp, 0u);
+  EXPECT_EQ(rd_lat, 8u);
+  EXPECT_GT(wr_lat, 9u) << "写的那一笔排在读后面";
 }
 
 // Matrix Mem 读 8T、写 9T。

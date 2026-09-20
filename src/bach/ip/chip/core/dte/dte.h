@@ -64,10 +64,12 @@ class Dte {
       : clk(clock), cfg(setting), agcu(setting.cmem) {
     const uint64_t gid = TraceGroup(name, parent);
     hmem = std::make_unique<Hmem>(clock, "hmem", gid, setting.tick);
-    // 进核那块只有 in_ch 一个通道用，出核那块四个出核通道各分一份。
+    // 一个通道一份 Buffer：进核那块归 in_ch，出核那块四个出核通道各一份，
+    // 各自 kDteBufFlits 项，不是四个分一份。
     in_buf = std::make_unique<DteBuffer>(clock, "in_buf", kDteBufFlits,
                                          1, gid, setting.tick);
-    out_buf = std::make_unique<DteBuffer>(clock, "out_buf", kDteBufFlits,
+    out_buf = std::make_unique<DteBuffer>(clock, "out_buf",
+                                          kDteBufFlits * (kLaneNum - 1),
                                           kLaneNum - 1, gid, setting.tick);
     parser = std::make_unique<HeaderParser>(clock, "parser", gid,
                                             setting.tick);

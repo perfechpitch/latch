@@ -134,7 +134,7 @@
 | 第二层　chip 内 core 间 | 切 K 后各 core 的部分和 | Router 的 ReduceModule，Read-Modify-Write | 包流经每一跳就加，不等齐 | ReduceModule 上下文，16 用户 × 32 KiB | Reduce credit |
 | 第三层　EP 组间 | 各行的结果，沿 12 个 R core 逐行累加 | R core 的 VU | 一个用户的两笔到齐才加 | R core 的 Matrix Mem，32 MB | 派遣前预留所有 R core 的余量 |
 
-三层不共用机制。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层用一个 core 的 Matrix Mem 做缓冲，等齐再加。
+三层不共用机制。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层用一个 core 的 Matrix Mem 做缓冲，等齐再加。《EP组间Reduction讨论（过程）》把“复用 TP Reduction 通路做 EP Reduction”列在放弃方案里，原话是“EP覆盖的范围远大于TP的范围，而且EP之间存在很大程度的不均衡问题……否则会频繁导致任务较少的EP被反压”。
 
 第二层还带一条对软件的硬约束：**Rmem 给一个用户 32 KiB，按 FP32 驻留算，最多 8192 个 FP32**。一笔 reduce 装不下时，软件要按这个容量把它拆成几笔，每笔在 TS 任务链上配成一项逐级 reduce 任务。《TS_通信机制》的例子是把一笔 32 KB 拆成 **4 笔 8 KB**，链上连着配 4 项。默认用例的两条归约链一笔都装得下，不用拆：一行 4 颗 chip 逐跳 reduce 进本行 R core 的那条链，一包是 16 B 软件信息加 12288 B（6144 个 BF16），在 Rmem 里驻留 6144 个 FP32；chip 内 8 个计算 core 归约部分和的那条链，一包是 16 B 软件信息加 2048 B（1024 个 BF16），驻留 1024 个 FP32。
 

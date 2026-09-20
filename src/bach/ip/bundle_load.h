@@ -103,7 +103,7 @@ inline void CheckBadCore(CoreKey const& key, CorePlan const& c) {
   for (auto const& one : c.rtab) {
     RouteEntry const& e = one.second;
     Require(e.path_core_bypass && e.op_type == OpType::kTransfer &&
-                !e.stream_table_enable && !e.stall_way,
+                e.stream_need == 0 && !e.stall_way,
             key, "坏 core 的 RTAB 表项只能转发：不进 core、transfer、不查 stream "
                  "表、留在 VC 等");
   }
@@ -172,8 +172,8 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     std::string const& tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && tok[1] == "9",
-               "LoadBundle: 只认 BACHIR 9 那一版产物。");
+      LOGCHECK(tok.size() == 2 && tok[1] == "10",
+               "LoadBundle: 只认 BACHIR 10 那一版产物。");
       head_ok = true;
       continue;
     }
@@ -257,7 +257,7 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       LOGCHECK(tok.size() == 4, "LoadBundle: RTABDTE 记录要三个字段。");
       c.dte_rtab.push_back(Num(tok[3]));
     } else if (tag == "RTAB") {
-      LOGCHECK(tok.size() == 32, "LoadBundle: RTAB 记录要三十一个字段。");
+      LOGCHECK(tok.size() == 31, "LoadBundle: RTAB 记录要三十个字段。");
       RouteEntry e;
       e.valid = true;
       e.op_type = OpType(Num(tok[4]));
@@ -270,7 +270,7 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       e.path_core_mask_idx = Num(tok[13]);
       e.path_core_bypass = Num(tok[14]) != 0;
       e.need_buffer = Num(tok[15]) != 0;
-      e.stream_table_enable = Num(tok[16]) != 0;
+      e.stream_need = Num(tok[16]);
       e.cur_credit_type = Num(tok[17]);
       e.cur_credit_require = Num(tok[18]);
       for (uint64_t i = 0; i < e.nxt_credit_type.size(); ++i) {
@@ -283,7 +283,6 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       e.operation = Operation(Num(tok[28]));
       e.stall_way = Num(tok[29]) != 0;
       e.ext_dst = Num(tok[30]);
-      e.reduce_need = Num(tok[31]) != 0;
       c.rtab[Num(tok[3])] = e;
       ++stat.entries;
     } else {

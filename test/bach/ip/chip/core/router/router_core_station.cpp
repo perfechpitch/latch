@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -48,6 +49,13 @@ class StationHarness : public BachModule {
         to_station(std::move(out_wire)) {}
 
   std::vector<InJob> in_jobs;
+  // 照 Xbar 那样先看准入电平再发：电平低就压着这一笔，下一拍再试。
+  bool honor_level = false;
+  // 真发出去了几笔，压着没发的还有几笔，以及 CoreStation 收下了几笔。
+  // 计数器是 Logic64，停钟之后在主线程读不到，得在协程里逐拍取。
+  uint64_t fed = 0;
+  uint64_t held = 0;
+  uint64_t admitted_seen = 0;
   // 这些拍之前不给 ready。
   uint64_t dte_ready_from = 0, ts_ready_from = 0;
   // 到点从 DTE 那一侧回灌一笔出核数据。
@@ -89,6 +97,7 @@ class StationHarness : public BachModule {
       station_msg = f.msg;
     }
 
+    admitted_seen = cs.Admitted();
     ServeHdrSide(now);
     Feed(now);
     cs.ToDte().DriveReady(now >= dte_ready_from);
@@ -130,11 +139,27 @@ class StationHarness : public BachModule {
 
   void Feed(uint64_t now) {
     bool drove = false;
-    for (auto const& j : in_jobs) {
-      if (j.at != now) continue;
-      from_xbar->flit.Drive(j.vc, j.head, j.tail, j.msg->size, j.msg);
-      drove = true;
-      break;
+    if (honor_level) {
+      // 到点的先排进队列，再按电平一拍发一笔。
+      for (auto const& j : in_jobs) {
+        if (j.at == now) queue.push_back(j);
+      }
+      if (!queue.empty() && cs.LevelPtr()->Ready()) {
+        InJob const& j = queue.front();
+        from_xbar->flit.Drive(j.vc, j.head, j.tail, j.msg->size, j.msg);
+        queue.pop_front();
+        ++fed;
+        drove = true;
+      }
+      held = queue.size();
+    } else {
+      for (auto const& j : in_jobs) {
+        if (j.at != now) continue;
+        from_xbar->flit.Drive(j.vc, j.head, j.tail, j.msg->size, j.msg);
+        ++fed;
+        drove = true;
+        break;
+      }
     }
     if (!drove) from_xbar->flit.Idle();
     from_xbar->release.Idle();
@@ -148,6 +173,7 @@ class StationHarness : public BachModule {
 
   CoreStation& cs;
   LinkEndPtr from_xbar, to_station;
+  std::deque<InJob> queue;
 };
 
 struct Bench {
@@ -379,15 +405,17 @@ TEST(BachCoreStation, HeaderIsReadThenPopped) {
   EXPECT_EQ(depth_at_end, 1u) << "两个进来、弹出一个，还剩一个";
 }
 
-// 包头队列满了对进 core 的数据反压，不静默丢：丢一个包头就等于丢一个 token
-// 的搬运任务。
+// 包头队列快满时准入电平拉低，进核的数据压在 Xbar 那一侧，不静默丢：丢一个包头
+// 就等于丢一个 token 的搬运任务。没人来读包头，队列就一直满着，剩下的一直压着。
 TEST(BachCoreStation, FullHeaderFifoBackpressures) {
-  uint64_t depth = 0, admitted = 0, rejected = 0;
+  uint64_t depth = 0, admitted = 0, fed = 0, held = 0;
+  bool ready = true;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     StationHarness h(clk, *b.cs, b.in_wire, b.out_wire);
+    h.honor_level = true;
     // 灌 20 个单拍包，队列只有 16 个位置。
     for (uint64_t i = 0; i < 20; ++i) {
       h.in_jobs.push_back({1 + i * 2, MakeMsg(100 + i, 3), true, true, 0});
@@ -395,12 +423,15 @@ TEST(BachCoreStation, FullHeaderFifoBackpressures) {
     clk->Continue(120 * kPeriod);
     RT::JoinAll();
     depth = b.cs->HeaderDepth();
-    admitted = h.dte_at.size();
-    rejected = 0;
+    admitted = h.admitted_seen;
+    fed = h.fed;
+    held = h.held;
+    ready = b.cs->CoreReady();
   }
   RT::Reset();
-  EXPECT_EQ(depth, kHeaderFifoDepth) << "最多装这么多";
-  EXPECT_LE(admitted, kHeaderFifoDepth)
-      << "多出来的那几个整笔不收，不能只收数据丢包头";
-  EXPECT_EQ(rejected, 0u);
+  EXPECT_FALSE(ready) << "包头队列满着，电平要低";
+  EXPECT_LE(depth, kHeaderFifoDepth) << "最多装这么多";
+  EXPECT_EQ(admitted, fed) << "发进去的一笔不少地收下了，没有静默丢";
+  EXPECT_EQ(fed + held, 20u) << "剩下的压在上游，不是丢了";
+  EXPECT_GT(held, 0u) << "电平低下来之后确实压住了";
 }

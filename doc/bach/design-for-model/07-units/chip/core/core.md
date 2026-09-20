@@ -160,7 +160,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="246.0" y="1105.0" font-size="8.5" fill="#475569">　Stream Resource Table · VC Credit 计数器 · Credit Release 静态旁路</text>
 <text x="246.0" y="1118.5" font-size="8.5" fill="#475569">Xbar 5 入 7 出：按输出 RoundRobin，贪婪整包，多播全有全无</text>
 <text x="1029.0" y="1078.0" font-size="8.5" fill="#475569">CoreStation：HeaderFIFO · OutputBuffer · 三态准入 · 进出 core 并行</text>
-<text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 32 KiB · RMW FP32 累加 · 下游 Reduce credit 表</text>
+<text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 32 KiB · RMW FP32 累加</text>
 <text x="1029.0" y="1105.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
 <text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
 <text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份；坏 core 上只有它步进，处在透传档</text>

@@ -29,10 +29,12 @@ core 逐跳归约进本行 R core，各行 R core 串成一条链逐行相加。
 DIR_MID, DIR_LEFT, DIR_RIGHT, DIR_NUM = 0, 1, 2, 4
 FLOW_MID, FLOW_LEFT, FLOW_RIGHT = 1, 2, 4
 FLOW_REDUCE1, FLOW_REDUCE2 = 8, 16
+# 三个 R2R 方向那一组位
+FLOW_ALL_DIR = FLOW_MID | FLOW_LEFT | FLOW_RIGHT
+# streamNeedMask 的进本 core 那一位，低三位与 flow 同位
+CORE_NEED = 8
 # VC 数，与模型的 kVcNum 同源。
 VC_NUM = 4
-# Release 静态路由的出方向掩码：低三位与 flow 同位，这一位交给本级
-RELEASE_SELF = 8
 
 # chip 的四个对外口
 CHIP_N, CHIP_E, CHIP_W, CHIP_S, CHIP_PORT_NUM = 0, 1, 2, 3, 4
@@ -176,10 +178,10 @@ class Entry:
 
     def __init__(self, flow_dir=0, vc=0, operation=OP_FORWARD,
                  op_type=OPTYPE_TRANSFER, bypass=True, mask_enable=False,
-                 mask_idx=0, need_buffer=False, stream_table_enable=False,
+                 mask_idx=0, need_buffer=False, stream_need=0,
                  credit_type=0, credit_require=0, reduce_in_mask=0,
                  reduce_data_type=0, reduce_outdata_type=0, stall_way=False,
-                 ext_dst=0, reduce_need=False):
+                 ext_dst=0):
         self.flow_dir = flow_dir
         self.vc = vc
         self.operation = operation
@@ -188,7 +190,7 @@ class Entry:
         self.mask_enable = mask_enable
         self.mask_idx = mask_idx
         self.need_buffer = need_buffer
-        self.stream_table_enable = stream_table_enable
+        self.stream_need = stream_need
         self.credit_type = credit_type
         self.credit_require = credit_require
         self.reduce_in_mask = reduce_in_mask
@@ -196,7 +198,6 @@ class Entry:
         self.reduce_outdata_type = reduce_outdata_type
         self.stall_way = stall_way
         self.ext_dst = ext_dst
-        self.reduce_need = reduce_need
 
 
 def enter_and_spread(path_id, flow):
@@ -214,14 +215,14 @@ def reduce_hop(path_id, in_mask, flow, first, last):
     """归约那一条：本级收哪几路、算完往哪个方向发。flow 不置方向位时结果交回本
     core。
 
-    operation 按收几路编码：链首只收本 core 那一份，其余收两份。链尾那一级的下游
-    不做归约，结果往下游发时不查下游 Reduce 资源。输入输出都是 BF16，中间按 FP32
-    累加。
+    operation 按收几路编码：链首只收本 core 那一份，其余收两份。输入输出都是
+    BF16，中间按 FP32 累加。往下游发不查下游资源：下游的 Rmem 与 Core Mem 是一起
+    分配的，一个用户在那边的那一项 Stream 资源同时代表两者。
     """
+    del last
     return Entry(flow_dir=flow, vc=REDUCE_VC, op_type=OPTYPE_REDUCE,
                  bypass=True, reduce_in_mask=in_mask,
                  operation=OP_REDUCE0 if first else OP_REDUCE1,
-                 reduce_need=not last,
                  reduce_data_type=REDUCE_BF16,
                  reduce_outdata_type=REDUCE_BF16)
 
@@ -267,25 +268,18 @@ class Fabric:
         self.put(chip, core_of_slot(self.cols[chip], slot), path_id, entry,
                  dte)
 
-    def put_hop(self, chip, a, b, path_id, reduce=False):
+    def put_hop(self, chip, a, b, path_id):
         """槽位 a 往槽位 b 那一跳隔着的 core 各配一条只转发的表项，方向与这一跳
-        相同。这一跳在归约链上时，隔着的 core 还要把从下游一侧进来的 Reduce
-        release 转往上游一侧。"""
+        相同。"""
         d = dir_between(a, b)
         for core in cores_between(self.cols[chip], a, b):
             self.put(chip, core, path_id, pass_through(path_id, flow_of(d)))
-            if reduce:
-                self.put_release_route(chip, core, d, flow_of(opposite_of(d)))
 
-    def put_walk(self, chip, cores, path_id, direction, reduce=False):
-        """沿一串相邻的 core 往 direction 转发，每个 core 一条只转发的表项。在归约
-        链上时，从下游一侧进来的 Reduce release 转往上游一侧。"""
+    def put_walk(self, chip, cores, path_id, direction):
+        """沿一串相邻的 core 往 direction 转发，每个 core 一条只转发的表项。"""
         for core in cores:
             self.put(chip, core, path_id,
                      pass_through(path_id, flow_of(direction)))
-            if reduce:
-                self.put_release_route(chip, core, direction,
-                                       flow_of(opposite_of(direction)))
 
 
 def wire_broadcast(fab, chip, enter_port, out_ports, path_id=IN_PATH):
@@ -377,7 +371,7 @@ def wire_chip_reduce(fab, chip):
         if i > 0:
             prev = CHIP_CHAIN[i - 1]
             in_lane = opposite_of(dir_between(prev, slot))
-            fab.put_hop(chip, prev, slot, path, reduce=True)
+            fab.put_hop(chip, prev, slot, path)
 
         last = i + 1 == len(CHIP_CHAIN)
         flow = 0
@@ -386,9 +380,6 @@ def wire_chip_reduce(fab, chip):
             if out_dir == DIR_NUM:
                 raise ValueError(f"chip 内归约链第 {i} 跳的两个槽位不相邻")
             flow = flow_of(out_dir)
-            # 下游做完一笔还回来的 release 从往下游去的那个口进来，交给本级。
-            fab.put_release_route(chip, core_of_slot(col, slot), out_dir,
-                                  RELEASE_SELF)
 
         own_lane = 1 if in_lane == DIR_MID else 0
         if own_lane == 1:
@@ -435,6 +426,94 @@ def wire_concat(fab, chip):
         fab.put_slot(chip, DOT_SLOT, path, land_in_core(path))
 
 
+def neighbor(chip, core, direction, rows, cols):
+    """(chip, 片内 core) 往某个方向的下一个 core。
+
+    片内按编号走；走到边上时从那个 chip 口出去，E 对 W、S 对 N：core0 坐在 N 口
+    上接上一层，core4 坐在 E 口上接右边一颗，core5 坐在 W 口上接左边一颗，core9
+    坐在 S 口上接下一层。走出阵列返回 None。
+    """
+    gx, gy = chip % cols, chip // cols
+    row, col = core // CHIP_COLS, core % CHIP_COLS
+    if direction == DIR_MID:
+        return (chip, core + CHIP_COLS if row == 0 else core - CHIP_COLS)
+    if direction == DIR_LEFT:
+        if col > 0:
+            return (chip, core - 1)
+        if core == 0:
+            return (chip - cols, CHIP_CORES - 1) if gy > 0 else None
+        return (chip - 1, CHIP_COLS - 1) if gx > 0 else None
+    if direction == DIR_RIGHT:
+        if col + 1 < CHIP_COLS:
+            return (chip, core + 1)
+        if core == CHIP_COLS - 1:
+            return (chip + 1, CHIP_COLS) if gx + 1 < cols else None
+        return (chip + cols, 0) if gy + 1 < rows else None
+    return None
+
+
+def fill_credit_en(plan):
+    """搬出那几笔要不要先向 Router 要 credit：这条 path 从本 core 出去的方向里有
+    要查下游 Stream 资源的，就标上，TS 拿到授权再下发。
+
+    reduce 那几笔不走这一路：它们要的是本级 Rmem 的一份，TS 自己记。
+    """
+    for key, items in plan.chains.items():
+        table = plan.entries.get(key, {})
+        recv = set(plan.path_task.get(key, {}))
+        for it in items:
+            if it.task_type == "REDUCE" or not it.path_id or it.path_id in recv:
+                continue
+            e = table.get(it.path_id)
+            it.credit_en = bool(e is not None and e.stream_need & FLOW_ALL_DIR)
+
+
+def fill_stream_need(plan, rows, cols):
+    """铺 streamNeedMask，顺便给隔在中间的坏 core 配 release 的静态路由。
+
+    一项 Stream 资源代表一个用户在一个 core 上的 Core Mem 与 Rmem 容量。进本 core
+    那一位由本 core 自己定：数据真进 core 的置位，落 Matrix Mem 的 B core 与 R
+    core 不置，只转发的也不置。往某个方向发那一位只看下一跳：下一跳那个 core 进
+    核那一位置了，这一位就置，本 core 发之前查那个方向的表，那个用户在下游退休时
+    还回来。
+
+    逐级归约那几跳的表项一律不置进核位：下游做归约的那一份容量与它的 Core Mem 是
+    一起分配的，不另记一笔。
+
+    隔着的坏 core 不进 core、也不记账，它那一口配上把 release 往回转的掩码，还的
+    那一笔才到得了上游。
+    """
+    for (chip, core), table in plan.entries.items():
+        role = plan.role.get((chip, core))
+        for e in table.values():
+            if e.path_core_bypass or role in ("BROADCAST", "REDUCTION"):
+                continue
+            e.stream_need |= CORE_NEED
+
+    for (chip, core), table in plan.entries.items():
+        # 坏 core 只转发，不记账：那一跳的账记在它上游那个好 core 上。
+        if (plan.bad_mask[chip] >> core) & 1:
+            continue
+        for path, e in table.items():
+            for d in (DIR_MID, DIR_LEFT, DIR_RIGHT):
+                if not e.flow_dir & flow_of(d):
+                    continue
+                skipped = []
+                nxt = neighbor(chip, core, d, rows, cols)
+                while nxt is not None and (plan.bad_mask[nxt[0]] >> nxt[1]) & 1:
+                    skipped.append(nxt)
+                    nxt = neighbor(nxt[0], nxt[1], d, rows, cols)
+                if nxt is None:
+                    continue
+                down = plan.entries.get(nxt, {}).get(path)
+                if down is None or not down.stream_need & CORE_NEED:
+                    continue
+                e.stream_need |= flow_of(d)
+                for bad in skipped:
+                    plan.release_route.setdefault(bad, {})[d] = \
+                        flow_of(opposite_of(d))
+
+
 def dot_core_of(col):
     return core_of_slot(col, DOT_SLOT)
 
@@ -463,7 +542,7 @@ def wire_row(fab, row_chips, has_rcore):
         if not first:
             # 从 W 口进来，沿第 1 行往右到 dot core。
             walk = range(core_of_port(CHIP_W), dot)
-            fab.put_walk(chip, walk, path, DIR_RIGHT, reduce=True)
+            fab.put_walk(chip, walk, path, DIR_RIGHT)
             in_lane = DIR_LEFT
 
         if into_rcore:
@@ -475,10 +554,6 @@ def wire_row(fab, row_chips, has_rcore):
             flow = FLOW_MID
             fab.put(chip, core_of_port(CHIP_E), path,
                     pass_through(path, FLOW_RIGHT))
-            if not last:
-                fab.put_release_route(chip, dot, DIR_MID, RELEASE_SELF)
-                fab.put_release_route(chip, core_of_port(CHIP_E), DIR_RIGHT,
-                                      FLOW_MID)
 
         mask = 1
         if in_lane != DIR_NUM:
@@ -619,7 +694,7 @@ def bcore_chain(out_path, next_path=0):
     items = [
         ChainItem(0, "MU", "RV_ONLY", ("mu", "task_bc_wait")),
         ChainItem(1, "DTE", "DSA", ("dte", "task_dte_bc_send"),
-                  path_id=out_path, credit_en=True, end=next_path == 0),
+                  path_id=out_path, end=next_path == 0),
     ]
     if next_path:
         items.append(ChainItem(2, "DTE", "DSA", ("dte", "task_dte_bc_relay"),
@@ -840,4 +915,7 @@ def build_plan(desc):
                 continue
             plan.datain[(chip, core)] = DATAIN_SYM[role]
             plan.dtein[(chip, core)] = DTEIN_OF_ROLE[role]
+
+    fill_stream_need(plan, rows, cols)
+    fill_credit_en(plan)
     return plan

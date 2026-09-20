@@ -78,12 +78,24 @@ class VuUopsPort : public Logic {
   std::shared_ptr<VuUops> Uops() const { return uops.Get(); }
 };
 
-// 一条宏指令在通路上的全部中间结果。
+// 一条宏指令在通路上的一段现场。
 //
 // 各执行单元的输出都挂在这一份上：SMUX 按静态配置从这里取 bypass 源，DMUX 从
 // 这里取写回值。硬件上这是级间 latch 上的一组线，不是一块可寻址的存储。
+//
+// 一条宏指令在向量通路上是逐段流过的：一段是一个 RF entry，FP32 32 个元素、
+// BF16 64 个。LU 每凑齐一段就往下交一份，下游各级各算各的那一段，SU 收到一段
+// 就写一段，这样 Load、计算与 Store 在同一条宏指令内重叠。跨元素的那几种运算
+// （Top-K、mask 的归约与按第一个 1 生成、标量迭代）看的是整条，它们所在的宏
+// 指令不分段，整条走一份。
 struct VuFlow {
   VuUops uops;
+  // 本段是第几段、本段多少个元素、本段第一个元素在整条里的下标、是不是最后
+  // 一段。不分段时只有一段，长度就是 VL。
+  uint64_t seg = 0;
+  uint64_t seg_len = 0;
+  uint64_t seg_base = 0;
+  bool seg_last = true;
   // 各执行单元的输出。SEXE 三次迭代各占一格：DMUX 的六个 SRF 写口是逐次
   // 迭代各写一个的，挤在一格里会把前一次的结果覆盖掉。
   VuOperand lu, su_in;
@@ -97,6 +109,9 @@ struct VuFlow {
   std::array<VuOperand, 2> mrf_rd;
   std::array<VuOperand, kVuSrfRdPorts> srf_rd;
   uint64_t error = 0;
+
+  // 本段多少个元素。各级按它算，不再直接取 VL：分段之后 VL 是整条的长度。
+  uint64_t SegLen() const { return seg_len != 0 ? seg_len : uops.inst.Vl(); }
 };
 
 using VuFlowPtr = std::shared_ptr<VuFlow>;

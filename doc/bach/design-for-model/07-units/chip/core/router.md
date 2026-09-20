@@ -26,16 +26,18 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 * **进 core 与出 core 各一条通路**，接本 core 的 DTE
 * **控制信号**接 TS
 
-三类 credit 互不复用，管的东西、粒度、维护方、扣还时机都不同：
+两类 credit 互不复用，管的东西、粒度、维护方、扣还时机都不同：
 
-| | VC credit | stream credit（CoreMem credit） | Reduce credit |
-| - | - | - | - |
-| 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
-| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID 加目标方向，一笔 Reduce 任务 |
-| 谁维护 | RouterStation 的独立计数器，硬件自动维护；每个 VC 的深度由软件经 ctrl_noc 静态配置，取够覆盖 credit 往返延迟即可，不必装得下整包 | Router 是唯一有效状态；DTE 持一份 cache；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | 本级由 TS 按用户记，下发一笔 reduce 占掉、Rmem 做完才还，ReduceModule 维护相邻下游各方向的，Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | `reduce_need` 置位时，一笔任务头一次向目标方向提交前取得准入，后面的 Packet 与 flit 不再扣 |
-| 何时还 | flit 离开下游 VC Buffer 就归还 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release，逐跳传到上游 | 下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，经静态旁路返回上游 |
-| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按任务还，要等下游这一笔做完 |
+| | VC credit | stream credit（CoreMem credit） |
+| - | - | - |
+| 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 有没有空间容纳这个用户的数据 |
+| 粒度 | 按下游方向加 VC，flit | 按 UserID 加方向，一个表项 |
+| 谁维护 | RouterStation 的独立计数器，硬件自动维护；每个 VC 的深度由软件经 ctrl_noc 静态配置，取够覆盖 credit 往返延迟即可，不必装得下整包 | Router 是唯一有效状态；DTE 持一份 cache；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 |
+| 何时还 | flit 离开下游 VC Buffer 就归还 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release |
+| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 |
+
+一项 stream credit 同时代表目标 core 的 Core Mem 与 ReduceMemory 容量：两块存储按同样的办法给 16 个用户等分，一个用户拿到一项就两边都有位置，所以逐级归约往下游发不另记一笔。
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2240 1150" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Router 第 0 层">
@@ -47,7 +49,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <rect x="40" y="120" width="330" height="208.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="52" y="141" font-size="11" fill="#111827" font-weight="600">RouterTable / CSR</text>
 <text x="52.0" y="158.0" font-size="8.5" fill="#475569">64 条表项，索引 path_id</text>
-<text x="52.0" y="171.5" font-size="8.5" fill="#475569">字段：cur_vc · flow_dir · nxt_vc · stream_table_enable</text>
+<text x="52.0" y="171.5" font-size="8.5" fill="#475569">字段：cur_vc · flow_dir · nxt_vc · streamNeedMask</text>
 <text x="52.0" y="185.0" font-size="8.5" fill="#475569">　　　operation · stall_way · reduce_outdata_type</text>
 <text x="52.0" y="198.5" font-size="8.5" fill="#475569">只描述静态路由与资源需求，不保存包的动态状态</text>
 <text x="52.0" y="212.0" font-size="8.5" fill="#475569">内部多副本：所有需并行查询的位置各一份</text>
@@ -74,8 +76,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <text x="772" y="141" font-size="11" fill="#111827" font-weight="600">CoreStation</text>
 <text x="772.0" y="158.0" font-size="8.5" fill="#475569">HeaderFIFO：按接收顺序存包头，DTE 读完写 1 弹出</text>
 <text x="772.0" y="171.5" font-size="8.5" fill="#475569">OutputBuffer（in_core_fifo）：整包写入，不支持包间交织</text>
-<text x="772.0" y="185.0" font-size="8.5" fill="#475569">三态准入：UserID 已分配 → 直接收；未分配但有空项 → 记录占用；</text>
-<text x="772.0" y="198.5" font-size="8.5" fill="#475569">　无空项 → 该 VC 不能向 Core 发，但 VC 有空仍可继续收上游</text>
+<text x="772.0" y="185.0" font-size="8.5" fill="#475569">三态准入在 Xbar：UserID 已分配 → 直接发；未分配但有空项 → 记录占用；</text>
+<text x="772.0" y="198.5" font-size="8.5" fill="#475569">　无空项 → 不往 Core 出口发，那一笔留在它那个 VC 上等</text>
 <text x="772.0" y="212.0" font-size="8.5" fill="#475569">已过 Stream 检查，进 core 不再查 VC credit</text>
 <text x="772.0" y="225.5" font-size="8.5" fill="#475569">出 core：Core 方向输入 VC，与 DTE 之间按 VC credit 协议</text>
 <text x="772.0" y="239.0" font-size="8.5" fill="#475569">反压时 valid / Header / Payload / 首尾标志 / 有效字节保持不变</text>
@@ -157,7 +159,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <text x="1312.0" y="500.5" font-size="8.5" fill="#475569">User Context Table：UserID · 包状态 · 输入完成 · 输出状态 · Retire</text>
 <text x="1312.0" y="514.0" font-size="8.5" fill="#475569">RouterTable Copy：输出方向 · 下一跳 VC · operation · 输出精度</text>
 <text x="1312.0" y="527.5" font-size="8.5" fill="#475569">结果流水：元素加完就发，整包锁定到尾 flit</text>
-<text x="1312.0" y="541.0" font-size="8.5" fill="#475569">　发送前查目标 VC credit 与该方向的下游 Reduce credit</text>
+<text x="1312.0" y="541.0" font-size="8.5" fill="#475569">　发送前查目标 VC credit</text>
 <text x="1312.0" y="554.5" font-size="8.5" fill="#475569">Downstream Reduce Credit Map：按 UserID 加方向，每笔任务准入一次、</text>
 <text x="1312.0" y="568.0" font-size="8.5" fill="#475569">　按 release 恢复</text>
 <text x="1312.0" y="581.5" font-size="8.5" fill="#475569">三条硬约束：必须执行 Reduce 不许降级 · 上下文保护 ·</text>
@@ -262,7 +264,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 <rect x="230.7" y="88.5" width="338.5" height="10.5" fill="#ffffff" opacity="0.92"/>
 <text x="400" y="96" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">cfg 写事务 → RouterTable / CSR、Credit Bypass Route、各 Station 静态配置</text>
 <text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；stream credit 管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
-<text x="20" y="1134" font-size="10.5" fill="#374151" text-anchor="start">Reduce credit 管下游 ReduceModule 的用户上下文（本级由 TS 按用户记，ReduceModule 管相邻下游，Router 不维护）。ReduceModule 输入三路各 160 GB/s，输出 160 GB/s。</text>
+<text x="20" y="1134" font-size="10.5" fill="#374151" text-anchor="start">本级 Rmem 的一份由 TS 按用户记，下发一笔 reduce 占掉、Rmem 做完才还；下游那边的容量随 stream credit 一起给，Router 不另记。ReduceModule 输入三路各 160 GB/s，输出 160 GB/s。</text>
 </svg>
 ```
 
@@ -289,8 +291,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F11 | Stream Resource Table 维护所有下游方向的 UserID 占用；只有所有需求方向都满足才允许发送 |
 | F12 | 出口方向的 Output Buffer 与 Packet Shifter 按总线宽度移位拼接后从 `<方向>_data_out_ch` 发出 |
 | F13 | 同 VC 保序：VC Buffer 是 FIFO，同 VC 内 flit 严格按到达顺序读出，资源检查与仲裁都不重排；跨 VC、跨 input port 之间不保证顺序 |
-| F14 | Credit Release 静态旁路：Stream 与 Reduce 两类 release 不查 RouterTable、不做动态路径选择、不进 Xbar 仲裁，只按 CSR 配的静态方向 Mask 转发；Mask 含多个方向时同一笔 release 复制到所有指定方向，UserID 与 credit 类型保持不变 |
-| F15 | 坏 core 上的 RouterStation 处在透传档（F57）：数据走完整流水线，但只按 RouterTable 往 `mid`、`left`、`right` 转发，不投递本 core、不进 ReduceModule，不占 stream 坑、不扣 Core Mem 的量、不做溢流转存；下游还回来的 Reduce release 按 `RTR_RELEASE_ROUTE` 静态转发。链路级的 VC credit 照查照记：它记的是下一跳 VC Buffer 还剩几个位置，与本 core 坏不坏无关，不查就会把下一跳撑爆。不派角色的好 core 不开透传档，只转发由它的表项决定 |
+| F14 | Credit Release 静态旁路：release 不查 RouterTable、不做动态路径选择、不进 Xbar 仲裁，只按 CSR 配的静态方向 Mask 转发；Mask 含多个方向时同一笔 release 复制到所有指定方向，UserID 保持不变。收到的那一笔一律先交本级，所以只有要把 release 送过去的口上配得有 Mask |
+| F15 | 坏 core 上的 RouterStation 处在透传档（F57）：数据走完整流水线，但只按 RouterTable 往 `mid`、`left`、`right` 转发，不投递本 core、不进 ReduceModule，不占 stream 坑、不扣 Core Mem 的量、不做溢流转存；下游还回来的 release 按 `RTR_RELEASE_ROUTE` 静态转发。链路级的 VC credit 照查照记：它记的是下一跳 VC Buffer 还剩几个位置，与本 core 坏不坏无关，不查就会把下一跳撑爆。不派角色的好 core 不开透传档，只转发由它的表项决定 |
 | F16 | 边沿 Router 通过配置禁用不存在的端口，统一规格实现 |
 
 ### Xbar
@@ -309,7 +311,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 
 | 编号 | 功能 |
 | - | - |
-| F24 | 进 core 的三态准入：UserID 已分配则直接收；未分配但 stream credit 表有空项则记录 UserID 占用后收；无空项时该 VC 不能向 Core 发数据，但 VC 有空项时仍可继续接收上游数据 |
+| F24 | 进 core 的三态准入在 Xbar 那一级做：UserID 已分配则直接发；未分配但进本 core 那张 stream 表有空项则记录占用后发；无空项时不往 Core 出口发，那一笔留在它那个 VC 上等，VC 有空项时仍可继续接收上游数据。到了 CoreStation 的包一定收得下，收不下是电平没拉住，断言 |
 | F25 | 已通过 Stream 检查，进 core 不再检查对 Core 方向的 VC credit，一定有 Core Mem 空间 |
 | F26 | Header 写入 HeaderFIFO，Payload 写入 OutputBuffer（in_core_fifo），两者保持同一包顺序与边界 |
 | F27 | Core 入口以整包为单位，不支持包间交织，必须发完一个整包再发下一个 |
@@ -332,14 +334,14 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F39 | 上下文保护：当前包的全部输入完成并输出前，同一 User 的下一个包不得覆盖该上下文 |
 | F40 | 必须执行 Reduce：SRAM、Bank 或计算单元暂不可用时对输入反压，不允许绕过 Reduce 降级为直接存储或转发 |
 | F41 | 精度：中间累加固定 FP32，输出按 RouterTable 的 `reduce_outdata_type` 转成 FP32 或 BF16 |
-| F42 | 结果按 flit 出：某个结果 flit 所需的各方向操作数都累加完了，这个 flit 就能发，不等整包；一个包发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等。发送前查目标 VC credit，表项 `reduce_need` 置位时一笔任务头一个 flit 还查该方向的下游 Reduce credit，作为 Xbar 的第五路输入参与仲裁 |
+| F42 | 结果按 flit 出：某个结果 flit 所需的各方向操作数都累加完了，这个 flit 就能发，不等整包；一个包发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等。发送前查目标 VC credit，作为 Xbar 的第五路输入参与仲裁 |
 | F43 | `op_type` 分 reduce 与 reduce_twice 两档：reduce 第一次收到就写入上下文，reduce_twice 要到第二次或第三次收到才与上下文里的值相加。两个源允许都来自本 core 的 DTE，即用 Router 完成 core 内两个 token 的 reduce 再发出 |
 | F44 | “全部方向”取自 RouterTable 的 `reduce_in_mask`：按包头的 `path_id` 查 `rdc_rtab[path_id].reduce_in_mask`，得到这条 path 在本级会有哪几个相邻方向送来分量。某个结果元素要等集合里各方向对应的那个元素都进来。一笔任务的首份输入进来时把这个集合一并记进 `rdc_user_tab`，这笔任务做完前不再重查 |
 | F45 | `reduce_in_mask` 为 0 表示本级不做累加：坏 core 与这条 path 上只转发的好 core 都是这一档，包按 `flow_dir` 直接转发，不进 ReduceModule |
-| F46 | 下游 Reduce credit 以一笔 Reduce 任务为粒度：表项 `reduce_need` 置位时，一笔任务头一次向某个方向提交前要取得那个方向这个用户的准入，这笔任务后面的 Packet 与 flit 复用这次准入，逐 flit 只受 VC credit 约束。下游做完这笔任务、结果全部交付后生成一次携带 UserID 的 release，经 Router 的静态旁路返回相关上游 |
+| F46 | 结果往下游发不查下游的 ReduceMemory：那边的容量与它的 Core Mem 一起分配，上游发数据进那个 core 时取得的那一项 stream credit 同时代表两者，逐 flit 只受 VC credit 约束 |
 | F47 | Downstream Reduce Credit Map 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：取得准入时置忙，收到 release 时放开 |
 | F48 | 整包发出后经 `rmem2ts_done_ch` 向 core 返回 UserID、PathID 与该包包头里的 `reduce_seq`。TS 只认这一路把逐级 reduce 任务置 FINISH：按 UserID 找到那个用户，完成的是它的当前任务 |
-| F49 | 输入侧只有 VC credit 准入，`credit > 0` 即收；Reduce credit 是另一张网，与数据面分离 |
+| F49 | 输入侧只有 VC credit 准入，`credit > 0` 即收 |
 | F50 | 表项的建与删：收到本级 core 该 UserID 的 Retire 后本地分区可以回收；相邻下游各方向在途任务的 release 全部回来之后，才删掉这个用户的映射给其他用户用 |
 | F51 | 16 个用户分区在用户第一笔 Reduce 任务真正进来时分配，后面的任务接着用，收到这个用户的 User Retire 才释放。新用户进来时 16 个分区都占着，就对那一路输入反压，等有用户 Retire 放出一个 |
 | F52 | 链上没有同步点：上游分量到达时不必等本 core 算完，先存进上下文，本地出核的分量出来时再加 |
@@ -349,7 +351,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 
 | 编号 | 功能 |
 | - | - |
-| F53 | 64 条表项，按 `path_id` 索引。字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`：<br>`op_type` 2 bit（0 = kernel / weight 搬运、1 = transfer、2 = reduce、3 = reduce_twice）<br>`flow_dir` 5 bit 出方向掩码（bit0 上下、bit1 左、bit2 右、bit3 reduce1、bit4 reduce2）<br>`cur_vc` 2 bit、`nxt_vc` 五个出方向各 2 bit<br>`path_core_mask_enable` 1 bit、`path_core_mask_idx` 4 bit、`path_core_bypass` 1 bit（0 进 core、1 bypass）<br>`need_buffer` 1 bit（这条 path 允许进 core 缓存，即溢流使能）<br>`stream_table_enable` 1 bit（这个包要不要查输出端的 stream credit table）<br>`cur_credit_type` 1 bit（0 广播 / 1 P2P）、`cur_credit_require` 6 bit<br>`nxt_credit_type` 3 bit（三个 R2R 方向各一位）、`nxt_credit_require` 三个 R2R 方向各 6 bit<br>`reduce_data_type` 3 bit（输入精度 BF16 / FP32）、`reduce_outdata_type` 1 bit（输出精度）<br>`reduce_in_mask` 3 bit、`operation` 2 bit（0 转发、1 reduce0 单流，经 Rmem 不计算、2 reduce1 两流、3 reduce2 三流）、`stall_way` 1 bit、`reduceNeedMask` 1 bit（结果往下游发时查不查下游 ReduceModule 这个用户空不空） |
+| F53 | 64 条表项，按 `path_id` 索引。字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`：<br>`op_type` 2 bit（0 = kernel / weight 搬运、1 = transfer、2 = reduce、3 = reduce_twice）<br>`flow_dir` 5 bit 出方向掩码（bit0 上下、bit1 左、bit2 右、bit3 reduce1、bit4 reduce2）<br>`cur_vc` 2 bit、`nxt_vc` 五个出方向各 2 bit<br>`path_core_mask_enable` 1 bit、`path_core_mask_idx` 4 bit、`path_core_bypass` 1 bit（0 进 core、1 bypass）<br>`need_buffer` 1 bit（这条 path 允许进 core 缓存，即溢流使能）<br>`streamNeedMask` 4 bit（哪几个出口发之前要查那一侧的 stream credit table：bit0 上下、bit1 左、bit2 右、bit3 进本 core）<br>`cur_credit_type` 1 bit（0 广播 / 1 P2P）、`cur_credit_require` 6 bit<br>`nxt_credit_type` 3 bit（三个 R2R 方向各一位）、`nxt_credit_require` 三个 R2R 方向各 6 bit<br>`reduce_data_type` 3 bit（输入精度 BF16 / FP32）、`reduce_outdata_type` 1 bit（输出精度）<br>`reduce_in_mask` 3 bit、`operation` 2 bit（0 转发、1 reduce0 单流，经 Rmem 不计算、2 reduce1 两流、3 reduce2 三流）、`stall_way` 1 bit |
 | F54 | 进不进本 core 由两个字段二选一决定：`path_core_mask_enable = 0` 时按 `path_core_bypass` 定，适用于普通广播与 P2P；`= 1` 时取 MSG 里 `path_core_mask` 的第 `path_core_mask_idx` 位，适用于 EP 广播。**位到 core 的对应关系不是固定编码**，每个 core 在自己的表项里指定看哪一位 |
 | F54a | 开了 `path_core_mask` 的那条 path 走遍一串 core，包落在哪几个由包头挑。走到既不进本 core 又没有出方向的那一跳，这一笔就在那里终止。`path_core_mask_enable = 0` 的表项进不进核与包无关，那时候没有出方向是表项配错 |
 | F55 | `reduce_data_type` 配在表里而不是由 TS 给，是因为 `reduce_twice` 时 Router 可能先收到两个远程的 Reduce Token 而不是本 core 发出的那一份，那时 TS 还没有介入 |
@@ -360,7 +362,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F60 | 内部多副本：所有需要并行查询的位置各持一份，由 Router 的配置入口统一接收写事务 |
 | F61 | 更新状态机把同一笔写依次写入全部副本并记录完成状态；全部副本写完才向软件返回完成，禁止暴露部分新部分旧的状态 |
 | F62 | 外部两份副本由 DTE 与 ReduceModule 各自维护，软件负责写入相同配置并保证三方一致，Router 硬件不同步外部副本；软件只能在 Router 提交完成后再写它们 |
-| F63 | Credit Bypass Route（寄存器 `RTR_RELEASE_ROUTE`）：软件经 CSR 为每个业务 credit 输入端口配置静态输出方向 Mask，可指定一个或多个 R2R 方向与 Core 方向；跨过不落地的 core 时切换 credit 路径靠的就是改这组配置 |
+| F63 | Credit Bypass Route（寄存器 `RTR_RELEASE_ROUTE`）：软件经 CSR 为每个业务 credit 输入端口配置静态输出方向 Mask，可指定一个或多个 R2R 方向；隔在两个好 core 之间的坏 core 靠它把 release 送到上游，好 core 一律交给本级，不配 Mask |
 | F64 | 中间节点可以按表改写 VC |
 
 ### CoreMem 重发
@@ -381,7 +383,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - |
 | F72 | ReduceModule 完成计算并发出全部包后向 Core 返回 UserID；Core 判定任务链结束后向 Router 和 ReduceModule 广播 User Retire |
 | F73 | Core 的保证：仅可在该 UserID 的全部进 core、出 core 数据搬运完成，且不会再发起新搬运之后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包 |
-| F74 | Router 的动作：删除该 UserID 在各方向上的全部 stream credit 授权表项。已经进了本级、正在等仲裁的包照发；「停止新发送」说的是新包要重新申请授权，而 Retire 之后本来就不会再有新包 |
+| F74 | Router 的动作：只删这个 UserID 进本 core 那一项，同时往三个 R2R 方向各发一笔携带 UserID 的 release。本级记的各下游方向那几项不动，它们要等那些下游各自退休时还回来。上游收到 release 只删来向那个方向这一项，查无此项就丢掉。已经进了本级、正在等仲裁的包照发；「停止新发送」说的是新包要重新申请授权，而 Retire 之后本来就不会再有新包 |
 | F75 | ReduceModule 的动作：本地分区当场放，这个用户还有在做的任务就等结果交付完再放；相邻下游 Reduce 资源映射与本地分区分开清，在途任务的 Reduce release 都回来后才清掉这个用户的映射 |
 | F76 | Stream credit 的回程：每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 |
 
@@ -459,8 +461,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 port link[d] (双向, credit/release, clk)          // d ∈ {left, right, mid}：256 B/T，接相邻 core 的 Router 或 C2C Bridge
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
   in  credit_return_vld · credit_return_vc_id[1:0]        // VC credit 归还，共享总线，一拍最多一个 VC
-  in  stream_release_vld · stream_release_user[15:0]      // stream credit release
-  in  reduce_release_vld · reduce_release_user[15:0]      // Reduce credit release
+  in  stream_release_vld · stream_release_user[15:0]      // stream credit release，与数据反向走
   out 同字段
 port in_core_data_ch (master, AXI-Stream-Like, clk)   // CoreStation → DTE：进 core 的整包
   out tvalid · tdata[2047:0] · tkeep[255:0] · tlast · thdr
@@ -499,7 +500,7 @@ port cfg (slave, ctrl_noc 写事务, clk)                // RouterTable、CSR、
 ## 4　存储器
 
 ```
-mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0], nxt_vc[4:0][1:0], path_core_mask_enable, path_core_mask_idx[3:0], path_core_bypass, need_buffer, stream_table_enable, cur_credit_type, cur_credit_require[5:0], nxt_credit_type[2:0], nxt_credit_require[2:0][5:0], reduce_data_type[2:0], reduce_outdata_type, reduce_in_mask[2:0], operation[1:0], stall_way, ext_dst[5:0], reduce_need}  1R1W  多副本，逐份写  复位 全条目 bypass / no-op
+mem rtab[k]           FF 阵列   64 × {op_type[1:0], flow_dir[4:0], cur_vc[1:0], nxt_vc[4:0][1:0], path_core_mask_enable, path_core_mask_idx[3:0], path_core_bypass, need_buffer, stream_need_mask[3:0], cur_credit_type, cur_credit_require[5:0], nxt_credit_type[2:0], nxt_credit_require[2:0][5:0], reduce_data_type[2:0], reduce_outdata_type, reduce_in_mask[2:0], operation[1:0], stall_way, ext_dst[5:0]}  1R1W  多副本，逐份写  复位 全条目 bypass / no-op
 mem core_bad_mask     FF        10 b，第 i 位对应 core i                                     1R1W  Router 配置阶段先于 RouterTable 写入，业务开始后不变  复位 0
 mem rtab_commit       FF        {副本写入游标, 完成状态}                                    1RW   更新状态机                复位 空闲
 mem credit_bypass     FF 阵列   每个业务 credit 输入端口一个 {out_mask[3:0]}：mid、left、right、本 core                1R1W  CSR 配置                  复位 0
@@ -538,16 +539,15 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 | `nxt_vc` | VC 随 path 静态绑定，**相互依赖的流不排进同一个 VC** |
 | `path_core_mask_enable` / `path_core_mask_idx` / `path_core_bypass` | 进不进本 core 由前者二选一：0 时按 `path_core_bypass` 定（**0 进 core、1 bypass**），适用于普通广播与 P2P；1 时取 MSG 里 `path_core_mask` 的第 `path_core_mask_idx` 位，适用于 EP 广播。**位到 core 的对应由每个 core 自己指定**，不是固定编码 |
 | `need_buffer` | 这条 path 允许进 core 缓存。选它就等于选了 `stall_way` 的转存那一档，必须预留 Core Mem 空间并在任务链里安排 reissue 任务 |
-| `stream_table_enable` | 这个包出核前要不要查对应输出端的 stream credit table。纯 bypass 的包不查 |
+| `streamNeedMask` | 哪几个出口发之前要查那一侧的 stream credit table。某个 R2R 方向要不要查只看下一跳会不会把数据落进它的 core，隔着坏 core 时看坏 core 之后那个 core；进本 core 那一位由本 core 自己定，数据真落进 Core Mem 的置位，落 Matrix Mem 的 B core 与 R core 不置，只转发的不置 |
 | `cur_credit_type` / `cur_credit_require` | 进核占用的 credit 池类型与额度。额度的语义是上游已拨给本核的量，不是再向下游申请；不进核的表项填 0 |
 | `nxt_credit_type` / `nxt_credit_require` | 三个 R2R 方向各一份。某方向 `nxt_credit_require` 为 0 表示该方向不查 credit，只受链路反压；`flow_dir` 置位而 require 为 0 的方向随原子发送一起放行 |
 | `reduce_data_type` / `reduce_outdata_type` | reduce 加法的输入精度与输出精度，各自取 BF16 或 FP32。中间累加固定 FP32，不受这两项影响。默认用例的两条归约 path 都是 BF16 进、BF16 出 |
 | `reduce_in_mask` | 这条 path 在本级要收哪几路分量。相邻方向那几路按拓扑推导：在这条 path 的图上，把本核作为下一跳、且操作是 reduce 的那些相邻核，它们所在的方向就置位。本核自己出一份分量时，还要把 `flow_dir` 给它挑的那一路也置位。逻辑上相邻、物理上隔着坏 core 的一跳，收方按实际收到的方向填，与不隔 core 时相同。坏 core 与这条 path 上只转发的好 core 填 0 |
 | `operation` | 本级在这条 path 上收几路分量：0 普通转发、1 reduce0 单流（经 Rmem 不计算）、2 reduce1 两流、3 reduce2 三流 |
-| `reduce_need` | 结果往下游发之前查不查下游 ReduceModule 这个用户空不空；下一跳不再做归约的那一跳填 0 |
 | `stall_way` | 留在当前 VC 等，或转 Core Mem 暂存由 DTE 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务 |
 
-`reduce_in_mask` Router MAS 的 `Table Entry` 与 DATA_NOC HAS 的 `Routing table field` 都没有（**待确认**），它是逐级归约判断收齐所必需的。`operation` 的三档 reduce 取值与 `reduce_need` 照 Router MAS 的 `Table Entry`。`flow_dir` 的 reduce1 与 reduce2 两位原始文档只给了名字，本文档按“本 core 那一份分量走哪一路输入”给（**待确认**）。
+`reduce_in_mask` Router MAS 的 `Table Entry` 与 DATA_NOC HAS 的 `Routing table field` 都没有（**待确认**），它是逐级归约判断收齐所必需的。`operation` 的三档 reduce 取值照 Router MAS 的 `Table Entry`。`flow_dir` 的 reduce1 与 reduce2 两位原始文档只给了名字，本文档按“本 core 那一份分量走哪一路输入”给（**待确认**）。
 
 ### 一套可直接照抄的实例：中间列 chip 的坏 core2、core7
 
@@ -558,7 +558,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 
 括号里是透传的坏 core。
 
-| Core | Path | flow_dir | path_core_bypass | stream_table_enable | operation | stall_way | reduce_in_mask |
+| Core | Path | flow_dir | path_core_bypass | streamNeedMask | operation | stall_way | reduce_in_mask |
 | - | - | - | - | - | - | - | - |
 | C8 | chip 内归约 | 左 | 1 不进核 | 0 | Reduce0 | 留在 VC | bit0 |
 | C7 坏 core | chip 内归约 | 左 | 1 不进核 | 0 | 转发 | 只能留在 VC | 0 |
@@ -577,27 +577,27 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 | C9 dot core | 行链 | 上下 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
 | C4 | 行链 | 右（出 E 口） | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
 
-坏 core 上只配 RouterTable 与 `RTR_RELEASE_ROUTE`，表项一律 `op_type` 为 transfer、`path_core_bypass = 1`、`stream_table_enable` 与 `stall_way` 为 0。
+坏 core 上只配 RouterTable 与 `RTR_RELEASE_ROUTE`，表项一律 `op_type` 为 transfer、`path_core_bypass = 1`、`streamNeedMask` 与 `stall_way` 为 0。
 
 同一个 core 上不同 path 的表项互相独立：C7 在两条 path 上都只转发，一条往左、一条往右，仍然要两个表项。
 
-两列各看各的：`flow_dir` 只管往外发哪几个方向，进不进本核看 `path_core_bypass`，所以 C9 在 chip 内归约 path 上是“不再外发只进本核”，在行链 path 上是“往 mid 发、不进本核”。`stream_table_enable` 看的是下一跳会不会把数据落进它的 core：坏 core 上数据不落地，隔着坏 core 的那一跳要查的是坏 core 之后那个落地的 core 的坑，坏 core 自己不查。这两条都是归约 path，一律填 0。
+两列各看各的：`flow_dir` 只管往外发哪几个方向，进不进本核看 `path_core_bypass`，所以 C9 在 chip 内归约 path 上是“不再外发只进本核”，在行链 path 上是“往 mid 发、不进本核”。`streamNeedMask` 看的是下一跳会不会把数据落进它的 core：坏 core 上数据不落地，隔着坏 core 的那一跳要查的是坏 core 之后那个落地的 core 的坑，坏 core 自己不查。这两条都是归约 path，进本 core 那一位与三个方向位一律填 0。
 
 `reduce_in_mask` 按上面的规则推，隔着坏 core 的一跳由收方按实际收到的方向填：C6 从右侧收，C3 从左侧收。本 core 那一份分量默认走 bit0；上游从 mid 来时会与它挤在同一路，所以 chip 内归约 path 上的 C0 与 C9 置 `flow_dir` 的 reduce1，把自己那一份挪到 bit1。链首 C8 只出本 core 那一份，填 Reduce0。
 
 表里没列的三项：
 
-* `reduce_need`：chip 内归约 path 上 C8、C6、C5、C0、C1、C3、C4 填 1，链尾 C9 填 0；行链 path 上 C9 的下游是下一颗 chip 的 dot core，填 1；只转发的 core 填 0。
 * `reduce_data_type` 与 `reduce_outdata_type`：两条 path 都是 BF16。
 * `RTR_RELEASE_ROUTE`：按入口方向配，不分 path，见下表。
 
-| Core | 入口方向 | 转往 | 用在哪条 path |
-| - | - | - | - |
-| C7 坏 core | 左 | 右 | chip 内归约：C6 还给 C8 的 release |
-| C7 坏 core | 右 | 左 | 行链 |
-| C2 坏 core | 右 | 左 | chip 内归约：C3 还给 C1 的 release |
-| C5、C6、C8 | 右 | 左 | 行链 |
-| C4 | 右 | mid | 行链 |
+| Core | 入口方向 | 转往 |
+| - | - | - |
+| C2 坏 core | 左 | 右 |
+| C2 坏 core | 右 | 左 |
+| C7 坏 core | 左 | 右 |
+| C7 坏 core | 右 | 左 |
+
+两条归约 path 上不记 stream 资源，也就没有 release 要走；这四项是给穿过这两个坏 core 的搬运 path 配的，token 广播、concat 与 FC2 输入广播都隔着它们。好 core 的口上不配：收到的 release 一律交给本级。
 | 做累加的 core | 往下游去的那个方向 | 本 core | 两条 path |
 
 同一个入口方向上两条 path 要的去向一致，所以不分 path 也不冲突：行链的 release 从右侧进 C4、C5、C6、C8，chip 内归约 path 在这几个 core 上的下游在左侧或 mid。
@@ -818,7 +818,7 @@ R core 之间那条链另占两条，按行号奇偶轮换：一个 R core 既�
   <text x="250" y="56" font-size="12" fill="#111827">RC · 按 path_id 定去向</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. e = rtab[path_id]</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. out_mask = e.flow_dir；nxt_vc = e.nxt_vc</text>
-  <text x="250" y="118" font-size="10.5" fill="#475569">3. need_stream = e.stream_table_enable；enter_core = e.path_core_mask_enable ? core_mask[e.path_core_mask_idx] : !e.path_core_bypass</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. stream_need = e.streamNeedMask；enter_core = e.path_core_mask_enable ? core_mask[e.path_core_mask_idx] : !e.path_core_bypass</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. pkt_ctx[d][vc] = {nxt_vc, out_mask, enter_core, e.operation, e.stall_way, remain_len}</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">坏 core 只置转发位，need_stream 与 enter_core 恒为 0</text>
   <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arr2)" fill="none"/>
@@ -978,7 +978,7 @@ R core 之间那条链另占两条，按行号奇偶轮换：一个 R core 既�
   <text x="842" y="143" font-size="10.5" fill="#374151" text-anchor="middle">link[o]</text>
   <text x="842" y="161" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
   <text x="842" y="179" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_release_vld</text>
-  <text x="842" y="197" font-size="9.5" fill="#6b7280" text-anchor="middle">reduce_release_vld</text>
+  <text x="842" y="197" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_release_vld</text>
   <rect x="232" y="84" width="478" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="100" font-size="8.5" fill="#6b7280">M6</text>
   <text x="696" y="100" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
@@ -1205,7 +1205,6 @@ R core 之间那条链另占两条，按行号奇偶轮换：一个 R core 既�
   <text x="696" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="56" font-size="12" fill="#111827">ReduceModule · 转精度后回注 Xbar</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. out = (reduce_outdata_type==BF16) ? FP32toBF16(rdc_ctx[user]) : rdc_ctx[user]</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. 首 flit：reduce_need → rdc_down_credit[user][o] 空闲才发，发了置忙</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 每个 flit：vc_credit[o][nxt_vc] &gt; 0 且本 flit 的元素都 &lt; ready_elem</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 尾 flit 发完 → rmem2ts_done_ch.valid = 1，给上游还 release</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等</text>
@@ -1453,7 +1452,7 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 只有所有需求方向都满足才允许发送 | F11 | `stream_all_or_none` |
 | 同 VC 保序，跨 VC 与跨 port 不保证 | F13 | `same_vc_order` |
 | 业务 credit 旁路：不查表、不进仲裁、按静态 Mask 复制 | F14、F63 | `credit_bypass_route` |
-| 坏 core 在透传档只转发不记账，credit 跨过它，Reduce release 按 `RTR_RELEASE_ROUTE` 转回上游 | F15、F70 | `bad_core_pass_through` |
+| 坏 core 在透传档只转发不记账，credit 跨过它，release 按 `RTR_RELEASE_ROUTE` 转回上游 | F15、F70 | `bad_core_pass_through` |
 | Xbar 5 入 7 出，无冲突时五路并行 | F17、F18 | `xbar_parallel` |
 | 一个方向每拍出一个 flit：入口站按「Xbar 收得下就发」交，不等授予 | M2 与 M3 之间的接口 | `one_flit_per_cycle` |
 | 贪婪整包的第二档：攥着一整个包的入口排在只有半个包的前面 | F20 | `xbar_whole_packet` |
@@ -1485,8 +1484,7 @@ reduce 包           软件辅助信息固定 16 B，Router 做加法时固定�
 | 上下文保护：同一 User 的下一个包不得覆盖 | F39 | `reduce_ctx_protect` |
 | 必须执行 Reduce，不允许降级 | F40 | `reduce_no_bypass` |
 | 分区在用户第一笔任务进来时分配，用光了对输入反压，Retire 才放 | F51 | `reduce_ctx_on_demand` |
-| 结果按 flit 出，整包锁定到尾 flit；首 flit 前查下游 Reduce credit，每 flit 查 VC credit | F42、F47 | `reduce_out_credit` |
-| 一笔任务每个方向准入一次，下游做完还一次 release | F46、F47 | `reduce_credit_task` |
+| 结果按 flit 出，整包锁定到尾 flit；每 flit 查 VC credit | F42、F47 | `reduce_out_credit` |
 | 只有 Router Reduce Done 才能把 reduce task 置 FINISH | F48 | `reduce_done_owner` |
 | 链上没有同步点，流着加 | F52 | `reduce_streaming` |
 | RouterTable 内部多副本，全部写完才返回完成 | F60、F61 | `router_table_commit` |

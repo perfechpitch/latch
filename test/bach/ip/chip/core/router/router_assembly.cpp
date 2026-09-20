@@ -90,7 +90,7 @@ class Downstream : public BachModule {
     }
     rel->flit.Idle();
     if (on && f.valid) {
-      rel->release.Drive(true, f.vc, false, 0, false, 0);
+      rel->release.Drive(true, f.vc, false, 0);
     } else {
       rel->release.Idle();
     }
@@ -151,7 +151,7 @@ class AsmProbe : public BachModule {
     stream_right = rt.GetXbar().StreamUsed(kRight);
     overflow = rt.GetXbar().Overflow();
     stored = rt.GetReissue().Stored();
-    cs_used = rt.GetCoreStation().StreamUsed();
+    cs_used = rt.GetXbar().StreamUsed(kOutCore);
     cr_right = rt.GetXbar().VcCredit(kRight, 0);
     shared_right = rt.GetXbar().SharedCredit(kRight);
   }
@@ -164,9 +164,10 @@ RouteEntry Forward(uint64_t flow, bool enters_core, bool stall_way = false) {
   RouteEntry e;
   e.flow_dir = flow;
   e.path_core_bypass = !enters_core;
-  e.stream_table_enable = false;
   e.operation = Operation::kForward;
   e.stall_way = stall_way;
+  // 数据真进 core 的占一项进核的坑。
+  if (enters_core) e.stream_need = kStreamNeedCore;
   return e;
 }
 
@@ -209,7 +210,6 @@ RouteEntry ReduceRelay(uint64_t in_mask) {
   e.path_core_bypass = true;
   e.reduce_in_mask = in_mask;
   e.operation = Operation::kReduce1;
-  e.reduce_need = true;
   e.reduce_data_type = kReduceFp32;
   e.reduce_outdata_type = kReduceFp32;
   return e;
@@ -480,11 +480,10 @@ TEST(BachRouterAsm, SelfPartTakesTheLaneFlowDirNames) {
       << "上游那一份与本 core 那一份都进了 ReduceModule";
 }
 
-// 中继累加：收齐后按 flow_dir 往右发，占的是右方向这个用户的下游 Reduce 资源。
+// 中继累加：收齐后按 flow_dir 往右发。
 TEST(BachRouterAsm, ReduceRelayForwardsDownstream) {
   uint64_t got = 0;
   std::vector<uint8_t> payload;
-  bool right_busy = false;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -503,12 +502,10 @@ TEST(BachRouterAsm, ReduceRelayForwardsDownstream) {
     RT::JoinAll();
     got = down.got;
     payload = down.last_payload;
-    right_busy = rt.GetReduce().DownBusy(77, 2);
   }
   RT::Reset();
   EXPECT_EQ(got, 1u);
   EXPECT_FLOAT_EQ(ReduceValueOf(payload), 12.0f);
-  EXPECT_TRUE(right_busy) << "右方向这个用户忙着，等下游还 release";
 }
 
 // 溢流：下游 credit 耗光且 stall_way 选转存，包落进 CoreMemReissue，
@@ -607,9 +604,7 @@ TEST(BachRouterAsm, PassThroughRouterKeepsNoState) {
     bad = rt.Bad();
     neighbour_bad = rt3.Bad();
     // 表里写的是进核加查坑，透传档要把这两样都抹掉
-    RouteEntry e = Forward(kFlowRight, /*enters_core=*/true);
-    e.stream_table_enable = true;
-    rt.Preload(3, e);
+    rt.Preload(3, Forward(kFlowRight, /*enters_core=*/true));
 
     Pusher push(clk, rt.InWire(kLeft), {{2, MakeMsg(3, 42)}});
     Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
@@ -664,10 +659,10 @@ TEST(BachRouterAsm, SpareGoodCoreOnlyForwards) {
   EXPECT_EQ(stream, 0u);
 }
 
-// 坏 core 上的 Reduce release：从下游一侧进来，按 RTR_RELEASE_ROUTE 原样转往上游
-// 一侧，UserID 不变。归约链隔着坏 core 的那一跳靠这一项把 credit 还回上游。
-TEST(BachRouterAsm, BadCoreRelaysReduceReleaseUpstream) {
-  // 从 right 口灌一笔 Reduce release，并看 left 口出去的那一路。
+// 坏 core 上的 stream release：从下游一侧进来，按 RTR_RELEASE_ROUTE 原样转往上游
+// 一侧，UserID 不变。隔着坏 core 的那一跳靠这一项把坑还回上游。
+TEST(BachRouterAsm, BadCoreRelaysStreamReleaseUpstream) {
+  // 从 right 口灌一笔 stream release，并看 left 口出去的那一路。
   class ReleaseFeed : public BachModule {
    public:
     ReleaseFeed(ClockPtr c, LinkEndPtr in, LinkEndPtr out)
@@ -678,15 +673,15 @@ TEST(BachRouterAsm, BadCoreRelaysReduceReleaseUpstream) {
    protected:
     void Step() override {
       ReleaseView r = ReadRelease(to_up->release);
-      if (r.reduce_valid) {
+      if (r.stream_valid) {
         ++seen;
-        user = r.reduce_user;
+        user = r.stream_user;
       }
       from_down->flit.Idle();
       if (CycleNow() == 3) {
-        from_down->release.Drive(false, 0, false, 0, /*reduce_rel=*/true, 57);
+        from_down->release.DriveStream(true, 57);
       } else {
-        from_down->release.Idle();
+        from_down->release.DriveStream(false, 0);
       }
     }
 

@@ -33,7 +33,8 @@ class ReqFeeder : public BachModule {
     uint64_t vc = 0;
     uint64_t user = 0;
     bool head = true, tail = true;
-    bool need_stream = false;
+    // 这一笔往哪几个出口发之前要查那一侧的 stream 资源表，位与出口同序。
+    uint64_t stream_need = 0;
     // 这个入口的队列里有没有一整个包。
     bool whole = false;
     // 这一笔在下游要占多少 KB。
@@ -50,7 +51,8 @@ class ReqFeeder : public BachModule {
  protected:
   void Step() override {
     uint64_t now = CycleNow();
-    if (cursor < jobs.size() && jobs[cursor].at <= now && port->Room()) {
+    if (cursor < jobs.size() && jobs[cursor].at <= now &&
+        port->RoomFor(jobs[cursor].vc)) {
       msg = std::make_shared<Message>();
       msg->user_id = jobs[cursor].user;
       msg->path_id = 1;
@@ -78,7 +80,7 @@ class ReqFeeder : public BachModule {
     port->user_id = j.user;
     port->enters_core = 0;
     port->stall_way = 0;
-    port->need_stream = j.need_stream ? 1 : 0;
+    port->stream_need = j.stream_need;
     port->whole_packet = j.whole ? 1 : 0;
     port->credit_require = j.require;
     port->msg = msg;
@@ -117,7 +119,7 @@ class OutTap : public BachModule {
     }
     rel->flit.Idle();
     if (on && f.valid) {
-      rel->release.Drive(true, f.vc, false, 0, false, 0);
+      rel->release.Drive(true, f.vc, false, 0);
     } else {
       rel->release.Idle();
     }
@@ -153,6 +155,7 @@ struct Bench {
 
 std::vector<ReqFeeder::Job> Burst(uint64_t n, uint64_t out_mask, uint64_t vc,
                                   uint64_t user_base, bool need_stream = false) {
+  // 要查的就是这一笔要发的那几个出口。
   std::vector<ReqFeeder::Job> jobs;
   for (uint64_t i = 0; i < n; ++i) {
     ReqFeeder::Job j;
@@ -160,7 +163,7 @@ std::vector<ReqFeeder::Job> Burst(uint64_t n, uint64_t out_mask, uint64_t vc,
     j.out_mask = out_mask;
     j.vc = vc;
     j.user = user_base + i;
-    j.need_stream = need_stream;
+    j.stream_need = need_stream ? out_mask : 0;
     jobs.push_back(j);
   }
   return jobs;
@@ -348,6 +351,48 @@ TEST(BachXbar, BodyBeatsAnotherInputsHead) {
   EXPECT_GT(others, 0u) << "别的入口确实在抢同一个出口";
 }
 
+// 进 core 那个出口一个包独占到尾 flit，不分 VC：一个 VC3 上的包发出首 flit 之后
+// 隔了几拍才有 body，另一个入口 VC0 上的包也要等它发完。core 内的输入不支持几个
+// 包交织。
+TEST(BachXbar, CoreOutputTakesOnePacketAtATime) {
+  std::vector<uint64_t> users;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.xb->ForceReady(true);
+    LinkEndPtr core = MakeWire(clk);
+    LinkEndPtr core_back = MakeWire(clk);
+    b.xb->AttachCoreOut(core);
+    auto p0 = b.Req(kInLeft);
+    auto p1 = b.Req(kInRight);
+    std::vector<ReqFeeder::Job> pkt;
+    for (uint64_t i = 0; i < 3; ++i) {
+      ReqFeeder::Job j;
+      j.at = i == 0 ? 1 : 8 + i;
+      j.out_mask = 1ull << kOutCore;
+      j.vc = 3;
+      j.user = 100;
+      j.head = (i == 0);
+      j.tail = (i == 2);
+      pkt.push_back(j);
+    }
+    ReqFeeder::Job other;
+    other.at = 3;
+    other.out_mask = 1ull << kOutCore;
+    other.vc = 0;
+    other.user = 200;
+    ReqFeeder f0(clk, "f0", p0, pkt);
+    ReqFeeder f1(clk, "f1", p1, {other});
+    OutTap tap(clk, "tap", core, core_back, false);
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    users = tap.users;
+  }
+  RT::Reset();
+  EXPECT_EQ(users, std::vector<uint64_t>({100, 100, 100, 200}));
+}
+
 // stream 授权也按全有全无判：一个方向的表满了，多播的另一个方向也不占坑。
 TEST(BachXbar, StreamGrantIsAllOrNothing) {
   uint64_t mid_used = 0, right_used = 0, mc_granted = 0;
@@ -367,7 +412,7 @@ TEST(BachXbar, StreamGrantIsAllOrNothing) {
     j.out_mask = (1ull << kOutMid) | (1ull << kOutRight);
     j.vc = 0;
     j.user = 900;
-    j.need_stream = true;
+    j.stream_need = j.out_mask;
     mc.push_back(j);
     ReqFeeder f1(clk, "f1", p1, mc);
     OutTap t0(clk, "t0", b.out[kOutMid], b.back[kOutMid], true);
@@ -400,11 +445,12 @@ TEST(BachXbar, HeldDirectionTakesNoNewSlot) {
     a.out_mask = 1ull << kOutMid;
     a.vc = 0;
     a.user = 55;
-    a.need_stream = true;
+    a.stream_need = a.out_mask;
     jobs.push_back(a);
     ReqFeeder::Job c = a;
     c.at = 10;
     c.out_mask = (1ull << kOutMid) | (1ull << kOutRight);
+    c.stream_need = c.out_mask;
     jobs.push_back(c);
     ReqFeeder f0(clk, "f0", p0, jobs);
     OutTap t0(clk, "t0", b.out[kOutMid], b.back[kOutMid], true);
@@ -530,9 +576,10 @@ TEST(BachXbar, NotEnoughCreditStopsTheSend) {
   EXPECT_EQ(left, 16u) << "余额不动";
 }
 
-// 退休把这个用户占的量还回来。
-TEST(BachXbar, RetireGivesTheKilobytesBack) {
-  uint64_t after_send = 0, after_retire = 0;
+// 下游还回来的 release 把这个用户占的量还回来。本级退休不动这几张表：那几项
+// 记的是下游的坑，要等下游各自退休（F-036）。
+TEST(BachXbar, DownstreamReleaseGivesTheKilobytesBack) {
+  uint64_t after_send = 0, after_release = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -545,10 +592,35 @@ TEST(BachXbar, RetireGivesTheKilobytesBack) {
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
     after_send = b.xb->CoreCredit(kOutMid);
-    b.xb->RetireUser(77);
-    after_retire = b.xb->CoreCredit(kOutMid);
+    b.xb->ReleaseUser(kOutMid, 77);
+    after_release = b.xb->CoreCredit(kOutMid);
   }
   RT::Reset();
   EXPECT_EQ(after_send, 96u);
-  EXPECT_EQ(after_retire, 128u) << "退休还回那 32 KB";
+  EXPECT_EQ(after_release, 128u) << "下游还回来就放那 32 KB";
+}
+
+// 进本 core 的三态准入在 Xbar 这一级做（F-021）：进核表 16 项占满之后不再往 core
+// 发，第 17 个用户那一笔留在它那个 VC 上等，不丢也不转存。
+TEST(BachXbar, CoreSideStopsWhenTheCoreTableIsFull) {
+  uint64_t used = 0, got = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.xb->ForceReady(true);
+    auto p0 = b.Req(kInLeft);
+    ReqFeeder f0(clk, "f0", p0,
+                 Burst(kStreamTabEntries + 1, 1ull << kOutCore, 0, 100, true));
+    LinkEndPtr to_core = MakeWire(clk);
+    b.xb->AttachCoreOut(to_core);
+    OutTap tap(clk, "tap", to_core, MakeWire(clk), false);
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    used = b.xb->StreamUsed(kOutCore);
+    got = tap.got;
+  }
+  RT::Reset();
+  EXPECT_EQ(used, kStreamTabEntries) << "16 项占满";
+  EXPECT_EQ(got, kStreamTabEntries) << "第 17 个用户那一笔发不出去";
 }

@@ -237,7 +237,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | 编号 | 功能 |
 | - | - |
 | F12 | trigger 带 `{user_id, path_id, reissue}`，valid/ready 握手。不设入口队列：条件不满足就拉低 `ready`，由 CoreStation 保持这一笔，每拍重判，不丢弃、不越过。这条通路上的 trigger 与 token 一一对应，丢一笔就等于丢一个 token |
-| F13 | 普通模式下拿 `user_id` 与 `stream_table` 里已绑定的用户号比对：命中是老用户，复用原来的 `stream_id`；没命中是新用户 |
+| F13 | 普通模式下拿 `user_id` 与 `stream_table` 里已绑定的用户号比对：命中是老用户，复用原来的 `stream_id`；没命中是新用户。系统保证有效的 `user_id` 唯一：一个用户号在本 core 上的表项退休之前，不会有另一个 token 用它进来。老用户这一次既没有搬入任务可派、也没有要跳过的项，就是这条保证被打破，模型断言失败 |
 | F14 | 按 F11 找出搬入任务 t，再按 t 的 `TASK_TYPE` 与 trigger 的 `reissue` 定这一次派不派 DTE、跳过哪几项，取法见下表。t 的配对搬出是 t 的 `TASK_P2P_REISSUE_TID` 指的那一项 |
 | F15 | 跳过的位直接并进这个用户的 `done_bitmap`；跳过的里含当前任务时，当前任务同时算做完 |
 | F16 | 老用户不改当前任务与状态，只并跳过位；`reissue = 1` 时把表项的 `reissue` 置起来 |
@@ -982,6 +982,7 @@ task 唤醒延迟        2～3 cycle（MAS 的硬件目标值）
 | 按 PID 找这个用户没做完的最低一项搬入任务 | F11 | `BachTsCfg.MatchDatainPicksTheLowestUndoneTaskOfThatPid` |
 | trigger 不设队列，表满时反压，不丢 | F12、F17 | `BachTs.BackpressuresTriggerWhenTableIsFull` |
 | 老用户按 PID 找到它没做完的搬入任务，跳过位补进原来那一项 | F13、F16 | `BachTsIssue.ExistingUserMatchesByPid` |
+| 表项退休之后同一个用户号再来就是新用户；退休之前再来断言失败 | F13 | `BachTs.SameUserBeforeRetireIsAnError` |
 | Broadcast 重发的搬入且不重发：搬入照做，配对的搬出跳过 | F14、F15、F61 | `BachTsIssue.BroadcastReissueInSkipsOnlyTheEgress` |
 | P2P 重发的搬入且不重发：两项都跳过，不派 DTE，照样建表 | F14、F18、F62 | `BachTsIssue.P2pReissueInSkipsBothWithoutDte` |
 | 跳过位含当前任务时当前任务算做完 | F15 | `BachStreamTable.SkipMaskFinishesOnlyTheCurrentTask` |

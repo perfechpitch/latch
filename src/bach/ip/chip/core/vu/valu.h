@@ -41,7 +41,7 @@ class VuValu : public VuExeStage {
     VuOpReg const& r = f.uops.cfg.valu[idx];
     ValuOp op = ValuOp(r.opcode);
     VuMacroInst const& inst = f.uops.inst;
-    uint64_t vl = inst.Vl();
+    uint64_t vl = f.SegLen();
     VuOperand const& s1 = VuSrcOf(f, r.src1);
     VuOperand const& s2 = VuSrcOf(f, r.src2);
     VuOperand const& s3 = VuSrcOf(f, r.src3);

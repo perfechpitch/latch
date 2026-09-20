@@ -49,6 +49,7 @@ class VuSmux : public BachModule {
     Drain();
     Accept();
     routed = route_cnt;
+    TracePerCycle("hold", holding ? 1 : 0);
   }
 
  private:
@@ -90,14 +91,15 @@ class VuSmux : public BachModule {
   // 这里按需读，读了就是占了。
   void Route(VuFlow& f) {
     VuMacroInst const& inst = f.uops.inst;
-    uint64_t vl = inst.Vl();
+    uint64_t vl = f.SegLen();
 
+    // 一段是一个 RF entry，所以第几段就从起始 entry 往后数几个。
     for (uint64_t p = 0; p < 2; ++p) {
       if (Uses(f.uops.cfg, kSrcVrfP0 + p)) {
-        f.vrf_rd[p].vec = regs.ReadVrf(inst.VrfRd(p), vl, inst.Bf16());
+        f.vrf_rd[p].vec = regs.ReadVrf(inst.VrfRd(p) + f.seg, vl, inst.Bf16());
       }
       if (UsesMrf(f.uops.cfg, p)) {
-        f.mrf_rd[p].mask = regs.ReadMrf(inst.MrfRd(p), vl, inst.Bf16());
+        f.mrf_rd[p].mask = regs.ReadMrf(inst.MrfRd(p) + f.seg, vl, inst.Bf16());
       }
     }
     for (uint64_t p = 0; p < kVuSrfRdPorts; ++p) {
@@ -168,6 +170,7 @@ class VuDmux : public BachModule {
     Drain();
     Accept();
     written = write_cnt;
+    TracePerCycle("hold", holding ? 1 : 0);
   }
 
  private:
@@ -212,7 +215,7 @@ class VuDmux : public BachModule {
       if (src == kSrcNone) continue;
       VuOperand const& v = VuSrcOf(f, src);
       if (v.vec.empty()) continue;
-      regs.WriteVrf(inst.VrfWt(p), v.vec, inst.Bf16(), inst.Round());
+      regs.WriteVrf(inst.VrfWt(p) + f.seg, v.vec, inst.Bf16(), inst.Round());
       ++write_cnt;
     }
 
@@ -220,7 +223,7 @@ class VuDmux : public BachModule {
     if (mrf_src != kSrcNone) {
       VuOperand const& m = VuSrcOf(f, mrf_src);
       if (!m.mask.empty()) {
-        regs.WriteMrf(inst.MrfWt(), m.mask, inst.Bf16());
+        regs.WriteMrf(inst.MrfWt() + f.seg, m.mask, inst.Bf16());
         ++write_cnt;
       }
     }

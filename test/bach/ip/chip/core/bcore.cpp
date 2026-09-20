@@ -128,7 +128,6 @@ RouteEntry EnterCore() {
   RouteEntry e;
   e.flow_dir = 0;
   e.path_core_bypass = false;
-  e.stream_table_enable = false;
   e.operation = Operation::kForward;
   return e;
 }
@@ -172,7 +171,7 @@ class BcoreHarness : public BachModule {
     for (uint64_t d = 0; d < 3; ++d) {
       core.BackWire(d)->flit.Idle();
       if (took[d]) {
-        core.BackWire(d)->release.Drive(true, took_vc[d], false, 0, false, 0);
+        core.BackWire(d)->release.Drive(true, took_vc[d], false, 0);
         took[d] = false;
       } else {
         core.BackWire(d)->release.Idle();

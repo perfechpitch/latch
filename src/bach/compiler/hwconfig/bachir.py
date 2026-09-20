@@ -6,15 +6,16 @@
 
 版本 6 起产物装的是硬件配置（RTAB、TCHAIN、CFGMISC 这些）。此前几版装的是建模
 抽象层的配置，路由直接写目的坐标，那一档现在是编译器的输入侧。版本 7 加了
-RELROUTE（Release 静态路由，即 RTR_RELEASE_ROUTE）与 RTAB 末尾的 reduceNeedMask。
+RELROUTE（Release 静态路由，即 RTR_RELEASE_ROUTE）。
 版本 8 的 TCHAIN 照 TASK_CHAIN_xx_PC / ATTR 的位域：TASK_TYPE 取代三个类型位，去掉
 TASK_EXE_MASK 与每项的 SELF_START；CFGMISC 的第二个字段改成全局 SELF_START；加
 TSRTAB（TS 的 ROUTER_TABLE）。PATHTASK 只给 DTE 那一份。版本 9 的 chip 统一 2×5：
 CHIP 的第二个字段从形状换成 core_bad_mask，CORE 覆盖每颗 chip 的 10 个 core，加
-DTEIN（业务模式下进核那一笔的配置）。
+DTEIN（业务模式下进核那一笔的配置）。版本 10 去掉 RTAB 末尾的 reduceNeedMask：
+业务级资源只剩 Stream 一种，reduce 那一路不单独记账。
 """
 
-HEADER = "BACHIR 9"
+HEADER = "BACHIR 10"
 
 
 # 一层 MoE 那套拓扑的产物。core 一律按 (chip 号, 片内 core 号) 定位，与模型里
@@ -75,23 +76,23 @@ def render_plan(plan, source, images):
 
     out.append("# RTAB <chip> <core> <path> <op_type> <flow_dir> <cur_vc>"
                " <nxt_vc×5> <mask_en> <mask_idx> <bypass> <need_buffer>"
-               " <stream_tab_en> <cur_cr_type> <cur_cr_req> <nxt_cr_type×3>"
+               " <stream_need> <cur_cr_type> <cur_cr_req> <nxt_cr_type×3>"
                " <nxt_cr_req×3> <rdc_dtype> <rdc_odtype> <rdc_in_mask>"
-               " <operation> <stall_way> <ext_dst> <rdc_need>")
+               " <operation> <stall_way> <ext_dst>")
     for (chip, core), table in sorted(plan.entries.items()):
         for path_id, e in sorted(table.items()):
             nxt_vc = " ".join(str(e.vc) for _ in range(5))
             nxt_ct = " ".join(str(e.credit_type) for _ in range(3))
             nxt_cr = " ".join(str(e.credit_require) for _ in range(3))
             out.append(
-                "RTAB {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}"
+                "RTAB {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}"
                 .format(chip, core, path_id, e.op_type, e.flow_dir, e.vc,
                         nxt_vc, int(e.mask_enable), e.mask_idx,
                         int(e.path_core_bypass), int(e.need_buffer),
-                        int(e.stream_table_enable), e.credit_type,
+                        e.stream_need, e.credit_type,
                         e.credit_require, nxt_ct, nxt_cr, e.reduce_data_type,
                         e.reduce_outdata_type, e.reduce_in_mask, e.operation,
-                        int(e.stall_way), e.ext_dst, int(e.reduce_need)))
+                        int(e.stall_way), e.ext_dst))
 
     out.append("# RTABDTE <chip> <core> <path>　DTE 里那份副本，内容与 RTAB 同")
     for (chip, core), table in sorted(plan.dte_rtab.items()):
@@ -104,7 +105,7 @@ def render_plan(plan, source, images):
             out.append(f"PATHTASK {chip} {core} {path_id} {task_id}")
 
     out.append("# RELROUTE <chip> <core> <入口方向 0 mid 1 left 2 right>"
-               " <出方向掩码 bit0 mid bit1 left bit2 right bit3 本级>")
+               " <出方向掩码 bit0 mid bit1 left bit2 right>")
     for (chip, core), table in sorted(plan.release_route.items()):
         for in_dir, mask in sorted(table.items()):
             out.append(f"RELROUTE {chip} {core} {in_dir} {mask}")

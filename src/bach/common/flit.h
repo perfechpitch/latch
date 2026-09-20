@@ -86,20 +86,18 @@ inline FlitView ReadFlit(FlitPort const& p) {
   return v;
 }
 
-// 三种 release 各走各的通道，都是单拍脉冲。
-// vc_release   链路层：一个 flit 腾出下游一个 VC 槽就还一个
-// stream_release / reduce_release  业务层：按 user 还
+// 两种 release 各走各的通道，都是单拍脉冲。
+// vc_release      链路层：一个 flit 腾出下游一个 VC 槽就还一个
+// stream_release  业务层：一个用户在下游那个 core 上跑完整条任务链就还一次。
+//                 下游的 Core Mem 与 Rmem 是一起分配的，所以业务层只有这一种。
 class ReleasePort : public Logic {
  public:
   Logic64 vc_valid, vc_id;
   Logic64 stream_valid, stream_user;
-  Logic64 reduce_valid, reduce_user;
 
   explicit ReleasePort(ClockPtr c)
-      : vc_valid(c), vc_id(c), stream_valid(c), stream_user(c),
-        reduce_valid(c), reduce_user(c) {
-    Fields(vc_valid, vc_id, stream_valid, stream_user, reduce_valid,
-           reduce_user);
+      : vc_valid(c), vc_id(c), stream_valid(c), stream_user(c) {
+    Fields(vc_valid, vc_id, stream_valid, stream_user);
   }
 
   void Idle() {
@@ -107,29 +105,24 @@ class ReleasePort : public Logic {
     vc_id = 0;
     stream_valid = 0;
     stream_user = 0;
-    reduce_valid = 0;
-    reduce_user = 0;
   }
 
-  // 三条通道互相独立，一拍可以同时有。所以给的是整拍一次写全的接口。
-  void Drive(bool vc_rel, uint64_t vc, bool stream_rel, uint64_t stream_u,
-             bool reduce_rel, uint64_t reduce_u) {
+  // 两条通道互相独立，一拍可以同时有。所以给的是整拍一次写全的接口。
+  void Drive(bool vc_rel, uint64_t vc, bool stream_rel, uint64_t stream_u) {
     vc_valid = vc_rel ? 1 : 0;
     vc_id = vc;
     stream_valid = stream_rel ? 1 : 0;
     stream_user = stream_u;
-    reduce_valid = reduce_rel ? 1 : 0;
-    reduce_user = reduce_u;
   }
-  // 同一根回线上 VC 那一类与 Reduce 那一类由不同的模块写：各写各的那几项，
+  // 同一根回线上 VC 那一类与 Stream 那一类由不同的模块写：各写各的那几项，
   // 不碰另一类。
   void DriveVc(bool vc_rel, uint64_t vc) {
     vc_valid = vc_rel ? 1 : 0;
     vc_id = vc;
   }
-  void DriveReduce(bool reduce_rel, uint64_t reduce_u) {
-    reduce_valid = reduce_rel ? 1 : 0;
-    reduce_user = reduce_u;
+  void DriveStream(bool stream_rel, uint64_t stream_u) {
+    stream_valid = stream_rel ? 1 : 0;
+    stream_user = stream_u;
   }
 };
 
@@ -138,10 +131,8 @@ struct ReleaseView {
   uint64_t vc_id = 0;
   bool stream_valid = false;
   uint64_t stream_user = 0;
-  bool reduce_valid = false;
-  uint64_t reduce_user = 0;
 
-  bool Any() const { return vc_valid || stream_valid || reduce_valid; }
+  bool Any() const { return vc_valid || stream_valid; }
 };
 
 inline ReleaseView ReadRelease(ReleasePort const& p) {
@@ -150,8 +141,6 @@ inline ReleaseView ReadRelease(ReleasePort const& p) {
   v.vc_id = p.vc_id.Get();
   v.stream_valid = p.stream_valid.Get() != 0;
   v.stream_user = p.stream_user.Get();
-  v.reduce_valid = p.reduce_valid.Get() != 0;
-  v.reduce_user = p.reduce_user.Get();
   return v;
 }
 

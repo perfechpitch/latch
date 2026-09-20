@@ -69,6 +69,8 @@ class LaneHarness : public BachModule {
   std::vector<Job> jobs;
   // 存储回响应的延迟。
   uint64_t mem_latency = 2;
+  // Router 那一路收不收。
+  bool router_ready = true;
 
   struct MemOp {
     uint64_t at = 0, addr = 0;
@@ -85,7 +87,7 @@ class LaneHarness : public BachModule {
     Serve(ln.Cmem(), true, now);
     Serve(ln.Mmem(), false, now);
     if (ln.ToRouter().Valid()) ++router_beats;
-    ln.ToRouter().DriveReady(true);
+    ln.ToRouter().DriveReady(router_ready);
 
     bool drove = false;
     for (auto const& j : jobs) {
@@ -432,6 +434,34 @@ TEST(BachDteLane, NextTaskStartsAfterIssueDone) {
   ASSERT_GE(read_at.size(), 2u) << "两笔的读都要发出去";
   EXPECT_LT(read_at[1] - read_at[0], 30u)
       << "第二笔不该等第一笔的响应回来才发";
+}
+
+// 前一笔的读请求发完、响应还没收齐时，后一笔的读也要把它们算进 buffer 的占用：
+// Router 那一路不收，buffer 只有 4 拍，两笔各 4 拍，在途的读请求加起来不超过
+// 4 个，后一笔一个都发不出去。
+TEST(BachDteLane, ReadAheadCountsThePreviousTasksResponses) {
+  uint64_t peak = 0, reads = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    DteBuffer buf(clk, "buf", 4, 1, 0, false);
+    Agcu agcu(Layout());
+    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    LaneHarness h(clk, ln);
+    h.mem_latency = 5;
+    h.router_ready = false;
+    h.jobs = {{2, Task(1, Route::kCmToRouter, 0, 4 * kFlitBytes, 0, 0)},
+              {3, Task(2, Route::kCmToRouter, 0, 4 * kFlitBytes, 0x400, 0)}};
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    peak = h.peak_outstanding;
+    for (auto const& o : h.ops) {
+      if (!o.write) ++reads;
+    }
+  }
+  RT::Reset();
+  EXPECT_LE(peak, 4u) << "在途的读请求不超过 buffer 的位置";
+  EXPECT_EQ(reads, 4u) << "buffer 被前一笔占满，后一笔发不出读请求";
 }
 
 // 等收敛的任务边界数有上限：满了就先不激活新的。

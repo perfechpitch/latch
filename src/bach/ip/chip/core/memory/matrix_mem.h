@@ -11,6 +11,11 @@
 // 执行 MU、被让路的那一笔直接丢弃并计数，而 DTE 没有重传通路，丢一笔就少一段
 // 数据、结果直接错。所以模型遇到这一笔直接断言失败，不用重试掩盖。
 //
+// DTE 的读口与写口是同一方：B core 与 R core 上 DTE 一边把进来的数据写进 Matrix
+// Mem、一边把存着的读出去。两个口撞在同一个 bank 上排队，照 Core Mem MAS 对
+// DTE 端口读写 bank 冲突的那一条：仲裁二选一，只反压冲突的那个 bank。Matrix
+// Mem MAS 没写这一情形。
+//
 // bank 数有一处口径冲突未解：MU MAS 记 32 bank 与 32 lane 一对一，Mmem MAS 记
 // 64 bank。这里按 Mmem MAS 的 64 取，直接影响 8 KB/T 怎么组织。
 
@@ -34,12 +39,11 @@ constexpr uint64_t kMatrixMemBytes = 36ull * 1024 * 1024;
 
 inline std::vector<MemMaster> MatrixMemMasters() {
   return {
-      // DTE 的读与写各占一个端口，读 8T、写 9T，但它们是同一个 master 的两只口，
-      // 独占检查按组算：两者撞同一个 bank 排队，不算违反硬约束。
-      {"mu", 0, 8, 8, 0},        // 只读
-      {"dte_rd", 1, 8, 8, 1},
-      {"dte_wr", 1, 9, 9, 1},
-      {"cfg", 2, 50, 50, 2},  // ctrl_noc 取 Mmem 的上界
+      {"mu", 0, 8, 8},        // 只读
+      // DTE 的读与写各占一个端口，读 8T、写 9T，两个口同属 DTE 一方。
+      {"dte_rd", 1, 8, 8, kMmemDteRd},
+      {"dte_wr", 1, 9, 9, kMmemDteRd},
+      {"cfg", 2, 50, 50},  // ctrl_noc 取 Mmem 的上界
   };
 }
 

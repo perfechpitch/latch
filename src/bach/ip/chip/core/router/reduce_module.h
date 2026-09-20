@@ -9,18 +9,13 @@
 //                     的输入读出当前值、累加、写回，原位 Read-Modify-Write
 //   M12 结果流水      某个结果 flit 要的操作数都累加完了就能发，不等整包；一个
 //                     包发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出
-//                     等。发送前查目标 VC credit，一笔任务头一个 flit 还要查下游
-//                     Reduce credit，作为 Xbar 的第五路输入参与仲裁
+//                     等。发送前只查目标 VC credit，作为 Xbar 的第五路输入参与
+//                     仲裁
 //
-// 下游 Reduce credit 按 UserID 与目标方向记，粒度是一笔 Reduce 任务（F-032、
-// F-033）：表项的 reduce_need 置位时，一笔任务头一个 flit 往某个方向发之前，要那
-// 个方向这个用户空闲，取得之后这笔任务后面的 flit 不再查。模型里一笔任务就是一个
-// reduce_seq 的包。下游把这笔任务的结果整包交出去之后，给每一路上游来源各还一个
-// release，写在往那个方向去的出线上；本 core 那一份不还。
-//
-// 从某个方向进来的 release 按那个口的 Release 静态路由（RouterTable 的
-// CreditBypass，对应 RTR_RELEASE_ROUTE）走：带本级位的交给本级，放开那个方向这
-// 个用户；带方向位的原样转出去，坏 core 与只转发的 core 走这一档。
+// 往下游发 reduce 结果不查下游的 Rmem：Rmem 与 Core Mem 按同样的办法给 16 个
+// 用户等分，一个用户在下游拿到的那一项 Stream 资源同时代表那边的 Core Mem 与
+// Rmem 容量，所以 reduce 这一路不单独记账、也不单独还，业务级资源只有 Stream
+// 那一套，用户任务链跑完退休时还一次。
 //
 // 「全部方向」取自 RouterTable 的 reduce_in_mask：按包头的 path_id 查表，得到
 // 这条 path 在本级会有哪几个相邻方向送来分量。首份输入建上下文时把这个集合一并
@@ -38,9 +33,8 @@
 //
 // 分区：16 个用户各一个 kReduceCtxBytes 的分区，按 FP32 驻留数据量算（F-044）。
 // 用户第一笔任务真正进来时分配，后面的任务接着用，收到这个用户的 User Retire 才
-// 释放（F-029、F-037）。下游 Reduce 资源映射与本地分区分开记、分开清：Retire 之后
-// 分区照放，还有在途任务的方向等 release 回来才清。一个包累加出来超过分区容量就
-// 报错：软件要按这个容量把一笔 reduce 拆成链上几项逐级 reduce 任务，一项一包。
+// 释放（F-029、F-037）。一个包累加出来超过分区容量就报错：软件要按这个容量把一笔
+// reduce 拆成链上几项逐级 reduce 任务，一项一包。
 //
 // 链上没有同步点：上游分量到达时不必等本 core 算完，先存进上下文，本地出核的
 // 分量出来时再加。
@@ -141,20 +135,13 @@ class ReduceModule : public BachModule {
   std::shared_ptr<ReadyLevelPort> LevelPtr(uint64_t r) const {
     return in_level.at(r);
   }
-  // 往方向 d 去的出线：还方向 d 那个上游的 Reduce release 写在它的 release 上。
-  void AttachUpRelease(uint64_t d, LinkEndPtr wire) { up_rel.at(d) = std::move(wire); }
-  // 从方向 d 来的进线：方向 d 那个下游还回来的 Reduce release 从它上面读。
-  void AttachDownRelease(uint64_t d, LinkEndPtr wire) {
-    down_rel.at(d) = std::move(wire);
-  }
-
   // Retire 从这个口广播退休的 user。表由本模块的协程改，Retire 只送号。
   void AttachRetire(std::shared_ptr<RetireBroadcastPort> p) {
     retire_in = std::move(p);
   }
 
-  // User Retire 只放本地分区（F-037）：这个用户没有在做的任务就当场放，有就等
-  // 结果交付完再放。下游 Reduce 资源映射不在这里清，等在途任务的 release 回来。
+  // User Retire 放本地分区（F-037）：这个用户没有在做的任务就当场放，有就等结果
+  // 交付完再放。
   void RetireUser(uint64_t user) {
     auto it = ctx.find(user);
     if (it == ctx.end()) return;
@@ -167,21 +154,6 @@ class ReduceModule : public BachModule {
   // 这个用户占着一个本地分区。
   bool HoldsUser(uint64_t user) const { return ctx.count(user) != 0; }
   uint64_t ContextUsed() const { return ctx.size(); }
-  // 方向 dir 的下游那一级正做着本级发过去的这个用户的一笔任务。
-  bool DownBusy(uint64_t user, uint64_t dir) const {
-    auto it = down.find(user);
-    if (it == down.end()) return false;
-    return it->second[dir];
-  }
-  // 方向 dir 的下游做完了这个用户的一笔任务，还回来一个 release。各方向都空了，
-  // 这个用户的映射就清掉。
-  void ReturnCredit(uint64_t user, uint64_t dir) {
-    auto it = down.find(user);
-    LOGCHECK(it != down.end() && it->second[dir],
-             "ReduceModule: 这个方向没有在途的任务，却收到了 release。");
-    it->second[dir] = false;
-    if (!it->second[0] && !it->second[1] && !it->second[2]) down.erase(it);
-  }
 
   // 正在做的任务有几笔：从首份输入进来到结果尾 flit 交付。
   uint64_t OutQueued() const { return out_q.size(); }
@@ -193,20 +165,14 @@ class ReduceModule : public BachModule {
     for (auto const& b : in_buf) {
       if (!b.empty()) return false;
     }
-    for (auto const& q : rel_q) {
-      if (!q.empty()) return false;
-    }
     return out_q.empty();
   }
 
  protected:
   void Step() override {
     TakeRetire();
-    TakeDownReleases();
     // 末级先做。
-    rel = RelOut{};
     EmitOne();
-    PublishReleases();
     for (uint64_t r = 0; r < 3; ++r) {
       TakeIn(r);
       AcceptFrom(r);
@@ -257,13 +223,6 @@ class ReduceModule : public BachModule {
     uint64_t user_id = 0, reduce_seq = 0;
     MessagePtr msg;             // 结果包，发首 flit 之前按累加结果造
     uint64_t sent = 0;          // 已经发出去的字节
-    uint64_t contrib = 0;       // 这笔任务是哪几路来源凑齐的
-    uint64_t local_lane = 3;    // 其中本 core 那一份占的那一路
-  };
-  // 这一拍要还出去的 release：EmitOne 填，PublishReleases 一拍各口只写一次。
-  struct RelOut {
-    std::array<bool, 3> up{};
-    uint64_t user = 0;
   };
 
   // 这一拍线上到的 flit 先进本路的输入缓冲。
@@ -336,8 +295,7 @@ class ReduceModule : public BachModule {
                              std::min<size_t>(kReduceSwHeaderBytes,
                                               f.msg->payload.size()));
         c.first_msg = f.msg;
-        out_q.push_back({user, c.reduce_seq, nullptr, 0, c.expect_mask,
-                         LocalLaneOf(e)});
+        out_q.push_back({user, c.reduce_seq, nullptr, 0});
       }
       // 这一路一个新包开始，收了多少从包头起算。
       c.got[r] = 0;
@@ -454,7 +412,7 @@ class ReduceModule : public BachModule {
   // 结果没好就占着输出等，不换别的包。
   void EmitOne() {
     // 与各 RouterStation 同一套：Xbar 那一侧上一拍说收得下就发，发了当场出队。
-    if (!req->Room() || out_q.empty()) {
+    if (!req->RoomFor(kReduceVc) || out_q.empty()) {
       req->IdleReq();
       done->Idle();
       return;
@@ -501,7 +459,7 @@ class ReduceModule : public BachModule {
     req->user_id = it.user_id;
     req->enters_core = ((mask >> kOutCore) & 1u) ? 1 : 0;
     req->stall_way = 0;
-    req->need_stream = 0;
+    req->stream_need = 0;
     // 整个结果都算好了才算手里攥着整包。
     req->whole_packet = ready >= it.msg->size ? 1 : 0;
     req->credit_require = 0;
@@ -512,11 +470,9 @@ class ReduceModule : public BachModule {
       done->Idle();
       return;
     }
-    // 结果全部交付后向 core 返回 UserID 与包头里的 reduce_seq（F-034），同时给
-    // 上游还 release（F-033）。这笔任务做完，分区空出来给这个用户的下一笔；收到
-    // 过 Retire 的就放掉分区。
+    // 结果全部交付后向 core 返回 UserID 与包头里的 reduce_seq（F-034）。这笔任务
+    // 做完，分区空出来给这个用户的下一笔；收到过 Retire 的就放掉分区。
     done->Drive(it.user_id, it.reduce_seq, it.msg->path_id);
-    ReleaseSources(it);
     uint64_t user = it.user_id;
     out_q.pop_front();
     c.busy = false;
@@ -527,26 +483,12 @@ class ReduceModule : public BachModule {
     ++emitted_pending;
   }
 
-  // 队头还没开始发时，挑最早一笔首 flit 已经算好、下游也收得下的任务挪到队头。
-  // 一笔任务头一个 flit 发出去之前，表项的 reduce_need 置位就要取得各目标方向
-  // 这个用户的下游准入；后面的 flit 只受 VC credit 约束。
+  // 队头还没开始发时，挑最早一笔首 flit 已经算好的任务挪到队头。
   bool PickNext() {
     for (auto i = out_q.begin(); i != out_q.end(); ++i) {
       Ctx const& c = ctx.at(i->user_id);
       uint64_t size = OutSizeOf(c);
       if (ReadyBytes(c, size) < std::min(size, kFlitBytes)) continue;
-      RouteEntry const& e = rtab.Lookup(copy, c.path_id);
-      std::vector<uint64_t> dirs = DownDirsOf(e.flow_dir);
-      if (e.reduce_need) {
-        // 多播全有全无：任一方向这个用户还忙着就先不发这一笔。
-        bool free = true;
-        for (uint64_t d : dirs) free = free && !DownBusy(i->user_id, d);
-        if (!free) {
-          ++stalled_pending;
-          continue;
-        }
-        for (uint64_t d : dirs) down[i->user_id][d] = true;
-      }
       // 结果包的包头照抄首份输入，数据按 flit 填：发哪个 flit 之前写哪一段。
       auto m = std::make_shared<Message>(*c.first_msg);
       m->payload.assign(size, 0);
@@ -560,66 +502,8 @@ class ReduceModule : public BachModule {
     return false;
   }
 
-  // 本 core 那一份占哪一路（F113）：flow_dir 的 reduce2 置位走 2，reduce1 置位
-  // 走 1，都不置走 0。其余几路是同号方向的相邻上游：0 mid、1 left、2 right。
-  // 这个判断默认本 core 出了自己那一份。
-  static uint64_t LocalLaneOf(RouteEntry const& e) {
-    if (e.flow_dir & kFlowReduce2) return 2;
-    if (e.flow_dir & kFlowReduce1) return 1;
-    return 0;
-  }
-
-  // 这笔任务的结果整包交出去了：给每一路上游来源各还一个 release，本 core 那一份
-  // 不还。
-  void ReleaseSources(OutItem const& it) {
-    rel.user = it.user_id;
-    for (uint64_t r = 0; r < 3; ++r) {
-      if (((it.contrib >> r) & 1u) == 0 || r == it.local_lane) continue;
-      rel.up[r] = true;
-    }
-  }
-
-  // 每个方向一拍送一个：本级自己的与转过来的排在同一个队列里。
-  void PublishReleases() {
-    for (uint64_t d = 0; d < 3; ++d) {
-      if (rel.up[d]) rel_q[d].push_back(rel.user);
-      if (!up_rel[d]) {
-        rel_q[d].clear();
-        continue;
-      }
-      if (rel_q[d].empty()) {
-        up_rel[d]->release.DriveReduce(false, 0);
-        continue;
-      }
-      up_rel[d]->release.DriveReduce(true, rel_q[d].front());
-      rel_q[d].pop_front();
-    }
-  }
-
-  // 从方向 d 进来的 Reduce release 按那个口的 Release 静态路由走（F-018～
-  // F-020）：带本级位的交给本级，带方向位的原样转出去，UserID 不变。
-  void TakeDownReleases() {
-    for (uint64_t d = 0; d < 3; ++d) {
-      if (!down_rel[d]) continue;
-      ReleaseView r = ReadRelease(down_rel[d]->release);
-      if (!r.reduce_valid) continue;
-      uint64_t route = rtab.CreditBypass(d);
-      LOGCHECK(route != 0,
-               "ReduceModule: 这个口收到了 Reduce release，却没配 Release 路由。");
-      for (uint64_t o = 0; o < 3; ++o) {
-        if ((route >> o) & 1u) rel_q[o].push_back(r.reduce_user);
-      }
-      if ((route & kReleaseSelf) == 0) continue;
-      if (!DownBusy(r.reduce_user, d)) {
-        spdlog::error("ReduceModule 第 {} 拍从方向 {} 收到用户 {} 的 Reduce release",
-                      CycleNow(), d, r.reduce_user);
-      }
-      ReturnCredit(r.reduce_user, d);
-    }
-  }
-
-  // flow_dir 的 R2R 三位映射到 down_busy 的下标。末端汇聚核 flow_dir 全不置位，
-  // 结果只交给本 core，不占任何方向。
+  // flow_dir 的 R2R 三位映射到方向号。末端汇聚核 flow_dir 全不置位，结果只交给
+  // 本 core。
   static std::vector<uint64_t> DownDirsOf(uint64_t flow_dir) {
     std::vector<uint64_t> dirs;
     if (flow_dir & kFlowMid) dirs.push_back(0);
@@ -634,16 +518,10 @@ class ReduceModule : public BachModule {
   std::shared_ptr<XbarReqPort> req;
   std::shared_ptr<ReduceDonePort> done;
   std::vector<std::shared_ptr<ReadyLevelPort>> in_level;
-  std::array<LinkEndPtr, 3> up_rel{}, down_rel{};
 
   // Step 独占。
-  RelOut rel;
-  std::array<std::deque<uint64_t>, 3> rel_q;
   std::array<std::deque<FlitView>, 3> in_buf;
   std::map<uint64_t, Ctx> ctx;
-  // 相邻下游 Reduce 资源映射：各方向的下游是否正做着本级发过去的这个用户的一笔
-  // 任务。与本地分区分开记、分开清（F-037）。
-  std::map<uint64_t, std::array<bool, 3>> down;
   std::deque<OutItem> out_q;
   uint64_t req_seq = 0;
   uint64_t accepted_pending = 0, emitted_pending = 0, stalled_pending = 0;

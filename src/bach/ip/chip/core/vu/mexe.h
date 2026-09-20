@@ -33,7 +33,7 @@ class VuMexe : public VuExeStage {
   void Compute(VuFlow& f) override {
     VuOpReg const& r = f.uops.cfg.mexe;
     MexeOp op = MexeOp(r.opcode);
-    uint64_t vl = f.uops.inst.Vl();
+    uint64_t vl = f.SegLen();
     // ms2 可取 VALU0 的 Mask bypass（不占 MRF 读端口）或 MRF_rd_p0；ms1 只能
     // 取 MRF_rd_p1，单操作数指令必须置 0x00。
     std::vector<bool> const& a = VuSrcOf(f, r.src1).mask;

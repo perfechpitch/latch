@@ -10,7 +10,7 @@
 // 里面装了几件：
 //   RouterTable        1 份，7 个副本供并行查询的各位置各读各的
 //   RouterStation      4 个：left / right / mid / core
-//   Xbar               1 个，持有下游方向的 VC credit 与 Stream 表
+//   Xbar               1 个，持有下游各方向的 VC credit 与 Stream 表
 //   CoreStation        1 个，进出核那一段
 //   ReduceModule       1 个
 //   CoreMemReissue     1 个
@@ -42,6 +42,9 @@
 
 namespace latch {
 namespace bach {
+
+// CreditMonitor 读的那份 RouterTable 副本。
+constexpr uint64_t kMonitorCopy = 5;
 
 struct RouterCfg {
   // 本 core 在 chip 内的编号：取 core_bad_mask 的哪一位。
@@ -96,9 +99,10 @@ class Router {
     reissue = std::make_unique<CoreMemReissue>(clock, "reissue",
                                                cfg.reissue_pkts_per_vc, gid,
                                                setting.tick);
-    retire = std::make_unique<Retire>(clock, "retire", gid, setting.tick);
-    monitor = std::make_unique<CreditMonitor>(clock, "monitor", *rtab, 5,
-                                              gid, setting.tick);
+    retire = std::make_unique<Retire>(clock, "retire", *rtab, gid,
+                                      setting.tick);
+    monitor = std::make_unique<CreditMonitor>(clock, "monitor", *rtab,
+                                              kMonitorCopy, gid, setting.tick);
 
     Wire();
   }
@@ -111,13 +115,6 @@ class Router {
   LinkEndPtr BackWire(uint64_t d) const { return back_wire.at(d); }
   // 本级还给上游的 VC credit 走这根，由 RouterStation 写。
   LinkEndPtr UpBackWire(uint64_t d) const { return up_back_wire.at(d); }
-  // 业务 credit 的回程（stream release）另走一根，由 Retire 写。
-  //
-  // 分成两根不是实现上的将就：链路那一份说的就是「数据与三种 release 各走各的
-  // 实例，参数相同」。合在一根上会出现两个模块同一拍写同一个 Latch。VC credit
-  // 是 flit 一进一出就还的快通道，stream release 要等那个用户在下游 core 上跑完
-  // 整条任务链，两者的产生点本来就不是一处。
-  LinkEndPtr UpReleaseWire(uint64_t d) const { return up_release_wire.at(d); }
 
   // ── 对外：进出 core，接本 core 的 DTE ──
   CoreDataPort& ToDte() { return core_station->ToDte(); }
@@ -160,14 +157,15 @@ class Router {
   void Preload(uint64_t path_id, RouteEntry const& e) {
     rtab->Preload(path_id, e);
   }
-  // Release 静态路由（RTR_RELEASE_ROUTE）：从方向 d 进来的业务 credit release
-  // 按 out_mask 走，掩码的写法见 kReleaseSelf。
+  // Release 静态路由（RTR_RELEASE_ROUTE）：从方向 d 进来的 stream release 转到
+  // out_mask 指的那几个方向。收到的那一笔一律先交本级，所以只有坏 core 这种要
+  // 把 release 送过去的口上配得有掩码。
   void SetCreditBypass(uint64_t d, uint64_t out_mask) {
     rtab->SetCreditBypass(d, out_mask);
   }
   // core_bad_mask：上电锁存，只能在业务开始之前写。本 core 那一位为 1 就进透传
   // 档：数据只按 RouterTable 往 mid、left、right 转发，不投递本 core、不进
-  // ReduceModule；只查、只扣下一跳链路的 VC credit；不做溢流转存。Reduce
+  // ReduceModule；只查、只扣下一跳链路的 VC credit；不做溢流转存。stream
   // release 照旧按 Release 静态路由转发。
   void SetCoreBadMask(uint64_t mask) {
     LOGCHECK(NothingForwarded(),
@@ -181,9 +179,6 @@ class Router {
   bool Bad() const { return rtab->CoreBad(cfg.core_id); }
 
   // ── 观测 ──
-  // B core：搬出之前要查哪几个方向的下游资源。方向在 TS 的 B_CORE_DIRECTION
-  // 里，跑起来之前由软件配，所以接的是取值的办法而不是当时的值。
-  void SetBcastDirs(std::function<uint64_t()> fn) { bcast_dirs = std::move(fn); }
   Xbar& GetXbar() { return *xbar; }
   CoreStation& GetCoreStation() { return *core_station; }
   // 包头读口，接 DTE RV core 的 cm_lsq。
@@ -237,13 +232,8 @@ class Router {
       out_wire.push_back(MakeWire(clk));
       back_wire.push_back(MakeWire(clk));
       up_back_wire.push_back(MakeWire(clk));
-      up_release_wire.push_back(MakeWire(clk));
       stations[d]->AttachUp(in_wire[d]);
       stations[d]->AttachUpBack(up_back_wire[d]);
-      // Reduce release 与数据反向走：还给上游的写在往上游去的出线上，下游还回来
-      // 的从下游来的进线上读。链路与 C2C bridge 都按这一套透传。
-      reduce->AttachUpRelease(d, out_wire[d]);
-      reduce->AttachDownRelease(d, in_wire[d]);
       xbar->AttachOutLink(d, out_wire[d]);
       xbar->AttachBackLink(d, back_wire[d]);
     }
@@ -281,36 +271,34 @@ class Router {
     reissue_out = MakeWire(clk);
     reissue->AttachOut(reissue_out);
 
-    // Retire 广播到三处。顺序按设计：Router 立即删 stream 授权，CoreStation 放
-    // 进核的坑，ReduceModule 只记下、等 credit 全回来才删。
-    // 退休广播走一根线：Retire 送号，三张表各由自己的模块改。
+    // 本级退休广播到两处：Xbar 放进本 core 那一项，ReduceModule 放这个用户的
+    // 分区（F-036）。本级记的各下游方向那几项不在这里放，等那些下游还 release。
+    // 广播走一根线：Retire 送号，两张表各由自己的模块改。
     auto bcast = retire->BroadcastPtr();
     xbar->AttachRetire(bcast);
-    core_station->AttachRetire(bcast);
     reduce->AttachRetire(bcast);
+    // release 与数据反向走：还给上游的写在往上游去的出线上，下游还回来的从下游
+    // 来的进线上读。出线上数据那一路由 Xbar 写，两者各写各的字段。
     for (uint64_t d = 0; d < kR2RNum; ++d) {
-      retire->AttachUpLink(d, up_release_wire[d]);
+      retire->AttachUpLink(d, out_wire[d]);
+      retire->AttachDownLink(d, in_wire[d]);
     }
+    xbar->AttachRelease(retire->ReleasePtr());
 
-    // CreditMonitor 查的是进核那一侧的坑：Router 的进 core 表与 TS 内部的表按
-    // 完全一致的逻辑申请空项，所以「Router 通知 TS 的包一定能被 TS 接收」。
-    monitor->SetCheck([this](uint64_t user, uint64_t) {
-      // B core 的搬出查的是广播那几个方向的下游资源，不是本 core 的进核资源：
-      // 它不算数，进来的 token 只在自己的 Matrix Mem 里存一份再发出去。
-      if (bcast_dirs) {
-        uint64_t mask = bcast_dirs();
-        if (mask != 0) return xbar->BroadcastRoom(mask, user);
-      }
-      return core_station->HoldsUser(user) ||
-             core_station->StreamUsed() < kStreamTabEntries;
+    // 出核那一笔查的是下游：这条 path 从本 core 出去的那几个方向上，这个用户在
+    // 相邻下游 core 有没有一项 Stream 资源。查到就当场占坑，TS 拿到的授权与
+    // Xbar 记的是同一项。
+    monitor->SetCheck([this](uint64_t user, uint64_t path) {
+      uint64_t mask = StreamDirsOf(path);
+      return mask == 0 || xbar->BroadcastRoom(mask, user);
+    });
+    monitor->SetTake([this](uint64_t user, uint64_t path) {
+      xbar->TakeStream(StreamDirsOf(path), user);
     });
   }
 
   ClockPtr clk;
   RouterCfg cfg;
-  // B core 往哪几个方向广播。值在 TS 的 B_CORE_DIRECTION 里，跑起来之前由软件
-  // 配，所以这里存的是取值的办法，用的时候现读。
-  std::function<uint64_t()> bcast_dirs;
 
   std::unique_ptr<RouterTable> rtab;
   std::vector<std::unique_ptr<RouterStation>> stations;
@@ -321,8 +309,15 @@ class Router {
   std::unique_ptr<Retire> retire;
   std::unique_ptr<CreditMonitor> monitor;
 
-  std::vector<LinkEndPtr> in_wire, out_wire, back_wire, up_back_wire,
-      up_release_wire;
+  // 这条 path 出核之后要占哪几个方向的下游 Stream 资源：表项没置 streamNeedMask
+  // 的一个方向都不占，下一跳不进 core 的那几条 path 就是这一档。
+  uint64_t StreamDirsOf(uint64_t path) const {
+    RouteEntry const& e = rtab->Lookup(kMonitorCopy, path);
+    if (!e.valid) return 0;
+    return e.stream_need & kFlowR2R;
+  }
+
+  std::vector<LinkEndPtr> in_wire, out_wire, back_wire, up_back_wire;
   LinkEndPtr reissue_out;
 };
 

@@ -37,6 +37,7 @@
 | 取指 / 访存不对齐异常的归属 | RV Core MAS decode 优先级表：addr misalign 单列一类 | 同文档 ITCM 与 Exception 两节：不对齐归入 access fault | 按 decode 优先级表 |
 | RV core 的 C / A / F / D 扩展 | RV Core MAS Features：C 支持、**A 考虑支持**、F 与 D 不支持；MAS_TOP：RV32IMC；同文档“标准指令集”小节仍是“是否支持 C？是否支持 AFD？”的问句 | 软件计算流程详细评估：**RV Core 目前支持的指令集为 RV32IMAC**，A 已经算进去 | 按 Features 建，**A 先不建**。这条影响 Share Mem 的多核一致性怎么做：三个 RV core 共享 Share Mem，A 一旦确定支持，task 之间的同步就有原子指令可用 |
 | DTE 的软件接口 | DTE MAS：Task Descriptor（`TASK_CFG_ADDR` / `TD` / `PACK` / `TRG`）+ Trigger 序列 | 软件计算流程详细评估：一套按字段命名的寄存器；《DTE 寄存器配置参数》：第三套，`DTE_BASE` 起三段地址空间加 `template[0..3]` 寄存器模板，字段名与第二套对得上并多出模板 / 动态的分档 | 软件接口按《DTE 寄存器配置参数》建（地址空间与模板已写进《DTE 数据搬运引擎》），完成机制按 DTE MAS。三套的字段仍未逐条对齐 |
+| 逐级归约要不要单独的 credit | Router MAS F-032、F-033：下游 Reduce credit 按 UserID 加目标方向、以一笔 reduce 任务为粒度，表项的 `reduceNeedMask` 置位时头一个 flit 前取得准入，下游交付完结果还一次 Reduce release | 《Core 间数据流通信机制》：“Rmem跟Cmem维护的逻辑一致，也是按照用户数量平均划分，容量的维护机制跟Stream资源的维护保持一致，这样不需要额外的Credit机制”，一项 Stream 资源同时分配下游的 CoreMem 与 ReduceMem | **已定：按《Core 间数据流通信机制》**。Rmem 开满 16 份，业务级 credit 只剩 Stream 一种，reduce 往下游发只查 VC credit。代价是同一个用户在同一个 core 上的两笔 reduce 之间没有跨 core 的挡手：上游第二笔的数据早到时，下游那个用户的分区还被第一笔占着，包只能在 VC 上等。Router MAS 那一路是靠下游 Rmem 空项挡的 |
 | 入站包头的字段清单 | DTE MAS Header Logical Fields：`version` / `header_len`、`packet_type` / `route`、`dst_addr`、`byte_count`、`task_id` / `stream_id`、`attributes` / `reserved`；软件计算流程详细评估的 MSG 包结构：硬件包头 8 B（包头标记 2 B + Router 信息 4 B + 包长度 2 B） | 《Core 间数据流通信机制》：**硬件包头 16 B + 软件包头 16 B = 32 B**，逐字节给全（Reserved 7 B、Hardware Used 1 B、UserID 2 B、Reserved 1 B、PathID 1 B、CoreMask 2 B、size 2 B），与 DATA_NOC HAS 的 Header 32 B 对上 | **按《Core 间数据流通信机制》建**，它是三份里唯一逐字节给全的，且总长与 HAS 的 32 B 一致。DTE MAS 自己声明“具体 Header 位域仍以 Router 接口规范为准” |
 | DTE 的启动方式 | DTE MAS 旧版：有“TS 快速启动流程”（TS 绕过 RV core 直接启动 DTE），标 P1 优先级 | 软件计算流程详细评估：只保留 DTE core 配置任务给 DSA 这一种 | **已定**。DTE MAS 现版把「TS 直接启动 DTE DSA」这一条整条删掉，启动方式只剩 DTE core 配置任务给 DSA |
 | 包头与 topK 的存放位置 | DTE MAS：包头可写 DTE 内 Header mem 或 Cmem 独立空间；topK 可写 MU 的 `topK_ep_table` 或 Cmem 独立空间 | 软件计算流程详细评估：计算 core 的包头存 DTE 内独立 mem，B core / R core 存 Core Mem；topK 由 DTE 复制到单独的 mem 供 MU 读 | **已定**。《MU / DTE 需求整理和遗留问题分析》20260825：硬件包头与软件包头合并成一张 288 B 的表按 `stream_id` 索引，存 Hmem 还是存 Core Mem 由 `hw_header_addr` 这个地址本身选，普通计算 core 走 Hmem、B core / R core 走 Core Mem |
@@ -61,7 +62,7 @@
 | map 文件里的 core 网格 | `.map` 示例 meta：`core_cols_per_chip: 4` | 模拟器基准配置：`CORE_COLS_PER_CHIP = 5` | **已定：统一 5 列**。chip 一律 2×5，列数是全局常数。编译器把每颗 chip 的 8 个计算 core 当逻辑 2×4 用，这个逻辑格子是 4 列，与 `.map` 示例的 4 相同 |
 | VC 数 | DATA_NOC HAS 正文与 VC Buffer 表：每 Input Port V = 4 | 同一份 HAS 的 VC 使能 mask 20-bit、`vc_id` 5-bit、Area 预算按 VC0–19（4×20 + 16×2 + shared 20 = 132 flits/port） | V = 20 是 2026/08/19 缩减 VC 之前的残留，但 Area 与 Architectural Guidelines 两节没同步。按 V = 4 建 |
 | VC private 深度 | HAS 3.2.2 与 REQ-ARCH-025：Private per-VC 深度 = 2（防死锁），软件可配 | 同一份 HAS 的 VC Buffer 结构表：Private ~20 flits/VC（覆盖 RTT），总量 4×20 + shared 20 = 100 flits/port = 25 KB | **已定：按 20**。HAS 的 VC Buffer 规格表是缩减到 V=4 之后的正式口径（`V=4`、`Private(VC0–3) ~20 flits/VC`、`总 4×20+20=100 flits/port=25 KB`）；`2` 是 REQ-ARCH-025 的软件可配下限，也是已删除的 VC4–19 那一档的深度，HAS 正文写作「极限情况……保证每 VC 基本传输需求」 |
-| R2R 单跳延迟 | DATA_NOC HAS 性能预算：internal 6 ns + wire 10 ns = **16 ns/hop**，mid 无走线延迟 | 第 5 章延迟表与性能需求规格：T_R2R = **40 T** | **倾向 16 ns**。HAS 新版新增 ASM-03「R2R round trip 最大不超过 20 cycle，单向 C2C latency 最大不超过 300ns」，单跳约 10 cycle 以内，与 16 ns @1GHz 一档相符；40 T 对不上这条约束。待与设计者确认 40 T 是不是含 core 侧往返的端到端值 |
+| R2R 单跳延迟 | DATA_NOC HAS 性能预算：internal 6 ns + wire 10 ns = **16 ns/hop**，mid 无走线延迟 | 第 5 章延迟表与性能需求规格：T_R2R = **40 T** | **已定：按 HAS 那一档拆开建**。Router 内部那 6 ns 由 Router 自己的流水级走掉，链路只担走线，左右填 10 T、mid 填 0 T，两段加起来才是一跳。ASM-03「R2R round trip 最大不超过 20 cycle」也与这一档相符。40 T 是把两段并在一处的口径，逐级建模的模型再填 40 就把 Router 内部那一段算了两遍。**仍待与设计者确认** 40 T 是不是含 core 侧往返的端到端值 |
 | Rmem per-port buffer | HAS ASM-07：per-port **128 flits** | 同一份 HAS 的 Area 预算：Reduce 子系统 3 port × **32 flits** | 未解 |
 | ReduceBuffer 容量 | 《通信机制（分析过程）》：单用户最大 reduce 数据量 8K × FP32 = 32 KB，正反双份 = 64 KB；《Core 间数据流通信机制》：16 用户 × 32 KB = **512 KB** | Router MAS F-044：16 用户 × **32 KiB** = 512 KiB，“容量统一按 FP32 驻留数据量计算。一个 32 KiB 分区最多保存 8192 个 FP32 元素，对应 16 KiB 的 BF16 输入数据”；《TS_通信机制》：每用户 **16 KiB** | **已定：每用户 32 KiB，按 FP32 驻留算**（Router MAS F-044）。《TS_通信机制》的 16 KiB 与 MAS 按 BF16 输入量折算的数一致，它给了拆分的理由：单用户 reduce 次数不定，Rmem 装不下全空间，**要求软件把一笔 reduce task 拆成 4 笔 8 KB 的 reduce task** |
 | CoreMem credit 粒度 | 《通信机制（分析过程）》：按 **1 KB 粒度**划分，path 按自己需求申请 | DATA_NOC HAS：按 **user 粒度**的资源表格，16 项 | 未解。前者是容量记账，后者是表项记账 |
@@ -130,11 +131,10 @@
 * 整包传输方案下“长包阻塞可能有死锁场景，需要在架构层考虑不会出现死锁”，死锁避免的具体论证未写
 * Router 表项示例里一处原文未定：C0 在 Path2 上要不要查输出端的 stream credit table。原文另一处“C8 在 Path1 上进 CoreMem 重发时 Core 位是否也要置位”已不成立：出方向掩码里没有 Core 位，进不进本 core 由 `path_core_bypass` 单独判定
 * 一笔 Reduce 任务含几个 Packet、任务边界靠什么标出来，Router MAS 没写。MAS 只说“同一任务在每个目标方向只取得一次用户级准入，后续 Packet 和 flit 复用该准入”；《TS_通信机制》把一笔 32 KB 的 reduce 拆成 4 笔 8 KB 的 reduce task。模型按一个 `reduce_seq` 的包算一笔任务
-* 本级 ReduceMemory 做完一笔任务后“向相关上游发送一次”的 release 从哪一组进静态路由，Router MAS 没写：`RTR_RELEASE_ROUTE` 只按四个输入方向分组，这一笔不从任何输入方向进来。模型把它直接写到这笔任务每一路上游来源所在的方向，经过只转发、不做 reduce 的 core 时才按静态路由转。哪一路是本 core 那一份按表项 `flow_dir` 的 reduce1、reduce2 两位定，默认本 core 出了自己那一份
-* `RTR_RELEASE_ROUTE` 的复位值，以及没配路由的口收到 release 怎么处理，Router MAS 没写。模型里这种口收到 Reduce release 就报错
-* Stream release 的回程模型没接：《Router MAS》规定 Stream release 与 Reduce release 都按 `RTR_RELEASE_ROUTE` 转发，模型只按它转 Reduce release。现有 MoE 路由不用 stream credit，模型暂不接这一路
+* `RTR_RELEASE_ROUTE` 的复位值，以及没配路由的口收到 release 怎么处理，Router MAS 没写。模型里复位值是一个方向都不转，收到的 release 一律先交本级：好 core 删来向那个方向这个用户的表项，坏 core 没有表、删不到就算了，配了掩码的口再按掩码往上游转
+* 本级退休发出的 release 从哪一组进静态路由，Router MAS 没写：`RTR_RELEASE_ROUTE` 只按四个 R2R 输入方向分组，这一笔不从任何输入方向进来。模型把它往三个 R2R 方向都发一笔，没向本 core 申请过的上游查无此项，丢掉
 * Rmem 16 个分区都占着时新用户的第一笔怎么办，Router MAS 没写：反压那一段只列了“Rmem Bank、读改写通道、输入缓冲或输出空间暂时不可用”。模型对这一路输入反压，等有用户 Retire 放出一个分区。分区用时才分配之后，它与 16 项 stream 表不再一一对应；分区被上游先到的用户占满、本 core 的用户推进不下去时会不会卡死，原文没有论证
-* 只合并上游分量、本 core 不出分量的那一级，本 core 的 TS 里可能没有这个用户，谁对它发 User Retire 放 Rmem 分区，Router MAS 没写：原文只说“TS 发送 User Retire 触发Rmem释放”。模型里分区只等本 core 的 TS 对这个用户发 Retire
+* 只合并上游分量、本 core 不出分量的那一级，本 core 的 TS 里可能没有这个用户，谁对它发 User Retire 放 Rmem 分区，Router MAS 没写：原文只说“TS 发送 User Retire 触发Rmem释放”。模型里分区只等本 core 的 TS 对这个用户发 Retire。**量过一次**：把逐行归约那条链改成全部在 Router 上做、沿途的 core9 不派角色（因而没有 TS）之后，连续跑 32 个 token 在第 17 个用户上停住——16 个分区被前 16 个用户占满，没有 TS 就没人发 Retire，再也放不出来。所以做归约的那一级必须是有 TS、会对这个用户发 Retire 的好 core
 * 结果流里后面的结果还没算好时，同一出口别的 VC 能不能先走，Router MAS 没写：F-012 只说“只有当前 Packet 因下游条件不满足而阻塞时，才允许在合法的 flit 边界切换到其他已就绪的 VC”，结果没算好不是下游条件。模型只锁同一出口同一 VC，别的 VC 照走
 * **VC 机制到底实不实现**。原文的原话是“实现 VC 机制需要很大的额外面积、设计复杂度和验证空间，成本极高。具体是否实现需要模拟器介入，综合判断开发复杂度和效果收益”。这是本次建模要回答的问题之一，不是文档缺口
 * “Broadcast 过快引起空泡”这一档的定量结论，原文明确写了“需要模拟器介入协助确认”。前提是同一个用户在 core0 与 core2 上的处理速度不同，而计算量分布均匀时差距主要来自逐级 Reduce
@@ -179,6 +179,7 @@
 
 * Vector 数据广播场景是否值得支持乱序调度 TBD
 * RS 随机舍入是否实现待确认
+* **BF16 通路的中间精度，模型给不出来**。硬件上 `DATA_TYPE` 定的是向量通路内部的精度，置 BF16 时一拍吃 64 个 element、中间的加乘也是 BF16 的；模型只取了吞吐那一半，`VuOperand.vec` 是一串 `float`，通路内部仍按 FP32 算。所以把一条链配成 BF16 通路，模型上只体现为拍数减半，中间累加掉的精度一位都不显，逐字节比对照样过。R core 那条 12 行的累加链现在配的就是 BF16 通路（配 FP32 的话通路一拍只吃 32 个，一个 CM 块要拆两段，一条 VL = 6144 的向量要 192 拍而不是 96 拍），**12 级累加在 BF16 下的实际误差要另找办法核**，不能拿这个模型的比对结果当数
 
 **DTE**
 
@@ -237,6 +238,9 @@
 
 **专用 core（B core / R core）**
 
+* DTE 的读口与写口落到 Matrix Mem 同一个 bank 上怎么办，Mmem MAS 没写
+  * Mmem MAS 只规定 DTE、ctrl noc、MU 三方不能同时访问相同 bank；B core、R core 上 DTE 一边把进来的数据写进 Matrix Mem、一边把存着的读出去，两个口会撞在同一个 bank 上
+  * 模型的取法：照 Cmem MAS 对 DTE 端口的规定，读写两口之间 bank 冲突时仲裁二选一、只反压冲突的那个 bank，不算违反硬约束
 * R core 的 Matrix Mem 要不要额外的 credit 机制
   * 原文的疑问：“Reduction Core 的 Matrix Mem 与 Broadcast Core 的 Matrix Mem 对应的话，不需要额外 Credit 机制保证？”
   * 附带的追问：总槽位数是否要按输入 / 输出能支持的**较小**那个来算，否则进得多、出得少仍会缺 credit

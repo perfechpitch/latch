@@ -83,7 +83,6 @@ RouteEntry Relay(uint64_t in_mask, uint64_t dtype = kReduceFp32,
   e.path_core_bypass = true;
   e.reduce_in_mask = in_mask;
   e.operation = Operation::kReduce1;
-  e.reduce_need = true;
   e.reduce_data_type = dtype;
   e.reduce_outdata_type = out_dtype;
   return e;
@@ -121,8 +120,7 @@ class ReduceHarness : public BachModule {
   // 这一拍之前不给位置，用来把输出堵住。
   uint64_t grant_from = 0;
   // 到点退休、到点还 credit。改 ReduceModule 的表要在推它的这个协程里做。
-  uint64_t retire_at = 0, return_at = 0;
-  uint64_t retire_user = 0, return_dir = 0;
+  uint64_t retire_at = 0, retire_user = 0;
 
   uint64_t granted = 0;
   // 结果首 flit 与最后一个尾 flit 出现在哪一拍。
@@ -156,7 +154,7 @@ class ReduceHarness : public BachModule {
         out_msgs.push_back(v.msg);
       }
     }
-    rm.ReqPtr()->DriveRoom(now >= grant_from);
+    rm.ReqPtr()->DriveRoom(now >= grant_from ? ~0ull : 0);
     if (rm.Done().Valid()) {
       done_users.push_back(rm.Done().user_id.Get());
       done_seqs.push_back(rm.Done().reduce_seq.Get());
@@ -164,7 +162,6 @@ class ReduceHarness : public BachModule {
 
     Feed(now);
     if (retire_at != 0 && now == retire_at) rm.RetireUser(retire_user);
-    if (return_at != 0 && now == return_at) rm.ReturnCredit(retire_user, return_dir);
     rm.RunStep();
     stalled = rm.Stalled();
   }
@@ -340,10 +337,6 @@ TEST(BachReduce, NextPacketOfTheSameUserDoesNotOverwrite) {
               {4, 0, Part(77, 9, 6, 999.0f)},
               {20, 1, Part(77, 9, 5, 32.0f)},
               {30, 1, Part(77, 9, 6, 1.0f)}};
-    // 第一个包往右发出去之后，右边还回 release，第二个包才发得出去。
-    h.retire_user = 77;
-    h.return_at = 40;
-    h.return_dir = 2;
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
     values = h.out_values;
@@ -449,10 +442,10 @@ TEST(BachReduce, ResultFlitLeavesBeforeTheWholePacketArrives) {
   EXPECT_FLOAT_EQ(values[0], 42.0f);
 }
 
-// 下游 Reduce credit 按 UserID 与目标方向记，粒度是一笔任务：发出去之后那个
-// 方向这个用户就忙着，release 回来才空。
-TEST(BachReduce, DownCreditIsPerUserAndDirection) {
-  bool right = false, mid = true, after_return = true;
+// Retire 放本地分区：这个用户没有在做的任务就当场放，往下游发过什么不影响。
+// 下游的 Rmem 与 Core Mem 是一起分配的，所以往下游发 reduce 结果不单独记账。
+TEST(BachReduce, RetireFreesThePartition) {
+  bool held = true;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -460,92 +453,14 @@ TEST(BachReduce, DownCreditIsPerUserAndDirection) {
     b.tab->Preload(9, Relay(0b011));  // 往右发
     ReduceHarness h(clk, *b.rm, b.wires);
     h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
-    clk->Continue(60 * kPeriod);
-    RT::JoinAll();
-    right = b.rm->DownBusy(77, 2);
-    mid = b.rm->DownBusy(77, 0);
-    b.rm->ReturnCredit(77, 2);
-    after_return = b.rm->DownBusy(77, 2);
-  }
-  RT::Reset();
-  EXPECT_TRUE(right) << "往右发过一笔，右边这个用户就忙着";
-  EXPECT_FALSE(mid) << "没往那个方向发就不占";
-  EXPECT_FALSE(after_return) << "release 回来就空了";
-}
-
-// 同一个用户的下一笔任务要等下游把上一笔的 release 还回来才发。
-std::vector<float> RunTwoTasks(uint64_t return_at) {
-  std::vector<float> values;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.tab->Preload(9, Relay(0b011));
-    ReduceHarness h(clk, *b.rm, b.wires);
-    h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)},
-              {4, 1, Part(77, 9, 5, 2.0f)},
-              {10, 0, Part(77, 9, 6, 10.0f)},
-              {12, 1, Part(77, 9, 6, 20.0f)}};
-    h.retire_user = 77;
-    h.return_at = return_at;
-    h.return_dir = 2;
-    clk->Continue(80 * kPeriod);
-    RT::JoinAll();
-    values = h.out_values;
-  }
-  RT::Reset();
-  return values;
-}
-
-TEST(BachReduce, NextTaskWaitsForDownstreamRelease) {
-  std::vector<float> held = RunTwoTasks(0);
-  ASSERT_EQ(held.size(), 1u) << "release 没回来，第二笔发不出去";
-  EXPECT_FLOAT_EQ(held[0], 3.0f);
-  std::vector<float> freed = RunTwoTasks(40);
-  ASSERT_EQ(freed.size(), 2u) << "release 回来之后第二笔接着发";
-  EXPECT_FLOAT_EQ(freed[1], 30.0f);
-}
-
-// User Retire 只放本地分区（F-037）：往右发过的那一笔 release 还没回来，下游
-// 映射留着；回来了才清。
-TEST(BachReduce, RetireFreesThePartitionButKeepsTheDownstreamMap) {
-  bool held = true, right_busy = false;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.tab->Preload(9, Relay(0b011));
-    ReduceHarness h(clk, *b.rm, b.wires);
-    h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
     h.retire_at = 30;
     h.retire_user = 77;
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
     held = b.rm->HoldsUser(77);
-    right_busy = b.rm->DownBusy(77, 2);
   }
   RT::Reset();
   EXPECT_FALSE(held) << "Retire 之后本地分区当场放";
-  EXPECT_TRUE(right_busy) << "往右那一笔的 release 没回来，下游映射还记着";
-
-  bool right_after = true;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.tab->Preload(9, Relay(0b011));
-    ReduceHarness h(clk, *b.rm, b.wires);
-    h.jobs = {{2, 0, Part(77, 9, 5, 1.0f)}, {4, 1, Part(77, 9, 5, 2.0f)}};
-    h.retire_at = 30;
-    h.retire_user = 77;
-    h.return_at = 32;
-    h.return_dir = 2;
-    clk->Continue(60 * kPeriod);
-    RT::JoinAll();
-    right_after = b.rm->DownBusy(77, 2);
-  }
-  RT::Reset();
-  EXPECT_FALSE(right_after) << "release 回来就清了";
 }
 
 // 只收一路的中继：灌一份 count 个 FP32 的分量，数出来几个包。

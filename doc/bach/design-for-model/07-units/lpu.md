@@ -26,12 +26,13 @@ LPU 的组成：
 | chip | 48，摆成全局 12 × 4 的网格 | 装配容器；每颗都是 2 行 × 5 列共 10 个 core，其中 8 个计算 core；`gx ∈ {1, 2}` 的 chip 的 core2、core7 是坏 core |
 | tray | 3，每个 4 层 × 4 chip | 不是对象。它决定 chip 的全局坐标，以及哪两处纵向链路用不同参数 |
 | PCIe Switch | 12，每 tray 4 个，左右各 2，一个接两层 chip 的边缘口 | 逐拍推进的模块 |
-| 链路 | chip 之间、chip 到 Switch、Switch 到片外桩 | 逐拍推进的模块，一条物理链路每方向一个实例 |
+| 链路 | chip 到 Switch、Switch 到片外桩 | 逐拍推进的模块，一条物理链路每方向一个实例 |
+| chip 之间 | 两座 C2C Bridge 直接对接 | 不建链路实例：两座桥之间传的是段，链路搬的是 flit，段号只在一对桥之间有意义。这一段的延迟落在发送侧那座桥的 AXI 段上，跨 tray 的两处在那里换纵向参数 |
 
 LPU 只做构造与接线，不打拍，五件事：
 
 1. 构造 48 个 Chip，每颗都是 2×5，构造时不区分 chip 所在的列
-2. 按 12 × 4 网格接 chip 之间的 C2C 链路：同层左右直连、同列上下直连，都不经 Switch
+2. 按 12 × 4 网格接 chip 之间的 C2C：同层左右直连、同列上下直连，都不经 Switch。两座桥直接对接，不建链路实例
 3. 每层最左最右两颗 chip 的边缘口接本 tray 的 PCIe Switch
 4. 片外桩挂到 PCIe Switch 上
 5. 读入编译侧给的全局坐标换算表、坏 core 标记表与逻辑 core 映射
@@ -427,7 +428,7 @@ LPU 没有自己的一拍工作，全部逐拍行为在 chip 内各模块、PCIe
 
 | 入口 | 逻辑 | 出口 | Dx |
 | - | - | - | - |
-| `grid`、`link_param` | 1. `Build`：对 48 颗 chip，把这颗 chip 四个口的链路参数交给第 i 个 Chip 构造；每颗都构造 10 个 core，不区分所在列，`core_bad_mask` 不在构造期给<br>2. `WireRow`：同层左右，`(gx, gy)` 的 `c2c[E]` 与 `(gx+1, gy)` 的 `c2c[W]` 两座桥直接对接，这一段的带宽与延迟落在发送侧那座桥的 AXI 段上，取 C2C 参数<br>3. `WireCol`：同列上下，`(gx, gy)` 的 `c2c[S]` 与 `(gx, gy+1)` 的 `c2c[N]` 对接；`gy` 与 `gy+1` 跨 tray 时（`gy mod 4 == 3`）换纵向链路参数<br>4. `WireEdge`：每层 `gx == 0` 的 `c2c[W]`、`gx == 3` 的 `c2c[E]` 接本 tray 那一侧的 PCIe Switch，一个 Switch 接两层。这一段两端传的是 flit，带宽与延迟由一对 Link 承担，两侧桥的 AXI 段计 0；段与 flit 的折算在这个口上做<br>5. `WireExt`：入口桩与出口桩各挂一个 Switch 端口，走 ETH 参数的 Link | 模块实例与端口连接 | — |
+| `grid`、`link_param` | 1. `Build`：对 48 颗 chip，把这颗 chip 四个口的链路参数交给第 i 个 Chip 构造；每颗都构造 10 个 core，不区分所在列，`core_bad_mask` 不在构造期给<br>2. `WireRow`：同层左右，`(gx, gy)` 的 `c2c[E]` 与 `(gx+1, gy)` 的 `c2c[W]` 两座桥直接对接，这一段的带宽与延迟落在发送侧那座桥的 AXI 段上，取 C2C 参数<br>3. `WireCol`：同列上下，`(gx, gy)` 的 `c2c[S]` 与 `(gx, gy+1)` 的 `c2c[N]` 对接；`gy` 与 `gy+1` 跨 tray 时（`gy mod 4 == 3`）换纵向链路参数<br>4. `WireEdge`：每层 `gx == 0` 的 `c2c[W]`、`gx == 3` 的 `c2c[E]` 接本 tray 那一侧的 PCIe Switch，一个 Switch 接两层。这一段两端传的是 flit，带宽与延迟由一对 Link 承担，两侧桥的 AXI 段计 0；段与 flit 的折算在这个口上做，链路层的 credit 也在这里折算：Switch 把一个 flit 发走后从同一个端口回一个 VC release，本侧把它变成桥的发送额度，桥那一头的额度因此等于 Switch 为这个入口留的容量<br>5. `WireExt`：入口桩与出口桩各挂一个 Switch 端口，走 ETH 参数的 Link | 模块实例与端口连接 | — |
 
 ### L2 · 坐标与角色表读入（构造期，不逐拍）
 

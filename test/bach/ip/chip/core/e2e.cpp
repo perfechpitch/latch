@@ -73,7 +73,6 @@ RouteEntry EnterCore() {
   RouteEntry e;
   e.flow_dir = 0;
   e.path_core_bypass = false;
-  e.stream_table_enable = false;
   e.operation = Operation::kForward;
   return e;
 }
@@ -134,7 +133,7 @@ class CoreProbe : public BachModule {
  protected:
   void Step() override {
     triggers = core.GetRouter().GetCoreStation().Triggers();
-    cs_used = core.GetRouter().GetCoreStation().StreamUsed();
+    cs_used = core.GetRouter().GetXbar().StreamUsed(kOutCore);
     rv_insts = core.Rv(0).Exec().Insts();
     head = core.GetTs().Table().HeadPtr();
     tail = core.GetTs().Table().TailPtr();

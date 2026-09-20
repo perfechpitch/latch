@@ -81,13 +81,13 @@ class OutStub : public BachModule {
         e.bytes = 0;
         e.data.clear();
         e.want = f.msg->size;
+        // payload 挂在整包那一个 Message 上，同一个包的每个 flit 拿到的是同一
+        // 份，按包取一次。只有给了期望输出时才攒，否则不占内存。
+        if (!f.msg->payload.empty() && expect.count(key) != 0) {
+          e.data.assign(f.msg->payload.begin(), f.msg->payload.end());
+        }
       }
       e.bytes += f.bytes;
-      // payload 只有在给了期望输出时才攒，否则不占内存。
-      if (!f.msg->payload.empty() && expect.count(key) != 0) {
-        e.data.insert(e.data.end(), f.msg->payload.begin(),
-                      f.msg->payload.end());
-      }
       release_vc = true;
       release_id = f.vc;
 
@@ -98,7 +98,7 @@ class OutStub : public BachModule {
     }
 
     tx->flit.Idle();
-    tx->release.Drive(release_vc, release_id, false, 0, false, 0);
+    tx->release.Drive(release_vc, release_id, false, 0);
 
     done_cnt = done_pending;
     mismatch_cnt = mismatch_pending;

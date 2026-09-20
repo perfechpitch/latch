@@ -20,6 +20,10 @@
 // 自启动 core 与权重加载模式走 Bypass：不查 stream_table、不建表，PC 取
 // DATAIN_TASK，身份用保留的 SID 15 / TID 63。
 //
+// 系统保证有效的 user_id 唯一：一个 user_id 在本 core 上的 stream 退休之前，不会
+// 有另一个 token 用同一个号进来。老用户这一次在任务链上既没有要派的搬入任务、
+// 也没有要跳过的，就是这条保证被打破了，这一笔没有去处，直接断言失败。
+//
 // trigger 口不设入口队列。条件不满足时直接拉低 ready，由 CoreStation 保持这一笔，
 // 每拍重判一次，不丢弃、不越过。这条通路上的 trigger 与 token 一一对应，丢一笔就
 // 等于丢一个 token，所以只许反压不许丢。请求的保持责任本来就在 CoreStation 那一
@@ -89,6 +93,7 @@ class UserMatch : public BachModule {
 
  protected:
   void Step() override {
+    ForgetShownUsers();
     // 上一笔写表请求还没被 stream_table 收下就原地保持。
     if (pending) {
       if (create_port->Accepted()) {
@@ -135,6 +140,19 @@ class UserMatch : public BachModule {
     return p;
   }
 
+  // 快照里已经出现的，就不必再记在待落表的集合里了。每拍都看：一个用户可能只来
+  // 一笔 trigger，表项建好、链走完、退休都在下一笔 trigger 之前，只在收 trigger
+  // 时看的话它一直留在集合里，这个号再来就永远等不到快照。
+  void ForgetShownUsers() {
+    if (just_created.empty()) return;
+    StreamSnapshotPtr s = snap->Get();
+    if (!s) return;
+    for (uint64_t i = 0; i < kStreamNum && !just_created.empty(); ++i) {
+      StreamEntry const& e = s->entry[i];
+      if (e.valid && e.user_id_vld) just_created.erase(e.user_id);
+    }
+  }
+
   // 建表这一笔记下来：笔数加一，身份留下。老用户那条重发/跳过的写不算；自启动
   // core 上的原地重新激活不经这里，由 credit 与退休那一侧计数。
   void NoteMade(StreamEntry const& e) {
@@ -154,12 +172,6 @@ class UserMatch : public BachModule {
 
     StreamSnapshotPtr s = snap->Get();
     if (!s) return false;
-
-    // 快照里已经出现的，就不必再记在待落表的集合里了。
-    for (uint64_t i = 0; i < kStreamNum && !just_created.empty(); ++i) {
-      StreamEntry const& e = s->entry[i];
-      if (e.valid && e.user_id_vld) just_created.erase(e.user_id);
-    }
 
     // Bypass：自启动 core 与权重加载模式不建 stream 表项，进来的包只把 datain
     // 任务登记进 DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID / TID。
@@ -184,6 +196,12 @@ class UserMatch : public BachModule {
       StreamEntry const& e = s->entry[i];
       if (!e.valid || !e.user_id_vld || e.user_id != user) continue;
       Plan p = PlanFor(path, reissue, e.done_bitmap);
+      if (p.task_id >= kTaskChainNum && p.skip == 0) {
+        spdlog::error("UserMatch 第 {} 拍：用户 {} 在 stream {} 上已经没有 path {} "
+                      "还没做的搬入任务", CycleNow(), user, i, path);
+        LOGCHECK(false, "UserMatch: 老用户的这一笔没有搬入任务可派。同一个 "
+                        "user_id 还有没退休的 stream 时又进来了新 token。");
+      }
       if (p.task_id < kTaskChainNum && hold.valid) {
         ++stall_pending;
         return false;

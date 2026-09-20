@@ -75,6 +75,9 @@ enum FlowBit : uint64_t {
   kFlowReduce2 = 1u << 4,
 };
 
+// flow_dir 与 Release 静态路由共用低三位这一组方向。
+constexpr uint64_t kFlowR2R = kFlowMid | kFlowLeft | kFlowRight;
+
 // Xbar 的 7 个出口。
 enum XbarOut : uint64_t {
   kOutMid = 0,
@@ -87,6 +90,9 @@ enum XbarOut : uint64_t {
   kXbarOutNum = 7,
 };
 
+// streamNeedMask 的进本 core 那一位，低三位与 flow_dir 同位。
+constexpr uint64_t kStreamNeedCore = 1ull << kOutCore;
+
 // Xbar 的 5 个入口。
 enum XbarIn : uint64_t {
   kInMid = 0,
@@ -98,10 +104,6 @@ enum XbarIn : uint64_t {
 };
 
 // 一条 path 在本 core 上的表项。字段照 F53，含义与填法照「编译侧怎么填这三张表」。
-// Release 静态路由的出方向掩码：bit0 mid、bit1 left、bit2 right 与 flow_dir 同位，
-// 这一位交给本级。
-constexpr uint64_t kReleaseSelf = 1u << 3;
-
 struct RouteEntry {
   bool valid = false;
 
@@ -118,7 +120,11 @@ struct RouteEntry {
   bool path_core_bypass = true;
 
   bool need_buffer = false;           // 允许进 core 缓存，即溢流使能
-  bool stream_table_enable = false;   // 出核前查不查对应输出端的 stream credit 表
+  // streamNeedMask：哪几个出方向发之前要查那个方向的 stream 资源表。位与 Xbar 的
+  // 出口同序：bit0 mid、bit1 left、bit2 right、bit3 进本 core。一个方向要不要查
+  // 只看下一跳进不进 core，进本 core 那一位只有真占容量的 core 置，落 Matrix Mem
+  // 的 B core 与 R core 不置。
+  uint64_t stream_need = 0;
 
   uint64_t cur_credit_type = 0;       // 0 广播、1 P2P
   uint64_t cur_credit_require = 0;    // 上游已拨给本核的量；不进核填 0
@@ -128,7 +134,6 @@ struct RouteEntry {
   uint64_t reduce_data_type = 0;      // 输入精度
   uint64_t reduce_outdata_type = 0;   // 输出精度
   uint64_t reduce_in_mask = 0;        // 本级要等哪几个相邻方向的分量
-  bool reduce_need = false;           // reduceNeedMask：结果往下游发之前查不查下游那一级这个用户空不空
   Operation operation = Operation::kForward;
   bool stall_way = false;             // false 留在 VC 等，true 转 Core Mem 重发
 
@@ -205,9 +210,10 @@ class RouterTable : public BachModule {
     return ((core_bad_mask >> core_in_chip) & 1u) != 0;
   }
 
-  // 每个业务 credit 输入端口一个静态输出方向 Mask（RTR_RELEASE_ROUTE）。Stream
-  // 与 Reduce 两类 release 只按它转发，不查 RouterTable、不进 Xbar 仲裁；带
-  // kReleaseSelf 的交给本级。
+  // 每个业务 credit 输入端口一个静态输出方向 Mask（RTR_RELEASE_ROUTE）。stream
+  // release 只按它转发，不查 RouterTable、不进 Xbar 仲裁。收到的那一笔一律先交
+  // 本级，所以只有要转出去的口上配得有掩码：隔在两个好 core 之间的坏 core 配
+  // 左进转左、右进转右，其余的口空着。
   void SetCreditBypass(uint64_t in_port, uint64_t out_mask) {
     LOGCHECK(in_port < kDirNum, "RouterTable: credit 输入端口越界。");
     credit_bypass[in_port] = out_mask;

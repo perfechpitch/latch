@@ -42,6 +42,10 @@ namespace bach {
 // 那边收两拍合一，段号只在一对桥之间有意义。Switch 收发的是 flit，所以这一侧
 // 由装配层折算：出去的两拍合成一个 flit，进来的一个 flit 摊成两拍，段号由
 // 本侧自己给。
+//
+// 链路层的 credit 也由这一侧折算：Switch 把一个 flit 发走后从同一个端口回一个
+// VC release，本侧把它变成桥的发送额度。桥那一头的额度因此等于 Switch 为这个
+// 入口留的容量，由装配层填。
 class SwitchPort {
  public:
   SwitchPort(C2cBridge& bridge, LinkEndPtr out_wire, LinkEndPtr in_wire)
@@ -81,7 +85,7 @@ class SwitchPort {
       to_sw->flit.Idle();
     } else {
       C2cBeat const& b = flit_q.front();
-      to_sw->flit.Drive(b.seg.vc, /*is_head=*/true, b.seg.tail, b.seg.bytes,
+      to_sw->flit.Drive(b.seg.vc, b.seg.head, b.seg.tail, b.seg.bytes,
                         b.seg.msg);
       flit_q.pop_front();
       ++out_cnt;
@@ -90,8 +94,7 @@ class SwitchPort {
       to_sw->release.Idle();
     } else {
       ReleaseView const& r = rel_q.front();
-      to_sw->release.Drive(r.vc_valid, r.vc_id, r.stream_valid, r.stream_user,
-                           r.reduce_valid, r.reduce_user);
+      to_sw->release.Drive(r.vc_valid, r.vc_id, r.stream_valid, r.stream_user);
       rel_q.pop_front();
     }
   }
@@ -103,7 +106,10 @@ class SwitchPort {
       C2cBeat b;
       b.seg.vc = f.vc;
       b.seg.seq_id = seq;
+      b.seg.head = f.head;
       b.seg.tail = f.tail;
+      // 一个 flit 只摊成一段，段到这里就完了，桥的 RX 按这一位还原它。
+      b.seg.seg_last = true;
       b.seg.bytes = f.bytes;
       b.seg.msg = f.msg;
       seq = (seq + 1) % kC2cSeqNum;
@@ -112,10 +118,20 @@ class SwitchPort {
       ++in_cnt;
     }
     ReleaseView r = ReadRelease(from_sw->release);
-    if (r.Any()) {
+    if (r.vc_valid) {
+      // Switch 那一侧把一个 flit 发走就回一个位置。这是本桥往线上发的额度，到
+      // 桥为止，不往 core 送，与三类业务 release 的透传是两回事。
+      C2cBeat b;
+      b.is_release = true;
+      b.is_c2c_credit = true;
+      b.rel.vc_id = r.vc_id;
+      br->PushIn(b);
+    }
+    if (r.stream_valid) {
       C2cBeat b;
       b.is_release = true;
       b.rel = r;
+      b.rel.vc_valid = false;
       br->PushIn(b);
     }
   }
@@ -281,6 +297,10 @@ class Lpu {
         c.port[kChipW].axi_latency = gx > 0 ? LinkPcieC2C().latency : 0;
         c.port[kChipS].axi_latency = VertParams(gy).latency;
         c.port[kChipN].axi_latency = gy > 0 ? VertParams(gy - 1).latency : 0;
+        // 接 Switch 的那两个口对面不是桥，往线上发的额度按 Switch 为一个入口
+        // 留的容量给，不是对侧桥的 RX Buffer。
+        if (gx + 1 >= kGridX) SetSwitchCredit(c.port[kChipE]);
+        if (gx == 0) SetSwitchCredit(c.port[kChipW]);
         c.core_tick = cfg.core_tick;
         c.chip_tick = cfg.chip_tick;
         if (!cfg.build[i]) continue;
@@ -404,6 +424,13 @@ class Lpu {
              from_sw);
     sw_ports.push_back(std::make_unique<SwitchPort>(
         chips[e.chip]->Port(e.chip_port), to_sw, from_sw));
+  }
+
+  // Switch 一个出口队列可能被两个 chip 端口同时灌（第三个端口挂片外桩），所以
+  // 一个入口的额度取队列深度的一半：四个 VC 各留 private，其余共用。
+  static void SetSwitchCredit(C2cCfg& c) {
+    c.tx_private = kSwitchQueueDepth / (2 * kVcNum * 2);
+    c.tx_shared = kSwitchQueueDepth / 2 - kVcNum * c.tx_private;
   }
 
   void MakeLink(const std::string& name, LinkParams const& params,

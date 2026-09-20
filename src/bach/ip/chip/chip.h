@@ -150,43 +150,45 @@ class Chip : public BachModule {
 
  private:
   // 同行相邻 core 的 left 与 right 用一对 Link 对接；core[i] 与 core[i+5] 的
-  // mid 口直连。两者都走 R2R 参数。
+  // mid 口直连。左右那一档担 10 T 的走线，mid 两端上下相对、没有走线段。
   void BuildLinks() {
     for (uint64_t row = 0; row < 2; ++row) {
       for (uint64_t c = 0; c + 1 < cols; ++c) {
         uint64_t a = row * cols + c;
         uint64_t b = a + 1;
         Connect("lr" + std::to_string(a), a, uint64_t(Dir::kDirRight), b,
-                uint64_t(Dir::kDirLeft));
+                uint64_t(Dir::kDirLeft), LinkR2R());
       }
     }
     for (uint64_t c = 0; c < cols; ++c) {
       Connect("mid" + std::to_string(c), c, uint64_t(Dir::kDirMid),
-              c + cols, uint64_t(Dir::kDirMid));
+              c + cols, uint64_t(Dir::kDirMid), LinkR2RMid());
     }
   }
 
   // 一对 Link：a 的出口到 b 的入口，b 的出口到 a 的入口。credit 的回程各走
   // 各的实例，与数据同参数。
   void Connect(const std::string& name, uint64_t a, uint64_t da, uint64_t b,
-               uint64_t db) {
+               uint64_t db, LinkParams const& params) {
     // 片内这几十条链路不记波形：一条链路上走了多少、堵没堵，在它两端那两个
     // RouterStation 的 forwarded 与 occupancy 上都读得出来，一颗 chip 五十多条
     // 链路各记三个信号，翻起来全是重复的。
     TraceOffScope off;
     const uint64_t gid = TraceGroup(name, Id());
-    MakeLink("fwd", gid, cores[a]->OutWire(da), cores[b]->InWire(db));
-    MakeLink("rev", gid, cores[b]->OutWire(db), cores[a]->InWire(da));
+    MakeLink("fwd", gid, params, cores[a]->OutWire(da), cores[b]->InWire(db));
+    MakeLink("rev", gid, params, cores[b]->OutWire(db), cores[a]->InWire(da));
     // VC credit 的回程。stream release 那两根还没接：收它的那一级（把本级
     // core 与各下级出口的 release 汇总再发往另两个 R2R 口的那个 crossbar）还
     // 没建，接到 back_wire 上就成了两根线写同一个端口，VC credit 会被盖掉。
-    MakeLink("back_a", gid, cores[b]->UpBackWire(db), cores[a]->BackWire(da));
-    MakeLink("back_b", gid, cores[a]->UpBackWire(da), cores[b]->BackWire(db));
+    MakeLink("back_a", gid, params, cores[b]->UpBackWire(db),
+             cores[a]->BackWire(da));
+    MakeLink("back_b", gid, params, cores[a]->UpBackWire(da),
+             cores[b]->BackWire(db));
   }
 
-  void MakeLink(const std::string& name, uint64_t parent, LinkEndPtr from,
-                LinkEndPtr to) {
-    auto l = std::make_unique<Link>(clk, name, LinkR2R(), parent, false);
+  void MakeLink(const std::string& name, uint64_t parent,
+                LinkParams const& params, LinkEndPtr from, LinkEndPtr to) {
+    auto l = std::make_unique<Link>(clk, name, params, parent, false);
     l->AttachIn(std::move(from));
     l->AttachOut(std::move(to));
     links.push_back(std::move(l));

@@ -102,13 +102,13 @@ mem last_busy_until  FF     32 b                                    1RW   每笔
 ## 6　参数汇总
 
 ```
-R2R          256 B/T，40T                       // chip 内 Router ↔ Router
+R2R          256 B/T；左右每跳走线 10T，mid 0T   // chip 内 Router ↔ Router，Router 内部那一段归 Router 自己的流水级
 C2C          Router ↔ Router 400T；PCIe C2C 64 GB/s、300 ns（Chip ↔ Chip、PCIe Switch → Chip）
 C2C_VERT     tray 间纵向链路 120 GB/s（试算值，待定）
 PCIE_ROUTER  128 B/T；左右 10T + 25T，上下 10T + 50T
 ETH_IN       50 GB/s 每口，3 μs → 3000T
 PCIE_IN      x16 54.4 GB/s；PCIE_OUT x32 108.8 GB/s
-LINK_Q_DEPTH 按 latency / 每拍 1 flit 上限取（40T → 40；400T → 400）
+LINK_Q_DEPTH 按 latency / 每拍 1 flit 上限取（10T → 10；400T → 400）
 单位换算     1 T = 1 ns；拍数 = ceil(size / bw)，size ≤ 0 算一拍
 ```
 
@@ -120,7 +120,7 @@ LINK_Q_DEPTH 按 latency / 每拍 1 flit 上限取（40T → 40；400T → 400�
 | - | - | - |
 | 链路占用与到达时刻：`arrive_cycle = max(now, last_busy_until) + ceil(size / bw) + latency` | K1 第 1 条 | `link_arrive` |
 | 到达拍单调递增，队首不挡更早的项 | K1 第 3 条的断言 | `link_monotonic` |
-| chip 内 R2R 256 B/T、40T | 参数 | `link_r2r` |
+| chip 内 R2R 256 B/T，左右走线 10T、mid 0T | 参数 | `link_r2r` |
 | chip 间 Router 到 Router 400T；PCIe C2C 64 GB/s、300 ns | 参数 | `link_c2c` |
 | tray 间纵向链路 120 GB/s | 参数 | `link_tray_vertical` |
 | PCIe ↔ Router 128 B/T，左右 10T + 25T、上下 10T + 50T | 参数 | `link_pcie_router` |

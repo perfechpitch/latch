@@ -138,8 +138,14 @@ struct LinkParams {
   uint64_t queue_depth = 64;  // 在途队列深度，按 latency 每拍 1 flit 的上限取
 };
 
-// chip 内相邻 core 的 Router 之间。规格书：256 B/T、40T
-inline LinkParams LinkR2R() { return {256, 40, 64}; }
+// chip 内相邻 core 的 Router 之间，同行左右那一档。256 B/T、走线 10T。
+//
+// DATA_NOC HAS 的性能预算把一跳拆成两段：Router 内部流水 6 ns 加走线 10 ns 合
+// 16 ns。Router 内部那一段由 Router 自己的流水级走掉，链路只担走线这 10 T。
+inline LinkParams LinkR2R() { return {256, 10, 64}; }
+
+// 跨行的 mid 那一档：两个 Router 上下相对，没有走线段。
+inline LinkParams LinkR2RMid() { return {256, 0, 64}; }
 
 // chip 之间的 C2C，Router 到 Router。规格书：400T
 inline LinkParams LinkC2C() { return {256, 400, 448}; }

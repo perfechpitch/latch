@@ -58,6 +58,7 @@
 | `moe.txt` | 一行一个键值对，给出种子、token 与它的 scale、一个 core 的部分和、每个专家的 FC2 输入与它的 scale、FC2 那一段 |
 | `moe_chip.txt`、`moe_two_groups.txt`、`moe_group.txt` | 一行一个键值对，给出种子、token 与它的 scale，每颗 chip 以 `c<组内序号>.` 开头的各 core 部分和、归约结果、FC2 输入、FC2 各段，出口上的结果；`moe_two_groups.txt` 另给行链结果，`moe_group.txt` 另给每行的行链结果与每个 R core 的结果 |
 | `moe_lpu.txt` | 同 `moe_group.txt`，每颗 chip 只给 concat |
+| `moe_lpu_tokens.txt` | 一行一个键值对，给出种子、第 0 个 token 与它的 scale、组数与 token 数，第 k 个 token 出口上的结果 `out<k>`。第 k 个 token 的种子是 `token_seed` 加 k |
 
 MoE 那几份的权重按完整形状逐 tile 播种，向量里只给种子，两侧按同一个规则生成。
 
@@ -79,6 +80,7 @@ MoE 那几份的权重按完整形状逐 tile 播种，向量里只给种子，�
 | 一个 core 上 KN 那几步的中间量与本层逐 bit 相同 | `test/bach/ip/chip/core/moe.cpp` |
 | 一颗 chip、一行两颗 chip、一个 EP 组的中间量与出口上的结果与本层逐 bit 相同 | `test/bach/ip/chip/moe_chip.cpp` |
 | 48 颗 chip 的 concat、行链结果、R core 的结果与出口上的结果与本层逐 bit 相同 | `test/bach/ip/chip/moe_lpu.cpp` |
+| 48 颗 chip 上连续跑 32 个 token，每个 token 出口上的结果与本层逐 bit 相同 | `test/bach/ip/chip/moe_lpu_tokens.cpp` |
 
 NaN 只比“是不是 NaN”，不比载荷：多个编码都是 NaN，载荷是实现细节。
 
@@ -88,12 +90,12 @@ NaN 只比“是不是 NaN”，不比载荷：多个编码都是 NaN，载荷�
 
 改了 `numeric/`、`numeric_ref.py` 或 `ffn_reference.py` 中的任何一份：
 
-1. 跑 `python3 src/bach/compiler/reference/vectors.py` 重新产出比对向量，全部产一遍约 4 分钟
+1. 跑 `python3 src/bach/compiler/reference/vectors.py` 重新产出比对向量，全部产一遍约 2 小时，几乎都花在 `moe_lpu_tokens.txt` 上
 2. 跑 `python3 src/bach/compiler/reference/selftest.py`
 3. 跑 `ctest -R 'numeric_cross|mu|vu|e2e|moe|reference'`
 4. 把 `vectors/` 下改动的文件一并提交
 
-`selftest.py` 会把向量重新产一遍与在版本库里的那份比，忘了第 1 步的话它报错。`moe_group.txt` 与 `moe_lpu.txt` 一份要算一分钟到几分钟，自检跳过这两份。
+`selftest.py` 会把向量重新产一遍与在版本库里的那份比，忘了第 1 步的话它报错。`moe_group.txt`、`moe_lpu.txt` 一份要算一分钟到几分钟，`moe_lpu_tokens.txt` 要算约 2 小时，自检跳过这三份。
 
 ***
 

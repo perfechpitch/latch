@@ -156,7 +156,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="572.0" y="1065.5" font-size="8.5" fill="#475569">PendingTaskQ：没申请到下游 Stream 或 Reduce 资源的任务在这里等</text>
 <text x="572.0" y="1079.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4：按 VC0～3 多线程调度，单 VC 阻塞只阻塞该 buffer</text>
 <text x="572.0" y="1092.5" font-size="8.5" fill="#475569">进方向只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化</text>
-<text x="572.0" y="1106.0" font-size="8.5" fill="#475569">两类业务层 credit 都分方向，先查 routing table 定方向再取 credit</text>
+<text x="572.0" y="1106.0" font-size="8.5" fill="#475569">业务层 credit 分方向，先查 routing table 定方向再取 credit</text>
 <text x="572.0" y="1119.5" font-size="8.5" fill="#475569">解析本级 Router 各方向传进来的 core credit release，按 action 决定</text>
 <text x="572.0" y="1133.0" font-size="8.5" fill="#475569">　是否同步更新 core 内的 stream 表状态</text>
 <rect x="1000" y="960" width="320" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
@@ -376,7 +376,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F56 | Reduce 包与其他出核包一样只查 VC 通路上的 flit credit；本级 Rmem 的 credit 由 TS 按用户记，有 credit 才下发 reduce 任务 |
 | F59 | 出方向按 VC0～3 多线程调度维护多个 VC buffer，某个 VC 阻塞只阻塞对应的那个 buffer；用它吸收整包流量，完成 core 与 Router 之间的协议转换 |
 | F60 | 进方向 Router 与 core 之间只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化完成；DTE 侧感知单 VC buffer 的缓存状态并据此启动搬运，解析包信息，搬完按 flit 释放 VC credit |
-| F61 | 两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 routing table 定；这两类由 TS 在下发前查（见 TS 一节“credit 与退休”）。DTE 只负责 credit 回程：把 Router 各方向送回来的 release 解析出来更新本地的表 |
+| F61 | 业务层 credit 只有一类：下游那个 core 的 coremem credit，分方向，方向由 routing table 定，由 TS 在下发前查（见 TS 一节“credit 与退休”）。DTE 只负责 credit 回程：把 Router 各方向送回来的 release 解析出来更新本地的表 |
 | F62 | credit 回程：解析本级 Router 各方向传进来的 core credit release，按其中的 action 信息决定是否同步更新 core 内的 stream 表状态。action 三种：1 credit release only（下游发起 release，本级 port 的 credit 更新）、2 bypass only（本级发生 bypass 而下游没有 release，传的是消耗信息，单 port 实现不复用）、3 bypass + credit release（两者同时发生，同步传两个 user_id 与 path_id，只发生在 router → core 场景） |
 | F63 | 进 core 缓存的包要重发时，**core 内先同步更新本地的 core credit table**，之后 Router 的 output 检索到该重发包时再更新自己那一份 |
 
@@ -998,7 +998,7 @@ scale 长度          data_len / 32；topK 长度 router_ep_count × 6 B，每 s
 | Reduce 包只查 VC credit，本级 Rmem 资源由 TS 申请 | F56 | `dte_reduce_vc_only` |
 | 出方向 4 个 VC buffer，单 VC 阻塞不影响其他 | F59 | `dte_vc_buffers` |
 | 进方向单 VC，搬完按 flit 释放 VC credit | F60 | `dte_single_vc_in` |
-| 两类业务层 credit 都分方向，先查 routing table | F61 | `credit_by_direction` |
+| 业务层 credit 分方向，先查 routing table | F61 | `credit_by_direction` |
 | stream_cache 只跟随不分配，按 action 更新 | F62、F63 | `credit_release_action` |
 
 ***

@@ -40,6 +40,11 @@ class RouterSide : public BachModule {
       : BachModule(c, "router"), ts(sched), at(fire_at), user(uid), path(pid) {}
 
   bool sent = false;
+  // 同一个 user 在这一拍再推一笔 trigger，0 表示不推。
+  uint64_t again_at = 0;
+  bool sent_again = false;
+  // Router 侧收不收退休请求。不收的话那个 stream 做完了也一直留在表里。
+  bool accept_retire = true;
   uint64_t retire_seen = 0;
   uint64_t retire_user = 0;
   uint64_t credit_req_seen = 0;
@@ -51,6 +56,9 @@ class RouterSide : public BachModule {
     if (!sent && now >= at) {
       ts.Trigger().Drive(user, path, /*reissue=*/false);
       if (ts.Trigger().Ready()) sent = true;
+    } else if (again_at != 0 && !sent_again && now >= again_at) {
+      ts.Trigger().Drive(user, path, /*reissue=*/false);
+      if (ts.Trigger().Ready()) sent_again = true;
     } else {
       ts.Trigger().Idle();
     }
@@ -69,7 +77,7 @@ class RouterSide : public BachModule {
     } else {
       retire_hold = false;
     }
-    ts.Credit().RetireReq().DriveAccepted(true);
+    ts.Credit().RetireReq().DriveAccepted(accept_retire);
     // credit 申请也一律收下，但不授予（除非测试另接）。
     if (ts.Credit().Req().Valid()) ++credit_req_seen;
     ts.Credit().Req().DriveReady(true);
@@ -296,6 +304,42 @@ TEST(BachTs, SkipsCompletedDatainTask) {
   ASSERT_GE(tasks.size(), 2u);
   EXPECT_EQ(tasks[0], 0u);
   EXPECT_EQ(tasks[1], 2u);
+}
+
+// 同一个 user 先后两个 token：第一个的链走完，第 60 拍第二个进来。retire 为真时
+// 第一个的 stream 已经退休，第二个建新表项把链再走一遍，返回 DTE 收到的 task 序列。
+std::vector<uint64_t> RunSameUserTwice(bool retire) {
+  std::vector<uint64_t> tasks;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Ts ts(clk, "ts", TsCfg{});
+    TaskEntry din = MakeTask(SendUnit::kDte, false);
+    din.wait_wake = true;
+    din.path_id = 4;
+    ts.Cfg().WriteTask(0, din);
+    ts.Cfg().WriteTask(1, MakeTask(SendUnit::kDte, true));
+    ts.InitFinish();
+
+    RouterSide router(clk, ts, 2, 99, /*pid=*/4);
+    router.again_at = 60;
+    router.accept_retire = retire;
+    UnitSide units(clk, ts, 2);
+    clk->Continue(150 * kPeriod);
+    RT::JoinAll();
+    tasks = units.dte_tasks;
+  }
+  RT::Reset();
+  return tasks;
+}
+
+// 系统保证有效的 user_id 唯一。一个 user 的 stream 退休了，同一个号再进来就是新
+// 用户，链从头走一遍；stream 做完了还没退休时同一个号又进来，任务链上没有这条
+// path 还没做的搬入任务，这一笔没有去处，断言失败。
+TEST(BachTs, SameUserBeforeRetireIsAnError) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_EQ(RunSameUserTwice(true), std::vector<uint64_t>({0, 1, 0, 1}));
+  EXPECT_DEATH(RunSameUserTwice(false), "");
 }
 
 // 表满时拉低 trigger 的 ready，不丢请求。

@@ -412,6 +412,33 @@ struct VuUops {
   std::array<bool, kVuUnitNum> active{};
 };
 
+// 这一条宏指令能不能拆成段逐段流过。
+//
+// 能拆的前提是本条用到的每个单元都逐元素算：第 i 个元素的结果只看第 i 个输入。
+// 归约（redusum / redmax / redmin）、Top-16 排序、Mask 的数 1 与按第一个 1 生成
+// 都要看整条，标量迭代 SEXE 一条宏指令只算一遍，这几类拆了就算错，整条走一份。
+// 拆的收益在 Load 与 Store 重叠上，所以两头都得是向量。
+inline bool VuCanSegment(VuUops const& u) {
+  LuOp lu = LuOp(u.cfg.lu.opcode);
+  SuOp su = SuOp(u.cfg.su.opcode);
+  if (!u.cfg.lu.Active() || !u.cfg.su.Active()) return false;
+  if (lu == LuOp::kLdVmMask || lu == LuOp::kLdSFp32) return false;
+  if (su == SuOp::kStVmMask || su == SuOp::kStSFp32) return false;
+  // MXFP8 的块 scale 按整条定阶，拆段之后每段自己定阶就不是同一个数了。
+  if (lu == LuOp::kLdMxfp8 || su == SuOp::kStMxfp8) return false;
+  if (u.cfg.mexe.Active()) return false;
+  for (VuOpReg const& r : u.cfg.sexe) {
+    if (r.Active()) return false;
+  }
+  for (VuOpReg const& r : u.cfg.valu) {
+    // 0x70 起是归约与 Top-16，它们看整条。
+    if (r.Active() && r.opcode >= uint32_t(ValuOp::kRedusum)) return false;
+  }
+  // 写 SRF 的那几路也是一条宏指令一次的事。
+  if (u.cfg.SrfWtEn() != 0) return false;
+  return u.inst.Entries() > 1;
+}
+
 // ── 微指令在通路上的中间结果 ──
 struct VuOperand {
   std::vector<float> vec;      // 向量通路，元素一律按 FP32 存
