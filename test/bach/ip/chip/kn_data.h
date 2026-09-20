@@ -39,7 +39,7 @@ constexpr uint64_t kChipChain[kSlots] = {6, 5, 4, 0, 1, 2, 3, 7};
 //
 // Core Mem 按 stream 切成 kStreamNum 片，每片 kStreamStride 字节，与 AGCU 的
 // cm.stream_stride、kernel 的 CMEM_STREAM_STRIDE 同源。多 token 时每个 token 占
-// 一片，topK 表也要按 stream 各放一份：MU 读 topk_addr + stream_id × stride。
+// 一片。topK 表不落 Core Mem，改由 DTE 直接写进 MU 的 topK_ep_table。
 constexpr uint64_t kStreamNum = 16;
 constexpr uint64_t kStreamStride = 64 * 1024;
 constexpr uint64_t kSwHead = 16;

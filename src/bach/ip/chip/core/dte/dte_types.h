@@ -91,6 +91,9 @@ struct Descriptor {
   // ceil(bytes / 32) 个，随数据一起搬，包里接在数据后面。
   bool scale = false;
   uint64_t ScaleBytes() const { return scale ? (bytes + 31) / 32 : 0; }
+  // TOPK_VALID：进核包自带 topK 表（msg->topk，256 B）。置位时这一笔落地不把
+  // topK 写进 Core Mem，而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。
+  bool topk_valid = false;
   uint64_t vc = 0;           // 出核走哪个 VC，决定落在哪个 out_ch
 
   // task_last 标记一个 task 拆成几笔搬运时的最后一笔，只有带这个标记的那一笔

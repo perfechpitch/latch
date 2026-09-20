@@ -565,7 +565,7 @@ class MuDriver : public BachModule {
   Mu& mu;
 };
 
-// topK 表在 Core Mem 里的样子：每项 {expert_id 2 B, weight 4 B}。
+// topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(t.size() * kTopkEntryBytes, 0);
   for (size_t i = 0; i < t.size(); ++i) {
@@ -684,13 +684,10 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
     cmem.Poke(want.addr_token + e * want.ac_expert_stride, tok.back());
   }
   // topK 里第 0 个是全局 17 号专家、组内第 1 个，第 1 个是全局 5 号、组内第 0 个。
-  // 表本身放在 Core Mem 的 topK 区，MU 在任务启动时自己读进来。
+  // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
   mu.EpInfo().SetLocalEpTable({5, 17});
   const float w0 = 0.75f, w1 = 0.25f;
-  want.topk_addr = 0x30000;
-  want.topk_stride = kTopkBytesPerStream;
-  cmem.Poke(want.topk_addr + want.stream_id * want.topk_stride,
-            TopkBytes({{17, w0}, {5, w1}}));
+  mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{17, w0}, {5, w1}}));
   mmem.Poke(want.addr_weight + 1 * want.b_expert_stride, wgt[0]);
   mmem.Poke(want.addr_weight + 0 * want.b_expert_stride, wgt[1]);
 
@@ -703,8 +700,6 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   writer.Push(kMuAcExpertStride, want.ac_expert_stride);
   writer.Push(kMuBExpertStride, want.b_expert_stride);
   writer.Push(kMuEpCtrl, want.expert_count | kMuEpReduceEn);
-  writer.Push(kMuTopkAddr, want.topk_addr);
-  writer.Push(kMuTopkStride, want.topk_stride);
   writer.Push(kMuStreamId, want.stream_id);
   writer.Push(kMuTaskId, want.task_id);
   writer.Push(kMuSysCtrl, kMuTaskStart);
@@ -776,10 +771,8 @@ TEST(Mu, ExpertsWriteSeparateResults) {
     wgt.push_back(TamePattern(want.dtype_ab, k * n, 0xB10 + e));
   }
   mu.EpInfo().SetLocalEpTable({5, 17});
-  want.topk_addr = 0x30000;
-  want.topk_stride = kTopkBytesPerStream;
-  cmem.Poke(want.topk_addr + want.stream_id * want.topk_stride,
-            TopkBytes({{17, 1.0f}, {5, 1.0f}}));
+  // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
+  mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{17, 1.0f}, {5, 1.0f}}));
   mmem.Poke(want.addr_weight + 1 * want.b_expert_stride, wgt[0]);
   mmem.Poke(want.addr_weight + 0 * want.b_expert_stride, wgt[1]);
 
@@ -792,8 +785,6 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   writer.Push(kMuAcExpertStride, want.ac_expert_stride);
   writer.Push(kMuBExpertStride, want.b_expert_stride);
   writer.Push(kMuEpCtrl, want.expert_count);
-  writer.Push(kMuTopkAddr, want.topk_addr);
-  writer.Push(kMuTopkStride, want.topk_stride);
   writer.Push(kMuStreamId, want.stream_id);
   writer.Push(kMuTaskId, want.task_id);
   writer.Push(kMuSysCtrl, kMuTaskStart);

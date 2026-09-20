@@ -135,22 +135,36 @@ TEST(BachMuGenEpInfo, GlobalIndexBecomesLocal) {
   RT::Reset();
 }
 
-// topK 表由 MU 自己从 Core Mem 载入，载入完成前这一级不 ready。
-TEST(BachMuGenEpInfo, TopkIsLoadedBeforeUse) {
+// topK 表由 DTE 搬运时经专用数据线按 stream_id 写进 topK_ep_table，MU 计算时按
+// stream_id 读回同一份，各 stream 互不串。
+TEST(BachMuGenEpInfo, DteWritesTopkMuReadsByStream) {
   ClockPtr clk = MakeClock(0, kPeriod);
   GenEpInfo g(clk, "gen", 0, false);
-  EXPECT_FALSE(g.Ready()) << "还没载入";
 
-  std::vector<TopkEntry> t = {{17, 0.5f}, {5, 0.25f}};
-  g.LoadTopk(t);
-  EXPECT_TRUE(g.Ready());
-  ASSERT_EQ(g.Topk().size(), 2u);
-  EXPECT_EQ(g.Topk()[0].expert_id, 17u);
-  EXPECT_FLOAT_EQ(g.Topk()[1].weight, 0.25f);
+  auto pack = [](std::vector<TopkEntry> const& t) {
+    std::vector<uint8_t> b(kTopkEntryBytes * t.size(), 0);
+    for (uint64_t i = 0; i < t.size(); ++i) {
+      uint64_t off = i * kTopkEntryBytes;
+      b[off] = uint8_t(t[i].expert_id & 0xFF);
+      b[off + 1] = uint8_t((t[i].expert_id >> 8) & 0xFF);
+      uint32_t w = numeric::BitsOf(t[i].weight);
+      for (int k = 0; k < 4; ++k) {
+        b[off + 2 + k] = uint8_t((w >> (8 * k)) & 0xFF);
+      }
+    }
+    return b;
+  };
 
-  // 换一个 task 就作废，免得读到半新半旧的一组专家。
-  g.Invalidate();
-  EXPECT_FALSE(g.Ready());
+  // DTE 按 stream_id 各写一份，写进 FF 阵列。
+  g.WriteTopk(0, pack({{17, 0.5f}, {5, 0.25f}}));
+  g.WriteTopk(3, pack({{23, 1.0f}}));
+
+  // MU 按 stream_id 读回，各自那份互不串。
+  ASSERT_EQ(g.Topk(0, 2).size(), 2u);
+  EXPECT_EQ(g.Topk(0, 2)[0].expert_id, 17u);
+  EXPECT_FLOAT_EQ(g.Topk(0, 2)[1].weight, 0.25f);
+  ASSERT_EQ(g.Topk(3, 1).size(), 1u);
+  EXPECT_EQ(g.Topk(3, 1)[0].expert_id, 23u);
   RT::Reset();
 }
 

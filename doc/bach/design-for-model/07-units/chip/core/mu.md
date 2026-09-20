@@ -20,7 +20,7 @@
 
 MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token = 1）的极低延时推理。一趟数据流：
 
-* **读**：token 从 Core Mem，weight 从 Matrix Mem（bank 与 lane 一对一垂直贴合，无 crossbar）
+* **读**：token 从 Core Mem，weight 从 Matrix Mem（bank 与 lane 一对一垂直贴合，无 crossbar），topK 从本地 `topK_ep_table`（DTE 搬运时写进）
 * **算**：32 个物理 lane 各 10 级流水的 MAC 阵列
 * **写**：结果经 stq 拼成 1 KB 写回 Core Mem
 
@@ -47,7 +47,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <text x="262.0" y="148.0" font-size="8.5" fill="#475569">静态配置：基本不随用户变化，</text>
 <text x="262.0" y="161.5" font-size="8.5" fill="#475569">　初始化阶段配好，业务流阶段快速调用</text>
 <text x="262.0" y="175.0" font-size="8.5" fill="#475569">动态配置：随用户变化，跟随任务下发</text>
-<text x="262.0" y="188.5" font-size="8.5" fill="#475569">启动：dsawi 先写 topk_stream_stride，后写 trigger</text>
+<text x="262.0" y="188.5" font-size="8.5" fill="#475569">启动：dsawi 写 trigger</text>
 <text x="262.0" y="202.0" font-size="8.5" fill="#475569">trigger 含 last 标志</text>
 <text x="262.0" y="215.5" font-size="8.5" fill="#475569">streamID / taskID / userID 由 DSA 自己读，</text>
 <text x="262.0" y="229.0" font-size="8.5" fill="#475569">　不需要软件配置</text>
@@ -68,7 +68,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <text x="844.0" y="175.0" font-size="8.5" fill="#475569">　转成 local index，方便算 weight 访存地址</text>
 <text x="844.0" y="188.5" font-size="8.5" fill="#475569">local_ep_table 记录当前 EP Group 内有哪些专家</text>
 <text x="844.0" y="202.0" font-size="8.5" fill="#475569">　及各自在组内的序号</text>
-<text x="844.0" y="215.5" font-size="8.5" fill="#475569">topK_ep_table：从 Core Mem 载入的 topK，每 stream ≤ 256 B</text>
+<text x="844.0" y="215.5" font-size="8.5" fill="#475569">topK_ep_table：DTE 经专用数据线写入，每 stream ≤ 256 B</text>
 <text x="844.0" y="229.0" font-size="8.5" fill="#475569">　FC1 / FC3 只需 ids，FC2 需 ids 与 weights</text>
 <text x="844.0" y="242.5" font-size="8.5" fill="#475569">router_expert_count = 0 时忽略 topK 相关寄存器</text>
 <polygon points="319,44 450,44 441,74 310,74" fill="#f8fafc" stroke="#374151"/>
@@ -199,7 +199,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | 编号 | 功能 |
 | - | - |
 | F1 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
-| F2 | 任务启动写两条 `dsawi`：先 `topk_stream_stride`，最后 `trigger`；trigger 寄存器含 last 标志 |
+| F2 | 任务启动写 `dsawi` 到 `trigger`；trigger 寄存器含 last 标志 |
 | F3 | `streamID` / `taskID` / `userID` 由**软件写进动态配置寄存器**，不来自硬件通路：MU RV core 从自定义 CSR 读出 TS 下发的这三个值，在写 trigger 之前用配置指令写给 MU。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是寄存器里的这一组 |
 | F4 | 寄存器地址映射本轮用临时映射（`regmap.h`）。原来等的《MU/DTE 寄存器配置参数》已改名为《DTE 寄存器配置参数》，只剩 DTE 那一半（地址空间三段加寄存器模板，见《DTE 数据搬运引擎》），**MU 侧的寄存器地址映射仍无着落** |
 
@@ -219,7 +219,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F9 | 按任务信息索引 topK 激活专家信息 |
 | F10 | 用 topK 里的 global index 索引 `local_ep_table` 转成 local index，方便算 weight 访存地址 |
 | F11 | `local_ep_table` 记录当前 EP Group 内有哪些专家以及各自在组内的序号 |
-| F12 | `topK_ep_table` 是 MU 自己从 Core Mem 载入的一份副本：DTE 进核时把 topK 写进 Core Mem 的 topK 区，MU 在 task 启动时经 `cmem_rd` 按 `topk_base + stream_id × 256 B` 读进来。载入未完成时 gen_ep_info 等着，不会读到半新半旧的一组专家 |
+| F12 | `topK_ep_table` 由 DTE 搬运时经 DTE→MU 专用数据线按 `stream_id` 直接写入（256 B，1 拍），MU 计算时与 token、weight 同时读，不再有 task 启动时的前置串行读 |
 | F13 | token 数据与 topK 信息分开存放：FC1 / FC3 只需 topK ids，FC2 需 ids 与 weights |
 | F14 | `router_expert_count = 0` 时忽略 topK 相关寄存器 |
 
@@ -308,7 +308,7 @@ port cfg (slave, ctrl_noc 写事务, clk)            // local_ep_table 与静态
 mem regfile         FF 阵列   静态配置组 + 动态参数寄存器                          1R1W  dsa_cfg 写            复位 0
 mem issue_q         FIFO      16 × 任务描述                                        1W1R  顺序执行              复位空
 mem local_ep_table  FF 阵列   当前 EP Group 内的专家与组内序号                      1R    编译侧算好，boot 期经 ctrl_noc 写入  复位由输入给
-mem topK_ep_table   FF 阵列   16 stream × 256 B，每项 {expert_id 2 B, weight 4 B}   1R1W  task 启动时经 cmem_rd 从 Core Mem 载入  复位空
+mem topK_ep_table   FF 阵列   16 stream × 256 B，每项 {expert_id 2 B, weight 4 B}   1W1R  DTE 经专用数据线写入，MU 计算时读  复位空
 mem token_ldq       FIFO      16 × {addr[17:0], tag}                                1W1R  取决于读延时           复位空
 mem rd_outstanding  FF 阵列   16 × 256 B = 4 KB                                     1RW   掩盖 latency          复位空
 mem weight_ldq      FIFO      4 × {addr[24:0]}                                      1W1R  各 lane 地址相同       复位空
@@ -480,7 +480,7 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="104" y="82" font-size="10" fill="#334155" text-anchor="middle">task_id[5:0]</text>
   <rect x="20" y="102" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="106" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">topK_ep_table · FF 16×256 B · 1R</text>
+  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">topK_ep_table · FF 16×256 B · 1W1R（DTE 写、MU 读）</text>
   <rect x="20" y="156" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="160" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">local_ep_table · FF · 1R</text>
@@ -767,7 +767,7 @@ Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一
 | issue_q 顺序执行，任务切换无 bubble | F6、F7 | `mu_issue_q` |
 | task 间三段重叠 | F8 | `mu_three_stage_overlap` |
 | topK 的 global index 经 local_ep_table 转 local index | F10、F11 | `gen_ep_info` |
-| topK_ep_table 由 MU 自己从 Core Mem 载入 | F12 | `topk_load` |
+| topK_ep_table 由 DTE 经专用数据线直接写入 | F12 | `topk_wr` |
 | router_expert_count = 0 时忽略 topK 寄存器 | F14 | `no_topk` |
 | 循环顺序由内往外是 tile_K、专家、tile_N | F16 | `tile_order` |
 | 一列的几段攒在 kblock_acc，几个专家乘 W_ep 后攒在 ep_acc，走完一列才产出 | F33a、F33b | `expert_reduce` |

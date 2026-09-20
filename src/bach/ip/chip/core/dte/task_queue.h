@@ -41,6 +41,8 @@ struct ActiveCtx {
   // scale 两段时分两次写。
   uint64_t off = 0;
   uint64_t part = 0;
+  // topK 旁带（TOPK_VALID）：这一笔的 topK 写进 MU 了没有。整笔只写一次。
+  bool topk_sent = false;
 };
 
 class TaskQueue {

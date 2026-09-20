@@ -528,6 +528,11 @@ class Core : public BachModule {
     rv[2]->AttachSmem(smem->PortPtr(kSmemVuRv));
     // DTE 搬完一笔之后写 shareMem 表项的那一路。
     dte->AttachSmemWr(smem->PortPtr(kSmemDteDsa));
+    // DTE→MU 的 topK 数据线：DTE 搬运时按 stream_id 把进核包里的 topK 直接写进
+    // MU 的 topK_ep_table，两端各持同一根线的两端。
+    auto topk_port = std::make_shared<MuTopkPort>(clk);
+    dte->AttachMuTopk(topk_port);
+    mu->AttachMuTopk(topk_port);
     // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
     // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
     rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));

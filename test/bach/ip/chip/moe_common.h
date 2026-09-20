@@ -142,7 +142,7 @@ inline void ExpectSame(std::vector<uint8_t> const& got,
 
 // ── 每个 core 的数据 ──
 
-// topK 表在 Core Mem 里的样子：每项 {expert_id 2 B, weight 4 B}。
+// topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
 inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
   for (size_t i = 0; i < t.size(); ++i) {
@@ -167,12 +167,12 @@ constexpr uint64_t kLocal[kn::kExperts] = {1, 0};
 inline void SetUpCoreData(Core& core, uint64_t group, uint64_t chip,
                           uint64_t slot) {
   core.GetMu().EpInfo().SetLocalEpTable({5, 17});
-  // topK 表按 stream 放：MU 按 topk_addr + stream_id × stride 读，每个 stream 各
-  // 占一段。多 token 各自落在自己的 stream 上，得各有一份，否则只有 0 号 stream
-  // 有专家、别的 stream 算出全 0。
+  // topK 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table，
+  // 每个 stream 各占一份。多 token 各自落在自己的 stream 上，得各有一份，否则只有
+  // 0 号 stream 有专家、别的 stream 算出全 0。
   auto topk = TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}});
   for (uint64_t s = 0; s < kn::kStreamNum; ++s) {
-    core.Cmem().Poke(kn::kTopkOff + s * kn::kStreamStride, topk);
+    core.GetMu().EpInfo().WriteTopk(s, topk);
   }
   kn::PokeCoreWeights(core.Mmem(), group, chip, slot, kLocal);
 }

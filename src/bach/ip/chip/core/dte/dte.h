@@ -122,6 +122,8 @@ class Dte {
   void AttachSmemWr(std::shared_ptr<MemPort> p) {
     comp->AttachSmemWr(std::move(p));
   }
+  // topK 旁带写进 MU 的那条数据线。只接给进核通道。
+  void AttachMuTopk(std::shared_ptr<MuTopkPort> p) { mu_topk = std::move(p); }
   // 对每块存储的读与写各一个口，五个通道在 DMA_XBAR 里仲裁。
   void AttachCmemRd(std::shared_ptr<MemPort> p) {
     xbar->AttachCmemRd(std::move(p));
@@ -194,6 +196,8 @@ class Dte {
 
     // Payload 走端口交给进核通道的 RD 侧。
     lanes[kInCh]->AttachPayload(parser->PayloadPtr());
+    // topK 旁带写进 MU 的那条数据线只给进核通道。
+    if (mu_topk) lanes[kInCh]->AttachMuTopk(mu_topk);
 
     // 每个通道在 DMA_XBAR 上各占一份存储口，四个出核通道各占出核仲裁的一份。
     for (uint64_t i = 0; i < kLaneNum; ++i) {
@@ -237,6 +241,7 @@ class Dte {
   std::unique_ptr<Commit> commit;
   std::unique_ptr<CompletionRs> comp;
   std::vector<std::unique_ptr<Lane>> lanes;
+  std::shared_ptr<MuTopkPort> mu_topk;
   std::shared_ptr<DescPort> commit_port;
 };
 

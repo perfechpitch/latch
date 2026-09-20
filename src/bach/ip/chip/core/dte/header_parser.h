@@ -177,6 +177,7 @@ class HeaderParser : public BachModule {
     // 旁带。
     desc->bytes = d.msg->DataBytes();
     desc->scale = d.msg->scale_valid != 0;
+    desc->topk_valid = d.msg->topk_valid != 0;
     desc->dst_addr = d.msg->dst_addr;
     if (entry_bytes_of_slot != 0) {
       desc->smem_wr = true;

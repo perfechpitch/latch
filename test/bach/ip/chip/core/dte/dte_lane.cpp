@@ -492,3 +492,59 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
   EXPECT_LE(reads, kDrainSlots + 1) << "领先量卡在可保留的任务边界数上";
   EXPECT_GT(reads, 1u) << "但确实比「一笔一等」快";
 }
+
+// 进核那一笔带 topK 旁带：落地时按 stream_id 把包里的 topK 写进 MU 端口，整笔
+// 只写一次。只有进核通道挂着这条数据线。
+TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
+  std::vector<uint8_t> topk(256, 0);
+  for (uint64_t i = 0; i < topk.size(); ++i) topk[i] = uint8_t(i * 3 + 7);
+
+  uint64_t drives = 0, got_stream = 0;
+  std::vector<uint8_t> got_topk;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    DteBuffer buf(clk, "buf", 64, 1, 0, false);
+    Agcu agcu(Layout());
+    Lane ln(clk, "lane", kInCh, buf, agcu, 0, false);
+    CoreMem cmem(clk, "cmem");
+    ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
+    auto topk_port = std::make_shared<MuTopkPort>(clk);
+    ln.AttachMuTopk(topk_port);
+
+    auto d = Task(1, Route::kRouterToCm, /*stream=*/3, kFlitBytes, 0, 0x40);
+    d->topk_valid = true;
+    d->msg->topk = topk;
+
+    // 每拍读一次端口：valid 且序号没见过就算一次（端口同一拍值会连着出现两拍）。
+    struct PortSink : public BachModule {
+      explicit PortSink(ClockPtr c, std::shared_ptr<MuTopkPort> p)
+          : BachModule(c, "sink"), port(std::move(p)) {}
+      uint64_t drives = 0, stream = 0;
+      std::vector<uint8_t> data;
+      void Step() override {
+        if (!port->Valid()) return;
+        if (port->Seq() == last_seq) return;
+        last_seq = port->Seq();
+        ++drives;
+        stream = port->StreamId();
+        auto d = port->Data();
+        if (d) data = *d;
+      }
+      std::shared_ptr<MuTopkPort> port;
+      uint64_t last_seq = 0;
+    };
+    PortSink sink(clk, topk_port);
+
+    RealMemHarness h(clk, ln, d);
+    clk->Continue(300 * kPeriod);
+    RT::JoinAll();
+    drives = sink.drives;
+    got_stream = sink.stream;
+    got_topk = sink.data;
+  }
+  RT::Reset();
+  EXPECT_EQ(drives, 1u) << "整笔只写一次";
+  EXPECT_EQ(got_stream, 3u) << "按 stream_id 写";
+  EXPECT_EQ(got_topk, topk) << "写的是包里的那一份";
+}

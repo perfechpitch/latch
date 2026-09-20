@@ -22,6 +22,7 @@
 #include "bach/ip/chip/core/mu/issue_q.h"
 #include "bach/ip/chip/core/mu/ldq.h"
 #include "bach/ip/chip/core/mu/matrix_exe.h"
+#include "bach/ip/chip/core/mu/mu_ports.h"
 #include "bach/ip/chip/core/mu/regfile.h"
 #include "bach/ip/chip/core/mu/stq.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
@@ -84,6 +85,8 @@ class Mu {
     weight_ldq->AttachPort(std::move(p));
   }
   void AttachCmemWr(std::shared_ptr<MemPort> p) { stq->AttachPort(std::move(p)); }
+  // DTE 搬运时经这条数据线把 topK 直接写进 topK_ep_table。
+  void AttachMuTopk(std::shared_ptr<MuTopkPort> p) { topk_port = std::move(p); }
 
   // ── 配置面 ──
   GenEpInfo& EpInfo() { return *ep; }
@@ -104,10 +107,10 @@ class Mu {
     if (i >= t.size()) return 1.0f;
     return t[i].weight;
   }
-  // 这一笔用哪一份 topK：自己读进来的那一份；没读的那一档退回 gen_ep_info 上
-  // 直接预置的那一份，测试与 boot 期走这条。
+  // 这一笔用哪一份 topK：按 stream_id 读 topK_ep_table。DTE 搬运时写进来，
+  // MU 计算时与 token / weight 同时读，不再有前置串行读。
   std::vector<TopkEntry> const& TopkOf(MuInflight const& f) const {
-    return f.topk_ready ? f.topk : ep->Topk();
+    return ep->Topk(f.cfg.stream_id, f.cfg.Experts());
   }
 
   // ── 观测 ──
@@ -124,6 +127,8 @@ class Mu {
   uint64_t DoneUser() const { return ctrl->DoneUser(); }
 
   void RunStep() {
+    // DTE 搬运时写进来的 topK 这一拍先收进 topK_ep_table，下面才算得到。
+    StepTopk();
     // 软件轮询 SYS_STATUS 等一笔任务做完，忙不忙由这里每拍写进去。空的判据与
     // dsa_done 一样要算上写回落地：离开 stq 的写请求还要经端口到存储。
     if (Quiescent()) {
@@ -149,6 +154,15 @@ class Mu {
   }
 
  private:
+  // DTE 那条 topK 数据线：每拍读一次，valid 且序号没见过的写进 topK_ep_table。
+  // 同一拍数据会连着两拍出现在端口上，按序号认它。
+  void StepTopk() {
+    if (!topk_port || !topk_port->Valid()) return;
+    if (topk_port->Seq() == last_topk_seq) return;
+    last_topk_seq = topk_port->Seq();
+    auto d = topk_port->Data();
+    if (d) ep->WriteTopk(topk_port->StreamId(), *d);
+  }
   // 把七个模块串起来的那一小段控制。放在装配里，因为它读的是各模块的接口，
   // 不属于任何一个模块自己。
   class Ctrl : public BachModule {
@@ -221,20 +235,6 @@ class Mu {
       MuInflight* f = mu.iq->FirstToLoad();
       if (f == nullptr) return;
       if (!mu.token_ldq->HasRoom() || !mu.weight_ldq->HasRoom()) return;
-      // 带 topK 的那一档先把这一笔自己的那一份读进来：权重落在哪由专家在本组
-      // 内的序号定，那个序号要等 topK 到齐才算得出。
-      if (f->cfg.expert_count != 0 && !f->topk_ready) {
-        if (!f->topk_asked) {
-          MuLdq::Req r;
-          r.addr = f->cfg.topk_addr + f->cfg.stream_id * f->cfg.topk_stride;
-          r.bytes = kTopkBytesPerStream;
-          r.tag = f->seq;
-          r.topk = true;
-          mu.token_ldq->Push(r);
-          f->topk_asked = true;
-        }
-        return;
-      }
       MuStep s = f->agu.Next();
       // acu 查越界与对齐。查出来走 Drain & Trap，本轮只留状态位：这一笔的余下
       // tile 全部作废，直接算做完。
@@ -268,16 +268,6 @@ class Mu {
           mu.weight_ldq->HasData()) {
         mu.token_ldq->TakeData();
         mu.weight_ldq->TakeData();
-        return;
-      }
-      // topK 那一笔没有配对的权重读，单独收下并记给它那一笔任务。
-      if (mu.token_ldq->HeadIsTopk()) {
-        MuLdq::Rsp t = mu.token_ldq->TakeData();
-        MuInflight* owner = mu.iq->BySeq(t.tag);
-        if (owner != nullptr) {
-          owner->topk = GenEpInfo::Parse(t.data, owner->cfg.Experts());
-          owner->topk_ready = true;
-        }
         return;
       }
       MuInflight* f = mu.iq->FirstToCompute();
@@ -373,12 +363,15 @@ class Mu {
   MuCfg cfg;
   // 执行通路连着空了几拍，用来判 SYS_STATUS.BUSY 落下去。
   uint64_t idle_cycles = 0;
+  // topK 数据线最近一笔写进来的序号，按它去重。
+  uint64_t last_topk_seq = 0;
   std::unique_ptr<MuRegfile> reg;
   std::unique_ptr<MuIssueQ> iq;
   std::unique_ptr<GenEpInfo> ep;
   std::unique_ptr<MuLdq> token_ldq, weight_ldq;
   std::unique_ptr<MatrixExe> exe;
   std::unique_ptr<MuStq> stq;
+  std::shared_ptr<MuTopkPort> topk_port;
   std::shared_ptr<DonePort> done;
   std::unique_ptr<Ctrl> ctrl;
 };

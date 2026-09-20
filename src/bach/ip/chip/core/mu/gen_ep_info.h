@@ -6,19 +6,21 @@
 // topK 存的是 global index，算 weight 访存地址要的是 local index，中间隔着
 // local_ep_table，它记录当前 EP Group 内有哪些专家、各自在组内第几个。
 //
-// topK_ep_table 是 MU 自己从 Core Mem 载入的一份副本：DTE 进核时把 topK 写进
-// Core Mem 的 topK 区，MU 在 task 启动时按 topk_base + stream_id × 256 B 读进来。
-// 载入未完成时这一级等着，不会读到半新半旧的一组专家。
+// topK_ep_table 是一块 FF 阵列（16 stream × 256 B），由 DTE 搬运时经专用数据线
+// 按 stream_id 直接写进来。MU 计算时同时读 topK_ep_table[stream_id]（本地）、
+// token（Core Mem）与 weight（Matrix Mem），不再有任务启动时的前置串行读。
 //
 // token 数据与 topK 分开存：FC1 / FC3 只需要 ids，FC2 还要 weights。
 // router_expert_count 为 0 时整个 topK 那一组寄存器都忽略。
 
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "base/log.h"
 #include "bach/common/numeric/formats.h"
+#include "bach/ip/chip/core/ts/ts_types.h"
 #include "bach/ip/module_base.h"
 
 namespace latch {
@@ -45,13 +47,22 @@ class GenEpInfo : public BachModule {
     for (uint64_t i = 0; i < experts.size(); ++i) local_ep[experts[i]] = i;
   }
 
-  // task 启动时从 Core Mem 载入这一份。载入完成前 Ready 是 false。
-  void LoadTopk(std::vector<TopkEntry> entries) {
-    topk = std::move(entries);
-    loaded = true;
+  // DTE 搬运时经专用数据线把这一份写进来（256 B）。写进 FF 阵列，MU 计算时读。
+  void WriteTopk(uint64_t stream_id, std::vector<uint8_t> bytes) {
+    LOGCHECK(stream_id < kStreamNum, "GenEpInfo: stream_id 越界。");
+    table[stream_id] = std::move(bytes);
+    dirty[stream_id] = true;
   }
-  void Invalidate() { loaded = false; }
-  bool Ready() const { return loaded; }
+
+  // MU 计算时读这一份：dirty 时用 Parse 解一次，之后走缓存。
+  std::vector<TopkEntry> const& Topk(uint64_t stream_id, uint64_t count) {
+    LOGCHECK(stream_id < kStreamNum, "GenEpInfo: stream_id 越界。");
+    if (dirty[stream_id]) {
+      parsed[stream_id] = Parse(table[stream_id], count);
+      dirty[stream_id] = false;
+    }
+    return parsed[stream_id];
+  }
 
   // 全局专家号翻成组内序号。不在本组里就返回 false，那说明 topK 与
   // local_ep_table 对不上，是配置错误，不是正常工作点。
@@ -66,7 +77,6 @@ class GenEpInfo : public BachModule {
     return true;
   }
 
-  std::vector<TopkEntry> const& Topk() const { return topk; }
   uint64_t Lookups() const { return lookups.Get(); }
   uint64_t Misses() const { return misses.Get(); }
 
@@ -97,8 +107,10 @@ class GenEpInfo : public BachModule {
 
  private:
   std::map<uint64_t, uint64_t> local_ep;
-  std::vector<TopkEntry> topk;
-  bool loaded = false;
+  // DTE 写进来的 topK 原始字节，按 stream 各一份；dirty 时才 Parse 成表。
+  std::array<std::vector<uint8_t>, kStreamNum> table;
+  std::array<std::vector<TopkEntry>, kStreamNum> parsed;
+  std::array<bool, kStreamNum> dirty{};
   uint64_t lookup_pending = 0, miss_pending = 0;
 
   Logic64 lookups, misses;

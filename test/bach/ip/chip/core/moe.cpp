@@ -82,7 +82,7 @@ MoeCase ReadMoeCase() {
   return c;
 }
 
-// topK 表在 Core Mem 里的样子：每项 {expert_id 2 B, weight 4 B}。
+// topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
   for (size_t i = 0; i < t.size(); ++i) {
@@ -104,7 +104,9 @@ void PokeCoreData(Cmem& cm, Mmem& mm, Mu& mu, MoeCase const& want) {
   cm.Poke(kn::kTokenOff, want.token);
   cm.PokeScale(kn::kTokenOff, want.token_scale);
   mu.EpInfo().SetLocalEpTable({5, 17});
-  cm.Poke(kn::kTopkOff, TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
+  // topK 表由 DTE 搬运时经专用数据线直接写进 MU 的 topK_ep_table，不落 Core Mem。
+  // 这几笔 MU 任务都走 stream 0。
+  mu.EpInfo().WriteTopk(0, TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
   kn::PokeCoreWeights(mm, want.group, want.chip, want.slot, kLocal);
 }
 
@@ -209,8 +211,6 @@ void Submit(std::deque<std::pair<uint64_t, uint64_t>>& q, MuJob const& j) {
   q.push_back({kMuAcExpertStride, j.ac_stride});
   q.push_back({kMuBExpertStride, kn::kMmStride});
   q.push_back({kMuEpCtrl, kn::kExperts | (j.ep_reduce ? kMuEpReduceEn : 0)});
-  q.push_back({kMuTopkAddr, kn::kTopkOff});
-  q.push_back({kMuTopkStride, kTopkBytesPerStream});
   q.push_back({kMuStreamId, 0});
   q.push_back({kMuTaskId, j.task_id});
   q.push_back({kMuSysCtrl, kMuTaskStart});
@@ -617,10 +617,11 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     WriteDotChain(core, want.slot);
 
     // boot 期装进去的那几样：权重按专家在本组内的序号摆，topK 表与本组的专家
-    // 名单一起给。token 由 Router 送进来。
+    // 名单一起给。topK 由 DTE 搬运时经专用数据线写进 MU 的 topK_ep_table，这里
+    // 直接注入同一份（本 core 的 MU 任务走 stream 0）。token 由 Router 送进来。
     core.GetMu().EpInfo().SetLocalEpTable({5, 17});
-    core.Cmem().Poke(kn::kTopkOff,
-                     TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
+    core.GetMu().EpInfo().WriteTopk(
+        0, TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
     kn::PokeCoreWeights(core.Mmem(), want.group, want.chip, want.slot, kLocal);
 
     auto token = std::make_shared<Message>();

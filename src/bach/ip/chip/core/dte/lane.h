@@ -40,6 +40,7 @@
 #include "bach/ip/chip/core/dte/buffer.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/dte/task_queue.h"
+#include "bach/ip/chip/core/mu/mu_ports.h"
 #include "bach/ip/chip/core/ports.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
@@ -100,6 +101,9 @@ class Lane : public BachModule {
   // 搬运都走端口。
   void AttachPayload(std::shared_ptr<PayloadPort> p) { payload = std::move(p); }
 
+  // topK 旁带写进 MU 的那条数据线。只有进核通道收到，出核通道恒为空。
+  void AttachMuTopk(std::shared_ptr<MuTopkPort> p) { mu_topk = std::move(p); }
+
   uint64_t Moved() const { return moved.Get(); }
   uint64_t QueueLen(uint64_t half) const { return q[half].Size(); }
 
@@ -116,6 +120,7 @@ class Lane : public BachModule {
     cmem_used = false;
     mmem_used = false;
     router_used = false;
+    topk_driven = false;
 
     // 末级先做：先收响应、再发新请求、最后激活下一个任务。
     TakeAdmit();
@@ -129,6 +134,7 @@ class Lane : public BachModule {
     if (!cmem_used) cmem->IdleReq();
     if (!mmem_used) mmem->IdleReq();
     if (!router_used) to_router->Idle();
+    if (mu_topk && !topk_driven) mu_topk->Idle();
 
     rd_active = ctx[kRd].busy ? 1 : 0;
     wr_active = ctx[kWr].busy ? 1 : 0;
@@ -259,6 +265,7 @@ class Lane : public BachModule {
       ctx[h].drained = false;
       ctx[h].filled = 0;
       ctx[h].sent_first = false;
+      ctx[h].topk_sent = false;
       q[h].Pop();
     }
   }
@@ -356,6 +363,16 @@ class Lane : public BachModule {
 
   void StepWr() {
     ActiveCtx& c = ctx[kWr];
+    // topK 旁带：进核那一笔落地时把包里的 topK 写进 MU 的 topK_ep_table，整笔
+    // 只写一次。只有进核通道挂着这条数据线，出核通道 mu_topk 为空走不进来。
+    if (c.busy && c.desc.topk_valid && !c.topk_sent && mu_topk) {
+      std::vector<uint8_t> topk =
+          c.desc.msg ? c.desc.msg->topk : std::vector<uint8_t>();
+      mu_topk->Drive(c.desc.stream_id,
+                     std::make_shared<ByteBlock>(std::move(topk)));
+      c.topk_sent = true;
+      topk_driven = true;
+    }
     if (!c.busy) {
       if (!wr_reported) wr_done->Idle();
       return;
@@ -431,6 +448,7 @@ class Lane : public BachModule {
   std::shared_ptr<CoreDataPort> to_router;
   std::shared_ptr<PayloadPort> payload;
   std::shared_ptr<AdmitPort> admit;
+  std::shared_ptr<MuTopkPort> mu_topk;
   std::shared_ptr<HalfDonePort> rd_done, wr_done;
 
   std::array<TaskQueue, kHalfNum> q;
@@ -441,6 +459,7 @@ class Lane : public BachModule {
   std::set<uint64_t> inbound_done;
   uint64_t last_payload_seq = 0, last_admit_seq = 0;
   bool cmem_used = false, mmem_used = false, router_used = false;
+  bool topk_driven = false;
   uint64_t move_pending = 0;
 
   Logic64 rd_active, wr_active, moved;

@@ -78,6 +78,12 @@ struct Message {
   // 置了 scale_valid 时打上，收方据此把包尾那一段写进存储的 scale 旁带。
   uint64_t scale_valid = 0;
 
+  // MoE 进核包自带的 topK 表（256 B）。topk_valid 置位时收方 DTE 不落 Core Mem，
+  // 而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。与 scale 一样是包里的
+  // 旁带段，不计入 size / payload 的字节换算。
+  uint64_t topk_valid = 0;
+  std::vector<uint8_t> topk;
+
   // 诊断用：从哪个 core 发出、第几笔。模型不拿它当主键，硬件包头里也没有。
   uint64_t src_core = 0;
   uint64_t seq = 0;

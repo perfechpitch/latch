@@ -107,8 +107,9 @@ struct MuTaskCfg {
   uint64_t stream_id = 0;
   uint64_t task_id = 0;
   uint64_t user_id = 0;
-  // topK 表在 Core Mem 里的位置。MU 在任务启动时按 topk_addr + stream_id ×
-  // topk_stride 把这一份读进来。
+  // 已废弃（obsolete）：topK 表不再落在 Core Mem，改由 DTE 搬运时经专用数据线
+  // 按 stream_id 直接写进 MU 的 topK_ep_table。这两个寄存器与 kMuTopkAddr /
+  // kMuTopkStride 常量保留，仅为了让旧 kernel 写入不报错，MU 不再读取它们。
   uint64_t topk_addr = 0;
   uint64_t topk_stride = 0;
 

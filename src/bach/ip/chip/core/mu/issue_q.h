@@ -13,7 +13,6 @@
 
 #include "base/log.h"
 #include "bach/ip/chip/core/mu/agu.h"
-#include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include "bach/ip/chip/core/mu/regfile.h"
 #include "bach/ip/module_base.h"
 
@@ -47,12 +46,6 @@ struct MuInflight {
   uint64_t issued = 0, computed = 0, stored = 0;
   // acu 查出越界：这一笔余下的数据全部作废，已发出的回复收回来也不算。
   bool dropped = false;
-  // 这一笔自己的那一份 topK。任务启动时从 Core Mem 读进来，权重地址与 W_ep
-  // 都从它取。每笔各存一份：几笔任务在执行通路上重叠时，共用一份会读到别人的
-  // 那一组专家。
-  std::vector<TopkEntry> topk;
-  bool topk_asked = false;
-  bool topk_ready = false;
   // 各 tile 写回哪。发读的时候由 AGU 算出来记下，算完那一拍再取，因为 AGU 的
   // 迭代这时已经走到后面的 tile 了。
   std::vector<uint64_t> out_addr;

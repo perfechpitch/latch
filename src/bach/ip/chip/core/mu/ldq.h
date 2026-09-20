@@ -39,13 +39,9 @@ class MuLdq : public BachModule {
     // 带 scale 的那一档：block scale 与数据一一映射，存储把它附在响应正文
     // 之后一起回来，不占独立的读通道。
     bool scale_en = false;
-    // 这一笔读的是 topK 表不是 token。两样都从 Core Mem 读，走同一条队列，
-    // 收方按这个标记分开。
-    bool topk = false;
   };
   struct Rsp {
     uint64_t tag = 0;
-    bool topk = false;
     std::vector<uint8_t> data;
   };
 
@@ -67,8 +63,6 @@ class MuLdq : public BachModule {
   }
 
   bool HasData() const { return !done.empty(); }
-  // 队头那一笔是不是 topK 表。它没有配对的权重读，收方要单独取走。
-  bool HeadIsTopk() const { return !done.empty() && done.front().topk; }
   Rsp TakeData() {
     Rsp r = done.front();
     done.pop_front();
@@ -111,7 +105,6 @@ class MuLdq : public BachModule {
     inflight.pop_front();
     Rsp s;
     s.tag = r.tag;
-    s.topk = r.topk;
     auto d = port->RspData();
     if (d) s.data = *d;
     done.push_back(s);
