@@ -414,3 +414,34 @@ TEST(BachTaskCtrl, NewPidGoesOnlyToTheAdjacentTask) {
   EXPECT_EQ(far.task_path_id, 7u) << "不紧邻就用自己的 PID";
   EXPECT_FALSE(far.pid_pending);
 }
+
+// 建表推 tail、退休推 head，指针模 32。走完一圈再装满时 tail 会小于 head，
+// 在途数必须按环形差来，不能无符号直接相减。
+TEST(BachStreamTable, InFlightWrapsTheRing) {
+  uint64_t fly = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    ChainBench h(clk, *b.cfg, *b.table, *b.ctrl);
+    uint64_t t = 2;
+    for (uint64_t i = 0; i < 20; ++i) {
+      h.jobs.push_back({t++, kWrCreate, Sitting(i % kStreamNum, 0, 0)});
+    }
+    for (uint64_t i = 0; i < 20; ++i) {
+      auto w = std::make_shared<StreamWrite>();
+      w->valid = true;
+      w->stream_id = i % kStreamNum;
+      w->clear_valid = true;
+      h.jobs.push_back({t++, kWrRetirement, w});
+    }
+    for (uint64_t i = 0; i < kStreamNum; ++i) {
+      h.jobs.push_back({t++, kWrCreate, Sitting(i, 0, 0)});
+    }
+    clk->Continue((t + 5) * kPeriod);
+    RT::JoinAll();
+    fly = b.table->InFlight();
+  }
+  RT::Reset();
+  EXPECT_EQ(fly, kStreamNum) << "绕回之后表仍是满的 16 项";
+}

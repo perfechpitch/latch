@@ -607,7 +607,7 @@ TEST(BachTs, SelfStartChainRestartsInPlace) {
       if (g.task == 0) t0_streams.push_back(g.stream);
     }
     retire_seen = router.retire_seen;
-    in_flight = ts.Table().TailPtr() - ts.Table().HeadPtr();
+    in_flight = ts.Table().InFlight();
     both_valid = ts.Table().Peek(0).valid && ts.Table().Peek(1).valid;
     third_valid = ts.Table().Peek(2).valid;
   }
@@ -641,7 +641,7 @@ TEST(BachTs, SelfStartBuildsNothingInWeightsMode) {
     ts.Cfg().WriteDatainTask(0x300, /*weights_mode=*/false);
     ts.InitFinish();
     built_in_business = ts.Table().Peek(0).valid && ts.Table().Peek(3).valid;
-    in_flight = ts.Table().TailPtr() - ts.Table().HeadPtr();
+    in_flight = ts.Table().InFlight();
   }
   RT::Reset();
   EXPECT_FALSE(built_in_weights) << "权重加载模式不启动任务链";

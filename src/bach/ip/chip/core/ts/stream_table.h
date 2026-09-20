@@ -69,8 +69,8 @@ class StreamTable : public BachModule {
   StreamEntry const& Peek(uint64_t i) const { return table.at(i); }
   uint64_t HeadPtr() const { return head_ptr; }
   uint64_t TailPtr() const { return tail_ptr; }
-  // 本拍末表里还剩几项没退休。head_ptr 与 tail_ptr 是只由本模块 Step() 触碰的
-  // 普通成员，别的协程要判这个 core 的任务链走没走空，读这个打拍的值。
+  // 本拍末表里还剩几项没退休。环形指针模 2*kStreamNum，在途数按环形差来，
+  // 不能做无符号直接相减：绕回以后 tail < head，减出会炸成接近 2^64 的数。
   uint64_t InFlight() const { return in_flight.Get(); }
   uint64_t Writes() const { return writes.Get(); }
   uint64_t Conflicts() const { return conflicts.Get(); }
@@ -86,10 +86,11 @@ class StreamTable : public BachModule {
   void Step() override {
     Arbitrate();
     snap_port->Drive(MakeSnapshot());
-    in_flight = tail_ptr - head_ptr;
+    uint64_t occ = Occupied();
+    in_flight = occ;
     writes = write_pending;
     conflicts = conflict_pending;
-    TracePerCycle("in_flight", tail_ptr - head_ptr);
+    TracePerCycle("in_flight", occ);
     TracePerCycle("writes", write_pending);
   }
 
@@ -177,13 +178,17 @@ class StreamTable : public BachModule {
     }
   }
 
+  // 环形差：模 2*kStreamNum 保留满（16）与空（0）的区分。
+  uint64_t Occupied() const {
+    return (tail_ptr + 2 * kStreamNum - head_ptr) % (2 * kStreamNum);
+  }
+
   StreamSnapshotPtr MakeSnapshot() const {
     auto s = std::make_shared<StreamSnapshot>();
     s->entry = table;
     s->head_ptr = head_ptr % kStreamNum;
-    // 环形指针用 2 倍模保留满与空的区分，快照里换算成实际在途数单独带出来：
-    // 两个指针取模之后满与空都是相等，差值分不开。
-    s->in_flight = (tail_ptr + 2 * kStreamNum - head_ptr) % (2 * kStreamNum);
+    // 两个指针取模之后满与空都是相等，差值分不开，在途数单独带出来。
+    s->in_flight = Occupied();
     s->tail_ptr = (s->head_ptr + s->in_flight) % kStreamNum;
     return s;
   }
