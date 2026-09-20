@@ -544,11 +544,14 @@ inline std::vector<uint8_t> RcoreHalf(Chip& chip, uint64_t half,
 }
 
 // 出口上收到的结果包：单 token 一包，多 token 每个 token 一包，按 token_id 区分。
-// 每个 token 的落点是它自己的 R core 槽（kUserId + i）。所有 token 输入数据相同，
-// 所以每一包的正文都该等于同一份 want。
+// dst 是第 0 个 token 的落点，落在哪一半看发这一包的是链尾哪一笔：出的是本行结果
+// 就落 half 0（dot core 的 task_dte_send_row），出的是上一行累加过来的结果就落
+// half 1（R core 的 task_dte_rc_send）。每个 token 各占一个 R core 槽
+// （kUserId + i），落点按槽长递推。所有 token 输入数据相同，所以每一包的正文都该
+// 等于同一份 want。
 inline void CheckOut(std::vector<MessagePtr> const& got,
                      std::vector<uint8_t> const& want,
-                     uint64_t token_count = 1) {
+                     uint64_t dst, uint64_t token_count = 1) {
   ASSERT_EQ(got.size(), token_count) << "出口上要收到每个 token 一包结果";
   std::map<uint64_t, MessagePtr> by_token;
   for (MessagePtr const& m : got) by_token[m->token_id] = m;
@@ -558,7 +561,7 @@ inline void CheckOut(std::vector<MessagePtr> const& got,
     ASSERT_NE(it, by_token.end()) << "token " << i << " 的结果没收到";
     MessagePtr const& m = it->second;
     ASSERT_EQ(m->payload.size(), kn::kRowBytes);
-    EXPECT_EQ(m->dst_addr, kn::RcLand(kUserId + i, 1));
+    EXPECT_EQ(m->dst_addr, dst + i * kn::kRcSlotBytes);
     ExpectSame(std::vector<uint8_t>(m->payload.begin() + kn::kSwHead,
                                     m->payload.end()),
                want, "token " + std::to_string(i) + " 出口上收到的结果");

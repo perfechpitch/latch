@@ -138,5 +138,5 @@ TEST(BachMoeLpu, OneLayerAcrossFortyEightChips) {
     }
   }
   CheckInflight(inflight);
-  CheckOut(got, want.Bytes("out"), kTokenCount);
+  CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 1), kTokenCount);
 }
