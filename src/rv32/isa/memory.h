@@ -92,7 +92,7 @@ class MemoryPort {
 
 class MemoryBase : public MemoryPort {
  public:
-  static const uint64_t memPageSize = 2 * 1024 * 1024;
+  static const uint64_t memPageSize = 64 * 1024;
 
   MemoryBase(uint64_t size = UINT64_MAX, uint8_t fill = 0x55) : addrSize(size), fillByte(fill) {}
 
