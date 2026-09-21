@@ -6,12 +6,14 @@
 // 分静态与动态两档：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速
 // 调用；动态配置随用户变化，跟随任务下发，含静态配置的选择。
 //
-// streamID / taskID / userID 由软件写进动态配置寄存器，不来自硬件通路：MU RV
-// core 从自定义 CSR 读出 TS 下发的这三个值，在写 trigger 之前配给 MU。
-// dsa_done 回给 TS 的 stream_id 与 task_id 就是寄存器里的这一组。
+// streamID / taskID / userID 不再由软件写寄存器：三个身份信号从 MU RV core 的
+// CSR 直连过来（DsaIdsPort），写 TASK_TRIGGER 那一拍采样进任务快照。dsa_done 回
+// 给 TS 的 stream_id / task_id 就是这一组，与 DTE、VU 同一套做法。
 //
-// 寄存器偏移照《Matrix Unit DSA》§Register Map Overview，位域照各寄存器那张
-// 位域表。地址映射本轮按那一份，与 compiler/hwconfig/layout.py 同源。
+// 寄存器偏移照《Matrix Unit DSA》§Register Map Overview（任务配置 0x0000~0x03FF），
+// 位域照各寄存器那张位域表。地址模型：token 与结果的物理地址由硬件按
+// base + stream_id × stream_stride 算，软件只写 base 与 stride，不再把 stream
+// 偏移乘进绝对地址。
 
 #include <array>
 #include <deque>
@@ -26,96 +28,96 @@
 namespace latch {
 namespace bach {
 
-// 偏移照《Matrix Unit DSA》。
-constexpr uint64_t kMuSysCtrl = 0x000;
-constexpr uint64_t kMuSysStatus = 0x004;
-constexpr uint64_t kMuTaskCfg = 0x008;
-constexpr uint64_t kMuTaskBlock = 0x00C;
-constexpr uint64_t kMuAddrToken = 0x010;
-constexpr uint64_t kMuAddrWeight = 0x014;
-constexpr uint64_t kMuAddrScale = 0x018;
-constexpr uint64_t kMuAddrOut = 0x01C;
-constexpr uint64_t kMuExceptStatus = 0x020;
-constexpr uint64_t kMuExceptMask = 0x024;
-// 这三个原文没有：软件要把 TS 下发的身份配进来，dsa_done 才填得出。
-// 《MU/DTE 寄存器配置参数》改名后只剩 DTE 那一半，MU 侧的地址映射仍无着落，
-// 这几个按建模计划的临时映射排在异常那一组之后。
-constexpr uint64_t kMuStreamId = 0x050;
-constexpr uint64_t kMuTaskId = 0x054;
-constexpr uint64_t kMuUserId = 0x058;
-constexpr uint64_t kMuTopkStride = 0x05C;
-constexpr uint64_t kMuTopkAddr = 0x048;
-// 多专家那一组。原文给的是名字（AC_expert_stride、B_expert_stride、
-// primitive_mode 里的 router_expert_count 与 router_ep_reduce_en），地址同样
-// 无着落，按同一条临时映射往后排。
-constexpr uint64_t kMuAcExpertStride = 0x060;
-constexpr uint64_t kMuBExpertStride = 0x064;
-constexpr uint64_t kMuEpCtrl = 0x068;
+// 任务配置寄存器 0x0000~0x03FF。
+constexpr uint64_t kMuTaskTrigger    = 0x000;  // WO，写即把当前配置锁成一笔任务
+constexpr uint64_t kMuPrimitiveDim   = 0x004;  // [15:0] Nblock、[31:16] Kblock
+constexpr uint64_t kMuAAddr          = 0x008;  // token/A 基址
+constexpr uint64_t kMuAStreamStride  = 0x00C;  // token/A 用户间 stride
+constexpr uint64_t kMuCAddr          = 0x010;  // output/C 基址
+constexpr uint64_t kMuCStreamStride  = 0x014;  // output/C 用户间 stride
+constexpr uint64_t kMuAcExpertStride = 0x018;  // [15:0] token、[31:16] output
+constexpr uint64_t kMuBAddr          = 0x01C;  // weight/B 的 Matrix Mem 基址
+constexpr uint64_t kMuBExpertStride  = 0x020;  // 专家间 weight stride
+constexpr uint64_t kMuTopkTableAddr  = 0x024;  // 用户 topK 存储地址（留档）
+constexpr uint64_t kMuPrimitiveMode  = 0x028;  // 任务类型、精度、专家信息、task_last
 
-// EP_CTRL 位域：[7:0] router_expert_count、[8] router_ep_reduce_en。
-constexpr uint64_t kMuEpReduceEn = 1u << 8;
+// 控制与状态寄存器 0x0400~0x07FF。
+constexpr uint64_t kMuCtrl        = 0x400;
+constexpr uint64_t kMuStatus      = 0x404;
+constexpr uint64_t kMuTaskqStatus = 0x408;
+constexpr uint64_t kMuErrInfo     = 0x40C;
 
-// SYS_CTRL 位域。
-constexpr uint64_t kMuTaskStart = 1u << 0;
-
-// SYS_STATUS 位域。软件轮询它等一笔任务做完：一个 task 里发几笔时，TS 那边只
-// 等一次完成，收尾由 RV core 报。
+// MU_STATUS 位域。软件轮询它等一笔任务做完；用 task_last 的那一档不再轮询，
+// 由 dsa_done 报 TS。
 constexpr uint64_t kMuBusy = 1u << 0;
 
 // 物理阵列：32 个 lane，每 lane 128 个 MAC，一次出 64 个结果。
 constexpr uint64_t kMuArrayK = 128;
 constexpr uint64_t kMuArrayN = 64;
 
-// TASK_CFG 的 PRIM_TYPE 位：物理阵列只有 1×K128×N64 这一种，固定写 1。
-constexpr uint64_t kMuPrimK128N64 = 1u << 0;
+// primitive_mode 位域。宽度 25 位：[0] primitive_type、[2:1] A_data_type、
+// [3] C_data_type、[6:4] share_ep_data_type、[9:7] router_ep_data_type、
+// [13:10] share_ep_count、[21:14] router_expert_count、[22] share_ep_en、
+// [23] router_ep_reduce_en、[24] task_last。
+constexpr uint64_t kMuPrimTypeShift = 0;             // [0] 0: 1×K128×N64、1: 1×K64×N128
+constexpr uint64_t kMuADataTypeShift = 1;            // [2:1] token：0 BF16、1 MXFP8
+constexpr uint64_t kMuCDataTypeShift = 3;            // [3] out：0 FP32、1 BF16
+constexpr uint64_t kMuRouterEpDtypeShift = 7;        // [9:7] weight：0 BF16、1 MXFP8、2 MXFP4、3 NVFP4
+constexpr uint64_t kMuRouterExpertCountShift = 14;   // [21:14] 路由专家数
+constexpr uint64_t kMuRouterEpReduceEn = 1u << 23;
+constexpr uint64_t kMuTaskLast = 1u << 24;
 
-// 一次任务的完整配置。写 trigger 那一刻锁存成这一份。
+// primitive_dim 位域：[15:0] Nblock、[31:16] Kblock。
+constexpr uint64_t kMuNblockShift = 0;
+constexpr uint64_t kMuKblockShift = 16;
+
+// AC_expert_stride 位域：[15:0] token_expert_stride、[31:16] output_expert_stride。
+constexpr uint64_t kMuTokenExpertStrideShift = 0;
+constexpr uint64_t kMuOutputExpertStrideShift = 16;
+
+// TASK_TRIGGER 位域：[0] Temp Valid、[2:1] Temp Index（模板 0~3）。
+constexpr uint64_t kMuTriggerValid = 1u << 0;
+
+// 一次任务的完整配置。写 TASK_TRIGGER 那一刻锁存成这一份。
 struct MuTaskCfg {
-  // TASK_CFG：[0] PRIM_TYPE、[2:1] VLANE_MODE、[4:3] DTYPE_AB、[5] DTYPE_C
-  //
-  // vlane = 2 时每个 lane 在 CSA 树中间断开，一次出两个半长的点积，原语就是
-  // 1×K64×N128；vlane = 1 是 1×K128×N64。
-  uint64_t vlane = 1;           // 1 或 2
-  numeric::DataType dtype_ab = numeric::DataType::kBf16;
-  bool out_bf16 = false;        // 0 = FP32 全精度写回，1 = BF16 原位舍入截断
+  // primitive_mode 位域。
+  uint64_t primitive_type = 0;   // 0 = 1×K128×N64、1 = 1×K64×N128
+  numeric::DataType a_dtype = numeric::DataType::kBf16;  // token
+  numeric::DataType b_dtype = numeric::DataType::kBf16;  // router weight
+  bool out_bf16 = false;         // C_data_type：0 FP32、1 BF16
+  uint64_t expert_count = 0;     // router_expert_count；0 表示与专家无关（FC0）
+  bool ep_reduce = false;        // router_ep_reduce_en：FC2 置 1，FC1/FC3 置 0
+  bool task_last = false;        // 任务包里最后一笔，完成后要反馈 TS
 
-  // TASK_BLOCK：[15:0] KBLOCK、[31:16] NBLOCK
+  // primitive_dim：[31:16] Kblock、[15:0] Nblock。
   uint64_t kblock = 1;
   uint64_t nblock = 1;
 
-  uint64_t addr_token = 0;
-  uint64_t addr_weight = 0;
-  // ADDR_SCALE 寄存器照留。scale 与数据地址一一映射，随数据一起从存储的 scale
-  // 旁带读出来，这一项不参与寻址。
-  uint64_t addr_scale = 0;
-  uint64_t addr_out = 0;
-
-  // ── 多专家 ──
-  //
-  // 本次任务要算 topK 里的前几个专家。0 表示这一笔与专家无关（FC0 那一档），
-  // 按单专家走。
-  uint64_t expert_count = 0;
-  // 使能专家间 reduce：FC2 置 1，几个专家的结果按 topK 权重合并成一份；
-  // FC1 与 FC3 置 0，每个专家各输出一份。
-  bool ep_reduce = false;
-  // 激活与结果这一侧每个专家隔多远。ep_reduce 为 1 时算在读的地址上（每个
-  // 专家一份激活），为 0 时算在写的地址上（每个专家一份结果）。
-  uint64_t ac_expert_stride = 0;
-  // 权重这一侧每个专家隔多远。
+  // 地址。token 与结果在 Core Mem，硬件按 base + stream_id × stride 算；
+  // weight 在 Matrix Mem，无 stream 偏移，专家间按 B_expert_stride 隔。
+  uint64_t a_addr = 0;
+  uint64_t a_stream_stride = 0;
+  uint64_t c_addr = 0;
+  uint64_t c_stream_stride = 0;
+  uint64_t b_addr = 0;
   uint64_t b_expert_stride = 0;
+  // AC_expert_stride 拆两侧：token_expert_stride 用于 FC2，output_expert_stride
+  // 用于 FC1/FC3。
+  uint64_t token_expert_stride = 0;
+  uint64_t output_expert_stride = 0;
 
+  // topK_table_addr 只留档：topK 实际经 DTE 那条专用数据线进 topK_ep_table，
+  // 不参与寻址。
+  uint64_t topk_table_addr = 0;
+
+  // 身份：写 TASK_TRIGGER 那一拍从 RV core CSR 直连采样，不由软件写。
   uint64_t stream_id = 0;
   uint64_t task_id = 0;
   uint64_t user_id = 0;
-  // 已废弃（obsolete）：topK 表不再落在 Core Mem，改由 DTE 搬运时经专用数据线
-  // 按 stream_id 直接写进 MU 的 topK_ep_table。这两个寄存器与 kMuTopkAddr /
-  // kMuTopkStride 常量保留，仅为了让旧 kernel 写入不报错，MU 不再读取它们。
-  uint64_t topk_addr = 0;
-  uint64_t topk_stride = 0;
 
-  // 一条原语的 K 与 N，由 vlane 从物理阵列折出来。
-  uint64_t PrimK() const { return kMuArrayK / vlane; }
-  uint64_t PrimN() const { return kMuArrayN * vlane; }
+  // 一条原语的 K 与 N，由 primitive_type 从物理阵列折出。
+  uint64_t PrimK() const { return primitive_type == 1 ? kMuArrayK / 2 : kMuArrayK; }
+  uint64_t PrimN() const { return primitive_type == 1 ? kMuArrayN * 2 : kMuArrayN; }
   // 这一笔要走几个专家。不带 topK 的那一档按一个走。
   uint64_t Experts() const { return expert_count == 0 ? 1 : expert_count; }
 };
@@ -126,17 +128,20 @@ class MuRegfile : public BachModule {
             bool tick = true)
       : BachModule(clock, name, parent, tick),
         cfg_port(std::make_shared<DsaCfgPort>(clock)),
+        ids(std::make_shared<DsaIdsPort>(clock)),
         rdata(std::make_shared<DsaRdataPort>(clock)),
         triggers(clock) {}
 
-  // boot 期 ctrl_noc 灌配置走这一条。与 RV core 的 dsa_iss 那一条分开：
-  // 两条通路同时往一个端口上写就是两个写者，而它们本来就不在同一段时间里用
-  // （ctrl_noc 是 boot 期，dsa_iss 是业务期）。
+  // boot 期 ctrl_noc 灌配置走这一条。与 RV core 的 dsa_iss 那一条分开：两条通路
+  // 同时往一个端口上写就是两个写者，而它们本来就不在同一段时间里用。
   void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
 
   DsaCfgPort& CfgPort() { return *cfg_port; }
   std::shared_ptr<DsaCfgPort> CfgPortPtr() const { return cfg_port; }
   void AttachCfg(std::shared_ptr<DsaCfgPort> p) { cfg_port = std::move(p); }
+  // 身份信号：写 TASK_TRIGGER 那一拍采样进任务快照。
+  DsaIdsPort& Ids() { return *ids; }
+  void AttachIds(std::shared_ptr<DsaIdsPort> p) { ids = std::move(p); }
   // 读寄存器隔几拍才回，返回数据走独立的一根线。
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return rdata; }
   // 忙不忙由装配层每拍写进来：这一级看不到 issue_q 与执行通路。
@@ -171,7 +176,7 @@ class MuRegfile : public BachModule {
     uint64_t addr = cfg_port->req_addr.Get();
     uint64_t v = cfg_port->req_wdata.Get();
     // 同一笔会连着两拍出现在端口上，按序号认它。不能按 (addr, data) 认：写
-    // SYS_CTRL 的 TASK_START 位是写一次启动一次，连着写两个相同的值是两笔。
+    // TASK_TRIGGER 是写一次启动一次，连着写两个相同的值是两笔。
     if (cfg_port->Seq() == last_seq) return;
     last_seq = cfg_port->Seq();
     if (cfg_port->req_we.Get() == 0) {
@@ -193,49 +198,48 @@ class MuRegfile : public BachModule {
 
   uint64_t ReadReg(uint64_t addr) const {
     switch (addr) {
-      case kMuSysStatus: return busy ? kMuBusy : 0;
-      case kMuTaskBlock: return live.kblock | (live.nblock << 16);
-      case kMuAddrToken: return live.addr_token;
-      case kMuAddrWeight: return live.addr_weight;
-      case kMuAddrOut: return live.addr_out;
-      case kMuStreamId: return live.stream_id;
-      case kMuTaskId: return live.task_id;
-      case kMuUserId: return live.user_id;
+      case kMuStatus: return busy ? kMuBusy : 0;
+      case kMuPrimitiveDim: return (live.kblock << kMuKblockShift) |
+                                   (live.nblock << kMuNblockShift);
+      case kMuAAddr: return live.a_addr;
+      case kMuCAddr: return live.c_addr;
+      case kMuBAddr: return live.b_addr;
       default: return 0;
     }
   }
 
   void WriteReg(uint64_t addr, uint64_t v) {
     switch (addr) {
-      case kMuTaskCfg:
-        LOGCHECK((v & kMuPrimK128N64) != 0,
-                 "MuRegfile: 物理阵列只有 1×K128×N64，PRIM_TYPE 要写 1。");
-        live.vlane = ((v >> 1) & 0x3u) == 0 ? 1 : 2;
-        live.dtype_ab = DecodeDtype((v >> 3) & 0x3u);
-        live.out_bf16 = ((v >> 5) & 1u) != 0;
+      case kMuPrimitiveDim:
+        live.kblock = (v >> kMuKblockShift) & 0xFFFFu;
+        live.nblock = (v >> kMuNblockShift) & 0xFFFFu;
         break;
-      case kMuTaskBlock:
-        live.kblock = v & 0xFFFFu;
-        live.nblock = (v >> 16) & 0xFFFFu;
+      case kMuAAddr: live.a_addr = v; break;
+      case kMuAStreamStride: live.a_stream_stride = v; break;
+      case kMuCAddr: live.c_addr = v; break;
+      case kMuCStreamStride: live.c_stream_stride = v; break;
+      case kMuAcExpertStride:
+        live.token_expert_stride = (v >> kMuTokenExpertStrideShift) & 0xFFFFu;
+        live.output_expert_stride = (v >> kMuOutputExpertStrideShift) & 0xFFFFu;
         break;
-      case kMuAddrToken: live.addr_token = v; break;
-      case kMuAddrWeight: live.addr_weight = v; break;
-      case kMuAddrScale: live.addr_scale = v; break;
-      case kMuAddrOut: live.addr_out = v; break;
-      case kMuStreamId: live.stream_id = v; break;
-      case kMuTaskId: live.task_id = v; break;
-      case kMuUserId: live.user_id = v; break;
-      case kMuTopkStride: live.topk_stride = v; break;
-      case kMuTopkAddr: live.topk_addr = v; break;
-      case kMuAcExpertStride: live.ac_expert_stride = v; break;
+      case kMuBAddr: live.b_addr = v; break;
       case kMuBExpertStride: live.b_expert_stride = v; break;
-      case kMuEpCtrl:
-        live.expert_count = v & 0xFFu;
-        live.ep_reduce = (v & kMuEpReduceEn) != 0;
+      case kMuTopkTableAddr: live.topk_table_addr = v; break;
+      case kMuPrimitiveMode:
+        live.primitive_type = (v >> kMuPrimTypeShift) & 1u;
+        live.a_dtype = DecodeADtype((v >> kMuADataTypeShift) & 0x3u);
+        live.out_bf16 = ((v >> kMuCDataTypeShift) & 1u) != 0;
+        live.b_dtype = DecodeBDtype((v >> kMuRouterEpDtypeShift) & 0x7u);
+        live.expert_count = (v >> kMuRouterExpertCountShift) & 0xFFu;
+        live.ep_reduce = (v & kMuRouterEpReduceEn) != 0;
+        live.task_last = (v & kMuTaskLast) != 0;
         break;
-      case kMuSysCtrl:
-        // 写 1 启动，硬件接收后自清零。必须最后写。
-        if (v & kMuTaskStart) {
+      case kMuTaskTrigger:
+        // 写 1 启动，硬件接收后自清零。身份信号在这一拍采样，必须最后写。
+        if (v & kMuTriggerValid) {
+          live.stream_id = ids->Stream();
+          live.task_id = ids->Task();
+          live.user_id = ids->User();
           latched = live;
           pending = true;
           ++trigger_pending;
@@ -246,10 +250,15 @@ class MuRegfile : public BachModule {
     }
   }
 
-  static numeric::DataType DecodeDtype(uint64_t v) {
-    // 00 BF16、01 MXFP8、10 MXFP4、11 保留
+  // A_data_type 只有 BF16 / MXFP8 两档有效。
+  static numeric::DataType DecodeADtype(uint64_t v) {
+    return v == 1 ? numeric::DataType::kMxfp8 : numeric::DataType::kBf16;
+  }
+  // router_ep_data_type 多两档：0 BF16、1 MXFP8、2 MXFP4、3 NVFP4。
+  static numeric::DataType DecodeBDtype(uint64_t v) {
     if (v == 1) return numeric::DataType::kMxfp8;
     if (v == 2) return numeric::DataType::kMxfp4;
+    // NVFP4 本轮不建模，回落 BF16。
     return numeric::DataType::kBf16;
   }
 
@@ -258,6 +267,7 @@ class MuRegfile : public BachModule {
   };
 
   std::shared_ptr<DsaCfgPort> cfg_port;
+  std::shared_ptr<DsaIdsPort> ids;
   std::shared_ptr<DsaRdataPort> rdata;
   std::deque<ReadBack> pending_read;
   bool rdata_used = false, busy = false;

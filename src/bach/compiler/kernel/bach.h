@@ -276,56 +276,51 @@ static inline u32 dte_template(u32 idx) {
   return DTE_TEMPLATE_BASE + idx * DTE_TEMPLATE_STRIDE;
 }
 
-/* ===== MU：《Matrix Unit DSA》§Register Map Overview ===== */
+/* ===== MU：《Matrix Unit DSA》§Register Map Overview =====
+ *
+ * 任务配置寄存器 0x0000~0x03FF。地址模型：token 与结果的物理地址由硬件按
+ * base + stream_id × stream_stride 算，kernel 只写 base 与 stride。身份三项
+ * streamID / taskID / userID 由 RV core 的 CSR 直连，不再写寄存器。 */
 
-#define MU_SYS_CTRL      0x000
-#define MU_SYS_STATUS    0x004
-#define MU_TASK_CFG      0x008
-#define MU_TASK_BLOCK    0x00C
-#define MU_ADDR_TOKEN    0x010
-#define MU_ADDR_WEIGHT   0x014
-#define MU_ADDR_SCALE    0x018
-#define MU_ADDR_OUT      0x01C
-#define MU_EXCEPT_STATUS 0x020
-#define MU_EXCEPT_MASK   0x024
+#define MU_TASK_TRIGGER     0x000
+#define MU_PRIMITIVE_DIM    0x004
+#define MU_A_ADDR           0x008
+#define MU_A_STREAM_STRIDE  0x00C
+#define MU_C_ADDR           0x010
+#define MU_C_STREAM_STRIDE  0x014
+#define MU_AC_EXPERT_STRIDE 0x018
+#define MU_B_ADDR           0x01C
+#define MU_B_EXPERT_STRIDE  0x020
+#define MU_TOPK_TABLE_ADDR  0x024
+#define MU_PRIMITIVE_MODE   0x028
 
-/* 身份三项。《Matrix Unit DSA》里没有这一组：MU 的 dsa_done 要填 stream_id 与
- * task_id，而 MU 没有从 RV core 直连过来的身份信号，只能由软件写进来。地址按
- * 建模计划的临时映射排在异常那一组之后，与 src/bach 的 mu/regfile.h 同源 */
-#define MU_STREAM_ID     0x050
-#define MU_TASK_ID       0x054
-#define MU_USER_ID       0x058
-#define MU_TOPK_STRIDE   0x05C
-#define MU_TOPK_ADDR     0x048
+/* 控制与状态寄存器 0x0400~0x07FF */
+#define MU_STATUS 0x404
+/* MU_STATUS 位域 */
+#define MU_BUSY (1u << 0)
 
-/* 多专家那一组。原文给的是名字（AC_expert_stride、B_expert_stride，以及
- * primitive_mode 里的 router_expert_count 与 router_ep_reduce_en），地址同样
- * 无着落，按同一条临时映射往后排 */
-#define MU_AC_EXPERT_STRIDE 0x060
-#define MU_B_EXPERT_STRIDE  0x064
-#define MU_EP_CTRL          0x068
-/* EP_CTRL 位域：[7:0] router_expert_count、[8] router_ep_reduce_en */
-#define MU_EP_REDUCE_EN (1u << 8)
+/* primitive_dim 位域：[15:0] Nblock、[31:16] Kblock */
+#define MU_NBLOCK_SHIFT 0
+#define MU_KBLOCK_SHIFT 16
 
-/* SYS_CTRL 位域 */
-#define MU_TASK_START  (1u << 0)   /* 写 1 启动，硬件接收后自清零 */
-#define MU_SOFT_RESET  (1u << 1)
-#define MU_CLK_GATE_EN (1u << 2)
+/* AC_expert_stride 位域：[15:0] token_expert_stride、[31:16] output_expert_stride */
+#define MU_TOKEN_EXPERT_STRIDE_SHIFT 0
+#define MU_OUTPUT_EXPERT_STRIDE_SHIFT 16
 
-/* SYS_STATUS 位域 */
-#define MU_BUSY        (1u << 0)
-#define MU_STATE_SHIFT 1           /* [2:1] 00 Idle、01 Running、10 Error */
+/* TASK_TRIGGER 位域：[0] Temp Valid、[2:1] Temp Index */
+#define MU_TRIGGER_VALID (1u << 0)
 
-/* TASK_CFG 位域 */
-#define MU_PRIM_TYPE_K128_N64 1u   /* [0] 物理阵列只有 1*K128*N64，固定写 1 */
-#define MU_VLANE_SHIFT   1         /* [2:1] 00 vlane=1、01 vlane=2 */
-#define MU_VLANE2        (1u << MU_VLANE_SHIFT)
-#define MU_DTYPE_MXFP8   (1u << 3) /* DTYPE_AB = 01 */
-#define MU_DTYPE_AB_SHIFT 3        /* [4:3] 00 BF16、01 MXFP8、10 MXFP4 */
-#define MU_DTYPE_C_BF16  (1u << 5) /* [5] 0 = FP32、1 = BF16 */
-
-/* TASK_BLOCK 位域：[15:0] KBLOCK、[31:16] NBLOCK */
-#define MU_NBLOCK_SHIFT 16
+/* primitive_mode 位域：[0] primitive_type、[2:1] A_data_type、[3] C_data_type、
+ * [9:7] router_ep_data_type、[21:14] router_expert_count、[23] router_ep_reduce_en、
+ * [24] task_last */
+#define MU_PRIM_TYPE_K64_N128 (1u << 0)          /* [0] 1 = 1×K64×N128；0 = 1×K128×N64 */
+#define MU_A_DTYPE_MXFP8      (1u << 1)          /* [2:1] token = 01（MXFP8） */
+#define MU_C_DTYPE_BF16       (1u << 3)          /* [3] out = BF16 */
+#define MU_ROUTER_EP_DTYPE_SHIFT 7               /* [9:7] weight */
+#define MU_ROUTER_EP_DTYPE_MXFP8 (1u << MU_ROUTER_EP_DTYPE_SHIFT)
+#define MU_ROUTER_EXPERT_SHIFT 14                /* [21:14] 路由专家数 */
+#define MU_ROUTER_EP_REDUCE_EN (1u << 23)
+#define MU_TASK_LAST          (1u << 24)
 
 /* ===== VU：《VU-DSA 寄存器整理》§Register Map Overview ===== */
 

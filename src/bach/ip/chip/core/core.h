@@ -486,8 +486,9 @@ class Core : public BachModule {
     rv[1]->AttachDsaCfg(mu->CfgPtr());
     rv[2]->AttachDsaCfg(vu->CfgPtr());
     dte->AttachIds(rv[0]->DsaIdsPtr());
-    // VU 的 stream_id 与 task_id 也从它那个 RV core 的 CSR 直连过来；MU 那一
-    // 组由软件写进动态配置寄存器。
+    // VU 与 MU 的 stream_id / task_id / user_id 也从各自那个 RV core 的 CSR
+    // 直连过来，写 trigger 那一拍采样，不再由软件写进动态配置寄存器。
+    mu->AttachIds(rv[1]->DsaIdsPtr());
     vu->AttachIds(rv[2]->DsaIdsPtr());
     // 读 DSA 寄存器的返回值走独立的一根线回 dsa_rq。三个 RV core 各读各的那一个
     // DSA：MU 的软件轮询 SYS_STATUS 等一笔任务做完，VU 的轮询 macro_inst_left

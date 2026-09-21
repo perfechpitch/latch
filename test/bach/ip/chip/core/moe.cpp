@@ -196,29 +196,34 @@ void DriveOne(std::deque<std::pair<uint64_t, uint64_t>>& que, DsaCfgPort& port,
 
 // 一笔 MU 任务要写的那几个寄存器。
 struct MuJob {
-  uint64_t cfg = 0, kblock = 1, nblock = 1;
-  uint64_t addr_token = 0, addr_weight = 0, addr_out = 0, ac_stride = 0;
+  uint64_t mode = 0;   // primitive_mode 的精度与类型位；专家数、reduce、task_last 由 Submit 拼
+  uint64_t kblock = 1, nblock = 1;
+  uint64_t a_addr = 0, b_addr = 0, c_addr = 0, ac_stride = 0;
   bool ep_reduce = false;
-  uint64_t task_id = 0;
 };
 
 void Submit(std::deque<std::pair<uint64_t, uint64_t>>& q, MuJob const& j) {
-  q.push_back({kMuTaskCfg, j.cfg});
-  q.push_back({kMuTaskBlock, j.kblock | (j.nblock << 16)});
-  q.push_back({kMuAddrToken, j.addr_token});
-  q.push_back({kMuAddrWeight, j.addr_weight});
-  q.push_back({kMuAddrOut, j.addr_out});
-  q.push_back({kMuAcExpertStride, j.ac_stride});
+  uint64_t mode = j.mode | (kn::kExperts << kMuRouterExpertCountShift);
+  if (j.ep_reduce) mode |= kMuRouterEpReduceEn;
+  mode |= kMuTaskLast;   // 单 core 用例三笔各自报一次 dsa_done，全置 task_last
+  q.push_back({kMuPrimitiveMode, mode});
+  q.push_back({kMuPrimitiveDim, j.nblock | (j.kblock << 16)});
+  q.push_back({kMuAAddr, j.a_addr});
+  q.push_back({kMuBAddr, j.b_addr});
+  q.push_back({kMuCAddr, j.c_addr});
+  // AC_expert_stride 拆两侧：FC2 用 token 那侧，FC1/FC3 用 output 那侧，不用的写 0。
+  q.push_back({kMuAcExpertStride,
+               j.ep_reduce ? (j.ac_stride << kMuTokenExpertStrideShift)
+                           : (j.ac_stride << kMuOutputExpertStrideShift)});
   q.push_back({kMuBExpertStride, kn::kMmStride});
-  q.push_back({kMuEpCtrl, kn::kExperts | (j.ep_reduce ? kMuEpReduceEn : 0)});
-  q.push_back({kMuStreamId, 0});
-  q.push_back({kMuTaskId, j.task_id});
-  q.push_back({kMuSysCtrl, kMuTaskStart});
+  q.push_back({kMuTaskTrigger, kMuTriggerValid});
 }
 
-constexpr uint64_t kFc13Cfg =
-    kMuPrimK128N64 | (uint64_t(1) << 3) | (uint64_t(1) << 5);   // MXFP8、BF16 出
-constexpr uint64_t kFc2Cfg = kFc13Cfg | (uint64_t(1) << 1);     // 开 vlane = 2
+constexpr uint64_t kFc13Mode =
+    (1u << kMuADataTypeShift) |        // A=MXFP8
+    (1u << kMuCDataTypeShift) |        // C=BF16
+    (1u << kMuRouterEpDtypeShift);     // B=MXFP8，primitive_type = 0
+constexpr uint64_t kFc2Mode = kFc13Mode | (1u << kMuPrimTypeShift);  // 1×K64×N128
 
 // FC1、门控、FC2 按顺序下发。MU、VU、两块存储与两条配置通路都由这一个协程驱动。
 class MoeRig : public BachModule {
@@ -250,14 +255,14 @@ class MoeRig : public BachModule {
     uint64_t kb = kn::kSegEmbed / kn::kFc13K, nb = kn::kSegInter / kn::kFc13N;
     if (stage == 0) {
       GateSetup(vq);
-      Submit(q, {kFc13Cfg, kb, nb, token, kn::kMmW1, kn::kFc1Off,
-                 kn::kPartStride, false, 1});
+      Submit(q, {kFc13Mode, kb, nb, token, kn::kMmW1, kn::kFc1Off,
+                 kn::kPartStride, false});
       stage = 1;
       return;
     }
     if (stage == 1 && dones >= 1) {
-      Submit(q, {kFc13Cfg, kb, nb, token, kn::kMmW3, kn::kFc3Off,
-                 kn::kPartStride, false, 2});
+      Submit(q, {kFc13Mode, kb, nb, token, kn::kMmW3, kn::kFc3Off,
+                 kn::kPartStride, false});
       stage = 2;
       return;
     }
@@ -270,9 +275,9 @@ class MoeRig : public BachModule {
     // 每个专家三条宏指令各报一次完成。真实链路里由 RV core 轮询
     // macro_inst_left 收尾，这一份直接数。
     if (stage == 3 && vdones >= 3 * kn::kExperts) {
-      Submit(q, {kFc2Cfg, kn::kSegInter / kn::kFc2K,
+      Submit(q, {kFc2Mode, kn::kSegInter / kn::kFc2K,
                  kn::kSegEmbed / kn::kFc2N, kn::kActOff, kn::kMmW2,
-                 kn::ConcatOf(s), kn::kActStride, true, 3});
+                 kn::ConcatOf(s), kn::kActStride, true});
       stage = 4;
       return;
     }
@@ -479,7 +484,7 @@ void WriteDotChain(Core& core, uint64_t slot) {
   core.GetTs().Cfg().WriteTask(0, in);
 
   core.GetTs().Cfg().WriteTask(
-      1, Task(SendUnit::kMu, RecvUnit::kRvOnly,
+      1, Task(SendUnit::kMu, RecvUnit::kDsa,
               ("task_mu_part_s" + s).c_str(), "mu"));
 
   TaskEntry part = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_send_part", "dte");
@@ -496,7 +501,7 @@ void WriteDotChain(Core& core, uint64_t slot) {
   core.GetTs().Cfg().WriteTask(
       4, Task(SendUnit::kVu, RecvUnit::kRvOnly, "task_vu_gate", "vu"));
   core.GetTs().Cfg().WriteTask(
-      5, Task(SendUnit::kMu, RecvUnit::kRvOnly,
+      5, Task(SendUnit::kMu, RecvUnit::kDsa,
               ("task_mu_fc2_s" + s).c_str(), "mu"));
 
   TaskEntry row = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_send_row", "dte");

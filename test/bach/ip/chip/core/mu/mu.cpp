@@ -42,13 +42,13 @@ std::vector<float> Reference(MuTaskCfg const& cfg,
                              std::vector<uint8_t> const& wscale = {}) {
   uint64_t k = cfg.PrimK();
   uint64_t n = cfg.PrimN();
-  uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
-  uint64_t elem_bits = numeric::ElemBitsOf(cfg.dtype_ab);
+  uint64_t block = numeric::ScaleBlockOf(cfg.a_dtype);
+  uint64_t elem_bits = numeric::ElemBitsOf(cfg.b_dtype);
 
-  std::vector<float> a = numeric::Decode(cfg.dtype_ab, token, k);
+  std::vector<float> a = numeric::Decode(cfg.a_dtype, token, k);
   std::vector<float> sc;
   if (block != 0) {
-    sc = numeric::DecodeScale(cfg.dtype_ab, scale, k / block);
+    sc = numeric::DecodeScale(cfg.a_dtype, scale, k / block);
   }
 
   std::vector<float> out;
@@ -56,7 +56,7 @@ std::vector<float> Reference(MuTaskCfg const& cfg,
     uint64_t col_bytes = k * elem_bits / 8;
     std::vector<uint8_t> col(weight.begin() + j * col_bytes,
                              weight.begin() + (j + 1) * col_bytes);
-    std::vector<float> b = numeric::Decode(cfg.dtype_ab, col, k);
+    std::vector<float> b = numeric::Decode(cfg.b_dtype, col, k);
 
     // 乘积先逐个算出来存下，再加。写成 acc += a[i] * b[i] 的话编译器会合成
     // FMA，中间那一次舍入就没了，与硬件先乘后加的结果差一个 bit，逐 bit
@@ -77,7 +77,7 @@ std::vector<float> Reference(MuTaskCfg const& cfg,
         float s = sc[blk];
         if (!wscale.empty()) {
           std::vector<uint8_t> one = {wscale[j * nb + blk]};
-          s = s * numeric::DecodeScale(cfg.dtype_ab, one, 1)[0];
+          s = s * numeric::DecodeScale(cfg.b_dtype, one, 1)[0];
         }
         acc += part * s;
       }
@@ -189,15 +189,15 @@ void CheckPrimitive(MuTaskCfg const& cfg, uint64_t seed,
   Probe probe(clk, exe);
 
   uint64_t k = cfg.PrimK(), n = cfg.PrimN();
-  uint64_t elem_bits = numeric::ElemBitsOf(cfg.dtype_ab);
-  uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
-  std::vector<uint8_t> token = TamePattern(cfg.dtype_ab, k, seed);
-  std::vector<uint8_t> weight = TamePattern(cfg.dtype_ab, k * n, seed + 7);
+  uint64_t elem_bits = numeric::ElemBitsOf(cfg.b_dtype);
+  uint64_t block = numeric::ScaleBlockOf(cfg.a_dtype);
+  std::vector<uint8_t> token = TamePattern(cfg.a_dtype, k, seed);
+  std::vector<uint8_t> weight = TamePattern(cfg.b_dtype, k * n, seed + 7);
   std::vector<uint8_t> scale =
       block == 0 ? std::vector<uint8_t>()
-                 : TameScale(cfg.dtype_ab, k / block, seed + 13);
+                 : TameScale(cfg.a_dtype, k / block, seed + 13);
   std::vector<uint8_t> wscale =
-      with_wscale ? TameScale(cfg.dtype_ab, n * (k / block), seed + 17)
+      with_wscale ? TameScale(cfg.b_dtype, n * (k / block), seed + 17)
                   : std::vector<uint8_t>();
   (void)elem_bits;
 
@@ -220,26 +220,30 @@ void CheckPrimitive(MuTaskCfg const& cfg, uint64_t seed,
 
 TEST(Mu, PrimitiveBf16) {
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kBf16;
+  cfg.a_dtype = numeric::DataType::kBf16;
+  cfg.b_dtype = numeric::DataType::kBf16;
   CheckPrimitive(cfg, 0x1234);
 }
 
 TEST(Mu, PrimitiveMxfp8) {
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kMxfp8;
+  cfg.a_dtype = numeric::DataType::kMxfp8;
+  cfg.b_dtype = numeric::DataType::kMxfp8;
   CheckPrimitive(cfg, 0x2345);
 }
 
 TEST(Mu, PrimitiveMxfp4) {
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kMxfp4;
+  cfg.a_dtype = numeric::DataType::kMxfp4;
+  cfg.b_dtype = numeric::DataType::kMxfp4;
   CheckPrimitive(cfg, 0x3456);
 }
 
 TEST(Mu, PrimitiveOutBf16) {
   // DTYPE_C = 1：结果原位舍入截断成 BF16。
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kBf16;
+  cfg.a_dtype = numeric::DataType::kBf16;
+  cfg.b_dtype = numeric::DataType::kBf16;
   cfg.out_bf16 = true;
   CheckPrimitive(cfg, 0x4567);
 }
@@ -247,7 +251,8 @@ TEST(Mu, PrimitiveOutBf16) {
 TEST(Mu, PrimitiveMxfp8TimesMxfp8) {
   // 权重也带 scale：块内部分和乘 token 与权重两个 scale 之积。
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kMxfp8;
+  cfg.a_dtype = numeric::DataType::kMxfp8;
+  cfg.b_dtype = numeric::DataType::kMxfp8;
   EXPECT_EQ(cfg.PrimK(), 128u);
   EXPECT_EQ(cfg.PrimN(), 64u);
   CheckPrimitive(cfg, 0x5678, /*with_wscale=*/true);
@@ -257,8 +262,9 @@ TEST(Mu, PrimitiveVlane2IsK64N128) {
   // 物理阵列 K128×N64 开 vlane = 2：每个 lane 在第 64 个输入处断开，一次出两个
   // 半长的点积，原语就是 1×K64×N128。
   MuTaskCfg cfg;
-  cfg.vlane = 2;
-  cfg.dtype_ab = numeric::DataType::kMxfp8;
+  cfg.primitive_type = 1;
+  cfg.a_dtype = numeric::DataType::kMxfp8;
+  cfg.b_dtype = numeric::DataType::kMxfp8;
   EXPECT_EQ(cfg.PrimK(), 64u);
   EXPECT_EQ(cfg.PrimN(), 128u);
   CheckPrimitive(cfg, 0x6789, /*with_wscale=*/true);
@@ -272,11 +278,12 @@ TEST(Mu, AccumOrderIsPartOfResult) {
   MatrixExe exe(clk, "exe");
 
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kMxfp8;
+  cfg.a_dtype = numeric::DataType::kMxfp8;
+  cfg.b_dtype = numeric::DataType::kMxfp8;
   uint64_t k = cfg.PrimK(), n = cfg.PrimN();
-  std::vector<uint8_t> token = TamePattern(cfg.dtype_ab, k, 0x9001);
-  std::vector<uint8_t> weight = TamePattern(cfg.dtype_ab, k * n, 0x9002);
-  std::vector<uint8_t> scale = TameScale(cfg.dtype_ab, k / 32, 0x9003);
+  std::vector<uint8_t> token = TamePattern(cfg.a_dtype, k, 0x9001);
+  std::vector<uint8_t> weight = TamePattern(cfg.b_dtype, k * n, 0x9002);
+  std::vector<uint8_t> scale = TameScale(cfg.a_dtype, k / 32, 0x9003);
 
   exe.Issue(cfg, token, weight, scale);
   clk->Continue((kMuLaneDepth + 4) * kPeriod);
@@ -284,12 +291,12 @@ TEST(Mu, AccumOrderIsPartOfResult) {
   MatrixExe::Result r = exe.TakeResult();
 
   // 逐个乘 scale 再顺序加：与按块分组累加算出来的位不一样。
-  std::vector<float> a = numeric::Decode(cfg.dtype_ab, token, k);
-  std::vector<float> sc = numeric::DecodeScale(cfg.dtype_ab, scale, k / 32);
+  std::vector<float> a = numeric::Decode(cfg.a_dtype, token, k);
+  std::vector<float> sc = numeric::DecodeScale(cfg.a_dtype, scale, k / 32);
   uint64_t differ = 0;
   for (uint64_t j = 0; j < n; ++j) {
     std::vector<uint8_t> col(weight.begin() + j * k, weight.begin() + (j + 1) * k);
-    std::vector<float> b = numeric::Decode(cfg.dtype_ab, col, k);
+    std::vector<float> b = numeric::Decode(cfg.b_dtype, col, k);
     float other = 0.0f;
     for (uint64_t i = 0; i < k; ++i) other += a[i] * b[i] * sc[i / 32];
     if (numeric::BitsOf(other) != numeric::BitsOf(r.out[j])) ++differ;
@@ -317,12 +324,13 @@ TEST(Mu, AguIteratesKThenN) {
 
 TEST(Mu, AguAddresses) {
   MuTaskCfg cfg;
-  cfg.dtype_ab = numeric::DataType::kBf16;
+  cfg.a_dtype = numeric::DataType::kBf16;
+  cfg.b_dtype = numeric::DataType::kBf16;
   cfg.kblock = 2;
   cfg.nblock = 2;
-  cfg.addr_token = 0x1000;
-  cfg.addr_weight = 0x20000;
-  cfg.addr_out = 0x8000;
+  cfg.a_addr = 0x1000;
+  cfg.b_addr = 0x20000;
+  cfg.c_addr = 0x8000;
   MuAgu agu(cfg);
 
   // token 按 tile_K 走，weight 按 (n × kblock + k) 走，结果按 tile_N 走。
@@ -339,13 +347,13 @@ TEST(Mu, AguAddresses) {
 
 TEST(Mu, AguRejectsOutOfRange) {
   MuTaskCfg cfg;
-  cfg.addr_token = 0x100000;
+  cfg.a_addr = 0x100000;
   MuAgu agu(cfg);
   MuStep s = agu.Next();
   EXPECT_FALSE(agu.CheckStep(s, 0x1000, 0x100000));
   // 没对齐也拒。
   MuTaskCfg odd;
-  odd.addr_token = 0x1004;
+  odd.a_addr = 0x1004;
   MuAgu agu2(odd);
   MuStep s2 = agu2.Next();
   EXPECT_FALSE(agu2.CheckStep(s2, 0x100000, 0x100000));
@@ -358,27 +366,33 @@ TEST(Mu, TriggerLatchesConfig) {
   ClockPtr clk = MakeClock(0, kPeriod);
   MuRegfile reg(clk, "regfile");
   auto port = std::make_shared<DsaCfgPort>(clk);
+  auto ids = std::make_shared<DsaIdsPort>(clk);
   reg.AttachCfg(port);
+  reg.AttachIds(ids);
 
-  // 扮演 RV core：逐拍写配置，最后写 SYS_CTRL 的 TASK_START 位。
+  // 扮演 RV core：逐拍写配置，最后写 TASK_TRIGGER。身份三项在 trigger 那一拍从
+  // CSR 直连采样，不在寄存器里。
   class Writer : public BachModule {
    public:
-    Writer(ClockPtr c, std::shared_ptr<DsaCfgPort> p)
-        : BachModule(c, "writer"), port(std::move(p)) {}
+    Writer(ClockPtr c, std::shared_ptr<DsaCfgPort> p,
+           std::shared_ptr<DsaIdsPort> i)
+        : BachModule(c, "writer"), port(std::move(p)), ids(std::move(i)) {}
 
    protected:
     void Step() override {
+      ids->Drive(/*stream=*/5, /*task=*/9, /*user=*/77, /*path=*/0);
       static const std::pair<uint64_t, uint64_t> kSeq[] = {
-          {kMuTaskCfg, 0xBu},          // PRIM_TYPE=1、VLANE=01、DTYPE_AB=01
-          {kMuTaskBlock, 0x00020003u}, // KBLOCK=3、NBLOCK=2
-          {kMuAddrToken, 0x1000u},
-          {kMuAddrOut, 0x8000u},
-          {kMuStreamId, 5u},
-          {kMuTaskId, 9u},
-          {kMuSysCtrl, kMuTaskStart},
+          {kMuPrimitiveDim, (3u << kMuKblockShift) | 2u},  // KBLOCK=3、NBLOCK=2
+          {kMuPrimitiveMode, (1u << kMuPrimTypeShift) |        // 1×K64×N128
+                                 (1u << kMuADataTypeShift) |   // A=MXFP8
+                                 (1u << kMuRouterEpDtypeShift) |  // B=MXFP8
+                                 kMuTaskLast},
+          {kMuAAddr, 0x1000u},
+          {kMuCAddr, 0x8000u},
+          {kMuTaskTrigger, kMuTriggerValid},
       };
       uint64_t now = CycleNow();
-      if (now == 0 || now > 7) {
+      if (now == 0 || now > 5) {
         port->Idle();
         return;
       }
@@ -388,24 +402,28 @@ TEST(Mu, TriggerLatchesConfig) {
 
    private:
     std::shared_ptr<DsaCfgPort> port;
+    std::shared_ptr<DsaIdsPort> ids;
   };
-  Writer w(clk, port);
+  Writer w(clk, port, ids);
 
   clk->Continue((12) * kPeriod);
   RT::JoinAll();
 
   ASSERT_TRUE(reg.HasPending());
   MuTaskCfg cfg = reg.TakePending();
-  EXPECT_EQ(cfg.vlane, 2u);
+  EXPECT_EQ(cfg.primitive_type, 1u);
   EXPECT_EQ(cfg.PrimK(), 64u);
   EXPECT_EQ(cfg.PrimN(), 128u);
-  EXPECT_EQ(cfg.dtype_ab, numeric::DataType::kMxfp8);
+  EXPECT_EQ(cfg.a_dtype, numeric::DataType::kMxfp8);
+  EXPECT_EQ(cfg.b_dtype, numeric::DataType::kMxfp8);
+  EXPECT_TRUE(cfg.task_last);
   EXPECT_EQ(cfg.kblock, 3u);
   EXPECT_EQ(cfg.nblock, 2u);
-  EXPECT_EQ(cfg.addr_token, 0x1000u);
-  EXPECT_EQ(cfg.addr_out, 0x8000u);
+  EXPECT_EQ(cfg.a_addr, 0x1000u);
+  EXPECT_EQ(cfg.c_addr, 0x8000u);
   EXPECT_EQ(cfg.stream_id, 5u);
   EXPECT_EQ(cfg.task_id, 9u);
+  EXPECT_EQ(cfg.user_id, 77u);
   EXPECT_FALSE(reg.HasPending());
 }
 
@@ -565,6 +583,23 @@ class MuDriver : public BachModule {
   Mu& mu;
 };
 
+// 扮演 RV core 的身份 CSR：每拍驱动 stream / task / user，写 TASK_TRIGGER 那一拍
+// 由 regfile 采样进任务快照。
+class IdsHolder : public BachModule {
+ public:
+  IdsHolder(ClockPtr c, std::shared_ptr<DsaIdsPort> p, uint64_t stream,
+            uint64_t task, uint64_t user)
+      : BachModule(c, "ids"), ids(std::move(p)),
+        stream_(stream), task_(task), user_(user) {}
+
+ protected:
+  void Step() override { ids->Drive(stream_, task_, user_, /*path=*/0); }
+
+ private:
+  std::shared_ptr<DsaIdsPort> ids;
+  uint64_t stream_, task_, user_;
+};
+
 // topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(t.size() * kTopkEntryBytes, 0);
@@ -594,36 +629,40 @@ TEST(Mu, AssemblySingleTile) {
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
 
+  auto ids = std::make_shared<DsaIdsPort>(clk);
+  mu.AttachIds(ids);
+
   MuTaskCfg want;
-  want.dtype_ab = numeric::DataType::kBf16;   // 无 block scale，先排除 scale
+  want.a_dtype = numeric::DataType::kBf16;
+  want.b_dtype = numeric::DataType::kBf16;   // 无 block scale，先排除 scale
   want.kblock = 1;
   want.nblock = 1;
-  want.addr_token = 0x1000;
-  want.addr_weight = 0x0;
-  want.addr_out = 0x20000;
+  want.a_addr = 0x1000;
+  want.b_addr = 0x0;
+  want.c_addr = 0x20000;
   want.stream_id = 2;
   want.task_id = 3;
+  want.task_last = true;   // 单笔任务要置 task_last，才会报一次 dsa_done
 
   uint64_t k = want.PrimK(), n = want.PrimN();
   MuMem cmem(clk, "cmem", *cmem_rd, 0x40000, 13);
   MuMem mmem(clk, "mmem", *mmem_rd, 0x80000, 16);
   MuMem outmem(clk, "outmem", *cmem_wr, 0x40000, 13);
 
-  std::vector<uint8_t> token = TamePattern(want.dtype_ab, k, 0x901);
-  std::vector<uint8_t> weight = TamePattern(want.dtype_ab, k * n, 0x902);
-  cmem.Poke(want.addr_token, token);
-  mmem.Poke(want.addr_weight, weight);
+  std::vector<uint8_t> token = TamePattern(want.a_dtype, k, 0x901);
+  std::vector<uint8_t> weight = TamePattern(want.b_dtype, k * n, 0x902);
+  cmem.Poke(want.a_addr, token);
+  mmem.Poke(want.b_addr, weight);
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, kMuPrimK128N64);
-  writer.Push(kMuTaskBlock, 1u | (1u << 16));
-  writer.Push(kMuAddrToken, want.addr_token);
-  writer.Push(kMuAddrWeight, want.addr_weight);
-  writer.Push(kMuAddrOut, want.addr_out);
-  writer.Push(kMuStreamId, want.stream_id);
-  writer.Push(kMuTaskId, want.task_id);
-  writer.Push(kMuSysCtrl, kMuTaskStart);
+  writer.Push(kMuPrimitiveMode, kMuTaskLast);   // BF16×BF16、1×K128×N64
+  writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
+  writer.Push(kMuAAddr, want.a_addr);
+  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuCAddr, want.c_addr);
+  writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
+  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(2000 * kPeriod);
@@ -631,7 +670,7 @@ TEST(Mu, AssemblySingleTile) {
 
   ASSERT_EQ(sink.got.size(), 1u);
   std::vector<float> ref = Reference(want, token, weight, {});
-  std::vector<uint8_t> raw = outmem.Peek(want.addr_out, n * 4);
+  std::vector<uint8_t> raw = outmem.Peek(want.c_addr, n * 4);
   for (uint64_t j = 0; j < n; ++j) {
     uint32_t b = 0;
     for (int t = 0; t < 4; ++t) b |= uint32_t(raw[j * 4 + t]) << (8 * t);
@@ -656,19 +695,24 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
 
+  auto ids = std::make_shared<DsaIdsPort>(clk);
+  mu.AttachIds(ids);
+
   MuTaskCfg want;
-  want.dtype_ab = numeric::DataType::kBf16;
+  want.a_dtype = numeric::DataType::kBf16;
+  want.b_dtype = numeric::DataType::kBf16;
   want.kblock = 1;
   want.nblock = 1;
   want.expert_count = 2;
   want.ep_reduce = true;
-  want.ac_expert_stride = 0x800;
+  want.token_expert_stride = 0x800;   // FC2 用 token 那侧
   want.b_expert_stride = 0x10000;
-  want.addr_token = 0x1000;
-  want.addr_weight = 0x0;
-  want.addr_out = 0x20000;
+  want.a_addr = 0x1000;
+  want.b_addr = 0x0;
+  want.c_addr = 0x20000;
   want.stream_id = 5;
   want.task_id = 7;
+  want.task_last = true;
 
   uint64_t k = want.PrimK(), n = want.PrimN();
   MuMem cmem(clk, "cmem", *cmem_rd, 0x40000, 13);
@@ -679,31 +723,31 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   // 在本组内的序号排。
   std::vector<std::vector<uint8_t>> tok, wgt;
   for (uint64_t e = 0; e < want.expert_count; ++e) {
-    tok.push_back(TamePattern(want.dtype_ab, k, 0xA10 + e));
-    wgt.push_back(TamePattern(want.dtype_ab, k * n, 0xA20 + e));
-    cmem.Poke(want.addr_token + e * want.ac_expert_stride, tok.back());
+    tok.push_back(TamePattern(want.a_dtype, k, 0xA10 + e));
+    wgt.push_back(TamePattern(want.b_dtype, k * n, 0xA20 + e));
+    cmem.Poke(want.a_addr + e * want.token_expert_stride, tok.back());
   }
   // topK 里第 0 个是全局 17 号专家、组内第 1 个，第 1 个是全局 5 号、组内第 0 个。
   // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
   mu.EpInfo().SetLocalEpTable({5, 17});
   const float w0 = 0.75f, w1 = 0.25f;
   mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{17, w0}, {5, w1}}));
-  mmem.Poke(want.addr_weight + 1 * want.b_expert_stride, wgt[0]);
-  mmem.Poke(want.addr_weight + 0 * want.b_expert_stride, wgt[1]);
+  mmem.Poke(want.b_addr + 1 * want.b_expert_stride, wgt[0]);
+  mmem.Poke(want.b_addr + 0 * want.b_expert_stride, wgt[1]);
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, kMuPrimK128N64);
-  writer.Push(kMuTaskBlock, 1u | (1u << 16));
-  writer.Push(kMuAddrToken, want.addr_token);
-  writer.Push(kMuAddrWeight, want.addr_weight);
-  writer.Push(kMuAddrOut, want.addr_out);
-  writer.Push(kMuAcExpertStride, want.ac_expert_stride);
+  writer.Push(kMuPrimitiveMode, (want.expert_count << kMuRouterExpertCountShift) |
+                                    kMuRouterEpReduceEn | kMuTaskLast);
+  writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
+  writer.Push(kMuAAddr, want.a_addr);
+  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuCAddr, want.c_addr);
+  writer.Push(kMuAcExpertStride,
+              want.token_expert_stride << kMuTokenExpertStrideShift);
   writer.Push(kMuBExpertStride, want.b_expert_stride);
-  writer.Push(kMuEpCtrl, want.expert_count | kMuEpReduceEn);
-  writer.Push(kMuStreamId, want.stream_id);
-  writer.Push(kMuTaskId, want.task_id);
-  writer.Push(kMuSysCtrl, kMuTaskStart);
+  writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
+  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(2000 * kPeriod);
@@ -714,7 +758,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   // 先各自算完一列，各乘自己的权重，再顺序相加。
   std::vector<float> p0 = Reference(want, tok[0], wgt[0], {});
   std::vector<float> p1 = Reference(want, tok[1], wgt[1], {});
-  std::vector<uint8_t> raw = outmem.Peek(want.addr_out, n * 4);
+  std::vector<uint8_t> raw = outmem.Peek(want.c_addr, n * 4);
   for (uint64_t j = 0; j < n; ++j) {
     float a = numeric::ClampNanInf(p0[j] * w0);
     float b = numeric::ClampNanInf(p1[j] * w1);
@@ -724,7 +768,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
     EXPECT_EQ(got, numeric::BitsOf(ref)) << "j=" << j;
   }
   // 合并成一份，所以只写了一列。
-  std::vector<uint8_t> beyond = outmem.Peek(want.addr_out + n * 4, 4);
+  std::vector<uint8_t> beyond = outmem.Peek(want.c_addr + n * 4, 4);
   EXPECT_EQ(beyond[0], 0u) << "第二个专家不该另写一份";
 }
 
@@ -744,19 +788,24 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
 
+  auto ids = std::make_shared<DsaIdsPort>(clk);
+  mu.AttachIds(ids);
+
   MuTaskCfg want;
-  want.dtype_ab = numeric::DataType::kBf16;
+  want.a_dtype = numeric::DataType::kBf16;
+  want.b_dtype = numeric::DataType::kBf16;
   want.kblock = 1;
   want.nblock = 1;
   want.expert_count = 2;
   want.ep_reduce = false;
-  want.ac_expert_stride = 0x800;
+  want.output_expert_stride = 0x800;   // FC1/FC3 用 output 那侧
   want.b_expert_stride = 0x10000;
-  want.addr_token = 0x1000;
-  want.addr_weight = 0x0;
-  want.addr_out = 0x20000;
+  want.a_addr = 0x1000;
+  want.b_addr = 0x0;
+  want.c_addr = 0x20000;
   want.stream_id = 6;
   want.task_id = 8;
+  want.task_last = true;
 
   uint64_t k = want.PrimK(), n = want.PrimN();
   MuMem cmem(clk, "cmem", *cmem_rd, 0x40000, 13);
@@ -764,31 +813,31 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   MuMem outmem(clk, "outmem", *cmem_wr, 0x40000, 13);
 
   // 各出一份那一档，几个专家共用同一份激活。
-  std::vector<uint8_t> token = TamePattern(want.dtype_ab, k, 0xB01);
-  cmem.Poke(want.addr_token, token);
+  std::vector<uint8_t> token = TamePattern(want.a_dtype, k, 0xB01);
+  cmem.Poke(want.a_addr, token);
   std::vector<std::vector<uint8_t>> wgt;
   for (uint64_t e = 0; e < want.expert_count; ++e) {
-    wgt.push_back(TamePattern(want.dtype_ab, k * n, 0xB10 + e));
+    wgt.push_back(TamePattern(want.b_dtype, k * n, 0xB10 + e));
   }
   mu.EpInfo().SetLocalEpTable({5, 17});
   // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
   mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{17, 1.0f}, {5, 1.0f}}));
-  mmem.Poke(want.addr_weight + 1 * want.b_expert_stride, wgt[0]);
-  mmem.Poke(want.addr_weight + 0 * want.b_expert_stride, wgt[1]);
+  mmem.Poke(want.b_addr + 1 * want.b_expert_stride, wgt[0]);
+  mmem.Poke(want.b_addr + 0 * want.b_expert_stride, wgt[1]);
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, kMuPrimK128N64);
-  writer.Push(kMuTaskBlock, 1u | (1u << 16));
-  writer.Push(kMuAddrToken, want.addr_token);
-  writer.Push(kMuAddrWeight, want.addr_weight);
-  writer.Push(kMuAddrOut, want.addr_out);
-  writer.Push(kMuAcExpertStride, want.ac_expert_stride);
+  writer.Push(kMuPrimitiveMode,
+              (want.expert_count << kMuRouterExpertCountShift) | kMuTaskLast);
+  writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
+  writer.Push(kMuAAddr, want.a_addr);
+  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuCAddr, want.c_addr);
+  writer.Push(kMuAcExpertStride,
+              want.output_expert_stride << kMuOutputExpertStrideShift);
   writer.Push(kMuBExpertStride, want.b_expert_stride);
-  writer.Push(kMuEpCtrl, want.expert_count);
-  writer.Push(kMuStreamId, want.stream_id);
-  writer.Push(kMuTaskId, want.task_id);
-  writer.Push(kMuSysCtrl, kMuTaskStart);
+  writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
+  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(2000 * kPeriod);
@@ -798,7 +847,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   for (uint64_t e = 0; e < want.expert_count; ++e) {
     std::vector<float> ref = Reference(want, token, wgt[e], {});
     std::vector<uint8_t> raw =
-        outmem.Peek(want.addr_out + e * want.ac_expert_stride, n * 4);
+        outmem.Peek(want.c_addr + e * want.output_expert_stride, n * 4);
     for (uint64_t j = 0; j < n; ++j) {
       uint32_t got = 0;
       for (int t = 0; t < 4; ++t) got |= uint32_t(raw[j * 4 + t]) << (8 * t);
@@ -810,7 +859,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
 // 一笔任务是 kblock × nblock 次原语。整条装配跑完，每个 tile 的结果都要与参考
 // 实现逐 bit 相同，dsa_done 只报一次。token 与权重都是 MXFP8、都带 scale，scale 由
 // 存储按数据地址一一对应地接在正文后面。
-void RunAllTiles(uint64_t vlane) {
+void RunAllTiles(uint64_t prim_type) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   MuCfg setting;
@@ -825,16 +874,21 @@ void RunAllTiles(uint64_t vlane) {
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
 
+  auto ids = std::make_shared<DsaIdsPort>(clk);
+  mu.AttachIds(ids);
+
   MuTaskCfg want;
-  want.dtype_ab = numeric::DataType::kMxfp8;
-  want.vlane = vlane;
+  want.a_dtype = numeric::DataType::kMxfp8;
+  want.b_dtype = numeric::DataType::kMxfp8;
+  want.primitive_type = prim_type;
   want.kblock = 2;
   want.nblock = 2;
-  want.addr_token = 0x1000;
-  want.addr_weight = 0x0;
-  want.addr_out = 0x20000;
+  want.a_addr = 0x1000;
+  want.b_addr = 0x0;
+  want.c_addr = 0x20000;
   want.stream_id = 4;
   want.task_id = 11;
+  want.task_last = true;
 
   uint64_t k = want.PrimK(), n = want.PrimN();
   uint64_t tok_bytes = k;                 // MXFP8 一个元素一字节
@@ -846,31 +900,31 @@ void RunAllTiles(uint64_t vlane) {
   MuMem outmem(clk, "outmem", *cmem_wr, 0x40000, 13);
 
   // 每个 tile_K 一段 token 与它那几个 scale，每个 (n, k) 一块权重与它那几个
-  // scale。vlane = 2 时一段 token 只有 64 B，第二段从一行的中间开始。
+  // scale。primitive_type = 1 时一段 token 只有 64 B，第二段从一行的中间开始。
   for (uint64_t ki = 0; ki < want.kblock; ++ki) {
-    cmem.Poke(want.addr_token + ki * tok_bytes,
-              TamePattern(want.dtype_ab, k, 0x600 + ki));
-    cmem.PokeScale(want.addr_token + ki * tok_bytes,
-                   TameScale(want.dtype_ab, sc_bytes, 0x700 + ki));
+    cmem.Poke(want.a_addr + ki * tok_bytes,
+              TamePattern(want.a_dtype, k, 0x600 + ki));
+    cmem.PokeScale(want.a_addr + ki * tok_bytes,
+                   TameScale(want.a_dtype, sc_bytes, 0x700 + ki));
   }
   for (uint64_t i = 0; i < want.kblock * want.nblock; ++i) {
-    mmem.Poke(want.addr_weight + i * wgt_bytes,
-              TamePattern(want.dtype_ab, k * n, 0x800 + i));
-    mmem.PokeScale(want.addr_weight + i * wgt_bytes,
-                   TameScale(want.dtype_ab, n * sc_bytes, 0x900 + i));
+    mmem.Poke(want.b_addr + i * wgt_bytes,
+              TamePattern(want.b_dtype, k * n, 0x800 + i));
+    mmem.PokeScale(want.b_addr + i * wgt_bytes,
+                   TameScale(want.b_dtype, n * sc_bytes, 0x900 + i));
   }
 
   CfgWriter writer(clk, cfg_port);
-  writer.Push(kMuTaskCfg, kMuPrimK128N64 | ((vlane - 1) << 1) |
-                              (uint64_t(1) << 3));     // DTYPE_AB = 01（MXFP8）
-  writer.Push(kMuTaskBlock, want.kblock | (want.nblock << 16));
-  writer.Push(kMuAddrToken, want.addr_token);
-  writer.Push(kMuAddrWeight, want.addr_weight);
-  writer.Push(kMuAddrOut, want.addr_out);
-  writer.Push(kMuStreamId, want.stream_id);
-  writer.Push(kMuTaskId, want.task_id);
-  writer.Push(kMuSysCtrl, kMuTaskStart);
+  writer.Push(kMuPrimitiveMode, (prim_type << kMuPrimTypeShift) |
+                                    (1u << kMuADataTypeShift) |
+                                    (1u << kMuRouterEpDtypeShift) | kMuTaskLast);
+  writer.Push(kMuPrimitiveDim, want.kblock | (want.nblock << 16));
+  writer.Push(kMuAAddr, want.a_addr);
+  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuCAddr, want.c_addr);
+  writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
+  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(3000 * kPeriod);
@@ -886,13 +940,13 @@ void RunAllTiles(uint64_t vlane) {
     std::vector<float> ref;
     for (uint64_t ki = 0; ki < want.kblock; ++ki) {
       uint64_t i = ni * want.kblock + ki;
-      std::vector<uint8_t> token = TamePattern(want.dtype_ab, k, 0x600 + ki);
+      std::vector<uint8_t> token = TamePattern(want.a_dtype, k, 0x600 + ki);
       std::vector<uint8_t> scale =
-          TameScale(want.dtype_ab, sc_bytes, 0x700 + ki);
+          TameScale(want.a_dtype, sc_bytes, 0x700 + ki);
       std::vector<uint8_t> weight =
-          TamePattern(want.dtype_ab, k * n, 0x800 + i);
+          TamePattern(want.b_dtype, k * n, 0x800 + i);
       std::vector<uint8_t> wscale =
-          TameScale(want.dtype_ab, n * sc_bytes, 0x900 + i);
+          TameScale(want.b_dtype, n * sc_bytes, 0x900 + i);
       std::vector<float> part = Reference(want, token, weight, scale, wscale);
       if (ki == 0) {
         ref = part;
@@ -903,7 +957,7 @@ void RunAllTiles(uint64_t vlane) {
       }
     }
 
-    std::vector<uint8_t> raw = outmem.Peek(want.addr_out + ni * n * 4, n * 4);
+    std::vector<uint8_t> raw = outmem.Peek(want.c_addr + ni * n * 4, n * 4);
     for (uint64_t j = 0; j < n; ++j) {
       uint32_t b = 0;
       for (int t = 0; t < 4; ++t) b |= uint32_t(raw[j * 4 + t]) << (8 * t);
@@ -912,9 +966,9 @@ void RunAllTiles(uint64_t vlane) {
   }
 }
 
-TEST(Mu, AssemblyRunsAllTiles) { RunAllTiles(1); }
+TEST(Mu, AssemblyRunsAllTiles) { RunAllTiles(0); }
 
-TEST(Mu, AssemblyRunsAllTilesVlane2) { RunAllTiles(2); }
+TEST(Mu, AssemblyRunsAllTilesK64N128) { RunAllTiles(1); }
 
 }  // namespace
 
@@ -1003,9 +1057,10 @@ TEST(Mu, MatchesPythonReference) {
       << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
   for (GemmCase const& c : cases) {
     MuTaskCfg cfg;
-    cfg.dtype_ab = c.dtype;
+    cfg.a_dtype = c.dtype;
+    cfg.b_dtype = c.dtype;
     cfg.out_bf16 = c.out_bf16;
-    cfg.vlane = c.k == 64 ? 2 : 1;
+    cfg.primitive_type = c.k == 64 ? 1 : 0;
     ASSERT_EQ(cfg.PrimK(), c.k);
     ASSERT_EQ(cfg.PrimN(), c.n);
 

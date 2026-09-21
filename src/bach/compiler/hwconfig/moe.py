@@ -629,18 +629,18 @@ def compute_chain(slot):
     """计算 core（槽位 0～6）的任务链。
 
     两项搬入任务标 wait_wake，Router 送来的 PID 按它匹配：token 与 FC2 输入。MU
-    的两笔各在一个 task 里发几笔 DSA 任务，收 RV core 那一路。部分和出核是逐级
-    reduce 任务，由 Router 报完成。"""
+    的两笔各在一个 task 里发几笔 DSA 任务，最后一笔置 task_last、由 DSA 报完成，
+    TS 收 RV core 与 DSA 两路。部分和出核是逐级 reduce 任务，由 Router 报完成。"""
     s = str(slot)
     return [
         ChainItem(0, "DTE", "DSA", ("dte", "task_dte_user_init"),
                   path_id=IN_PATH, wait_wake=True),
-        ChainItem(1, "MU", "RV_ONLY", ("mu", "task_mu_part_s" + s)),
+        ChainItem(1, "MU", "DSA", ("mu", "task_mu_part_s" + s)),
         ChainItem(2, "DTE", "DSA", ("dte", "task_dte_send_part"),
                   path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_user_init"),
                   path_id=FC2_BCAST_PATH, wait_wake=True),
-        ChainItem(4, "MU", "RV_ONLY", ("mu", "task_mu_fc2_s" + s)),
+        ChainItem(4, "MU", "DSA", ("mu", "task_mu_fc2_s" + s)),
         ChainItem(5, "DTE", "DSA", ("dte", "task_dte_send_concat_s" + s),
                   path_id=CONCAT_PATH[slot], end=True),
     ]
@@ -659,7 +659,7 @@ def dot_chain():
     items = [
         ChainItem(0, "DTE", "DSA", ("dte", "task_dte_user_init"),
                   path_id=IN_PATH, wait_wake=True),
-        ChainItem(1, "MU", "RV_ONLY", ("mu", "task_mu_part_s" + s)),
+        ChainItem(1, "MU", "DSA", ("mu", "task_mu_part_s" + s)),
         ChainItem(2, "DTE", "DSA", ("dte", "task_dte_send_part"),
                   path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_user_init"),
@@ -667,7 +667,7 @@ def dot_chain():
         ChainItem(4, "VU", "RV_ONLY", ("vu", "task_vu_gate")),
         ChainItem(5, "DTE", "DSA", ("dte", "task_dte_send_fc2in"),
                   path_id=FC2_BCAST_PATH),
-        ChainItem(6, "MU", "RV_ONLY", ("mu", "task_mu_fc2_s" + s)),
+        ChainItem(6, "MU", "DSA", ("mu", "task_mu_fc2_s" + s)),
     ]
     for k in range(DOT_SLOT):
         items.append(ChainItem(DOT_CONCAT_TASK + k, "DTE", "DSA",

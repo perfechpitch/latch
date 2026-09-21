@@ -297,9 +297,9 @@ TEST(BachMuDrain, OutOfRangeTaskWalksTheFourSteps) {
     MuHarness h(clk, mu);
     MuConfig c(clk, mu, 2, 0);
     // token 地址落在 Core Mem 之外，acu 会拒。
-    c.writes = {{kMuAddrToken, 0x100000},
-                {kMuTaskBlock, 1 | (1u << 16)},
-                {kMuSysCtrl, kMuTaskStart}};
+    c.writes = {{kMuAAddr, 0x100000},
+                {kMuPrimitiveDim, 1 | (1u << 16)},
+                {kMuTaskTrigger, kMuTriggerValid}};
     clk->Continue(120 * kPeriod);
     RT::JoinAll();
     seen = h.states;
@@ -332,11 +332,11 @@ TEST(BachMuDrain, LegalTaskDoesNotDrain) {
     Mu mu(clk, "mu", MuCfg{});
     MuHarness h(clk, mu);
     MuConfig c(clk, mu, 2, 0);
-    c.writes = {{kMuAddrToken, 0x0},
-                {kMuAddrWeight, 0x0},
-                {kMuAddrOut, 0x0},
-                {kMuTaskBlock, 1 | (1u << 16)},
-                {kMuSysCtrl, kMuTaskStart}};
+    c.writes = {{kMuAAddr, 0x0},
+                {kMuBAddr, 0x0},
+                {kMuCAddr, 0x0},
+                {kMuPrimitiveDim, 1 | (1u << 16)},
+                {kMuTaskTrigger, kMuTriggerValid}};
     clk->Continue(120 * kPeriod);
     RT::JoinAll();
     drains = mu.Drains();

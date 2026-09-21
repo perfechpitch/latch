@@ -74,15 +74,17 @@ class MatrixExe : public BachModule {
              bool ep_last = true, float w_ep = 1.0f) {
     uint64_t k = cfg.PrimK();
     uint64_t n = cfg.PrimN();
-    LOGCHECK(cfg.vlane == 1 || cfg.vlane == 2,
-             "MatrixExe: vlane 只有 1 与 2 两档。");
-    uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
+    LOGCHECK(cfg.primitive_type == 0 || cfg.primitive_type == 1,
+             "MatrixExe: primitive_type 只有 0 与 1 两档。");
+    // 累加按 token 的 scale block 分组；token 与权重精度可以不同（A_data_type /
+    // router_ep_data_type 各自解码）。
+    uint64_t block = numeric::ScaleBlockOf(cfg.a_dtype);
     uint64_t nblock = block == 0 ? 0 : k / block;
 
-    std::vector<float> a = numeric::Decode(cfg.dtype_ab, token, k);
+    std::vector<float> a = numeric::Decode(cfg.a_dtype, token, k);
     std::vector<float> sc =
         block == 0 ? std::vector<float>()
-                   : numeric::DecodeScale(cfg.dtype_ab, scale, nblock);
+                   : numeric::DecodeScale(cfg.a_dtype, scale, nblock);
 
     if (k_first) {
       LOGCHECK(ksplit.empty(), "MatrixExe: 上一列的部分和还没输出就开了新的一列。");
@@ -92,14 +94,14 @@ class MatrixExe : public BachModule {
     }
     for (uint64_t j = 0; j < n; ++j) {
       // 取这一列的 K 个权重。weight 按列优先排：第 j 列在偏移 j × K 处。
-      uint64_t elem_bits = numeric::ElemBitsOf(cfg.dtype_ab);
+      uint64_t elem_bits = numeric::ElemBitsOf(cfg.b_dtype);
       uint64_t col_bytes = k * elem_bits / 8;
       std::vector<uint8_t> col;
       uint64_t begin = j * col_bytes;
       for (uint64_t t = 0; t < col_bytes && begin + t < weight.size(); ++t) {
         col.push_back(weight[begin + t]);
       }
-      std::vector<float> b = numeric::Decode(cfg.dtype_ab, col, k);
+      std::vector<float> b = numeric::Decode(cfg.b_dtype, col, k);
 
       std::vector<float> prod(k, 0.0f);
       for (uint64_t i = 0; i < k; ++i) prod[i] = a[i] * b[i];
@@ -115,7 +117,7 @@ class MatrixExe : public BachModule {
           ws.push_back(wscale[j * nblock + t]);
         }
         acc = numeric::AccumByScaleBlock2(
-            prod, sc, numeric::DecodeScale(cfg.dtype_ab, ws, nblock), block);
+            prod, sc, numeric::DecodeScale(cfg.b_dtype, ws, nblock), block);
       } else {
         acc = numeric::AccumByScaleBlock(prod, sc, block);
       }

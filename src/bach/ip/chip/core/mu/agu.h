@@ -52,52 +52,56 @@ class MuAgu {
   }
   bool Done() const { return cur.done; }
 
-  // 三组地址。token 与结果在 Core Mem，weight 在 Matrix Mem。
+  // 三组地址。token 与结果在 Core Mem，硬件按 base + stream_id × stream_stride
+  // 算，软件只写 base 与 stride；weight 在 Matrix Mem，无 stream 偏移。
   // 合并成一份的那一档，每个专家有自己的一份激活；每个专家各出一份的那一档，
   // 几个专家共用同一份激活。
   uint64_t TokenAddr(MuStep const& s) const {
-    return cfg.addr_token + ExpertOffOfA(s) + s.k_idx * TokenBytes();
+    return cfg.a_addr + cfg.stream_id * cfg.a_stream_stride + ExpertOffOfA(s) +
+           s.k_idx * TokenBytes();
   }
   // 权重按专家在本 EP Group 内的序号排，与 topK 里的先后无关，所以要外面把
   // 全局专家号翻成组内序号再传进来。激活与结果那两侧按 topK 的先后排。
   uint64_t WeightAddr(MuStep const& s, uint64_t local_ep) const {
     // 各 lane 访存地址相同，只发一个地址然后逐级脉动到各 lane。
-    return cfg.addr_weight + local_ep * cfg.b_expert_stride +
+    return cfg.b_addr + local_ep * cfg.b_expert_stride +
            (s.n_idx * cfg.kblock + s.k_idx) * WeightBytes();
   }
   uint64_t WeightAddr(MuStep const& s) const {
     return WeightAddr(s, s.e_idx);
   }
   uint64_t OutAddr(MuStep const& s) const {
-    return cfg.addr_out + ExpertOffOfC(s) + s.n_idx * OutBytes();
+    return cfg.c_addr + cfg.stream_id * cfg.c_stream_stride + ExpertOffOfC(s) +
+           s.n_idx * OutBytes();
   }
   uint64_t ExpertOffOfA(MuStep const& s) const {
-    return cfg.ep_reduce ? s.e_idx * cfg.ac_expert_stride : 0;
+    return cfg.ep_reduce ? s.e_idx * cfg.token_expert_stride : 0;
   }
   uint64_t ExpertOffOfC(MuStep const& s) const {
-    return cfg.ep_reduce ? 0 : s.e_idx * cfg.ac_expert_stride;
+    return cfg.ep_reduce ? 0 : s.e_idx * cfg.output_expert_stride;
   }
 
   uint64_t TokenBytes() const {
-    return cfg.PrimK() * numeric::ElemBitsOf(cfg.dtype_ab) / 8;
+    return cfg.PrimK() * numeric::ElemBitsOf(cfg.a_dtype) / 8;
   }
   uint64_t WeightBytes() const {
-    return cfg.PrimK() * cfg.PrimN() * numeric::ElemBitsOf(cfg.dtype_ab) / 8;
+    return cfg.PrimK() * cfg.PrimN() * numeric::ElemBitsOf(cfg.b_dtype) / 8;
   }
   uint64_t OutBytes() const {
     // 输出 FP32 或 BF16。
     return cfg.PrimN() * (cfg.out_bf16 ? 2 : 4);
   }
   // token 那一段的 scale 个数：与 token 一一映射，随它从存储的 scale 旁带读出来，
-  // 地址按元素算，vlane = 2 时一段 token 只占半行，取的也只是那半行的 scale。
+  // 地址按元素算，primitive_type = 1 时一段 token 只占半行，取的也只是那半行的
+  // scale。
   uint64_t ScaleBytes() const {
-    uint64_t block = numeric::ScaleBlockOf(cfg.dtype_ab);
+    uint64_t block = numeric::ScaleBlockOf(cfg.a_dtype);
     return block == 0 ? 0 : cfg.PrimK() / block;
   }
-  // 权重那一块的 scale 个数：只有 MXFP8 × MXFP8 带，按列排，一列 K / 32 个。
+  // 权重那一块的 scale 个数：只有权重重是 MXFP8 那一档带，按列排，一列 K / 32 个。
   uint64_t WeightScaleBytes() const {
-    if (cfg.dtype_ab != numeric::DataType::kMxfp8) return 0;
-    return cfg.PrimK() * cfg.PrimN() / numeric::ScaleBlockOf(cfg.dtype_ab);
+    if (cfg.b_dtype != numeric::DataType::kMxfp8) return 0;
+    return cfg.PrimK() * cfg.PrimN() / numeric::ScaleBlockOf(cfg.b_dtype);
   }
 
   // acu：越界与对齐。Token 与 Weight 读要 16 B 对齐，结果写要 16 B 或 1 KB。

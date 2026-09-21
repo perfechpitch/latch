@@ -342,7 +342,9 @@ TEST(BachRvCore, CsrReadsCurrentTaskIds) {
     uint64_t pc = SymbolOf("mu", "task_mu_compute");
     ASSERT_GT(pc, 0u);
 
-    // MU 的 kernel 先把三个身份写进 MU 的寄存器，收下来看写的是什么。
+    // 身份三项不再由 kernel 写进 MU 的寄存器：写 trigger 那一拍，DSA 从 dsa_ids
+    // 直连线上采样当前 task 的身份。看 trigger（0x000）写出去那一刻 dsa_ids 上
+    // 是什么。
     class Watch : public BachModule {
      public:
       Watch(ClockPtr c, RvCore& core, uint64_t entry)
@@ -359,11 +361,11 @@ TEST(BachRvCore, CsrReadsCurrentTaskIds) {
           rv.Cmd().Idle();
         }
         if (rv.DsaCfg().Valid() && rv.DsaCfg().req_we.Get() != 0) {
-          uint64_t at = rv.DsaCfg().req_addr.Get();
-          uint64_t v = rv.DsaCfg().req_wdata.Get();
-          if (at == 0x050) stream_seen = v;
-          if (at == 0x054) task_seen = v;
-          if (at == 0x058) user_seen = v;
+          if (rv.DsaCfg().req_addr.Get() == 0x000) {   // MU_TASK_TRIGGER
+            stream_seen = rv.DsaIdsPtr()->Stream();
+            task_seen = rv.DsaIdsPtr()->Task();
+            user_seen = rv.DsaIdsPtr()->User();
+          }
         }
         rv.DsaCfg().DriveReady(true);
       }
@@ -380,7 +382,7 @@ TEST(BachRvCore, CsrReadsCurrentTaskIds) {
     user_seen = w.user_seen;
   }
   RT::Reset();
-  EXPECT_EQ(stream_seen, 5u);   // 写给 DSA 的是这一笔 task 的身份
+  EXPECT_EQ(stream_seen, 5u);   // trigger 那一拍 dsa_ids 上就是这一笔 task 的身份
   EXPECT_EQ(task_seen, 7u);
   EXPECT_EQ(user_seen, 61u);
 }

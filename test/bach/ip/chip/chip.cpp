@@ -698,8 +698,8 @@ TEST(BachChip, CtrlNocWritesReachTargets) {
 
   ScpTxn mu_cfg;
   mu_cfg.core = 1;
-  mu_cfg.addr = kCfgMuBase + kMuTaskBlock;
-  mu_cfg.data = 3u | (5u << 16);        // KBLOCK=3、NBLOCK=5
+  mu_cfg.addr = kCfgMuBase + kMuPrimitiveDim;
+  mu_cfg.data = (3u << kMuKblockShift) | 5u;   // KBLOCK=3、NBLOCK=5
   chip.Scp().PushRouterTxn(mu_cfg);
 
   ScpTxn sm;

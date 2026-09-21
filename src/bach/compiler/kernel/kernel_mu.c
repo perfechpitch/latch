@@ -1,8 +1,9 @@
 /* MU RV core 的 kernel。矩阵计算那一档。
  *
- * 寄存器名与位域照《Matrix Unit DSA》§Register Map Overview。MU 没有身份
- * 寄存器：给哪个 user 算由地址决定，Core Mem 按 stream 均分，kernel 读
- * CSR 拿 stream_id 再算出本 stream 那一段的基址。
+ * 寄存器名与位域照《Matrix Unit DSA》§Register Map Overview。地址模型：token
+ * 与结果的物理地址由硬件按 base + stream_id × stream_stride 算，kernel 只写
+ * base 与 stride；身份三项 streamID / taskID / userID 由 RV core 的 CSR 直连，
+ * 不再写寄存器。
  */
 
 #include "bach.h"
@@ -12,32 +13,20 @@
 /* 权重落 Matrix Mem 的起点。Core Mem 那一侧的分区在 bach.h 里 */
 #define MMEM_WEIGHT_BASE 0x00000u
 
-static u32 stream_base(void) {
-  return CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
-}
-
-/* TASK_CFG 与 TASK_BLOCK 配完再写 SYS_CTRL.TASK_START，启动位必须最后写。
- * 身份先写：MU 没有从 RV core 直连过来的身份信号，dsa_done 填的就是这三个
- * 寄存器里的值，不写的话 TS 收到的完成对不上任何一个 stream */
-static void mu_launch(u32 token, u32 weight, u32 out, u32 cfg,
-                      u32 kblock, u32 nblock) {
-  dsa_write(MU_STREAM_ID, stream_id());
-  dsa_write(MU_TASK_ID, task_id());
-  dsa_write(MU_USER_ID, user_id());
-  dsa_write(MU_TASK_CFG, cfg);
-  dsa_write(MU_TASK_BLOCK, kblock | (nblock << MU_NBLOCK_SHIFT));
-  dsa_write(MU_ADDR_TOKEN, token);
-  dsa_write(MU_ADDR_WEIGHT, weight);
-  dsa_write(MU_ADDR_OUT, out);
-  dsa_write(MU_SYS_CTRL, MU_TASK_START);
-}
-
 /* 一条原语：从 Core Mem 读 token、Matrix Mem 读权重，结果写回 Core Mem。
- * 1×K128×N64，MXFP8 进、BF16 出，token 与权重的 scale 都随数据从旁带读出来 */
+ * 1×K128×N64，MXFP8 进、BF16 出，token 与权重的 scale 都随数据从旁带读出来。
+ * 只有一笔任务，task_last 置 1，做完由 dsa_done 报 TS。 */
 TASK void task_mu_compute(void) {
-  u32 base = stream_base();
-  mu_launch(base + CMEM_TOKEN_OFF, MMEM_WEIGHT_BASE, base + CMEM_FC1_OFF,
-            MU_PRIM_TYPE_K128_N64 | MU_DTYPE_MXFP8 | MU_DTYPE_C_BF16, 1, 1);
+  dsa_write(MU_PRIMITIVE_DIM, 1u | (1u << MU_KBLOCK_SHIFT));
+  dsa_write(MU_A_ADDR, CMEM_STREAM_BASE + CMEM_TOKEN_OFF);
+  dsa_write(MU_A_STREAM_STRIDE, CMEM_STREAM_STRIDE);
+  dsa_write(MU_C_ADDR, CMEM_STREAM_BASE + CMEM_FC1_OFF);
+  dsa_write(MU_C_STREAM_STRIDE, CMEM_STREAM_STRIDE);
+  dsa_write(MU_B_ADDR, MMEM_WEIGHT_BASE);
+  dsa_write(MU_PRIMITIVE_MODE,
+            MU_A_DTYPE_MXFP8 | MU_ROUTER_EP_DTYPE_MXFP8 | MU_C_DTYPE_BF16 |
+                MU_TASK_LAST);
+  dsa_write(MU_TASK_TRIGGER, MU_TRIGGER_VALID);
   task_done(1);
 }
 
@@ -46,55 +35,50 @@ TASK void task_mu_compute(void) {
  * 形状与摆放照 bach.h 里的 MOE_*。几笔的差别在：读哪个矩阵、token 从哪一段起、
  * 结果写哪、几个专家各出一份还是合并成一份、按哪种原语切块。 */
 
-static void mu_moe(u32 token_off, u32 weight_off, u32 out_off, u32 cfg,
-                   u32 kblock, u32 nblock, u32 ac_stride, u32 ep_reduce) {
-  u32 base = stream_base();
-  dsa_write(MU_STREAM_ID, stream_id());
-  dsa_write(MU_TASK_ID, task_id());
-  dsa_write(MU_USER_ID, user_id());
-  dsa_write(MU_TASK_CFG, cfg);
-  dsa_write(MU_TASK_BLOCK, kblock | (nblock << MU_NBLOCK_SHIFT));
-  dsa_write(MU_ADDR_TOKEN, base + token_off);
-  dsa_write(MU_ADDR_WEIGHT, weight_off);
-  dsa_write(MU_ADDR_OUT, base + out_off);
-  dsa_write(MU_AC_EXPERT_STRIDE, ac_stride);
+static void mu_moe(u32 token_off, u32 weight_off, u32 out_off, u32 mode,
+                   u32 kblock, u32 nblock, u32 ac_stride, u32 ep_reduce,
+                   u32 task_last) {
+  dsa_write(MU_PRIMITIVE_DIM, nblock | (kblock << MU_KBLOCK_SHIFT));
+  dsa_write(MU_A_ADDR, CMEM_STREAM_BASE + token_off);
+  dsa_write(MU_A_STREAM_STRIDE, CMEM_STREAM_STRIDE);
+  dsa_write(MU_C_ADDR, CMEM_STREAM_BASE + out_off);
+  dsa_write(MU_C_STREAM_STRIDE, CMEM_STREAM_STRIDE);
+  dsa_write(MU_B_ADDR, weight_off);
   dsa_write(MU_B_EXPERT_STRIDE, MMEM_EXPERT_STRIDE);
-  dsa_write(MU_EP_CTRL, MOE_EXPERTS | (ep_reduce ? MU_EP_REDUCE_EN : 0u));
-  dsa_write(MU_TOPK_ADDR, MOE_TOPK_OFF);
-  dsa_write(MU_TOPK_STRIDE, CMEM_STREAM_STRIDE);
-  dsa_write(MU_SYS_CTRL, MU_TASK_START);
-}
-
-/* 等 MU 把手上这一笔做完 */
-static void mu_wait(void) {
-  while (dsa_read(MU_SYS_STATUS) & MU_BUSY) {
-  }
+  /* AC_expert_stride 拆两侧：FC2 用 token 那侧，FC1/FC3 用 output 那侧，不用的
+   * 写 0。 */
+  dsa_write(MU_AC_EXPERT_STRIDE,
+            ep_reduce ? (ac_stride << MU_TOKEN_EXPERT_STRIDE_SHIFT)
+                      : (ac_stride << MU_OUTPUT_EXPERT_STRIDE_SHIFT));
+  u32 full = mode | (MOE_EXPERTS << MU_ROUTER_EXPERT_SHIFT);
+  if (ep_reduce) full |= MU_ROUTER_EP_REDUCE_EN;
+  if (task_last) full |= MU_TASK_LAST;
+  dsa_write(MU_PRIMITIVE_MODE, full);
+  dsa_write(MU_TASK_TRIGGER, MU_TRIGGER_VALID);
 }
 
 /* FC1 与 FC3 的部分和：token 第 s 段乘本 core 的 W1、W3，几个专家共用一份 token，
  * 各出一份结果，写进部分和那一包。1×K128×N64，MXFP8 进、BF16 出。
  *
- * 每笔 MU 做完都会报一次 dsa_done，报两次会让 TS 把任务链推过头，所以这一档的
- * task_dsa_en 配 0：软件轮询 SYS_STATUS.BUSY 等两笔都做完再通知 TS */
+ * 两笔连着下发，只在最后一笔（FC3）置 task_last：MU 做完这一笔才报一次 dsa_done，
+ * TS 据此推进任务链。RV core 下发完即可交还自己，不等 DSA 执行完。 */
 static void mu_part(u32 s) {
-  u32 cfg = MU_PRIM_TYPE_K128_N64 | MU_DTYPE_MXFP8 | MU_DTYPE_C_BF16;
+  u32 mode = MU_A_DTYPE_MXFP8 | MU_ROUTER_EP_DTYPE_MXFP8 | MU_C_DTYPE_BF16;
   u32 token = MOE_TOKEN_OFF + s * MOE_SEG_EMBED;
-  mu_moe(token, MMEM_W1_OFF, MOE_FC1_OFF, cfg, MOE_KBLOCK_FC13,
-         MOE_NBLOCK_FC13, MOE_PART_STRIDE, 0);
-  mu_wait();
-  mu_moe(token, MMEM_W3_OFF, MOE_FC3_OFF, cfg, MOE_KBLOCK_FC13,
-         MOE_NBLOCK_FC13, MOE_PART_STRIDE, 0);
-  mu_wait();
+  mu_moe(token, MMEM_W1_OFF, MOE_FC1_OFF, mode, MOE_KBLOCK_FC13,
+         MOE_NBLOCK_FC13, MOE_PART_STRIDE, 0, 0);
+  mu_moe(token, MMEM_W3_OFF, MOE_FC3_OFF, mode, MOE_KBLOCK_FC13,
+         MOE_NBLOCK_FC13, MOE_PART_STRIDE, 0, 1);
   task_done(1);
 }
 
 /* FC2 第 s 段：每个专家一份 FC2 输入，按 topK 权重在 MU 内合并成一份，写进 concat
- * 区第 s 段。1×K64×N128，也就是 K128×N64 阵列开 vlane = 2 */
+ * 区第 s 段。1×K64×N128，也就是 K128×N64 阵列开 primitive_type = 1 */
 static void mu_fc2(u32 s) {
-  mu_moe(MOE_ACT_OFF, MMEM_W2_OFF, moe_concat(s),
-         MU_PRIM_TYPE_K128_N64 | MU_VLANE2 | MU_DTYPE_MXFP8 | MU_DTYPE_C_BF16,
-         MOE_KBLOCK_FC2, MOE_NBLOCK_FC2, MOE_ACT_STRIDE, 1);
-  mu_wait();
+  u32 mode = MU_PRIM_TYPE_K64_N128 | MU_A_DTYPE_MXFP8 |
+             MU_ROUTER_EP_DTYPE_MXFP8 | MU_C_DTYPE_BF16;
+  mu_moe(MOE_ACT_OFF, MMEM_W2_OFF, moe_concat(s), mode, MOE_KBLOCK_FC2,
+         MOE_NBLOCK_FC2, MOE_ACT_STRIDE, 1, 1);
   task_done(1);
 }
 
@@ -209,6 +193,5 @@ TASK void task_bc_wait(void) {
 }
 
 void kernel_init(void) {
-  /* 异常复位默认全屏蔽，写 0 打开上报 */
-  dsa_write(MU_EXCEPT_MASK, 0);
+  /* 异常配置寄存器已随新寄存器表移除，本轮无初始化项。 */
 }
