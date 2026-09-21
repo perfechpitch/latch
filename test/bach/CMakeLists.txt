@@ -1,5 +1,8 @@
 # 每个 .cpp 一个 CTest 目标，目标名取文件名。
+# 别把源码树里残留的 in-source build 目录（build/、CMakeFiles/）里的
+# CMakeCXXCompilerId.cpp 之类当作用例捡进来。
 file(GLOB_RECURSE BACH_TEST_SRCS "*.cpp")
+list(FILTER BACH_TEST_SRCS EXCLUDE REGEX "/build/|/CMakeFiles/")
 
 foreach(BACH_TEST_SRC ${BACH_TEST_SRCS})
   get_filename_component(TEST_NAME ${BACH_TEST_SRC} NAME_WE)
