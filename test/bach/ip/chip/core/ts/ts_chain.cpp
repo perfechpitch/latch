@@ -440,7 +440,7 @@ TEST(BachStreamTable, InFlightWrapsTheRing) {
     }
     clk->Continue((t + 5) * kPeriod);
     RT::JoinAll();
-    fly = b.table->InFlight();
+    fly = b.table->Occupied();
   }
   RT::Reset();
   EXPECT_EQ(fly, kStreamNum) << "绕回之后表仍是满的 16 项";

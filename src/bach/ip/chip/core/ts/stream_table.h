@@ -71,7 +71,15 @@ class StreamTable : public BachModule {
   uint64_t TailPtr() const { return tail_ptr; }
   // 本拍末表里还剩几项没退休。环形指针模 2*kStreamNum，在途数按环形差来，
   // 不能做无符号直接相减：绕回以后 tail < head，减出会炸成接近 2^64 的数。
+  //
+  // 两个口径：
+  //   InFlight() 读打拍的寄存器，别的协程在仿真里用它判这条链走没走空；
+  //   Occupied() 按 head/tail 的环形差直接算，主线程 JoinAll 之后验收读它。
+  // 主线程的 Base 停在 0，直接读打拍寄存器只能拿到复位值，所以要分开口径。
   uint64_t InFlight() const { return in_flight.Get(); }
+  uint64_t Occupied() const {
+    return (tail_ptr + 2 * kStreamNum - head_ptr) % (2 * kStreamNum);
+  }
   uint64_t Writes() const { return writes.Get(); }
   uint64_t Conflicts() const { return conflicts.Get(); }
 
@@ -176,11 +184,6 @@ class StreamTable : public BachModule {
         e.task_fsm = w.fsm;
       }
     }
-  }
-
-  // 环形差：模 2*kStreamNum 保留满（16）与空（0）的区分。
-  uint64_t Occupied() const {
-    return (tail_ptr + 2 * kStreamNum - head_ptr) % (2 * kStreamNum);
   }
 
   StreamSnapshotPtr MakeSnapshot() const {
