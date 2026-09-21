@@ -25,7 +25,28 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 #### External libraries ####
 include(FetchContent)
-set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "Skip updating the external dependencies after populating them for the first time")
+# Never let FetchContent download/update/delete the vendored deps. Each dep is
+# cloned exactly once below (only when its source tree is missing), so
+# reconfigures never touch the network nor wipe an existing checkout.
+set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL "" FORCE)
+
+# Clone a vendored dependency only if its source tree is absent; leave an
+# existing checkout untouched (no re-clone, no delete).
+function(latch_clone_if_missing name src_dir repo tag)
+  if(EXISTS "${src_dir}/CMakeLists.txt")
+    message(STATUS "${name} source already present, skipping clone: ${src_dir}")
+    return()
+  endif()
+  message(STATUS "${name} source missing, cloning ${repo}@${tag} ...")
+  file(REMOVE_RECURSE "${src_dir}")
+  execute_process(
+    COMMAND git clone --depth 1 --branch "${tag}" "${repo}" "${src_dir}"
+    RESULT_VARIABLE _clone_result
+  )
+  if(NOT _clone_result EQUAL 0)
+    message(FATAL_ERROR "Failed to clone ${name} from ${repo}@${tag}")
+  endif()
+endfunction()
 
 message("Configuring yaml-cpp...")
 option(YAML_CPP_BUILD_CONTRIB "Enable yaml-cpp contrib in library" OFF)
@@ -37,6 +58,10 @@ FetchContent_Declare(
   GIT_TAG        yaml-cpp-0.9.0                        
   SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/ext/yaml-cpp
 )
+latch_clone_if_missing(yaml-cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/ext/yaml-cpp"
+  https://github.com/jbeder/yaml-cpp.git
+  yaml-cpp-0.9.0)
 FetchContent_MakeAvailable(yaml-cpp)
 include_directories(${yaml-cpp_SOURCE_DIR}/include)
 message("Done configuring yaml-cpp.")
@@ -48,6 +73,10 @@ FetchContent_Declare(
   GIT_TAG        10.2.1
   SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/ext/fmt
 )
+latch_clone_if_missing(fmt
+  "${CMAKE_CURRENT_SOURCE_DIR}/ext/fmt"
+  https://github.com/fmtlib/fmt.git
+  10.2.1)
 FetchContent_MakeAvailable(fmt)
 include_directories(${fmt_SOURCE_DIR}/include)
 message("Done configuring fmt.")
