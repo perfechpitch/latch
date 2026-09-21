@@ -12,10 +12,11 @@
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
-/* 各 DSA 的 IO reg 基址，core 内偏移。跨度按各 IP 文档的最大偏移留 */
+/* 各 DSA 的 IO reg 基址，core 内偏移。跨度按各 IP 文档的最大偏移留：DTE 的
+ * 地址空间 16 KB（0x0000~0x3FFF），MU 4 KB，VU 20 KB。 */
 #define DTE_IO_BASE 0x00008000u
-#define MU_IO_BASE  0x00009000u
-#define VU_IO_BASE  0x0000C000u
+#define MU_IO_BASE  0x0000C000u
+#define VU_IO_BASE  0x0000D000u
 
 /* ===== DSA 寄存器的读写：custom-0 的自定义指令 =====
  *
@@ -39,46 +40,67 @@ static inline __attribute__((always_inline)) u32 dsa_read(u32 off) {
   return v;
 }
 
-/* ===== DTE：《DTE寄存器配置参数》§DTE地址空间和寄存器配置 ===== */
+/* ===== DTE：《DTE DSA》§寄存器地址域划分 ===== */
 
-/* 地址空间七段，照 §寄存器地址空间分配 */
-#define DTE_CTRL_STATUS_BASE 0x000  /* 全局控制、状态、错误、性能、调试 */
-#define DTE_ISSUE_BASE       0x100  /* 运行时动态字段、trigger/doorbell */
-#define DTE_TEMPLATE_BASE    0x200  /* template[0..3]，每套 64 B 对齐 */
-#define DTE_TASKQ_BASE       0x300  /* taskQ shadow/debug，深度 16 */
-#define DTE_LUT_BASE         0x600  /* path_id_table / task_len_table */
-#define DTE_HMEM_BASE        0x800  /* core_mask_table / sw_header_table */
-#define DTE_RESERVED_BASE    0xC00
+/* 地址空间 16 KB。kernel 只写 Config 区 0x0000~0x004C 那一小块，Template 区
+ * 0x1000 起（8 × 128B）与 TaskQ / Header Table 回读都不动。 */
+#define DTE_TEMPLATE_BASE   0x1000
+#define DTE_TEMPLATE_STRIDE 0x80
 
-#define DTE_TEMPLATE_STRIDE  0x40
+/* 段位端点 tag：地址高 4 bit 选端点，低位为端内偏移（建模约定，见 04-dte 文档）。
+ * Cmem 是 0x0，tag 即 0，写偏移本身就行；Mmem / scale / topK / header 按
+ * dte_ep(tag, off) 拼。 */
+#define DTE_EP_SHIFT 28
+#define DTE_EP_CMEM  0x0u  /* CoreMem 数据 */
+#define DTE_EP_MMEM  0x1u  /* MatrixMem 数据 */
+#define DTE_EP_SCALE 0x2u  /* scale 旁带，低位给对应数据地址 */
+#define DTE_EP_TOPK  0x3u  /* MU topK_table，低位给 stream_id */
+#define DTE_EP_HDR   0x4u  /* header_table，低位给 stream_id */
+static inline u32 dte_ep(u32 ep, u32 off) { return (ep << DTE_EP_SHIFT) | off; }
 
-/* 一套模板内十一项的偏移，照 §DTE task寄存器配置信息 */
-#define DTE_SRC_ADDR       0x00
-#define DTE_DST_ADDR       0x04
-#define DTE_STREAM_STRIDE  0x08
-#define DTE_SCALE_ADDR     0x0C
-#define DTE_TOPK_ADDR      0x10
-#define DTE_HW_HEADER_ADDR 0x14
-#define DTE_SW_HEADER_ADDR 0x18
-#define DTE_SHAREMEM_WADDR 0x1C
-#define DTE_SHAREMEM_WDATA 0x20
-#define DTE_DATA_LEN       0x24
-/* CFG_DATA_LEN 是 16 bit，一格 8 B */
-#define DTE_DATA_LEN_GRAIN 8u
-#define DTE_TRIGGER        0x28   /* transfer_mode/task_trigger，必须最后写 */
+/* Config 区 19 项任务配置寄存器（0x0004~0x004C，全部 R/W）。段 i 一组
+ * {ADDRi_SRC, ADDRi_DST, STRIDEi, DATA_LENi}；CFG_TRIGGER 独占 0x00。 */
+#define DTE_TRIGGER      0x000
+#define DTE_ADDR0_SRC    0x004
+#define DTE_ADDR0_DST    0x008
+#define DTE_ADDR1_SRC    0x00C
+#define DTE_ADDR1_DST    0x010
+#define DTE_ADDR2_SRC    0x014
+#define DTE_ADDR2_DST    0x018
+#define DTE_ADDR3_SRC    0x01C
+#define DTE_ADDR3_DST    0x020
+#define DTE_STRIDE0      0x024
+#define DTE_STRIDE1      0x028
+#define DTE_STRIDE2      0x02C
+#define DTE_STRIDE3      0x030
+#define DTE_DATA_LEN0    0x034
+#define DTE_DATA_LEN1    0x038
+#define DTE_DATA_LEN2    0x03C
+#define DTE_DATA_LEN3    0x040
+#define DTE_SM_W_ADDR    0x044
+#define DTE_SM_W_DATA    0x048
+#define DTE_TRANS_MODE   0x04C
 
-/* transfer_mode/task_trigger 的字段，照 §`transfer_mode/task_trigger` 字段建议 */
+/* CFG_TRIGGER（WO，4 bit）：[0] temp_valid、[3:1] temp_index。写 0x0000 = 提交
+ * 任务，temp_valid 清 0 时全部取 Cfg Reg File（普通配置）。 */
+#define DTE_TEMP_VALID       (1u << 0)
+#define DTE_TEMP_INDEX_SHIFT 1
+
+/* CFG_TRANS_MODE（10 bit）：[2:0] transfer_mode、[6:3] addr_valid[3:0]、
+ * [7] hw_header_op、[8] wr_sharemem_flag、[9] ack_ts_en。 */
 #define DTE_MODE_ROUTER_TO_CMEM 0u  /* 000 */
 #define DTE_MODE_ROUTER_TO_MMEM 1u  /* 001 */
 #define DTE_MODE_CMEM_TO_ROUTER 2u  /* 010 */
 #define DTE_MODE_MMEM_TO_ROUTER 3u  /* 011 */
 #define DTE_MODE_MMEM_TO_CMEM   4u  /* 100 */
-#define DTE_EP_COUNT_SHIFT   3
-#define DTE_SCALE_VALID      (1u << 11)
-#define DTE_TOPK_VALID       (1u << 12)
-#define DTE_HW_HEADER_OP     (1u << 13)
-#define DTE_WR_SHAREMEM_FLAG (1u << 14)
-#define DTE_TASK_LAST        (1u << 15)
+#define DTE_ADDR_VALID_SHIFT 3
+#define DTE_HW_HEADER_OP     (1u << 7)
+#define DTE_WR_SHAREMEM_FLAG (1u << 8)
+#define DTE_ACK_TS_EN        (1u << 9)
+
+/* dte_move 的调用方标志：带 scale 时置位。硬件上是段 2，不占 TRANS_MODE 位，所以
+ * 取在硬件位之外的高位。 */
+#define DTE_SCALE_VALID (1u << 16)
 
 /* ===== Core Mem 上一个 stream 的分区 =====
  *

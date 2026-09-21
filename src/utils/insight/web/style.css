@@ -1,6 +1,8 @@
 /* insight — minimal: no toolbar, collapsible hierarchy, cycle grid. */
 
-@import url("https://rsms.me/inter/inter.css");
+/* Render-blocking external @import: hangs on networks that can't reach rsms.me,
+   leaving the page blank. Inter falls back to the system stack via font-family. */
+/* @import url("https://rsms.me/inter/inter.css"); */
 
 :root {
   --bg: #ffffff;

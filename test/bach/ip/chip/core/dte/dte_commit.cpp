@@ -31,7 +31,6 @@ std::shared_ptr<Descriptor> Inbound(uint64_t user, uint64_t path,
   d->path_id = path;
   d->stream_id = 0;
   d->task_id = 1;
-  d->bytes = bytes;
   auto m = std::make_shared<Message>();
   m->user_id = user;
   m->path_id = path;
@@ -49,7 +48,10 @@ std::shared_ptr<Descriptor> Outbound(uint64_t user, uint64_t path,
   d->path_id = path;
   d->stream_id = 1;
   d->task_id = 2;
-  d->bytes = bytes;
+  // 段 1 = 数据，出核造包时按 PayloadBytes() 汇总长度。
+  d->seg[1].valid = true;
+  d->seg[1].src_kind = SegEndpoint::kCmem;
+  d->seg[1].len = bytes;
   d->vc = vc;
   return d;
 }

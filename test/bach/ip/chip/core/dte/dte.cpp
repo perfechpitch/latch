@@ -517,7 +517,8 @@ TEST(BachDte, TriggerSamplesDirectIds) {
     auto ids = std::make_shared<DsaIdsPort>(clk);
     dte.AttachIds(ids);
 
-    // 扮演 DTE RV core：每拍驱动身份，按 F14 的顺序写四个寄存器再写 Trigger。
+    // 扮演 DTE RV core：每拍驱动身份，照《DTE DSA》的顺序写段 1 配置、CFG_TRANS_MODE
+    // 再写 CFG_TRIGGER 提交。
     class RvSide : public BachModule {
      public:
       RvSide(ClockPtr c, Dte& d, std::shared_ptr<DsaIdsPort> p)
@@ -528,17 +529,20 @@ TEST(BachDte, TriggerSamplesDirectIds) {
         ids->Drive(/*stream=*/6, /*task=*/9, /*user=*/77, /*path=*/2);
         uint64_t now = CycleNow();
         DsaCfgPort& cfg = dte.Cfg();
-        uint64_t tpl = kDteTemplateBase;
         if (now == 3) {
-          cfg.Drive(tpl + kDteRegSrcAddr, 0, 1);
+          cfg.Drive(kDteRegAddr1Src, 0, 1);    // 段 1 源地址
         } else if (now == 4) {
-          cfg.Drive(tpl + kDteRegDstAddr, 0, 2);
+          cfg.Drive(kDteRegAddr1Dst, 0, 2);    // 段 1 目的地址
         } else if (now == 5) {
-          cfg.Drive(tpl + kDteRegDataLen, 256, 3);
+          cfg.Drive(kDteRegDataLen1, 256, 3);  // 段 1 长度，字节
         } else if (now == 6) {
-          // transfer_mode = 010：Cmem → Router。task_last 置位才通知 TS。
-          cfg.Drive(tpl + kDteRegTrigger,
-                    uint64_t(Route::kCmToRouter) | kDteTaskLast, 4);
+          // transfer_mode = 010（Cmem → Router）+ addr_valid[1]（段 1 参与）
+          // + ack_ts_en（完成后通知 TS）。
+          uint64_t trans = uint64_t(Route::kCmToRouter) |
+                           (1u << (kDteAddrValidShift + 1)) | kDteAckTsEn;
+          cfg.Drive(kDteRegTransMode, trans, 4);
+        } else if (now == 7) {
+          cfg.Drive(kDteRegTrigger, 0, 5);     // 写 CFG_TRIGGER 提交任务
         } else {
           cfg.Idle();
         }
@@ -610,8 +614,7 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
         ids->Drive(1, 2, 3, 0);
         uint64_t now = CycleNow();
         if (now >= 3 && now < 13) {
-          dte.Cfg().Drive(kDteTemplateBase + kDteRegTrigger,
-                          uint64_t(Route::kCmToRouter) | kDteTaskLast, 7);
+          dte.Cfg().Drive(kDteRegTrigger, 0, 7);
         } else {
           dte.Cfg().Idle();
         }

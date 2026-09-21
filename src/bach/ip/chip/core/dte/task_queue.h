@@ -26,22 +26,20 @@ namespace bach {
 struct ActiveCtx {
   bool busy = false;
   Descriptor desc;
+  // 读那一侧（出核）：当前读到第几个段，段内下一拍地址与剩余字节。
+  uint64_t seg = 0;
   uint64_t cur_addr = 0;
-  uint64_t remain = 0;      // 还剩多少字节没发请求
+  uint64_t remain = 0;      // 当前段还剩多少字节没发请求
   uint64_t outstanding = 0; // 已发出未回来的请求数
   bool issue_done = false;
   bool drained = false;
   uint64_t filled = 0;      // 出核读回来的数据已经填了多少字节进包
   bool sent_first = false;  // 出核这一包的首拍发出去没有：首拍带 thdr
-  // 带 scale 的任务：数据那一段搬完之后还剩几个 scale，scale 那一段对应的数据
-  // 地址从哪起。
-  uint64_t scale_remain = 0;
-  uint64_t scale_addr = 0;
-  // 写那一侧已经落地到整包的第几个字节，与当前这一拍里落了多少：一拍跨数据与
-  // scale 两段时分两次写。
+  // 写那一侧：落地到整包的第几个字节，与当前这一拍里落了多少：一拍跨两段时分两
+  // 次写。
   uint64_t off = 0;
   uint64_t part = 0;
-  // topK 旁带（TOPK_VALID）：这一笔的 topK 写进 MU 了没有。整笔只写一次。
+  // topK 段：这一笔的 topK 写进 MU 了没有。整笔只写一次。
   bool topk_sent = false;
 };
 

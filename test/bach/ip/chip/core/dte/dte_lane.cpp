@@ -1,9 +1,9 @@
 // 通道与地址生成。
 //
-// 软件只配基址，Core Mem 那一侧的偏移由硬件按 stream_id 算，Matrix Mem 那一侧
-// 配的就是最终物理地址；scale 与 topK 的长度硬件自己算；通道内按序激活，读那一
-// 半的领先量受 buffer 与 outstanding 限额约束；MM → CM 只写 Core Mem；带 scale
-// 的任务 scale 随数据搬。
+// 对齐《DTE DSA》后任务按 4 段位走：软件逐段配地址与长度，端点由地址范围译码，
+// 展开后的地址由 agcu 算好交给 lane 直接用；scale 段地址随数据、长度按 bytes/32；
+// 通道内按序激活，读那一半的领先量受 buffer 与 outstanding 限额约束；MM → CM
+// 只写 Core Mem；带 scale 的任务 scale 随数据搬。
 
 #include <gtest/gtest.h>
 
@@ -32,23 +32,42 @@ CmemLayout Layout() {
   CmemLayout l;
   l.stream_base = 0x10000;
   l.stream_stride = 0x8000;
-  l.header_base = 0x1000;
-  l.scale_base = 0x2000;
-  l.topk_base = 0x3000;
   return l;
 }
 
+// 造一笔任务：段 1 装数据，带 scale 时再补段 2。src/dst 是软件配的段地址，展开
+// 成 src_addr/dst_addr 并译码端点走与 regfile Fire 同一条路径。
 std::shared_ptr<Descriptor> Task(uint64_t commit_seq, Route route,
                                  uint64_t stream, uint64_t bytes,
-                                 uint64_t src, uint64_t dst) {
+                                 uint64_t src, uint64_t dst,
+                                 bool scale = false) {
   auto d = std::make_shared<Descriptor>();
   d->valid = true;
   d->commit_seq = commit_seq;
   d->route = route;
   d->stream_id = stream;
-  d->bytes = bytes;
-  d->src_addr = src;
-  d->dst_addr = dst;
+  // 段地址带端点 tag（与 kernel dte_move 一致）：Mmem 出发的源端打 Mmem tag，scale
+  // 段打 scale tag；dst 是收方落点，写纯地址不带 tag。
+  uint64_t mm_tag = uint64_t(SegEndpoint::kMmem) << kEpShift;
+  uint64_t sc_tag = uint64_t(SegEndpoint::kScale) << kEpShift;
+  bool from_mm = route == Route::kMmToRouter || route == Route::kMmToCm;
+  d->seg[1].valid = true;
+  d->seg[1].src = from_mm ? (src | mm_tag) : src;
+  d->seg[1].dst = dst;
+  d->seg[1].stride = Layout().stream_stride;
+  d->seg[1].len = bytes;
+  if (scale) {
+    // 段 2 = scale 旁带：地址带 scale tag，低位给对应数据地址，长度按 bytes/32。
+    d->seg[2].valid = true;
+    d->seg[2].src = src | sc_tag;
+    d->seg[2].dst = dst | sc_tag;
+    d->seg[2].stride = Layout().stream_stride;
+    d->seg[2].len = bytes / 32;
+  }
+  Agcu agcu(Layout());
+  for (uint64_t i = 0; i < 4; ++i) {
+    if (d->seg[i].valid) agcu.ExpandOut(d->seg[i], stream, route);
+  }
   auto m = std::make_shared<Message>();
   m->size = bytes;
   m->payload.assign(bytes, 0);
@@ -192,8 +211,7 @@ TEST(BachDteLane, OutboundScaleFollowsTheData) {
     cmem.Poke(base, data);
     cmem.PokeScale(base, scale);
 
-    auto d = Task(1, Route::kCmToRouter, 0, kData, 0x100, 0);
-    d->scale = true;
+    auto d = Task(1, Route::kCmToRouter, 0, kData, 0x100, 0, /*scale=*/true);
     d->msg->size = kData + scale.size();
     d->msg->scale_valid = 1;
     d->msg->payload.assign(d->msg->size, 0);
@@ -232,8 +250,7 @@ TEST(BachDteLane, MatrixToCoreCarriesScale) {
     mmem.Poke(0x9000, data);
     mmem.PokeScale(0x9000, scale);
 
-    auto d = Task(1, Route::kMmToCm, 1, kData, 0x9000, 0x40);
-    d->scale = true;
+    auto d = Task(1, Route::kMmToCm, 1, kData, 0x9000, 0x40, /*scale=*/true);
     RealMemHarness h(clk, ln, d);
     clk->Continue(300 * kPeriod);
     RT::JoinAll();
@@ -256,22 +273,48 @@ TEST(BachAgcu, StreamOffsetOnCoreMemSideOnly) {
   EXPECT_EQ(a.DataAddr(0, false, 0x9000), 0x9000u);
 }
 
-// 包头、scale、topK 三个分区各按各的跨度算。
-TEST(BachAgcu, EachPartitionHasItsOwnStride) {
-  Agcu a(Layout());
-  EXPECT_EQ(a.HeaderAddr(0), 0x1000u);
-  EXPECT_EQ(a.HeaderAddr(2), 0x1000u + 2 * 18);
-  EXPECT_EQ(a.ScaleAddr(2), 0x2000u + 2 * 2048);
-  EXPECT_EQ(a.TopkAddr(2), 0x3000u + 2 * 256);
+// 端点由地址高 4 bit tag 译码决定，与 route 无关：Cmem 是 0（默认），Mmem / scale /
+// topK / header 各占一个 tag。
+TEST(BachAgcu, EndpointIsDecodedFromTheAddressRange) {
+  EXPECT_EQ(Agcu::Decode(0x00001000ull), SegEndpoint::kCmem);
+  EXPECT_EQ(Agcu::Decode(0x10001000ull), SegEndpoint::kMmem);
+  EXPECT_EQ(Agcu::Decode(0x20001000ull), SegEndpoint::kScale);
+  EXPECT_EQ(Agcu::Decode(0x30001000ull), SegEndpoint::kTopk);
+  EXPECT_EQ(Agcu::Decode(0x40001000ull), SegEndpoint::kHeader);
 }
 
-// scale 与 topK 的长度硬件自己算，不用软件配。
-TEST(BachAgcu, DerivedLengthsAreComputed) {
-  // 32 个元素共用一个 scale。
-  EXPECT_EQ(Agcu::ScaleBytes(512), 16u);
-  EXPECT_EQ(Agcu::ScaleBytes(6144), 192u);
-  // topK 每项 {expert_id 2 B, weight 4 B}。
-  EXPECT_EQ(Agcu::TopkBytes(8), 48u);
+// 段地址逐段展开：stream_start = CfgAddr + SID × stride。Cmem 一侧叠 stream_base
+// 与偏移，Mmem 一侧给物理地址不叠；MM→CM 源端不叠 stride。
+TEST(BachAgcu, ExpandOutExpandsPerSegmentAddress) {
+  Agcu a(Layout());
+  uint64_t mm_tag = uint64_t(SegEndpoint::kMmem) << kEpShift;
+
+  Segment data;
+  data.src = 0x40;
+  data.dst = 0x80;
+  data.stride = Layout().stream_stride;
+  // CmToRouter：源端是 Cmem，叠 stream_base + SID × stride；目的端是 Router，无地址。
+  a.ExpandOut(data, 3, Route::kCmToRouter);
+  EXPECT_EQ(data.src_kind, SegEndpoint::kCmem);
+  EXPECT_EQ(data.src_addr, 0x10000u + 3 * 0x8000 + 0x40);
+  EXPECT_EQ(data.dst_addr, 0u);
+
+  Segment m2r;
+  m2r.src = 0x9000u | mm_tag;   // Mmem 出发，源端带 Mmem tag，stride 配 0
+  m2r.dst = 0;
+  m2r.stride = 0;
+  a.ExpandOut(m2r, 2, Route::kMmToRouter);
+  EXPECT_EQ(m2r.src_kind, SegEndpoint::kMmem);
+  EXPECT_EQ(m2r.src_addr, 0x9000u);
+
+  Segment m2c;
+  m2c.src = 0x9000u | mm_tag;
+  m2c.dst = 0x40;
+  m2c.stride = Layout().stream_stride;
+  a.ExpandOut(m2c, 1, Route::kMmToCm);
+  EXPECT_EQ(m2c.src_addr, 0x9000u) << "MM→CM 源端不叠 stride";
+  EXPECT_EQ(m2c.dst_kind, SegEndpoint::kCmem);
+  EXPECT_EQ(m2c.dst_addr, 0x10000u + 0x8000 + 0x40);
 }
 
 // 出核读那一半的领先量卡在 outstanding 限额上，不会无限发请求。
@@ -513,7 +556,8 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     ln.AttachMuTopk(topk_port);
 
     auto d = Task(1, Route::kRouterToCm, /*stream=*/3, kFlitBytes, 0, 0x40);
-    d->topk_valid = true;
+    d->seg[3].valid = true;
+    d->seg[3].dst_kind = SegEndpoint::kTopk;
     d->msg->topk = topk;
 
     // 每拍读一次端口：valid 且序号没见过就算一次（端口同一拍值会连着出现两拍）。

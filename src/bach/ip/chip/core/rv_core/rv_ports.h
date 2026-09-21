@@ -22,11 +22,13 @@ namespace bach {
 constexpr uint64_t kItcmBase = 0x00000000;
 constexpr uint64_t kItcmSize = 4 * 1024;
 
-// 三个 DSA 的 IO reg。跨度按各 DSA 文档里的最大偏移留：VU 的 Profile Block 到
-// 0x40EC，所以它要 20 KB。
+// 三个 DSA 的 IO reg。跨度按各 DSA 文档里的最大偏移留：DTE 的地址空间 16 KB
+// （0x0000~0x3FFF），VU 的 Profile Block 到 0x40EC 所以它要 20 KB，MU 4 KB。
+// DTE 扩到 16 KB 后 MU / VU 顺移：MU 0x9000 → 0xC000，VU 0xC000 → 0xD000。
 constexpr uint64_t kDteIoBase = 0x00008000;
-constexpr uint64_t kMuIoBase = 0x00009000;
-constexpr uint64_t kVuIoBase = 0x0000C000;
+constexpr uint64_t kMuIoBase = 0x0000C000;
+constexpr uint64_t kVuIoBase = 0x0000D000;
+constexpr uint64_t kDteIoSize = 16 * 1024;
 constexpr uint64_t kDsaIoSize = 4 * 1024;
 constexpr uint64_t kVuIoSize = 20 * 1024;
 

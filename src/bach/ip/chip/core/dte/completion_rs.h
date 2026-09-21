@@ -19,7 +19,7 @@
 //   join_done   同一 task_id 的 RD 与 WR 都满足
 //   task_done   进 Done Pending 并与 TS 成功握手
 //
-// task_last 标记一个 task 拆成几笔搬运时的最后一笔，只有带这个标记的那一笔完成
+// ack_ts_en 标记一个 task 拆成几笔搬运时的最后一笔，只有带这个标记的那一笔完成
 // 后才通知 TS；no_ack 置位的任务不回 Ack。
 //
 // shareMem 写落在 Join 之后：任务数据传输完成后按描述符里的地址与数据写一笔
@@ -113,7 +113,7 @@ class CompletionRs : public BachModule {
   };
   struct Pend {
     uint64_t stream_id = 0, task_id = 0, user_id = 0, reduce_seq = 0;
-    bool notify = true;   // task_last 且非 no_ack 的那一笔才通知 TS
+    bool notify = true;   // ack_ts_en 且非 no_ack 的那一笔才通知 TS
     bool smem = false;
     uint64_t smem_addr = 0, smem_data = 0;
   };
@@ -167,11 +167,11 @@ class CompletionRs : public BachModule {
       }
       if (pend.size() >= kDonePendDepth) break;  // 串行化，不丢
       ++join_pending;
-      // 只有带 task_last 的那一笔完成后才通知 TS；no_ack 的不回 Ack。
-      bool notify = e.desc.task_last && !e.desc.no_ack;
-      if (notify || e.desc.smem_wr) {
+      // 只有带 ack_ts_en 的那一笔完成后才通知 TS；no_ack 的不回 Ack。
+      bool notify = e.desc.ack_ts_en && !e.desc.no_ack;
+      if (notify || e.desc.wr_sharemem_flag) {
         pend.push_back({e.desc.stream_id, e.desc.task_id, e.desc.user_id,
-                        e.desc.reduce_seq, notify, e.desc.smem_wr,
+                        e.desc.reduce_seq, notify, e.desc.wr_sharemem_flag,
                         e.desc.smem_addr, e.desc.smem_data});
       }
       it = rs.erase(it);

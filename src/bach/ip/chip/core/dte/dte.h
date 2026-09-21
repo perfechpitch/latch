@@ -71,7 +71,7 @@ class Dte {
     out_buf = std::make_unique<DteBuffer>(clock, "out_buf",
                                           kDteBufFlits * (kLaneNum - 1),
                                           kLaneNum - 1, gid, setting.tick);
-    parser = std::make_unique<HeaderParser>(clock, "parser", gid,
+    parser = std::make_unique<HeaderParser>(clock, "parser", agcu, gid,
                                             setting.tick);
     SetInbound(setting.inbound);
     parser->AttachPathTask(
@@ -80,7 +80,8 @@ class Dte {
                                       setting.tick);
     out_arb = std::make_unique<DteOutArb>(clock, "out_arb", gid,
                                           setting.tick);
-    reg = std::make_unique<DteRegfile>(clock, "regfile", gid, setting.tick);
+    reg = std::make_unique<DteRegfile>(clock, "regfile", agcu, gid,
+                                       setting.tick);
     comp = std::make_unique<CompletionRs>(clock, "comp", gid, setting.tick);
     xbar = std::make_unique<DteXbar>(clock, "xbar", gid, setting.tick);
     for (uint64_t i = 0; i < kLaneNum; ++i) {

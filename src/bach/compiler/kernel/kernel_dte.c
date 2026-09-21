@@ -9,19 +9,47 @@
 
 #define TASK __attribute__((section(".text.task"), noinline, used))
 
-/* 一笔搬运的四个寄存器加 Trigger，Trigger 必须最后写。
- * 寄存器落在模板 0 里，一套模板 64 B，照《DTE寄存器配置参数》的地址空间。
- * len 是数据那一段的字节数，CFG_DATA_LEN 收的是 8 B 一格的格数，所以这里除 8。
- * 传进来的字节数必须是 8 的倍数，硬件配不出不足一格的尾巴。mode 里带
- * DTE_SCALE_VALID 时 scale 随数据一起搬，长度硬件按 len / 32 自己算。
- * last 置位的那一笔带 task_last：一个 task 拆成几笔搬运时只有最后一笔带，DTE
- * 做完它才通知 TS。前一笔还没交出去时寄存器接口顶住写，所以几笔可以接着配 */
+/* 一笔搬运：段 1 装数据，可再带一段 scale（段 2），最后写 CFG_TRANS_MODE 与
+ * CFG_TRIGGER。寄存器落在 Config 区（0x0000~0x004C），照《DTE DSA》的地址空间。
+ * len 是数据段的字节数，CFG_DATA_LEN 直接收字节，不再按 8 B 格折算。mode 的低
+ * 3 位是 transfer_mode，高位带 DTE_SCALE_VALID 时 scale 随数据一起搬，scale 的
+ * 字节数是软件按 len / 32 算好写进段 2 的 CFG_DATA_LEN。last 置位的那一笔带
+ * ack_ts_en：一个 task 拆成几笔搬运时
+ * 只有最后一笔带，DTE 做完它才通知 TS。前一笔还没交出去时寄存器接口顶住写，
+ * 所以几笔可以接着配 */
 static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
-  u32 tpl = dte_template(0);
-  dsa_write(tpl + DTE_SRC_ADDR, src);
-  dsa_write(tpl + DTE_DST_ADDR, dst);
-  dsa_write(tpl + DTE_DATA_LEN, len / DTE_DATA_LEN_GRAIN);
-  dsa_write(tpl + DTE_TRIGGER, mode | (last ? DTE_TASK_LAST : 0u));
+  u32 tmode = mode & 0x7u;
+  /* stride：Mmem 一侧软件给物理地址，不叠 stream 偏移；Cmem 一侧叠。MM→CM 那
+   * 一档源是 Mmem 目标 Cmem，CFG_STRIDE 只作用在目标端（源端硬件强制 0），所以
+   * 这里按目标端填 Cmem 的跨度。 */
+  u32 stride = (tmode == DTE_MODE_MMEM_TO_ROUTER) ? 0u : CMEM_STREAM_STRIDE;
+  u32 addr_valid = (1u << 1);  /* 段 1 = 数据 */
+
+  /* 源端地址：Mmem 出发的两种 mode 打 Mmem tag，Cmem 出发 tag 是 0 不用打。
+   * dst 是收方落点（Router 那几档）或本核 Cmem（MM→CM），都写纯地址不带 tag。 */
+  u32 src1 = (tmode == DTE_MODE_MMEM_TO_ROUTER || tmode == DTE_MODE_MMEM_TO_CMEM)
+                 ? dte_ep(DTE_EP_MMEM, src)
+                 : src;
+  dsa_write(DTE_ADDR1_SRC, src1);
+  dsa_write(DTE_ADDR1_DST, dst);
+  dsa_write(DTE_STRIDE1, stride);
+  dsa_write(DTE_DATA_LEN1, len);
+
+  if (mode & DTE_SCALE_VALID) {
+    addr_valid |= (1u << 2);
+    /* scale 段地址带 SCALE tag，低位给对应数据地址，DTE 落进数据那块存储的
+     * scale 旁带。stride 与数据一致。 */
+    dsa_write(DTE_ADDR2_SRC, dte_ep(DTE_EP_SCALE, src & 0x0FFFFFFFu));
+    dsa_write(DTE_ADDR2_DST, dte_ep(DTE_EP_SCALE, dst & 0x0FFFFFFFu));
+    dsa_write(DTE_STRIDE2, stride);
+    dsa_write(DTE_DATA_LEN2, len / 32u);
+  }
+
+  u32 trans = tmode | (addr_valid << DTE_ADDR_VALID_SHIFT)
+                    | (mode & (DTE_HW_HEADER_OP | DTE_WR_SHAREMEM_FLAG))
+                    | (last ? DTE_ACK_TS_EN : 0u);
+  dsa_write(DTE_TRANS_MODE, trans);
+  dsa_write(DTE_TRIGGER, 0u);
 }
 
 /* 把 Core Mem 上某一段搬到 Router 发出去。段的起点与长度由 shape 定。
@@ -30,16 +58,13 @@ static void send_seg(u32 off, u32 bytes) {
   dte_move(off, 0, bytes, DTE_MODE_CMEM_TO_ROUTER, 1);
 }
 
-/* datain：包一到 DTE 就自己起搬运，不必这里再配一笔。这一笔要做的是软件包头
- * 那一档：把硬件包头抄进按 stream 排的软件包头表，再弹掉这个包的包头。搬运
- * 的完成由 DTE 报 TS，所以这里交还自己就走，不通知 TS。
+/* datain：包一到 DTE 就自己起搬运，不必这里再配一笔。落点与 scale 都由包头带
+ * 着，DTE 自己办，这一笔只弹掉这个包的包头。搬运的完成由 DTE 报 TS，所以这里
+ * 交还自己就走。软件包头表那套（硬件包头抄进按 stream 排的软件包头表）在新模型
+ * 里不落地，去掉。
  *
- * 一个计算 core 上几项搬入任务（token、FC2 输入、归约结果、concat）都走它：
- * 落点与 scale 由包头带着，DTE 自己办。 */
+ * 一个计算 core 上几项搬入任务（token、FC2 输入、归约结果、concat）都走它。 */
 TASK void task_dte_user_init(void) {
-  u32 tpl = dte_template(0);
-  u32 head = dsa_read(tpl + DTE_HW_HEADER_ADDR);
-  dsa_write(tpl + DTE_SW_HEADER_ADDR, head);
   hdr_pop();
   task_done(1);
 }
@@ -188,11 +213,9 @@ TASK void task_dte_weights_loader(void) {
   task_yield();
 }
 
-/* MSG 解析：DTE 要能解析包头并执行，MU 与 VU 不需要 */
+/* MSG 解析：DTE 要能解析包头并执行，MU 与 VU 不需要。软件包头表那套在新模型里
+ * 不落地，这里只剩占位。 */
 TASK void task_dte_msg_parse(void) {
-  u32 tpl = dte_template(0);
-  u32 head = dsa_read(tpl + DTE_HW_HEADER_ADDR);
-  dsa_write(tpl + DTE_SW_HEADER_ADDR, head);
   task_done(1);
 }
 
@@ -202,6 +225,7 @@ TASK void task_rv_nop(void) {
   task_done(1);
 }
 
-void kernel_init(void) {
-  dsa_write(dte_template(0) + DTE_STREAM_STRIDE, 0);
-}
+/* 旧模型在模板 0 里写 stream_stride=0；新模型 stride 是逐段的 CFG_STRIDEi，
+ * dte_move 每笔自己配，这里没有全局要预置的，留空。 */
+void kernel_init(void) {}
+

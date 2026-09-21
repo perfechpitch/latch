@@ -18,17 +18,17 @@
 // 一笔挪进 drain 队列等响应收敛，下一笔当拍就能激活。可保留的任务边界数就是这
 // 个队列的深度。
 //
-// 两半的分工按方向变：
+// 对齐飞书《DTE DSA》后，任务是 4 个通用段位。两侧按段遍历：
 //   进核  RD 侧的数据由 Header Parser 从 AXI-Stream 收下来推进 inbound buffer，
-//         这一侧只跟着记账；WR 侧从 buffer 按任务边界取数写存储
-//   出核  RD 侧的 AGCU 生成源端读地址、经 DMA_XBAR 读存储，数据进 outbound
+//         这一侧只跟着记账；WR 侧从 buffer 按任务边界取数，逐段写存储（数据段
+//         照常写，scale 段走 scale 旁带，topK 段经旁带写 MU，包头段走 Hmem 不在
+//         这里）
+//   出核  RD 侧逐段读源端（数据段照常读，scale 段只读 scale），数据进 outbound
 //         buffer；WR 侧从 buffer 取数发给 Router
 //   MM→CM 完全走出核通道，只是 WR 侧的出口从 Router TX 切到 Core Mem
 //
-// 带 scale 的任务（SCALE_VALID）：包里 scale 接在数据后面。读那一侧先按拍读完
-// 数据，再用只读 scale 的请求把 scale 读回来接在包尾；写那一侧数据那一段照常
-// 写，包尾那一段用只写 scale 的请求落到同一段地址的 scale 旁带。边读边发时
-// scale 只能排在数据后面，所以分两段搬。
+// 端点（Cmem/Mmem/scale 旁带/topK_table/header_table）在 Fire / 解析时已由 agcu
+// 译码并展开成每段的 src_addr / dst_addr，这一层直接用，不再自己叠 stream 偏移。
 
 #include <deque>
 #include <memory>
@@ -49,7 +49,7 @@ namespace latch {
 namespace bach {
 
 // 读的 outstanding 限额。原文只说领先量由 Buffer credit、读 outstanding 与可保留
-// 的任务边界数共同约束（F20），没给这一项的值。取与一个通道的 Buffer 项数相同：
+// 的任务边界数共同约束，没给这一项的值。取与一个通道的 Buffer 项数相同：
 // 让 Buffer 成为真正卡住的那一个，读这一半才填得满 256 B/T —— 在飞读数少于访存
 // 延迟的拍数时，带宽就是「在飞数 ÷ 延迟」，取 4 只有 4/13。
 constexpr uint64_t kRdOutstanding = kDteBufFlits;
@@ -57,6 +57,12 @@ constexpr uint64_t kRdOutstanding = kDteBufFlits;
 // 一侧同时能保留几个已经 issue_done、还在等 drain 的任务边界。原文只说「可保留
 // 的任务边界数」是领先量的三项约束之一，没给数，取 2：一笔在等收敛，一笔在发。
 constexpr uint64_t kDrainSlots = 2;
+
+// 段是否参与 payload 的字节搬运。topK / header 段走旁带或 Hmem，不占 payload。
+inline bool PayloadSeg(SegEndpoint k) {
+  return k == SegEndpoint::kCmem || k == SegEndpoint::kMmem ||
+         k == SegEndpoint::kScale;
+}
 
 class Lane : public BachModule {
  public:
@@ -95,10 +101,6 @@ class Lane : public BachModule {
   std::shared_ptr<HalfDonePort> WrDonePtr() const { return wr_done; }
 
   // 进核通道的 RD 侧从这个口收 Payload。
-  //
-  // 早先是 Header Parser 直接调进来往 buffer 里塞的，那是两个模块的协程同时改
-  // 同一个容器：单线程下看着能跑，多线程下 25 轮里段错误了一次。一切跨模块的
-  // 搬运都走端口。
   void AttachPayload(std::shared_ptr<PayloadPort> p) { payload = std::move(p); }
 
   // topK 旁带写进 MU 的那条数据线。只有进核通道收到，出核通道恒为空。
@@ -114,9 +116,6 @@ class Lane : public BachModule {
 
  protected:
   void Step() override {
-    // MM → CM 那一档一拍里两侧都用存储：RD 侧读 Matrix Mem，WR 侧写 Core Mem。
-    // 谁都不许替对方调 IdleReq：同线程同拍两次写 Latch 不触发断言，盖掉的请
-    // 求是静默丢的。所以两块存储各记各的，本拍末尾只把没人用的那一个置闲。
     cmem_used = false;
     mmem_used = false;
     router_used = false;
@@ -146,15 +145,13 @@ class Lane : public BachModule {
  private:
   bool Outbound() const { return idx != kInCh; }
 
-  // 一侧的起始地址。Core Mem 那一侧软件只配段内偏移，落在哪一片由硬件按
-  // stream_id 算；Matrix Mem 那一侧软件配的就是最终物理地址。
-  uint64_t StartAddr(Descriptor const& d, uint64_t half) const {
-    if (half == kRd) {
-      bool from_cm = d.route == Route::kCmToRouter;
-      return agcu.DataAddr(d.stream_id, from_cm, d.src_addr);
-    }
-    bool to_cm = d.route == Route::kRouterToCm || d.route == Route::kMmToCm;
-    return agcu.DataAddr(d.stream_id, to_cm, d.dst_addr);
+  // 读这一侧的源端存储：route 决定。CmToRouter 读 Core Mem，其余读 Matrix Mem。
+  // scale 旁带随它的数据落在同一块存储。
+  bool FromCm(Route r) const { return r == Route::kCmToRouter; }
+  // 写这一侧的目的端存储：route 决定。RouterToCm、MmToCm 写 Core Mem，
+  // RouterToMm 写 Matrix Mem。scale 旁带随它的数据落在同一块存储。
+  bool ToCm(Route r) const {
+    return r == Route::kRouterToCm || r == Route::kMmToCm;
   }
 
   // 这一笔在本通道的 buffer 里用哪个号认。进核那一路的号由 Header Parser 在
@@ -162,6 +159,33 @@ class Lane : public BachModule {
   // 内部序号。两条路各用各的 buffer，号撞不上。
   static uint64_t TagOf(Descriptor const& d) {
     return IsInbound(d.route) ? d.frame_seq : d.commit_seq;
+  }
+
+  // 读这一侧第 i 段要搬的字节数：payload 段搬 len，topK / header 段不搬。
+  static uint64_t RdLen(Descriptor const& d, uint64_t i) {
+    if (i >= 4) return 0;
+    Segment const& s = d.seg[i];
+    if (!s.valid || !PayloadSeg(s.src_kind)) return 0;
+    return s.len;
+  }
+
+  // 从 seg 号往后读这一侧还有没有要搬的段。
+  static bool RdRemain(Descriptor const& d, uint64_t seg) {
+    for (uint64_t i = seg; i < 4; ++i) {
+      if (RdLen(d, i) != 0) return true;
+    }
+    return false;
+  }
+
+  // 有 topK 段（按地址译码命中 topK_table）的任务。
+  static bool HasTopk(Descriptor const& d) {
+    for (auto const& s : d.seg) {
+      if (s.valid && (s.src_kind == SegEndpoint::kTopk ||
+                      s.dst_kind == SegEndpoint::kTopk)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // 读回来的一块填进要发出去的那个包，按已填字节数排在后面。
@@ -194,8 +218,7 @@ class Lane : public BachModule {
     return b;
   }
 
-  // 收 Commit 准入的任务。ready 是「下一拍一定收得下」的承诺：往这两个队列里
-  // 放东西的只有 Commit 一家，所以这一拍报的空位到下一拍还在。
+  // 收 Commit 准入的任务。
   void TakeAdmit() {
     admit->DriveReady(!q[kRd].Full() && !q[kWr].Full());
     if (!admit->Valid() || admit->Seq() == last_admit_seq) return;
@@ -206,13 +229,11 @@ class Lane : public BachModule {
     q[kWr].Push(*d);
   }
 
-  // 从 Header Parser 收 Payload 写进 inbound buffer。ready 反映 buffer 还收不
-  // 收得下，上游据此对 Router 反压。
+  // 从 Header Parser 收 Payload 写进 inbound buffer。
   void TakePayload() {
     if (Outbound()) return;
     payload->DriveReady(buffer.HasRoom(idx));
     if (!payload->Valid()) return;
-    // 同一拍数据会连着两拍出现在端口上，按序号认它。
     if (payload->Seq() == last_payload_seq) return;
     if (!buffer.HasRoom(idx)) return;
     last_payload_seq = payload->Seq();
@@ -224,8 +245,7 @@ class Lane : public BachModule {
     if (last) inbound_done.insert(frame);
   }
 
-  // 已经 issue_done、在等响应收敛的那些：队头收敛了就报完成、出队。一侧一拍
-  // 报一笔，报的口一拍只能驱动一次。
+  // 已经 issue_done、在等响应收敛的那些：队头收敛了就报完成、出队。
   void ReportDrained() {
     rd_reported = false;
     wr_reported = false;
@@ -249,15 +269,13 @@ class Lane : public BachModule {
   void Activate() {
     for (uint64_t h = 0; h < kHalfNum; ++h) {
       if (ctx[h].busy || q[h].Empty()) continue;
-      // drain 队列满了就先不激活：可保留的任务边界数是领先量的一项约束。
       if (drain_q[h].size() >= kDrainSlots) continue;
       Descriptor const& d = q[h].Front();
       ctx[h].busy = true;
       ctx[h].desc = d;
-      ctx[h].remain = d.bytes == 0 ? 0 : d.bytes;
-      ctx[h].cur_addr = StartAddr(d, h);
-      ctx[h].scale_remain = d.ScaleBytes();
-      ctx[h].scale_addr = ctx[h].cur_addr;
+      ctx[h].seg = 0;
+      ctx[h].cur_addr = 0;
+      ctx[h].remain = 0;
       ctx[h].off = 0;
       ctx[h].part = 0;
       ctx[h].outstanding = 0;
@@ -275,8 +293,7 @@ class Lane : public BachModule {
     if (!c.busy) return;
 
     if (!Outbound()) {
-      // 进核：数据由 Header Parser 推进 buffer，这一侧只跟着记账。整包收完
-      // （inbound_last 追上本任务）就算这一侧做完，没有在途的读请求要等。
+      // 进核：数据由 Header Parser 推进 buffer，这一侧只跟着记账。
       if (!c.issue_done && inbound_done.count(TagOf(c.desc)) != 0) {
         inbound_done.erase(TagOf(c.desc));
         c.issue_done = true;
@@ -294,9 +311,8 @@ class Lane : public BachModule {
       return;
     }
 
-    // 出核：AGCU 生成源端读地址，经 DMA_XBAR 读存储。领先量受三件事约束。
+    // 出核：逐段读源端。领先量受三件事约束。
     if (c.issue_done) {
-      // 请求发完了就把上下文腾出来，这一笔挪去等响应收敛。
       drain_q[kRd].push_back(c);
       c.busy = false;
       if (!rd_reported) rd_done->Idle();
@@ -304,33 +320,41 @@ class Lane : public BachModule {
     }
     if (!rd_reported) rd_done->Idle();
 
-    // Buffer 的位置在发请求这一刻就要占下：响应回来时没位置，那一块数据就只能
-    // 丢，而请求已经发出去、outstanding 也已经记上。所以余量要够已经在飞的那
-    // 些，加上这一笔自己。已经在飞的除了本笔的，还有前面几笔 issue_done 之后
-    // 还没收齐的响应；读的 outstanding 限额也按这个总数算。
+    // 当前段读完了就推进到下一个有数据的段；都读完了就 issue_done。段 0 恒为
+    // 包头、不是 payload 段，所以先从段 1 起看。
+    if (c.remain == 0) {
+      ++c.seg;
+      while (c.seg < 4 && RdLen(c.desc, c.seg) == 0) ++c.seg;
+      if (c.seg >= 4) {
+        c.issue_done = true;
+        return;
+      }
+      c.remain = RdLen(c.desc, c.seg);
+      c.cur_addr = c.desc.seg[c.seg].src_addr;
+    }
+
     uint64_t flying = c.outstanding;
     for (ActiveCtx const& d : drain_q[kRd]) flying += d.outstanding;
     bool room = buffer.Credit(idx) > flying;
     bool slot = flying < kRdOutstanding;
     if (!room || !slot) return;
-    bool from_cm = c.desc.route == Route::kCmToRouter;
-    MemPort& port = from_cm ? *cmem : *mmem;
+    Segment const& s = c.desc.seg[c.seg];
+    MemPort& port = FromCm(c.desc.route) ? *cmem : *mmem;
     if (!port.Ready()) return;
-    if (c.remain != 0 || c.scale_remain == 0) {
+    if (s.src_kind == SegEndpoint::kScale) {
+      // scale 段：len 是 scale 字节数，地址给的是对应数据地址。
+      uint64_t g = c.remain > kFlitBytes ? kFlitBytes : c.remain;
+      port.ReadScale(c.cur_addr, g * kScaleGroupBytes);
+      c.cur_addr += g * kScaleGroupBytes;
+      c.remain -= g;
+    } else {
       uint64_t n = c.remain > kFlitBytes ? kFlitBytes : c.remain;
       port.Read(c.cur_addr, n);
       c.cur_addr += n;
       c.remain -= n;
-    } else {
-      // 数据读完了再读 scale：一笔最多一拍那么多个。
-      uint64_t g = c.scale_remain > kFlitBytes ? kFlitBytes : c.scale_remain;
-      port.ReadScale(c.scale_addr, g * kScaleGroupBytes);
-      c.scale_addr += g * kScaleGroupBytes;
-      c.scale_remain -= g;
     }
-    (from_cm ? cmem_used : mmem_used) = true;
+    (FromCm(c.desc.route) ? cmem_used : mmem_used) = true;
     ++c.outstanding;
-    if (c.remain == 0 && c.scale_remain == 0) c.issue_done = true;
   }
 
   // 响应按发出的顺序回来：先给还在等收敛的那一笔，它收满了再给当前这一笔。
@@ -344,19 +368,18 @@ class Lane : public BachModule {
     }
     if (p == nullptr) return;
     ActiveCtx& c = *p;
-    bool from_cm = c.desc.route == Route::kCmToRouter;
+    bool from_cm = FromCm(c.desc.route);
     MemPort& port = from_cm ? *cmem : *mmem;
     if (!port.RspValid()) return;
     LOGCHECK(c.outstanding > 0, "Lane: 收到没发过的读响应。");
     --c.outstanding;
-    bool last = (c.remain == 0 && c.scale_remain == 0 && c.outstanding == 0);
-    // 位置在发请求时就占下了，这里一定放得进。
+    // 这一笔的所有段都读完、没有在途请求了，才是任务边界（包的最后一拍）。
+    bool last = c.remain == 0 && !RdRemain(c.desc, c.seg + 1) &&
+                c.outstanding == 0;
     LOGCHECK(buffer.HasRoom(idx), "Lane: 读回来的数据没地方放，发请求那一步的"
                                   "Buffer credit 记错了。");
     ByteBlockPtr blk = port.RspData();
     FillOut(c, blk);
-    // 这一拍的字节数按实际读回来的算：末拍不足一整拍，scale 那一拍也只有几个
-    // 字节。收方按累计字节数切包，记多了会把包尾之外的零写进存储。
     uint64_t n = blk ? blk->size() : kFlitBytes;
     buffer.Push(idx, {TagOf(c.desc), n, last, blk, c.desc.msg});
   }
@@ -365,7 +388,7 @@ class Lane : public BachModule {
     ActiveCtx& c = ctx[kWr];
     // topK 旁带：进核那一笔落地时把包里的 topK 写进 MU 的 topK_ep_table，整笔
     // 只写一次。只有进核通道挂着这条数据线，出核通道 mu_topk 为空走不进来。
-    if (c.busy && c.desc.topk_valid && !c.topk_sent && mu_topk) {
+    if (c.busy && HasTopk(c.desc) && !c.topk_sent && mu_topk) {
       std::vector<uint8_t> topk =
           c.desc.msg ? c.desc.msg->topk : std::vector<uint8_t>();
       mu_topk->Drive(c.desc.stream_id,
@@ -378,7 +401,6 @@ class Lane : public BachModule {
       return;
     }
     if (c.issue_done) {
-      // 请求发完了就把上下文腾出来，这一笔挪去等 Buffer 里的数据收敛。
       drain_q[kWr].push_back(c);
       c.busy = false;
       if (!wr_reported) wr_done->Idle();
@@ -392,7 +414,6 @@ class Lane : public BachModule {
     if (Outbound() && c.desc.route != Route::kMmToCm) {
       // 出核：发给 Router。这一档的出口是 Router TX。
       if (!to_router->Ready()) return;
-      // thdr 标这一包的首拍，tlast 标末拍：Router 那一侧按这两个认帧边界。
       to_router->Drive(b.bytes, b.last, !c.sent_first, c.desc.vc, b.msg);
       c.sent_first = true;
       router_used = true;
@@ -402,36 +423,42 @@ class Lane : public BachModule {
       return;
     }
 
-    // 进核写存储，或 MM → CM 那一档写 Core Mem。WR1 的硬件 route mask 只允许
-    // CoreMem，所以出核通道的数据不会被写回 Matrix Mem。
-    bool to_cm = c.desc.route == Route::kRouterToCm ||
-                 c.desc.route == Route::kMmToCm;
+    // 进核写存储，或 MM → CM 那一档写 Core Mem。逐段拆分写入：payload 字节按段
+    // 长顺序分到各个目的段。
+    bool to_cm = ToCm(c.desc.route);
     MemPort& port = to_cm ? *cmem : *mmem;
     if (!port.Ready()) return;
     ByteBlockPtr data = b.data ? b.data : std::make_shared<ByteBlock>(b.bytes, 0);
     uint64_t n = b.bytes;
-    uint64_t pos = c.off + c.part;           // 这一笔从整包的第几个字节起
-    uint64_t data_end = c.desc.bytes;        // 数据那一段在整包里的末尾
-    bool whole = c.part == 0;
-    if (!c.desc.scale || pos < data_end) {
-      // 数据那一段。带 scale 时这一拍可能跨进 scale 那一段，先只写到数据末尾。
-      uint64_t take = n - c.part;
-      if (c.desc.scale && pos + take > data_end) take = data_end - pos;
-      port.Write(c.cur_addr,
-                 whole && take == n ? data : SliceBlock(data, c.part, take));
-      c.cur_addr += take;
-      c.part += take;
-    } else {
-      // scale 那一段：整包里第 data_end + k 个字节是第 k 个 scale，管数据地址
-      // scale_addr + k × 32 那一组。
-      uint64_t take = n - c.part;
-      uint64_t k = pos - data_end;
-      port.WriteScale(c.scale_addr + k * kScaleGroupBytes,
+    uint64_t pos = c.off + c.part;           // 这一拍从整包的第几个字节起
+    // 找到这个字节落在哪个 payload 段，以及段内偏移。
+    uint64_t seg = 0, seg_off = 0;
+    while (seg < 4) {
+      Segment const& s = c.desc.seg[seg];
+      if (s.valid && PayloadSeg(s.dst_kind)) {
+        if (pos < seg_off + s.len) break;
+        seg_off += s.len;
+      }
+      ++seg;
+    }
+    Segment const& s = c.desc.seg[seg];
+    uint64_t take = n - c.part;
+    uint64_t seg_left = s.len - (pos - seg_off);
+    if (take > seg_left) take = seg_left;    // 一拍跨进下一段
+    bool whole = c.part == 0 && take == n;
+    if (s.dst_kind == SegEndpoint::kScale) {
+      // scale 段：dst_addr 是对应数据地址，整包里第 k 个 scale 管数据地址
+      // dst_addr + k × 32 那一组。
+      uint64_t k = pos - seg_off;
+      port.WriteScale(s.dst_addr + k * kScaleGroupBytes,
                       whole ? data : SliceBlock(data, c.part, take),
                       take * kScaleGroupBytes);
-      c.part += take;
+    } else {
+      port.Write(s.dst_addr + (pos - seg_off),
+                 whole ? data : SliceBlock(data, c.part, take));
     }
     (to_cm ? cmem_used : mmem_used) = true;
+    c.part += take;
     if (c.part < n) return;
     bool last = b.last;
     c.off += n;
@@ -453,7 +480,6 @@ class Lane : public BachModule {
 
   std::array<TaskQueue, kHalfNum> q;
   std::array<ActiveCtx, kHalfNum> ctx;
-  // 已经 issue_done、在等响应或 Buffer 收敛的那些。
   std::array<std::deque<ActiveCtx>, kHalfNum> drain_q;
   bool rd_reported = false, wr_reported = false;
   std::set<uint64_t> inbound_done;

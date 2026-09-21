@@ -141,7 +141,7 @@ TEST(BachHeaderParser, IdsComeFromTheHeaderAndTheLocalMap) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     // 本地的 path_task_map：path 7 是本条链上的第 3 步。
     hp.AttachPathTask([](uint64_t path) { return path == 7 ? 3 : 0; });
     ParserHarness h(clk, hp);
@@ -157,7 +157,7 @@ TEST(BachHeaderParser, IdsComeFromTheHeaderAndTheLocalMap) {
   EXPECT_EQ(d->path_id, 7u);
   EXPECT_EQ(d->stream_id, 5u) << "stream_id 直接取包头里的";
   EXPECT_EQ(d->task_id, 3u) << "task_id 按 path 查本地的表，不用发方的编号";
-  EXPECT_EQ(d->bytes, 512u);
+  EXPECT_EQ(d->seg[1].len, 512u);
 }
 
 // 落点取自包头：发方在出核造包时写进去的那个地址，收方原样用。落 Core Mem 的
@@ -169,7 +169,7 @@ TEST(BachHeaderParser, LandingAddressComesFromTheHeader) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     ParserHarness h(clk, hp);
     auto m = MakeMsg(41, 7, 512, 5, 0);
     m->dst_addr = 0x2000;
@@ -182,11 +182,11 @@ TEST(BachHeaderParser, LandingAddressComesFromTheHeader) {
   RT::Reset();
   ASSERT_TRUE(d);
   EXPECT_EQ(kept, 1u);
-  EXPECT_EQ(d->dst_addr, 0x2000u);
+  EXPECT_EQ(d->seg[1].dst, 0x2000u) << "落点取自包头，原样作段 1 的目的地址";
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     ParserHarness h(clk, hp);
     auto m = MakeMsg(41, 7, 512, 5, 0);
     m->dst_addr = 0x2004;   // 没对齐到 128 B
@@ -206,7 +206,7 @@ TEST(BachHeaderParser, InboundSetsTheTokenEntryFlag) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.SetInboundFlag(/*base=*/0x100, /*entry_bytes=*/0x400);
     ParserHarness h(clk, hp);
     auto m = MakeMsg(41, 7, 512, 5, 0);
@@ -218,7 +218,7 @@ TEST(BachHeaderParser, InboundSetsTheTokenEntryFlag) {
   }
   RT::Reset();
   ASSERT_TRUE(d);
-  EXPECT_TRUE(d->smem_wr);
+  EXPECT_TRUE(d->wr_sharemem_flag);
   EXPECT_EQ(d->smem_addr, 0x100u + 6 * 4);
   EXPECT_EQ(d->smem_data, 1u);
 }
@@ -229,7 +229,7 @@ TEST(BachHeaderParser, InboundWithoutFlagTableWritesNothing) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     ParserHarness h(clk, hp);
     h.beats = Frame(2, MakeMsg(41, 7, 512, 5, 0));
     clk->Continue(40 * kPeriod);
@@ -238,7 +238,7 @@ TEST(BachHeaderParser, InboundWithoutFlagTableWritesNothing) {
   }
   RT::Reset();
   ASSERT_TRUE(d);
-  EXPECT_FALSE(d->smem_wr);
+  EXPECT_FALSE(d->wr_sharemem_flag);
 }
 
 // 同一条 path 上连着来的几个包，task_id 相同，靠帧号分开。
@@ -247,7 +247,7 @@ TEST(BachHeaderParser, FramesOnOnePathGetDistinctSeq) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 3; });
     ParserHarness h(clk, hp);
     // 三个包，同一条 path。
@@ -278,7 +278,7 @@ TEST(BachHeaderParser, OneFrameIsOneTask) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 1; });
     ParserHarness h(clk, hp);
     // 一个 1 KB 的包，四拍。
@@ -307,7 +307,7 @@ TEST(BachHeaderParser, TlastMarksTheFrameBoundary) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 1; });
     ParserHarness h(clk, hp);
     // 两帧首尾相接，中间不留空拍。
@@ -332,7 +332,7 @@ TEST(BachHeaderParser, NothingIsStrippedFromTheRouterSide) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 1; });
     ParserHarness h(clk, hp);
     sent = MakeMsg(41, 7, 256, 0, 0);
@@ -355,7 +355,7 @@ TEST(BachHeaderParser, PayloadWaitsForTheHeaderToCommit) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 1; });
     ParserHarness h(clk, hp);
     h.beats = Frame(2, MakeMsg(41, 7, 1024, 0, 0));
@@ -379,7 +379,7 @@ TEST(BachHeaderParser, HeaderOnlyFrameIsOneBeat) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 1; });
     ParserHarness h(clk, hp);
     auto m = MakeMsg(41, 7, 0, 0, 0);
@@ -390,7 +390,7 @@ TEST(BachHeaderParser, HeaderOnlyFrameIsOneBeat) {
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
     desc_num = h.descs.size();
-    if (!h.descs.empty()) bytes = h.descs.front()->bytes;
+    if (!h.descs.empty()) bytes = h.descs.front()->seg[1].len;
   }
   RT::Reset();
   EXPECT_EQ(desc_num, 2u) << "纯包头那一帧收完，下一帧照样认得出";
@@ -404,7 +404,7 @@ TEST(BachHeaderParser, IllegalHeaderDropsOnlyThatFrame) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    HeaderParser hp(clk, "hp", 0, false);
+    HeaderParser hp(clk, "hp", Agcu(CmemLayout{}), 0, false);
     hp.AttachPathTask([](uint64_t) { return 1; });
     ParserHarness h(clk, hp);
     // 第一帧长度超过上限，要被丢掉。

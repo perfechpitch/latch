@@ -20,6 +20,7 @@
 #include <string>
 
 #include "base/log.h"
+#include "bach/ip/chip/core/dte/agcu.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
@@ -29,9 +30,10 @@ namespace bach {
 
 class HeaderParser : public BachModule {
  public:
-  HeaderParser(ClockPtr clock, const std::string& name, uint64_t parent = 0,
-               bool tick = true)
+  HeaderParser(ClockPtr clock, const std::string& name, Agcu const& addr_gen,
+               uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
+        agcu(addr_gen),
         from_router(std::make_shared<CoreDataPort>(clock)),
         to_commit(std::make_shared<DescPort>(clock)),
         payload(std::make_shared<PayloadPort>(clock)),
@@ -173,19 +175,49 @@ class HeaderParser : public BachModule {
     desc->stream_id = d.msg->stream_id;
     desc->task_id = path_task ? path_task(d.msg->path_id) : d.msg->task_id;
     desc->frame_seq = ++frame_cnt;
-    // 带 scale 的包：数据那一段落数据地址，包尾的 scale 落同一段地址的 scale
-    // 旁带。
-    desc->bytes = d.msg->DataBytes();
-    desc->scale = d.msg->scale_valid != 0;
-    desc->topk_valid = d.msg->topk_valid != 0;
-    desc->dst_addr = d.msg->dst_addr;
+
+    // 4 段位：段 0 包头 → header_table，段 1 数据，段 2 scale 旁带，段 3 topK
+    // 旁带。进核这一笔落 Core Mem 还是 Matrix Mem 由 inbound route 定；数据落点
+    // 由包头 dst_addr 给，落 Core Mem 时叠 stream 偏移、落 Matrix Mem 时直接用。
+    SegEndpoint data_kind = (inbound == Route::kRouterToMm)
+                                ? SegEndpoint::kMmem
+                                : SegEndpoint::kCmem;
+    uint64_t data_dst =
+        agcu.InboundAddr(desc->stream_id, data_kind, d.msg->dst_addr);
+
+    desc->seg[0].valid = true;
+    desc->seg[0].dst_kind = SegEndpoint::kHeader;
+    desc->seg[0].dst = desc->stream_id;  // header_table 按 stream_id 索引
+    desc->seg[0].len = kDteHeaderBytes;  // 进核由 Commit 记 gpu_id/token_id
+
+    desc->seg[1].valid = true;
+    desc->seg[1].dst_kind = data_kind;
+    desc->seg[1].dst = d.msg->dst_addr;
+    desc->seg[1].dst_addr = data_dst;
+    desc->seg[1].len = d.msg->DataBytes();
+
+    if (d.msg->scale_valid != 0) {
+      // 包尾那一段 scale 落同一数据地址的 scale 旁带。
+      desc->seg[2].valid = true;
+      desc->seg[2].dst_kind = SegEndpoint::kScale;
+      desc->seg[2].dst_addr = data_dst;
+      desc->seg[2].len = d.msg->size - d.msg->DataBytes();
+    }
+
+    if (d.msg->topk_valid != 0) {
+      desc->seg[3].valid = true;
+      desc->seg[3].dst_kind = SegEndpoint::kTopk;
+      desc->seg[3].dst = desc->stream_id;  // topK_ep_table 按 stream_id 索引
+      desc->seg[3].len = 0;                 // 旁带，不占 payload
+    }
+
     if (entry_bytes_of_slot != 0) {
-      desc->smem_wr = true;
+      desc->wr_sharemem_flag = true;
       desc->smem_addr = flag_base + d.msg->dst_addr / entry_bytes_of_slot * 4;
       desc->smem_data = 1;
     }
     desc->msg = d.msg;
-    desc->task_last = true;
+    desc->ack_ts_en = true;
     desc->no_ack = inbound_no_ack;
     byte_count = d.msg->size;
     keep_sum = d.bytes;
@@ -219,6 +251,7 @@ class HeaderParser : public BachModule {
   std::shared_ptr<DescPort> to_commit;
   std::shared_ptr<PayloadPort> payload;
 
+  Agcu agcu;
   Route inbound = Route::kRouterToCm;
   uint64_t flag_base = 0, entry_bytes_of_slot = 0;
   bool inbound_no_ack = false;

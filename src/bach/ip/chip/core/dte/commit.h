@@ -7,8 +7,9 @@
 // TaskQueue 项、Completion RS 项。任一侧没有空间时整体保持，Header 入口向 Router
 // 反压。这条规则挡住「读已经开始、写还没有落脚点」的半任务。
 //
-// 两个配置 Bank，Bank0 优先于 Bank1：都空闲时 Router 的配置进 Bank0、RV core 的
-// 配置进 Bank1；只剩一个 Bank 而两者竞争时优先配置 Router 信息。
+// 两个入口竞争准入时 Router 那一路优先：一拍只准入一笔，RV core 起的出核任务
+// 先进 PendingTaskQ 等 VC credit，够了才来申请；等 credit 的任务不占 TaskQueue 项
+// 也不占 Completion RS 项。
 //
 // PendingTaskQ 排在 Commit 之前：RV core 配好一个出核任务后，先按 path_id 查出
 // 走哪个 VC 与资源需求，credit 不够的进 PendingTaskQ 等，够了才来 Commit 申请
@@ -77,9 +78,9 @@ class Commit : public BachModule {
 
  protected:
   void Step() override {
-    // 一拍只准入一笔，所以这三步的先后就是两个 Bank 的优先级：只剩一个 Bank
-    // 而两侧都要时先配 Router 的那一笔。TakeFromRv 只是把任务放进 PendingTaskQ
-    // 等 credit，不占准入的名额，排在最后。
+    // 一拍只准入一笔，所以这三步的先后就是优先级：Router 入站那一笔先进，其次
+    // 是 PendingTaskQ 里等到 credit 的出核任务。TakeFromRv 只是把新到的出核任务
+    // 放进 PendingTaskQ 等 credit，不占准入的名额，排在最后。
     TakeFromParser();
     TryAdmitPending();
     TakeFromRv();
@@ -109,7 +110,7 @@ class Commit : public BachModule {
       from_parser->DriveAccepted(false);
       return;
     }
-    // Bank0 优先：Router 的配置总是先进。
+    // Router 优先：Router 的配置总是先进。
     if (!TryAdmit(*d)) {
       ++stall_pending;
       from_parser->DriveAccepted(false);
@@ -182,15 +183,15 @@ class Commit : public BachModule {
     m->user_id = d.user_id;
     m->path_id = d.path_id;
     m->dst = hmem.Rtab(d.path_id).ext_dst;
-    // 收方按这一项把包搬进它的存储。软件配 DTE 模板的 dst_addr 时配的就是收方
-    // 那一侧的落点，本地这一笔用不着它。
-    m->dst_addr = d.dst_addr;
+    // 收方按这一项把包搬进它的存储。软件配 DTE 数据段的 CFG_ADDRi_DST 时配的就是
+    // 收方那一侧的落点，本地这一笔用不着它。
+    m->dst_addr = d.DataDst();
     HmemEntry const& h = hmem.Entry(d.stream_id);
     m->gpu_id = h.gpu_id;
     m->token_id = h.token_id;
-    // 带 scale 的包：数据后面接 scale，包长把两段都算上。
-    m->size = d.bytes + d.ScaleBytes();
-    m->scale_valid = d.scale ? 1 : 0;
+    // 带 scale 的包：数据后面接 scale，包长把 payload 各段都算上。
+    m->size = d.PayloadBytes();
+    m->scale_valid = d.HasScale() ? 1 : 0;
     m->vc = d.vc;
     m->stream_id = d.stream_id;
     m->task_id = d.task_id;

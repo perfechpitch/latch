@@ -250,7 +250,9 @@ class RvExec : public BachModule {
     return kVuIoBase;
   }
   uint64_t DsaIoSize() const {
-    return unit == RvUnit::kVu ? kVuIoSize : kDsaIoSize;
+    if (unit == RvUnit::kDte) return kDteIoSize;
+    if (unit == RvUnit::kMu) return kDsaIoSize;
+    return kVuIoSize;
   }
 
   void BuildFunctional() {

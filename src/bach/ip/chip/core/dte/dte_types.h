@@ -11,6 +11,11 @@
 // 任务从两个入口来，都在 Commit 边界汇成同一套内部任务模型：Router 入站帧的
 // Header 经 Header Parser 生成 Descriptor；DTE RV core 经寄存器写加 Trigger
 // 生成 Descriptor。
+//
+// 对齐飞书《DTE DSA》文档后，任务模型是 4 个通用段位：段 0 唯一与用途绑定 =
+// 包头（core_mask 2B + 软件包头 16B，stride 18B），段 1~3 通用，内容由软件约定，
+// DTE 不区分。各段端点属于 Mmem / Cmem / topK_table / header_table 的哪一个，
+// 由该段地址所在的地址范围译码决定（同一个 Task 的不同段可以落在不同存储上）。
 
 #include <cstdint>
 #include <memory>
@@ -62,10 +67,44 @@ constexpr uint64_t kDteBufFlits = 32;
 // 单个 DTE 任务的搬运量上限：256 B × 128 拍 = 32 KB。超过的要拆成多个任务包。
 constexpr uint64_t kMaxTaskBytes = 32 * 1024;
 
-// CFG_DATA_LEN 是 16 bit，写进去的数以 8 B 为一格，所以一段最长 64 KB 差 8 B。
-// 软件配的是格数，硬件乘回字节。
-constexpr uint64_t kDteDataLenGrain = 8;
+// CFG_DATA_LEN 是 16 bit，以字节（1B）为单位，所以一段最长 64 KB 差 1 B。
+// 段 0 承载包头（18B），不要求 8B 对齐；段 1~3 软件须保证 8B 整数倍。
 constexpr uint64_t kDteDataLenMax = 0xFFFFu;
+
+// 包头段长：core_mask 2B + 软件包头 16B = 18B。飞书文档另标「【暂定】硬件默认
+// 19B align 到 24B」，实现以 18B 为准。
+constexpr uint64_t kDteHeaderBytes = 18;
+
+// 一个段位的端点，由地址范围译码决定段落在哪块存储。
+enum class SegEndpoint : uint32_t {
+  kCmem = 0,     // CoreMem 数据
+  kMmem = 1,     // MatrixMem 数据
+  kScale = 2,    // CoreMem scale 旁带（地址低位给对应数据地址）
+  kTopk = 3,     // MU topK_table（按 stream_id 索引写 MU）
+  kHeader = 4,   // header_table（DTE 的 Hmem，按 stream_id 索引）
+};
+
+// 端点地址范围译码的位约定：地址高 4 bit 作端点 tag，低位为端内偏移。飞书文档只
+// 说「由地址范围译码」未给具体数值，这里是建模约定（见 04-dte 建模文档）。段地址
+// 存在 Segment::src / dst 里时可能带 tag，展开成实际地址时用 kEpDataMask 剥掉。
+constexpr uint64_t kEpShift = 28;
+constexpr uint64_t kEpMask = 0xF;
+constexpr uint64_t kEpDataMask = (1ull << kEpShift) - 1;
+
+// 一个段位。地址公式 stream_start_i = CFG_ADDRi + SID × CFG_STRIDEi，stride 配 0
+// 退化为纯物理地址；route 100（Mmem→Cmem）源端不叠 stride（Mmem 侧软件给物理地址）。
+struct Segment {
+  bool valid = false;
+  uint64_t src = 0;      // CFG_ADDRi_SRC（软件基址）/ 进核包头落点
+  uint64_t dst = 0;      // CFG_ADDRi_DST
+  uint64_t stride = 0;   // CFG_STRIDEi
+  uint64_t len = 0;      // CFG_DATA_LENi，字节
+  SegEndpoint src_kind = SegEndpoint::kCmem;   // 源端地址范围译码
+  SegEndpoint dst_kind = SegEndpoint::kCmem;   // 目的端地址范围译码
+  // 展开后的实际地址（Fire / 解析时由 agcu 算好，lane 直接用）。
+  uint64_t src_addr = 0;
+  uint64_t dst_addr = 0;
+};
 
 // 一个高层任务。Commit 把它劈成一对 RD / WR 子上下文。
 struct Descriptor {
@@ -84,22 +123,19 @@ struct Descriptor {
   uint64_t path_id = 0;
   Route route = Route::kRouterToCm;
 
-  uint64_t src_addr = 0;
-  uint64_t dst_addr = 0;
-  uint64_t bytes = 0;
-  // SCALE_VALID：MXFP8 数据带 scale。bytes 仍只算数据那一段，scale 另有
-  // ceil(bytes / 32) 个，随数据一起搬，包里接在数据后面。
-  bool scale = false;
-  uint64_t ScaleBytes() const { return scale ? (bytes + 31) / 32 : 0; }
-  // TOPK_VALID：进核包自带 topK 表（msg->topk，256 B）。置位时这一笔落地不把
-  // topK 写进 Core Mem，而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。
-  bool topk_valid = false;
+  // 4 个通用段位。段 0 与包头绑定，段 1~3 通用。
+  Segment seg[4];
+
   uint64_t vc = 0;           // 出核走哪个 VC，决定落在哪个 out_ch
 
-  // task_last 标记一个 task 拆成几笔搬运时的最后一笔，只有带这个标记的那一笔
-  // 完成后才通知 TS；no_ack 置位的任务不回 Ack。
-  bool task_last = true;
+  // ack_ts_en 对应 CFG_TRANS_MODE[9]，即旧命名里的 task_last：标记一个 task 拆成
+  // 几笔搬运时的最后一笔，只有带这个标记的那一笔完成后才通知 TS；no_ack 置位的
+  // 任务不回 Ack。
+  bool ack_ts_en = true;
   bool no_ack = false;
+  // hw_header_op 对应 CFG_TRANS_MODE[7]：包头 保存 / 丢弃 / 修改。当前模型包头
+  // 走 Hmem，这一位只作记录，不改数据通路。
+  bool hw_header_op = false;
   // reduce 包的任务边界：发方的 task_id，ReduceModule 靠它分开同一个用户前后
   // 两笔 reduce 任务。
   uint64_t reduce_seq = 0;
@@ -107,12 +143,50 @@ struct Descriptor {
   bool reduce_pkt = false;
 
   // shareMem 写：数据搬完之后按这一对写一笔，写出去了才通知 TS。只有 B core
-  // 与 R core 用，存的是 user_id 与 token entry 的 valid 标志。
-  bool smem_wr = false;
+  // 与 R core 用，存的是 user_id 与 token entry 的 valid 标志。对应 CFG_TRANS_MODE[8]
+  // 的 wr_sharemem_flag + CFG_SM_W_ADDR / CFG_SM_W_DATA。
+  bool wr_sharemem_flag = false;
   uint64_t smem_addr = 0, smem_data = 0;
 
   // 进核任务带着原包，出核任务带着要发出去的包。
   MessagePtr msg;
+
+  // 出核包里接进 payload 的段长之和：数据段（Cmem/Mmem）+ scale 段。
+  uint64_t PayloadBytes() const {
+    uint64_t n = 0;
+    for (auto const& s : seg) {
+      if (!s.valid) continue;
+      if (s.src_kind == SegEndpoint::kCmem ||
+          s.src_kind == SegEndpoint::kMmem ||
+          s.src_kind == SegEndpoint::kScale) {
+        n += s.len;
+      }
+    }
+    return n;
+  }
+  // 是否有 scale 段（出核造包据此打 scale_valid）。
+  bool HasScale() const {
+    for (auto const& s : seg) {
+      if (s.valid && (s.src_kind == SegEndpoint::kScale ||
+                      s.dst_kind == SegEndpoint::kScale)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 出核包要带的目的地址：数据段（Cmem/Mmem）的 CFG_ADDRi_DST，收方据此落点。
+  // dst 存的是带端点 tag 的软件值，剥掉 tag 才是收方认识的落点（收方按包头的
+  // dst_addr 当纯偏移用，tag 是本地存储译码的约定，不进包）。
+  uint64_t DataDst() const {
+    for (auto const& s : seg) {
+      if (s.valid && (s.src_kind == SegEndpoint::kCmem ||
+                      s.src_kind == SegEndpoint::kMmem)) {
+        return s.dst & kEpDataMask;
+      }
+    }
+    return 0;
+  }
 
   // 这个任务落在哪个通道上。
   uint64_t Lane() const {

@@ -5,13 +5,13 @@
 //
 // 这几张表都是 DTE 自己持有、按索引直接读的静态或半静态内容，收在一个模块里。
 //
-// Hmem：一次搬运的对象是一个 MSG 包，进了 core 就按内容拆成四份、各存各的地方。
-// 计算 core 上硬件包头与软件包头合并成一张表存这里，16 项按 stream_id 索引，
-// 每项 {core_mask 2 B, sw_header 16 B}，共 288 B，软件只配一个地址。硬件只改
-// 硬件包头的 core_mask，RV core 改软件包头。
+// Hmem：一次搬运的对象是一个 MSG 包，进了 core 就按内容拆成四段、各存各的地方。
+// 硬件包头与软件包头合并成一张表存这里，16 项按 stream_id 索引，每项
+// {core_mask 2 B, sw_header 16 B}，共 288 B，软件只配一个地址。硬件只改硬件包头
+// 的 core_mask，RV core 改软件包头。
 //
-// B core / R core 上包头存 Core Mem 的独立空间，走 Hmem 还是走 Core Mem 由
-// hw_header_addr 这个地址本身选，不另设开关。
+// 对齐后包头段（段 0）统一走 header_table（端点 tag 0x4），不再区分计算 core 与
+// B/R core 各自存哪。
 //
 // Fast LUT：从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE
 // Setup Time，目标压到 10T 以内。常规任务不走 RV core 的配置 kernel：task_id

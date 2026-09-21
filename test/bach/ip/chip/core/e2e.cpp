@@ -224,7 +224,7 @@ TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
   EXPECT_EQ(triggers, 1u);   // Router 收下包并通知了 TS
   EXPECT_EQ(cmds, 1u);       // TS 下发了这一笔给 DTE RV core
   EXPECT_GT(insts, 0u);      // RV core 真的跑了 kernel
-  EXPECT_GT(regw, 0u);       // kernel 真的写了 DTE 的寄存器
+  EXPECT_EQ(regw, 0u);       // datain 不写 DTE 寄存器：软件包头表随新模型去掉
   EXPECT_EQ(trigs, 0u);      // datain 这一笔不再自己配一趟搬运
   EXPECT_EQ(admits, 1u);     // 搬运只起了一笔，由 Header Parser 起
   EXPECT_GT(grants, 0u);     // 数据真的落进了 Core Mem

@@ -1,7 +1,7 @@
 // Completion RS 与 Done Pending：把劈开的两半合回来。
 //
 // 只在同一笔的 RD 与 WR 两侧都 drained 时才 Join；同一拍多个 Join 全部进 Done
-// Pending，由它串行化；向 TS 的报告是 exactly-once；task_last 与 no_ack 决定
+// Pending，由它串行化；向 TS 的报告是 exactly-once；ack_ts_en 与 no_ack 决定
 // 报不报。
 
 #include <gtest/gtest.h>
@@ -31,7 +31,7 @@ std::shared_ptr<Descriptor> Task(uint64_t commit_seq, uint64_t stream,
   d->commit_seq = commit_seq;
   d->stream_id = stream;
   d->task_id = task;
-  d->task_last = task_last;
+  d->ack_ts_en = task_last;
   d->no_ack = no_ack;
   return d;
 }
@@ -176,7 +176,7 @@ TEST(BachCompletionRs, ShareMemEntryIsWrittenBeforeTheReport) {
     CompletionRs rs(clk, "rs", 0, false);
     CompHarness h(clk, rs);
     auto d = Task(1, 5, 3);
-    d->smem_wr = true;
+    d->wr_sharemem_flag = true;
     d->smem_addr = 0x40;
     d->smem_data = 2;
     h.admits = {{2, d}};
@@ -194,7 +194,7 @@ TEST(BachCompletionRs, ShareMemEntryIsWrittenBeforeTheReport) {
   EXPECT_LT(smem[0].at, reports[0].at) << "写出去了才通知 TS";
 }
 
-// 不带 task_last 的那一笔照样写 shareMem，只是不通知 TS。
+// 不带 ack_ts_en 的那一笔照样写 shareMem，只是不通知 TS。
 TEST(BachCompletionRs, ShareMemWriteDoesNotNeedTaskLast) {
   std::vector<CompHarness::SmemWrite> smem;
   uint64_t reports = 0;
@@ -204,7 +204,7 @@ TEST(BachCompletionRs, ShareMemWriteDoesNotNeedTaskLast) {
     CompletionRs rs(clk, "rs", 0, false);
     CompHarness h(clk, rs);
     auto d = Task(1, 5, 3, /*task_last=*/false);
-    d->smem_wr = true;
+    d->wr_sharemem_flag = true;
     d->smem_addr = 0x80;
     d->smem_data = 1;
     h.admits = {{2, d}};
@@ -274,7 +274,7 @@ TEST(BachCompletionRs, ReportsExactlyOnce) {
   EXPECT_EQ(num, 1u) << "重复上报不该变成两笔完成";
 }
 
-// task_last 与 no_ack 决定报不报：拆成几笔时只有最后一笔通知 TS。
+// ack_ts_en 与 no_ack 决定报不报：拆成几笔时只有最后一笔通知 TS。
 TEST(BachCompletionRs, TaskLastAndNoAckDecideTheReport) {
   uint64_t not_last = 0, no_ack = 0, normal = 0;
   auto run = [](bool task_last, bool ack_off) {
