@@ -8,6 +8,10 @@
 //
 // 出队的闸门是在飞条数：最多两条相邻宏指令重叠，所以在飞数到 2 就不再放。
 // 重叠的那一条能不能真的往下走还要过 Scoreboard 那一关，这里只管上限。
+//
+// 队列表项自带一份动态参数快照（压入的就是那一条宏指令本身），快照窗口因此就
+// 摆在 ISQ 上：在场宏指令按年龄编号，0 是最老的一条，派发状态随编号一起给出。
+// sticky 那一份不在这个窗口里，它在 config_register 上随 error_info 锁存。
 
 #include <deque>
 #include <memory>
@@ -21,7 +25,7 @@
 namespace latch {
 namespace bach {
 
-class VuIsq : public BachModule {
+class VuIsq : public BachModule, public VuSnapshotWindow {
  public:
   VuIsq(ClockPtr clock, const std::string& name, VuConfigRegister& cr,
         uint64_t parent = 0, bool tick = true)
@@ -30,7 +34,9 @@ class VuIsq : public BachModule {
         in(std::make_shared<VuInstPort>(clock)),
         out(std::make_shared<VuInstPort>(clock)),
         depth(clock),
-        left(clock) {}
+        left(clock) {
+    cfg_reg.AttachSnapshotWindow(this);
+  }
 
   VuInstPort& In() { return *in; }
   void AttachIn(std::shared_ptr<VuInstPort> p) { in = std::move(p); }
@@ -42,6 +48,10 @@ class VuIsq : public BachModule {
     if (inflight > 0) --inflight;
     if (macro_left > 0) --macro_left;
     ++retire_cnt;
+    if (!window.empty()) {
+      cfg_reg.ClearNotDispatched(window.front().inst->seq);
+      window.pop_front();
+    }
   }
   uint64_t Retired() const { return retire_cnt; }
   // 被 ISQ 收下的宏指令笔数。收下这一拍就是它过门槛、真正开始算的那一拍 ——
@@ -60,6 +70,20 @@ class VuIsq : public BachModule {
   // 排队的加在飞的，就是软件读到的 macro_inst_left。
   uint64_t Left() const { return q.size() + inflight; }
 
+  // ── 快照窗口：在场宏指令按年龄编号，0 是最老的一条 ──
+  uint64_t SnapCount() const override { return window.size(); }
+  bool SnapDispatched(uint64_t age) const override {
+    if (age >= window.size() || !window[age].dispatched) return false;
+    // 被调度阶段拦下的那几条没进执行单元。
+    return !cfg_reg.NotDispatched(window[age].inst->seq);
+  }
+  uint64_t SnapTag(uint64_t age) const override {
+    return age < window.size() ? window[age].inst->tag : 0;
+  }
+  uint64_t SnapParam(uint64_t age, uint64_t idx) const override {
+    return age < window.size() ? window[age].inst->SnapParam(idx) : 0;
+  }
+
   bool Quiescent() const override { return q.empty() && inflight == 0; }
 
  protected:
@@ -76,6 +100,12 @@ class VuIsq : public BachModule {
   }
 
  private:
+  // 一条在场宏指令：本体加它派发没有。编号就是它在 window 里的位置。
+  struct Window {
+    std::shared_ptr<VuMacroInst> inst;
+    bool dispatched = false;
+  };
+
   void Drain() {
     if (holding) {
       if (!out->Ready()) {
@@ -95,6 +125,17 @@ class VuIsq : public BachModule {
     holding = true;
     out_seq = held->seq;
     out->Drive(held, out_seq);
+    MarkDispatched(held->seq);
+  }
+
+  // 出队是按发射顺序走的，所以最老的那一条没派发的就是刚出去的这一条。
+  void MarkDispatched(uint64_t seq) {
+    for (Window& w : window) {
+      if (!w.dispatched && w.inst->seq == seq) {
+        w.dispatched = true;
+        return;
+      }
+    }
   }
 
   void Accept() {
@@ -106,6 +147,7 @@ class VuIsq : public BachModule {
     auto inst = in->Inst();
     if (!inst) return;
     q.push_back(inst);
+    window.push_back({inst, false});
     ++macro_left;
     ++accept_cnt;
     start_stream = inst->stream_id;
@@ -129,6 +171,7 @@ class VuIsq : public BachModule {
   std::shared_ptr<VuInstPort> in, out;
 
   std::deque<std::shared_ptr<VuMacroInst>> q;
+  std::deque<Window> window;
   std::shared_ptr<VuMacroInst> held;
   bool holding = false;
   uint64_t out_seq = 0, last_seq = 0;

@@ -19,6 +19,7 @@
 //
 // 硬件不提供软件可见的缓冲队列：在飞的条数就等于级数，压不住就往上游报不收。
 
+#include <cmath>
 #include <deque>
 #include <memory>
 #include <string>
@@ -44,7 +45,8 @@ inline VuOperand const& VuSrcOf(VuFlow const& f, uint64_t sel) {
     case kSrcValu0: return f.valu[0];
     case kSrcValu1: return f.valu[1];
     case kSrcValu2: return f.valu[2];
-    case kSrcVsfu: return f.vsfu;
+    case kSrcVsfu0: return f.vsfu[0];
+    case kSrcVsfu1: return f.vsfu[1];
     case kSrcMexe: return f.mexe;
     case kSrcSexe0: return f.sexe[0];
     case kSrcSexe1: return f.sexe[1];
@@ -59,15 +61,43 @@ inline VuOperand const& VuSrcOf(VuFlow const& f, uint64_t sel) {
   }
 }
 
-// 本单元的运算掩码。mask_op 每个 VEXE 两位：00 不用、01 MRF_rd_p0、10 p1。
-// 位序是 VALU0、VALU1、VALU2、VSFU，掩码位为 0 的 element 不更新目的寄存器。
-// Mask 不能广播，一条宏指令内最多两处用 MRF。
-inline std::vector<bool> const& VuMaskOf(VuFlow const& f, uint64_t vexe) {
+// 本 VALU 的运算掩码。mask_op 里每个 VALU 一个字节，取值是 src_sel：00 不用、
+// 01 LU 的 ld.mask bypass（不占 MRF 读端口）、40 MRF_rd_p0、41 MRF_rd_p1。掩码
+// 位为 0 的 element 不更新目的寄存器。Mask 不能广播，一条宏指令内最多两处用
+// MRF，那个上限在 M3 查过。
+inline std::vector<bool> const& VuMaskOf(VuFlow const& f, uint64_t valu) {
   static const std::vector<bool> none;
-  uint64_t sel = f.uops.cfg.MaskSelOf(vexe);
-  if (sel == kVuMaskP0) return f.mrf_rd[0].mask;
-  if (sel == kVuMaskP1) return f.mrf_rd[1].mask;
+  uint64_t sel = f.uops.cfg.MaskSelOf(valu);
+  if (sel == kVuMaskSelLu) return f.lu.mask;
+  if (sel == kVuMaskSelMrfP0) return f.mrf_rd[0].mask;
+  if (sel == kVuMaskSelMrfP1) return f.mrf_rd[1].mask;
   return none;
+}
+
+// 两个收口位置——归约指令的输出 fd 与 SU 写出的输入阶段——的 NaN / Inf 处理。
+//
+// 替换模式（TYPE_VL.NAN_INF_REPLACE_EN=1）：NaN 换 NAN_REPLACE_VALUE、+Inf 换
+// INF_REPLACE_VALUE、−Inf 换取负的本值；非替换模式：NaN / Inf 原样透传，NaN 另
+// 置位 error_code.NAN_ERROR 并把上报单元记进 error_info。只在这两处收口，其余
+// 数值运算的输出不做替换。
+inline float VuSettleNanInf(float v, VuUops const& u, uint64_t unit,
+                            VuFlow& f) {
+  if (!std::isnan(v) && !std::isinf(v)) return v;
+  bool nan = std::isnan(v);
+  if (u.inst.NanInfReplaceEn()) {
+    if (nan) {
+      ++f.nan_replaced;
+      return VuReplaceValue(u.nan_replace, u.inst.Bf16());
+    }
+    ++f.inf_replaced;
+    float r = VuReplaceValue(u.inf_replace, u.inst.Bf16());
+    return std::signbit(v) ? -r : r;
+  }
+  if (nan && (f.error & kVuErrNan) == 0) {
+    f.error |= kVuErrNan;
+    f.err_unit = unit;
+  }
+  return v;
 }
 
 // 取一路的第 i 个元素。标量源在整条向量上广播。

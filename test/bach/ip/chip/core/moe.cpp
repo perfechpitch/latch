@@ -141,7 +141,7 @@ void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
   st(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
   st(0, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
   st(0, kVuSuOp, OpWord(uint64_t(SuOp::kNop)));
-  st(0, kVuPrfOp, kSrcVsfu);
+  st(0, kVuPrfOp, kSrcVsfu0);
   st(0, kVuStaticDupOffset + kVuVrfWtIndex, kVrfSig);
   st(0, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
 

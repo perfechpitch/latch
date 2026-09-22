@@ -7,10 +7,14 @@
 // FP32，高转低按 TYPE_VL.ROUND_MODE 舍入。MXFP8 的 scale 由本级按块算出来，
 // 地址硬件按一一映射推断，不参与软件编址。
 //
+// 写出的输入阶段是 NaN / Inf 替换与上报的两个收口位置之一（另一个是归约输出）：
+// 替换模式下先把 NaN 换成 NAN_REPLACE_VALUE、±Inf 换成 ±INF_REPLACE_VALUE，再
+// 转格式；非替换模式下 NaN 置位 error_code.NAN_ERROR，NaN / Inf 原样写出。
+//
 // 与 LU 对称：一次请求固定 1024 bit 不 burst，请求地址按 128 B 对齐，所以一条
 // 向量的两端可能落在块中间，那两个块要先读回来再改中间那一段。本级不读，改
 // 成按整块写并把两端补零，Core Mem 侧按 bytes 只取有效那一段。跨 128 B 边界的
-// 拆分由本级完成。
+// 拆分由本级完成。地址不满足访问格式的对齐要求时置位 CM_ADDR_ERROR。
 
 #include <deque>
 #include <memory>
@@ -95,8 +99,22 @@ class VuSu : public BachModule {
     uint64_t vl = flow->SegLen();
     numeric::RoundMode mode = inst.Round();
 
+    scale_bytes.clear();
+    // 分段走时这一段落在整条的哪一截：按 CM 上的元素宽度换算。不分段的那一档
+    // seg_base 是 0，地址就是整条的起点。
+    uint64_t addr = inst.StAddr() + flow->seg_base *
+                                        numeric::ElemBitsOf(CmType(op)) / 8;
+    // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。不合规置 CM_ADDR_ERROR，
+    // 硬件到这一步就把这笔 Store 丢弃、请求不发出；模型照发不误（见 vu.md 的
+    // 「取舍」一节），只把异常位记下来。
+    uint64_t grain = op == SuOp::kStSFp32 ? kVuScalarAlign : kVuCmAlign;
+    if (addr % grain != 0) {
+      flow->error |= kVuErrCmAddr;
+      flow->err_unit = kVuErrUnitSu;
+    }
+
     std::vector<uint8_t> body;
-    if (op == SuOp::kStVmMask) {
+    if (op == SuOp::kStMask) {
       // Mask 按 8 B 为单位搬运。
       body.assign(((vl + 63) / 64) * 8, 0);
       std::vector<bool> const& m = flow->su_in.mask;
@@ -104,13 +122,19 @@ class VuSu : public BachModule {
         if (m[i]) body[i / 8] = uint8_t(body[i / 8] | (1u << (i % 8)));
       }
     } else if (op == SuOp::kStSFp32) {
-      uint32_t b = numeric::BitsOf(flow->su_in.scalar);
+      // 标量也过一遍替换 / 上报，再原样写出。
+      float s = VuSettleNanInf(flow->su_in.scalar, uops, kVuErrUnitSu, *flow);
+      uint32_t b = numeric::BitsOf(s);
       body.resize(4);
       for (int k = 0; k < 4; ++k) body[k] = uint8_t((b >> (8 * k)) & 0xFFu);
     } else {
       numeric::DataType t = CmType(op);
       std::vector<float> v = flow->su_in.vec;
       v.resize(vl, 0.0f);
+      // 写出的输入阶段：先按替换规则处理 NaN / Inf，再转格式。
+      for (uint64_t i = 0; i < v.size(); ++i) {
+        v[i] = VuSettleNanInf(v[i], uops, kVuErrUnitSu, *flow);
+      }
       // 只有 MXFP8 这一档带 scale：块内取绝对值最大的那个定阶。FP8_e4m3 是
       // 定点意义上的裸格式，没有块 scale。
       std::vector<float> scale;
@@ -121,14 +145,6 @@ class VuSu : public BachModule {
       body = numeric::Encode(t, v, scale, mode);
       scale_bytes = numeric::EncodeScale(t, scale);
     }
-
-    // 分段走时这一段落在整条的哪一截：按 CM 上的元素宽度换算。不分段的那一档
-    // seg_base 是 0，地址就是整条的起点。
-    uint64_t addr = inst.StAddr() + flow->seg_base *
-                                        numeric::ElemBitsOf(CmType(op)) / 8;
-    // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。
-    uint64_t grain = op == SuOp::kStSFp32 ? kVuScalarAlign : kVuCmAlign;
-    if (addr % grain != 0) flow->error |= kVuErrCmAddr;
 
     // 请求按 128 B 块对齐，一条向量的两端可能落在块中间：数据前面补到块边界，
     // 每一块的写请求再带上块内有效区间，两头属于相邻数据的字节不动。

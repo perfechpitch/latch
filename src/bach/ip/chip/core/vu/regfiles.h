@@ -34,14 +34,11 @@ class VuRegfiles {
   std::vector<float> ReadVrf(uint64_t base, uint64_t count, bool bf16) const {
     std::vector<float> out;
     out.reserve(count);
-    uint64_t off = base * kVuVrfEntryBytes;
     uint64_t step = bf16 ? 2 : 4;
+    uint64_t per = kVuVrfEntryBytes / step;
     for (uint64_t i = 0; i < count; ++i) {
-      uint64_t at = off + i * step;
-      if (at + step > vrf.size()) {
-        out.push_back(0.0f);
-        continue;
-      }
+      uint64_t e = (base + i / per) % kVuVrfEntry;
+      uint64_t at = e * kVuVrfEntryBytes + (i % per) * step;
       if (bf16) {
         uint16_t h = uint16_t(vrf[at]) | (uint16_t(vrf[at + 1]) << 8);
         out.push_back(numeric::FromBf16(h));
@@ -56,11 +53,11 @@ class VuRegfiles {
 
   void WriteVrf(uint64_t base, std::vector<float> const& v, bool bf16,
                 numeric::RoundMode mode) {
-    uint64_t off = base * kVuVrfEntryBytes;
     uint64_t step = bf16 ? 2 : 4;
+    uint64_t per = kVuVrfEntryBytes / step;
     for (uint64_t i = 0; i < v.size(); ++i) {
-      uint64_t at = off + i * step;
-      if (at + step > vrf.size()) break;
+      uint64_t e = (base + i / per) % kVuVrfEntry;
+      uint64_t at = e * kVuVrfEntryBytes + (i % per) * step;
       if (bf16) {
         uint16_t h = numeric::NarrowBf16(v[i], mode);
         vrf[at] = uint8_t(h & 0xFFu);
@@ -82,7 +79,8 @@ class VuRegfiles {
     std::vector<bool> out;
     out.reserve(count);
     for (uint64_t i = 0; i < count; ++i) {
-      uint64_t bit = (entry + i / per) * 64 + (i % per);
+      uint64_t e = (entry + i / per) % kVuMrfEntry;
+      uint64_t bit = e * 64 + (i % per);
       uint64_t at = bit / 8;
       out.push_back(at < mrf.size() && ((mrf[at] >> (bit % 8)) & 1u) != 0);
     }
@@ -92,7 +90,8 @@ class VuRegfiles {
   void WriteMrf(uint64_t entry, std::vector<bool> const& m, bool bf16) {
     uint64_t per = bf16 ? 64 : 32;
     for (uint64_t i = 0; i < m.size(); ++i) {
-      uint64_t bit = (entry + i / per) * 64 + (i % per);
+      uint64_t e = (entry + i / per) % kVuMrfEntry;
+      uint64_t bit = e * 64 + (i % per);
       uint64_t at = bit / 8;
       if (at >= mrf.size()) break;
       uint8_t one = uint8_t(1u << (bit % 8));
@@ -123,12 +122,24 @@ class VuRegfiles {
   // ── 后门 ──
   //
   // reg_file_addr / reg_file_data 这条通路与宏指令异步，由软件保证访问期间目标
-  // RF 不被在飞的宏指令读写，硬件不查。地址在 0x2000 起的 DSA-RF 区内，按
-  // VRF、MRF、SRF 依次排。
-  uint64_t Backdoor(uint64_t off) const {
-    std::vector<uint8_t> const* mem = nullptr;
-    uint64_t at = 0;
-    if (!Locate(off, mem, at)) return 0;
+  // RF 不被在飞的宏指令读写，硬件不查。reg_file_addr.RF_SEL 选三块中的哪一块，
+  // RF_ADDR 是这一块内的字节地址，低 2 位被硬件忽略。
+  //
+  // 每块容量都是 2 的幂，所以越界回绕就是按容量取模，与硬件「地址在该 RF 容量
+  // 内回绕」等价；置不置 RF_IDX_ERROR 由调用方判。
+  static uint64_t RfBytes(uint64_t sel) {
+    switch (sel) {
+      case kVuRfSelVrf: return kVuVrfBytes;
+      case kVuRfSelMrf: return kVuMrfBytes;
+      case kVuRfSelSrf: return kVuSrfBytes;
+      default: return 0;
+    }
+  }
+
+  uint64_t ReadBackdoor(uint64_t sel, uint64_t addr) const {
+    std::vector<uint8_t> const* mem = RfOf(sel);
+    if (!mem) return 0;
+    uint64_t at = Wrap(sel, addr);
     uint32_t b = 0;
     for (int k = 0; k < 4; ++k) {
       if (at + k < mem->size()) b |= uint32_t((*mem)[at + k]) << (8 * k);
@@ -136,10 +147,10 @@ class VuRegfiles {
     return b;
   }
 
-  void WriteBackdoor(uint64_t off, uint64_t v) {
-    std::vector<uint8_t> const* mem = nullptr;
-    uint64_t at = 0;
-    if (!Locate(off, mem, at)) return;
+  void WriteBackdoor(uint64_t sel, uint64_t addr, uint64_t v) {
+    std::vector<uint8_t> const* mem = RfOf(sel);
+    if (!mem) return;
+    uint64_t at = Wrap(sel, addr);
     auto& target = const_cast<std::vector<uint8_t>&>(*mem);
     for (int k = 0; k < 4; ++k) {
       if (at + k < target.size()) target[at + k] = uint8_t((v >> (8 * k)) & 0xFFu);
@@ -147,26 +158,18 @@ class VuRegfiles {
   }
 
  private:
-  bool Locate(uint64_t off, std::vector<uint8_t> const*& mem,
-              uint64_t& at) const {
-    if (off < kVuVrfBytes) {
-      mem = &vrf;
-      at = off;
-      return true;
+  std::vector<uint8_t> const* RfOf(uint64_t sel) const {
+    switch (sel) {
+      case kVuRfSelVrf: return &vrf;
+      case kVuRfSelMrf: return &mrf;
+      case kVuRfSelSrf: return &srf;
+      default: return nullptr;
     }
-    off -= kVuVrfBytes;
-    if (off < kVuMrfBytes) {
-      mem = &mrf;
-      at = off;
-      return true;
-    }
-    off -= kVuMrfBytes;
-    if (off < kVuSrfBytes) {
-      mem = &srf;
-      at = off;
-      return true;
-    }
-    return false;
+  }
+
+  static uint64_t Wrap(uint64_t sel, uint64_t addr) {
+    uint64_t bytes = RfBytes(sel);
+    return bytes == 0 ? 0 : (addr & (bytes - 1));
   }
 
   std::vector<uint8_t> vrf, mrf, srf;

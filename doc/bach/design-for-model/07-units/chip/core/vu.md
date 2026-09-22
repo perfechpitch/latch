@@ -10,6 +10,9 @@
 
 **对应设计**：
 
+* VU-DSA MAS：[架构说明](https://pcng0ddyhlxs.feishu.cn/wiki/QRZLwTnwIiEnfnkujhecFGh1nAh)
+* VU-DSA 微操作与编码方案：[指令清单](https://pcng0ddyhlxs.feishu.cn/wiki/Fj2HwFN9oig1CVk03BEcl3tgnlh)
+* VU-DSA 寄存器整理：[寄存器位域](https://pcng0ddyhlxs.feishu.cn/wiki/L5acwpTZwiPnRyk5dbRckoWQnwb)
 * 《执行单元与存储》“VU DSA（向量单元）”全部小节
 * 《软件栈》各 VU 算子的宏指令拆分
 
@@ -22,7 +25,9 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 一条宏指令由两半组成：
 
 * **静态配置**：8 组模板之一，定各执行单元的连接与 op
-* **动态参数**：地址、索引、VL / 精度 / 舍入
+* **动态参数**：地址、索引、VL / 精度 / 舍入 / NaN-Inf 替换
+
+寄存器分六个 Block：动态参数 `0x0000`（12 个）、静态配置组 `N*0x100 + 0x1000`（8 组各 23 个）、全局静态 `0x1F00`（2 个）、DSA-RF 后门 `0x2000`（2 个）、状态 `0x3000`（12 个）、Profile `0x4000`（65 个）。
 
 一条宏指令怎么跑起来：VU-Core 写动态参数，再写 `macro_inst_trigger` → 硬件锁存并与静态配置的指针打包压入 ISQ → pipe_ctrl 展开成各单元的微指令，Scoreboard 管 VRF / MRF / SRF 依赖 → 最多两条相邻宏指令重叠。从 CM 读入、多级流水计算、写回 CM 的全过程由硬件自己走完，VU-Core 不感知周期级的控制细节。
 
@@ -38,8 +43,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="172.0" y="148.0" font-size="8.5" fill="#475569">8 组静态配置模板（默认全 0）+ 12 个动态参数寄存器</text>
 <text x="172.0" y="161.5" font-size="8.5" fill="#475569">macro_inst_trigger 是唯一的启动寄存器，写一次执行一次</text>
 <text x="172.0" y="175.0" font-size="8.5" fill="#475569">　字段：CONFIG_IDX · STATIC_DYNAMIC_MASK · EVENT_EN</text>
-<text x="172.0" y="188.5" font-size="8.5" fill="#475569">　· STREAM_ID_OVERRIDE · DATA_BROADCAST · MACRO_INST_FENCE</text>
-<text x="172.0" y="202.0" font-size="8.5" fill="#475569">TYPE_VL 一个寄存器含 VL、DATA_TYPE、ROUND_MODE 三个字段</text>
+<text x="172.0" y="188.5" font-size="8.5" fill="#475569">　· STREAM_ID_OVERRIDE · MACRO_INST_FENCE · CM_FENCE</text>
+<text x="172.0" y="202.0" font-size="8.5" fill="#475569">TYPE_VL 一个寄存器含 VL、DATA_TYPE、ROUND_MODE、NAN_INF_REPLACE_EN</text>
 <text x="172.0" y="215.5" font-size="8.5" fill="#475569">stream_id 与 task_id 没有寄存器，软件不配：经 dsa_ids 从 VU RV</text>
 <text x="172.0" y="229.0" font-size="8.5" fill="#475569">　core 的 CSR 直连过来，硬件在写 trigger 那一拍自动采样</text>
 <text x="172.0" y="242.5" font-size="8.5" fill="#475569">静态配置改写：目标组正被未完成的宏指令引用时，硬件把这次</text>
@@ -67,9 +72,9 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="922.0" y="202.0" font-size="8.5" fill="#475569">　后续宏指令无需等前一条完全结束即可重叠发射微操作</text>
 <text x="922.0" y="215.5" font-size="8.5" fill="#475569">　最多两条相邻宏指令重叠</text>
 <text x="922.0" y="229.0" font-size="8.5" fill="#475569">CM 访存依赖不追踪：存在冲突的宏指令之间须由软件置</text>
-<text x="922.0" y="242.5" font-size="8.5" fill="#475569">　MACRO_INST_FENCE = 1，等此前全部宏指令完成后才派发</text>
-<text x="922.0" y="256.0" font-size="8.5" fill="#475569">含 Vector 数据广播的宏指令须置 DATA_BROADCAST，它不参与</text>
-<text x="922.0" y="269.5" font-size="8.5" fill="#475569">　Scoreboard 乱序调度，等除 CM-Load 外的前序宏指令全完成才派发</text>
+<text x="922.0" y="242.5" font-size="8.5" fill="#475569">　MACRO_INST_FENCE=1（等此前全部完成）或 CM_FENCE=1（只等 CM 访问）</text>
+<text x="922.0" y="256.0" font-size="8.5" fill="#475569">含 Vector 数据广播的宏指令必须置 MACRO_INST_FENCE：同一个源</text>
+<text x="922.0" y="269.5" font-size="8.5" fill="#475569">　同时供给两个及以上消费者就是广播，消费者含 RF 写端口</text>
 <text x="922.0" y="283.0" font-size="8.5" fill="#475569">配平计算依赖树是软件的责任：硬件只提供 bypass 与广播，</text>
 <text x="922.0" y="296.5" font-size="8.5" fill="#475569">　不提供软件可见的缓冲队列</text>
 <polygon points="189,44 300,44 291,74 180,74" fill="#f8fafc" stroke="#374151"/>
@@ -109,7 +114,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="422.0" y="709.0" font-size="8.5" fill="#475569">　写区间不重叠；来源只能是 LU 或 VALU0/1/2/VSFU0/1，</text>
 <text x="422.0" y="722.5" font-size="8.5" fill="#475569">　其余置 CFG_ERROR</text>
 <text x="422.0" y="736.0" font-size="8.5" fill="#475569">VALU1 的归约标量结果走 SRF 虚拟写口</text>
-<text x="422.0" y="749.5" font-size="8.5" fill="#475569">MRF 唯一写口的来源是 LU 的 ld.vm_mask、VALU0 的</text>
+<text x="422.0" y="749.5" font-size="8.5" fill="#475569">MRF 唯一写口的来源是 LU 的 ld.mask、VALU0 的</text>
 <text x="422.0" y="763.0" font-size="8.5" fill="#475569">　比较类与 vfclass.mv、MEXE 三者之一，同一宏指令内</text>
 <text x="422.0" y="776.5" font-size="8.5" fill="#475569">　不能同时写回</text>
 <text x="422.0" y="790.0" font-size="8.5" fill="#475569">SRF 6 个写口按 PRF_op.SRF_WT_EN 位图使能：</text>
@@ -163,9 +168,9 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="1122.0" y="903.0" font-size="8.5" fill="#475569">从 CM 读向量 / Mask / 标量</text>
 <text x="1122.0" y="916.5" font-size="8.5" fill="#475569">格式转换 FP8_e4m3 / MXFP8 / BF16</text>
 <text x="1122.0" y="930.0" font-size="8.5" fill="#475569">　→ BF16 / FP32，精确扩宽</text>
-<text x="1122.0" y="943.5" font-size="8.5" fill="#475569">ld.fp32.vm 在 DATA_TYPE=BF16 下按</text>
+<text x="1122.0" y="943.5" font-size="8.5" fill="#475569">ld.fp32.v 在 DATA_TYPE=BF16 下按</text>
 <text x="1122.0" y="957.0" font-size="8.5" fill="#475569">　TYPE_VL.ROUND_MODE 把 FP32 窄化为</text>
-<text x="1122.0" y="970.5" font-size="8.5" fill="#475569">　BF16，结果为 NaN 时置 DATA_CVT_ERROR</text>
+<text x="1122.0" y="970.5" font-size="8.5" fill="#475569">　BF16，上溢写饱和值、下溢写 0，Inf / NaN 透传</text>
 <text x="1122.0" y="984.0" font-size="8.5" fill="#475569">CM 侧数据格式：FP8_e4m3 / MXFP8 /</text>
 <text x="1122.0" y="997.5" font-size="8.5" fill="#475569">　BF16 / FP32</text>
 <text x="1122.0" y="1011.0" font-size="8.5" fill="#475569">跨 128 B 边界的拆分与重组由 LU 完成</text>
@@ -227,6 +232,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="900" y="332" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">写回 VRF / MRF / SRF</text>
 <text x="20" y="1162" font-size="10.5" fill="#374151" text-anchor="start">单条宏指令的容量上限：CM 端口 1 Load + 1 Store · VRF 2R+2W · MRF 2R+1W · SRF 8 逻辑读 / 6 逻辑写 · 每个执行单元各 1 次（SEXE 例外，同一物理单元 3 次串行迭代）。SEXE 的操作数来自 SRF、VALU1 归约结果或前一次迭代（图中省略连线）。</text>
 <text x="20" y="1184" font-size="10.5" fill="#374151" text-anchor="start">向量位宽 1024 bit/cycle（32 个 FP32 或 64 个 BF16）；向量长度 1～16384 element，单条宏指令内完成；内部计算精度 FP32 或 BF16，单条宏指令内不支持混合精度。</text>
+<text x="20" y="1206" font-size="10.5" fill="#374151" text-anchor="start">掩码的 3 个来源：ld.mask 的 bypass（不占 MRF 端口）、MRF_rd_p0、MRF_rd_p1；每个来源一份掩码只供给一个消费者。VSFU 没有掩码字段。</text>
 </svg>
 ```
 
@@ -242,16 +248,18 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | - | - |
 | F1 | 8 组静态配置模板，默认全 0；软件需要的组数不超过 8 时运行中无需改写 |
 | F2 | 12 个动态参数寄存器（0x0000～0x002C）：`macro_inst_trigger`、`TYPE_VL`、`LD_addr`、`ST_addr`、`VRF_rd_index`、`VRF_wt_index`、`MRF_rd_index`、`MRF_wt_index`、`SRF_rd_index_0/1`、`SRF_wt_index_0/1`。静态模板区从 `N×0x100 + 0x1000` 起。`dsawi` 的立即数是 16 bit 字节地址、覆盖 0～64K，两个区都能直接用立即数寻址 |
+| F2a | 全局静态区 `0x1F00` 两个寄存器：`INF_REPLACE_VALUE`、`NAN_REPLACE_VALUE`。归属所有宏指令、不随 `CONFIG_IDX` 切换，也不参与 `STATIC_DYNAMIC_MASK`，配合 `TYPE_VL.NAN_INF_REPLACE_EN` 使用 |
+| F2b | 状态区 `0x3000` 共 12 个寄存器：`macro_inst_left`、`status`、`error_code`、`error_info`、`snapshot_addr`、`snapshot_data` 与 6 个错误上下文寄存器。其中只有 `snapshot_addr` 是软件写进去生效的；其余由硬件维护，写访问不报错也不改变值 |
 | F3 | `macro_inst_trigger` 是唯一的启动寄存器，写一次执行一次；两次写之间没有其他配置也启动两次 |
-| F4 | trigger 的六个字段：`CONFIG_IDX`（选静态配置组）、`STATIC_DYNAMIC_MASK`（逐参数选静态模板值还是动态寄存器值）、`EVENT_EN`、`STREAM_ID_OVERRIDE`、`DATA_BROADCAST`、`MACRO_INST_FENCE` |
-| F5 | 宏指令的 `stream_id` 有两个来源：`STREAM_ID_OVERRIDE` 为 `0` 时沿用 VU-Core CSR 中自带的那一个，为 `1` 时改用 `macro_inst_trigger.STREAM_ID` 字段（4 bit，共 16 个 stream）给出的值，用来访问不属于本 task 的 stream。`task_id` 始终取 VU-Core CSR 那一份，不受这一位影响。`dsa_done` 回给 TS 的就是这一组 |
+| F4 | trigger 的六个字段：`CONFIG_IDX`（选静态配置组）、`STATIC_DYNAMIC_MASK`（逐参数选静态模板值还是动态寄存器值）、`EVENT_EN`、`STREAM_ID_OVERRIDE`、`MACRO_INST_FENCE`、`CM_FENCE` |
+| F5 | 宏指令的 `stream_id` 有两个来源：`STREAM_ID_OVERRIDE` 为 `0` 时沿用 VU-Core CSR 中自带的那一个，为 `1` 时改用 `macro_inst_trigger.STREAM_ID` 字段（4 bit，共 16 个 stream）给出的值，用来访问不属于本 task 的 stream。`task_id` 始终取 VU-Core CSR 那一份，不受这一位影响。`dsa_done` 回给 TS 的就是这一组。VU-DSA 内部不按 stream 划分顺序域：所有宏指令一律按发射顺序进 ISQ 并按序派发，`STREAM_ID` 只作 TS Event 的标签 |
 | F5a | VU-Core CSR 那一组从 VU RV core 经 `dsa_ids` 直连过来，每拍有效，写 `macro_inst_trigger` 那一拍采样。**`task_id` 不是软件配置项**：VU 的寄存器空间里没有它，软件写不进来，硬件在采样那一拍自动填进宏指令描述符，`dsa_done` 回 TS 时原样带出 |
-| F6 | `TYPE_VL` 一个寄存器含 VL、DATA_TYPE、ROUND_MODE 三个字段，随 `STATIC_DYNAMIC_MASK.bit[0]` 一起在静态模板与动态寄存器之间切换 |
+| F6 | `TYPE_VL` 一个寄存器含 VL、DATA_TYPE、ROUND_MODE、NAN_INF_REPLACE_EN 四个字段，随 `STATIC_DYNAMIC_MASK.bit[0]` 一起在静态模板与动态寄存器之间切换，不能只让其中一个走动态通路 |
 | F7 | 静态配置的改写规则：目标组正被未完成的宏指令引用时，硬件把这次配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效、解除阻塞 |
 | F8 | in-flight 的宏指令始终按改写前的配置执行完毕 |
 | F9 | 三条配置通路（VU-Core / Ctrl-NOC / Debug Module）共享同一份寄存器视图、权限一致，流控彼此独立；VU-Core 的配置写因静态配置组被引用而阻塞时，Debug Module 与 Ctrl-NOC 仍能读出现场 |
-| F10 | 全部寄存器的全部位域均为 RW。`macro_inst_left`、`status` 与 Profile 计数器由硬件维护，软件写入无效、不报错 |
-| F11 | 经 `reg_file_addr` / `reg_file_data` 可读写 VRF / MRF / SRF，该通路与宏指令异步，须由软件保证访问期间目标 RF 不被 in-flight 宏指令读写 |
+| F10 | 全部寄存器的全部位域均为 RW。`macro_inst_left`、`status`、`error_code`、`error_info`、`snapshot_data`、6 个错误上下文寄存器与 Profile 计数器由硬件维护，软件写入无效、不报错；状态区里只有 `snapshot_addr` 写进去生效 |
+| F11 | 经 `reg_file_addr` / `reg_file_data` 可读写 VRF / MRF / SRF：`RF_SEL`（`[17:16]`）选哪一块，`RF_ADDR`（`[15:0]`）是那一块内的字节地址、低 2 位被忽略。该通路与宏指令异步，须由软件保证访问期间目标 RF 不被 in-flight 宏指令读写。地址越过该 RF 的容量时回绕并置位 `RF_IDX_ERROR`，`RF_SEL=11` 没有对应的 RF、同样置位且该次访问被丢弃 |
 
 ### ISQ
 
@@ -260,7 +268,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F12 | VU-Core 写完动态参数后写 `macro_inst_trigger`，硬件锁存当前动态参数，与对应静态配置的指针打包压入内部执行队列 |
 | F13 | 队列深度 8（待定） |
 | F14 | `status` 寄存器实时回传 `BUSY`、`ISQ_FULL`、`ISQ_EMPTY`、`ERROR_FLAG`；判断全部宏指令是否完成用 `macro_inst_left` 或 `BUSY` |
-| F15 | 读 `error_code` 时其全部异常位清零并同时清 `status.ERROR_FLAG`；Profile 计数器只能用 `profile_ctrl.CLEAR` 清零 |
+| F15 | 读 `error_code` 时其全部异常位清零，同时清 `status.ERROR_FLAG`、`error_info`、sticky 快照与 6 个错误上下文寄存器；Profile 计数器只能用 `profile_ctrl.CLEAR` 清零 |
+| F15c | 异常上下文一律首错锁存：`error_info` 给出首个置位异常的 `USER_ID` / `STREAM_ID` / `CONFIG_IDX` / `ERR_UNIT` / `FIRST_ERR` / `VALID`，sticky 快照（`snapshot_addr.SNAP_SEL=0xFF`）给出那一条宏指令的 12 个动态参数。定位顺序恒为「先读上下文、最后读 `error_code`」 |
 
 ### pipe_ctrl 与 Scoreboard
 
@@ -271,20 +280,21 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F16 | 把宏指令展开成各执行单元的微指令 |
 | F17 | Scoreboard 对 VRF / MRF / SRF 实时读写状态追踪，检测 RAW / WAR / WAW |
 | F18 | 重叠执行：前后宏指令无数据依赖、无执行资源冲突时，后续宏指令无需等前一条完全结束即可重叠发射微操作，最多两条相邻宏指令重叠 |
-| F19 | CM 访存依赖不追踪。存在冲突的宏指令之间须由软件置 `MACRO_INST_FENCE = 1`，该宏指令等此前全部宏指令完成后才开始派发 |
-| F20 | 含 Vector 数据广播的宏指令须置 `DATA_BROADCAST`，它不参与 Scoreboard 乱序调度，等除 CM-Load 之外的前序宏指令全部完成后才派发 |
-| F21 | 单条宏指令的容量上限：CM 端口 1 次 Load + 1 次 Store（仅支持单一基地址上的连续地址访问，scale 区不参与软件编址，MXFP8 时 scale 地址由硬件按一一映射推断）；VRF 2R + 2W；MRF 2R + 1W；SRF 8 逻辑读 / 6 逻辑写；每个执行单元 1 次，SEXE 例外 |
+| F19 | CM 访存依赖不追踪。存在冲突的宏指令之间须由软件置 `MACRO_INST_FENCE = 1`（等此前全部宏指令完成）或 `CM_FENCE = 1`（只等前序宏指令的 CM 访问——LU 读的数据已取回、SU 写已写响应齐——纯计算的前序不等待） |
+| F20 | 含 Vector 数据广播的宏指令必须置 `MACRO_INST_FENCE`：同一个源同时供给两个及以上消费者就是广播，消费者包括执行单元与寄存器堆写端口。广播由软件判定、硬件不检测 |
+| F21 | 单条宏指令的容量上限：CM 端口 1 次 Load + 1 次 Store（仅支持单一基地址上的连续地址访问，scale 区不参与软件编址，MXFP8 时 scale 地址由硬件按一一映射推断）；VRF 2R + 2W；MRF 2R + 1W；SRF 8 逻辑读 / 6 逻辑写；每个执行单元 1 次，SEXE 例外。掩码一条宏指令内最多 3 处（`ld.mask` 的 bypass 不占 MRF 读端口），其中取 MRF 的至多 2 处且两个不同的消费者必须分选 p0 与 p1。违反合法性检查置 `CFG_ERROR` 并放弃派发：本条不进执行单元，但仍走空配置退休，以归还 in-flight 计数与静态组引用 |
 | F22 | 配平计算依赖树是软件的责任：硬件在执行单元之间只提供 bypass 与广播，不提供软件可见的缓冲队列。级数差一级时用 VALU2 的 `vmv.v.v` 当延迟对齐缓冲；级数差超出可配平范围时拆成多条宏指令，由 Scoreboard 经 RF 传中间结果 |
-| F23 | 各执行单元 `*_op.OPCODE` 的未分配编码以及本单元不支持的编码一律按无操作处理，与 `0x00` 等效，不置位任何异常；`error_code` 没有 ILLEGAL_OPCODE 位 |
+| F23 | 各执行单元 `*_op.OPCODE` 的未分配编码以及本单元不支持的编码一律按无操作处理，与 `0x00` 等效，不置位任何异常；`error_code` 没有 ILLEGAL_OPCODE 位。该单元的其余字段一并被忽略：不检查编码、不占端口、置任何值都不置位 `CFG_ERROR` |
+| F23a | `error_code` 九位：`REG_ADDR_ERROR`、`CFG_ERROR`、`RF_IDX_ERROR`、`CM_ADDR_ERROR`、`NAN_ERROR`、`VRF_ECC_ERROR`、`MRF_ECC_ERROR`、`SRF_ECC_ERROR`、`CM_ECC_ERROR`。多个异常可同时置位，软件应逐位检查；置位异常不中断后续宏指令的发射与执行 |
 
 ### LU 与 SU
 
 | 编号 | 功能 |
 | - | - |
-| F24 | LU 6 条指令：从 CM 读向量 / Mask / 标量；格式转换 FP8_e4m3 / MXFP8 / BF16 → BF16 / FP32 为精确扩宽 |
-| F25 | `ld.fp32.vm` 在 DATA_TYPE=BF16 下按 `TYPE_VL.ROUND_MODE` 把 FP32 窄化为 BF16，结果为 NaN 时置 `DATA_CVT_ERROR` |
-| F26 | SU 6 条指令：向 CM 写回；格式转换 BF16 / FP32 → FP8_e4m3 / MXFP8 / BF16 / FP32，高转低按 `TYPE_VL.ROUND_MODE` 舍入 |
-| F27 | CM 接口读写各一条独立通路，一次请求固定 1024 bit，不支持 burst；地址 32 bit 按 128 B 对齐，向量与掩码按 32 B 对齐、标量按 4 B 对齐 |
+| F24 | LU 6 条指令：`ld.fp8e4m3.v` / `ld.mxfp8.v` / `ld.bf16.v` / `ld.fp32.v` / `ld.mask` / `ld.s.fp32`，从 CM 读向量 / Mask / 标量；低转高的格式转换 FP8_e4m3 / MXFP8 / BF16 → BF16 / FP32 为精确扩宽 |
+| F25 | `ld.fp32.v` 在 DATA_TYPE=BF16 下按 `TYPE_VL.ROUND_MODE` 把 FP32 窄化为 BF16：有限值上溢写饱和值、下溢写 0，Inf / NaN 原样透传，均不置位 |
+| F26 | SU 6 条指令：`st.fp8e4m3.v` / `st.mxfp8.v` / `st.bf16.v` / `st.fp32.v` / `st.mask` / `st.s.fp32`，向 CM 写回；高转低按 `TYPE_VL.ROUND_MODE` 舍入，MXFP8 的块共享 scale 另按 `SU_op.MXFP8_SCALE_ROUND` 取整 |
+| F27 | CM 接口读写各一条独立通路，一次请求固定 1024 bit，不支持 burst；地址 32 bit 按 128 B 对齐，向量与掩码按 32 B 对齐、标量按 4 B 对齐。违反访问格式的对齐要求置 `CM_ADDR_ERROR` |
 | F28 | 跨 128 B 边界的拆分与重组由 LU / SU 完成 |
 | F29 | CM 数据信号 1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 有效 |
 
@@ -292,36 +302,37 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 
 | 编号 | 功能 |
 | - | - |
-| F30 | SMUX 做源路由：执行单元之间允许 bypass 与广播，且不消耗 RF 端口 |
+| F30 | SMUX 做源路由：执行单元之间允许 bypass 与广播，且不消耗 RF 端口。源的编码是全局 `src_sel`：`0x01` LU、`0x02`～`0x04` VALU0/1/2、`0x05`/`0x06` VSFU0/VSFU1、`0x10` MEXE、`0x20`～`0x22` SEXE 三次迭代、`0x30`/`0x31` VRF 读端口、`0x40`/`0x41` MRF 读端口、`0x50`～`0x57` SRF 读端口 |
 | F31 | DMUX 做结果路由：写回 VRF / MRF / SRF 或交给 SU |
-| F32 | VRF 两个写口须指向不同执行单元，同时使能时写区间不重叠；来源只能是 LU 或 VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1，其余置 `CFG_ERROR` |
+| F32 | VRF 两个写口须指向不同执行单元，同时使能时写区间不重叠；来源只能是 LU 或 VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1（`0x06` 仅 FP32），其余置 `CFG_ERROR` |
 | F33 | VRF 允许读写寄存器完全重叠或完全不重叠，不允许部分重叠。硬件不检查，由软件保证 |
 | F34 | VALU1 的归约标量结果走 SRF 虚拟写口 |
-| F35 | MRF 唯一写口的来源是 LU 的 `ld.vm_mask`、VALU0 的比较类与 `vfclass.mv`、MEXE 三者之一，同一宏指令内不能同时写回；Mask 不能广播，一条宏指令内最多两处使用 Mask |
+| F35 | MRF 唯一写口的来源是 LU 的 `ld.mask`、VALU0 的比较类与 `vfclass.mv`、MEXE 三者之一，同一宏指令内不能同时写回；Mask 不能广播，一个读端口只服务一个消费者，两个不同的消费者必须分选 MRF_rd_p0 与 MRF_rd_p1（MEXE 的两个操作数取相同编码时算 1 个） |
 | F36 | SRF 6 个写口按 `PRF_op.SRF_WT_EN` 位图使能：bit0 LU、bit1 VALU1、bit2 MEXE、bit3～5 SEXE0/1/2 |
 
 ### 执行单元
 
 | 编号 | 功能 |
 | - | - |
-| F37 | VALU0（29 条独有）：加减乘、最值、MACC、除法（非全吞吐）、符号注入、比较生成 Mask、`vfclass`、`vfmerge`、标量广播 / 搬入 |
-| F38 | VALU1（6 条独有）：加减乘、最值、跨元素归约（求和 / 最大 / 最小）、Top-16 排序（同时输出 16 个 INT16 索引）、标量广播 / 搬出 |
-| F39 | VALU2（1 条独有）：加减乘、最值、标量广播、`vmv.v.v` 向量直通缓冲 |
+| F37 | VALU0（29 条独有）：加减乘、最值、MACC、除法 `vfdiv.vv`（非全吞吐，约 20～30 cycle）、符号注入、比较生成 Mask、`vfclass`、`vfmerge`、标量广播 / 搬入 |
+| F38 | VALU1（6 条独有）：加减乘、最值、跨元素归约（求和 / 最大 / 最小）、Top-16 排序（同时输出 16 个 INT16 索引）、标量广播 / 搬出。归约与 Top-K 的输出是 NaN / Inf 替换与上报的收口位置之一 |
+| F39 | VALU2（4 条独有）：加减乘、最值、标量广播、`vmv.v.v` 向量直通缓冲、`vswap2.v` 相邻偶奇对交换、两条 slide（`vfslide1up.vf` / `vfslide1down.vf`）。后三条只搬 element 的位置，不做数值运算 |
 | F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。源不能取自身的输出；自定义拟合函数暂定不实现 |
-| F40a | VSFU 有 `VSFU0` 与 `VSFU1` 两个功能一致的单元：FP32 精度下两者独立工作，BF16 精度下两者拼接成一个逻辑单元 |
+| F40a | VSFU 有 `VSFU0` 与 `VSFU1` 两个功能一致的单元，`VSFU_op` 低 16-bit 配 VSFU0、高 16-bit 配 VSFU1，`src_sel` 的 `0x05` / `0x06` 分别是两者的输出。FP32 精度下两者独立工作，BF16 精度下两者拼接成一个逻辑单元、共同处理 64 element/cycle，此时 VSFU1 的两个字段被忽略、`0x06` 也不可再作为来源 |
 | F40b | 除 SEXE 外，每个执行单元在单条宏指令里只能被调用 1 次 |
-| F41 | MEXE（15 条）：Mask 逻辑运算（and / nand / andn / xor / or / nor / orn / xnor）、`vcpop.m`、`vfirst.m`、`vmsbf/vmsif/vmsof.m`、`vmiuset.mv` / `vmiset.mv`（按 16 个 INT16 索引清 / 置 Mask 位，配合 Top-K 做迭代查找） |
+| F41 | MEXE（15 条）：Mask 逻辑运算（and / nand / andn / xor / or / nor / orn / xnor）、`vcpop.m`、`vfirst.m`、`vmsbf/vmsif/vmsof.m`、`vmiuset.mv` / `vmiset.mv`（掩码走 src1、16 个 INT16 索引走 src2，按索引清 / 置 Mask 位，配合 Top-K 做迭代查找） |
 | F42 | SEXE（7 条）：fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）。物理上只有一组，SEXE0/1/2 是同一物理单元在一条宏指令内的 3 次串行迭代 |
 | F43 | SEXE 迭代之间天然链式依赖：SEXE1 的操作数可来自 SEXE0，SEXE2 可来自 SEXE1，因此第 2、3 次迭代只需 1 个额外的 SRF 读端口 |
-| F44 | SEXE 操作数来源有四处：SRF 读端口、VALU1 的归约输出、LU 的 `ld.s.fp32` 结果、前一次 SEXE 迭代的结果。不支持立即数，也不能取 MEXE 为源，因为 MEXE 的标量输出是整数而 SEXE 只有浮点通路 |
+| F44 | SEXE 操作数来源有四处：SRF 读端口、VALU1 的归约输出、LU 的 `ld.s.fp32` 结果、前一次 SEXE 迭代的结果。不支持立即数，也不能取 MEXE 为源，因为 MEXE 的标量输出是整数而 SEXE 只有浮点通路。SEXE1 / SEXE2 各只有 1 个 SRF 读端口，两个操作数中最多 1 个取自 SRF、且至少 1 个取自前一次迭代 |
 | F45 | bit 级归约顺序：LANES 内归约再 ⌈log2 SEG⌉ 级累加，参考实现必须用同一顺序 |
 
 ### 数据类型与舍入
 
 | 编号 | 功能 |
 | - | - |
-| F46 | `TYPE_VL.DATA_TYPE` 为 1 bit（bit16：0 = FP32，1 = BF16），只作用于向量通路；标量只有 FP32 一种精度 |
-| F47 | `TYPE_VL.ROUND_MODE` 在 bit[19:17]，只作用于三处高转低转换：LU 的 `ld.fp32.vm` 在 DATA_TYPE=BF16 下把 FP32 窄化为 BF16；SU 的高转低写出（`st.fp8e4m3.vm` / `st.mxfp8.vm` / `st.bf16.vm`）；DATA_TYPE=BF16 时标量进入向量通路的 FP32 → BF16 转换 |
+| F46 | `TYPE_VL.DATA_TYPE` 为 1 bit（bit16：0 = FP32，1 = BF16），只作用于向量通路；标量只有 FP32 一种精度，BF16 向量指令引用标量时由硬件按 `ROUND_MODE` 自动转换 |
+| F46a | `TYPE_VL.NAN_INF_REPLACE_EN`（bit20）：0 = NaN 上报——归约输出与 SU 写出输入阶段出现 NaN 时置 `NAN_ERROR` 并把 user_id 锁进 `nan_err_info`，其余数值运算产生的 NaN 与全部 Inf 原样透传；1 = 替换——那两个收口位置上 NaN 换 `NAN_REPLACE_VALUE`、+Inf 换 `INF_REPLACE_VALUE`、−Inf 换取负的本值 |
+| F47 | `TYPE_VL.ROUND_MODE` 在 bit[19:17]，取 `000`～`101` 六种（`111` 是保留编码，置位 `CFG_ERROR`）。它同时作用于 element 数值运算（VALU / VSFU 的加减乘除、超越函数等）与三处高转低转换：LU 的 `ld.fp32.v` 在 DATA_TYPE=BF16 下把 FP32 窄化为 BF16；SU 的高转低写出（`st.fp8e4m3.v` / `st.mxfp8.v` / `st.bf16.v`）；DATA_TYPE=BF16 时标量进入向量通路的 FP32 → BF16 转换 |
 | F48 | 向量长度 VL 为 1～16384 element，单条宏指令内完成；`0` 等效于 `1`，大于 `16384` 等效于 `16384`，不报错 |
 | F49 | VL 取上限 16384 时单个 FP32 Token 恰好占满全部 VRF；VL 更小时按实际长度占用，剩余容量可同时驻留多个 Token 或宏指令之间传递的中间结果 |
 | F49a | 一条宏指令在向量通路上逐段流过，一段是一个 RF entry（FP32 32 个 element、BF16 64 个），段数为 ⌈VL ÷ LANES⌉。LU 每凑齐一段就往下交，SU 收到一段就写，Load 与 Store 因此在同一条宏指令内重叠；各执行单元每拍收一段、走完自己的级数、每拍交一段，跨分组串联只增加首拍填充延迟，不降低稳态吞吐 |
@@ -332,8 +343,10 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 
 | 编号 | 功能 |
 | - | - |
-| F50 | 可向 TS 发送 Event 硬件同步信号，用于更细粒度的任务调度与软硬件解耦 |
-| F51 | Profile 计数器区从 0x4000 起（`profile_ctrl` 在 0x4000，计数器从 0x4008 起） |
+| F49d | 访存格式对 VL 的粒度要求：MXFP8 访存与间隔访问要求 VL 为 32 的整数倍，`st.mask` 要求 8 的整数倍，`vswap2.v` 要求 VL 为偶数。不满足置位 `CFG_ERROR`，宏指令不执行 |
+| F50 | 可向 TS 发送 Event 硬件同步信号（`EVENT_EN`），用于更细粒度的任务调度与软硬件解耦 |
+| F51 | Profile 计数器区从 0x4000 起（`profile_ctrl` 在 0x4000，计数器从 0x4008 起，共 32 个 64-bit 计数器、拆成 64 个 32 位寄存器到 0x4104）。发射期的四个 `issue_stall_*` 按 fence > cmfence > dep > eu 归因，一拍只记一项、可以相加 |
+| F52 | 快照窗口：`snapshot_addr.SNAP_SEL` 按年龄选已发射未退休的宏指令（`0x00` 最老、`0xFF` 选 sticky），`SNAP_IDX` 选 12 个动态参数寄存器之一或状态字；窗口的读取不占执行单元与寄存器堆端口，`BUSY=1` 时也能读 |
 
 ***
 
@@ -449,7 +462,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
   <text x="20" y="438" font-size="10.5" fill="#374151">M6 里 VALU0 / VALU1 / VALU2 / VSFU / MEXE / SEXE 的级数各不相同，设计未给值，本轮各取 4 拍（待定）；SEXE0/1/2 是同一物理单元的三次串行迭代，因此是 3 倍。各级是流水的：每拍收一段、每拍交一段，级数只决定首拍延迟。</text>
   <text x="20" y="466" font-size="10.5" fill="#374151">一条宏指令内多条并行通路经过的执行分组级数不同，合并点的两个源操作数会不同拍到达，配平是软件的责任：差一级用 VALU2 的 vmv.v.v 对齐，差得多就拆成多条宏指令。</text>
-  <text x="20" y="494" font-size="10.5" fill="#374151">CM 访存依赖硬件不追踪，靠 MACRO_INST_FENCE；建模时若默认硬件会挡，结果会偏乐观。</text>
+  <text x="20" y="494" font-size="10.5" fill="#374151">CM 访存依赖硬件不追踪，靠 MACRO_INST_FENCE（等此前全部）或 CM_FENCE（只等 CM 访问）；建模时若默认硬件会挡，结果会偏乐观。</text>
 </svg>
 ```
 
@@ -566,7 +579,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="88" font-size="10.5" fill="#475569">1. uops = Expand(static_cfg[cfg_idx], 快照)，逐单元一条</text>
   <text x="250" y="108" font-size="10.5" fill="#475569">2. dep = RAW | WAR | WAW（对 VRF / MRF / SRF 逐区间比对）</text>
   <text x="250" y="128" font-size="10.5" fill="#475569">3. MACRO_INST_FENCE → 等此前全部宏指令完成才派发</text>
-  <text x="250" y="148" font-size="10.5" fill="#475569">4. DATA_BROADCAST → 等除 CM-Load 外的前序宏指令全部完成才派发</text>
+  <text x="250" y="148" font-size="10.5" fill="#475569">4. CM_FENCE → 只等前序宏指令的 CM 访问做完，纯计算的前序不等待</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">最多两条相邻宏指令重叠</text>
   <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arq3)" fill="none"/>
   <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arq3)" fill="none"/>
@@ -605,9 +618,9 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="684" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D14</text>
   <text x="250" y="56" font-size="12" fill="#111827">LU · 取向量、Mask 与标量并扩宽</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. cmem_ld.req = {addr}，一次固定 1024 bit，不 burst</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. 跨 128 B 边界的访问由本级拆分再重组</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 跨 128 B 边界的访问由本级拆分再重组（对齐不合规置 CM_ADDR_ERROR）</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. v = Widen(rsp_rdata, FP8_e4m3 / MXFP8 / BF16 → BF16 / FP32)，精确扩宽</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. ld.fp32.vm 且 DATA_TYPE=BF16 → 按 ROUND_MODE 窄化，NaN 置 DATA_CVT_ERROR</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. ld.fp32.v 且 DATA_TYPE=BF16 → 按 ROUND_MODE 窄化，Inf / NaN 原样透传</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">14 拍是 Cmem 侧的 VU 访问延迟</text>
   <path d="M188 54 L231 54" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
   <path d="M188 128 L231 128" stroke="#475569" marker-end="url(#arq4)" fill="none"/>
@@ -722,7 +735,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="622" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="56" font-size="12" fill="#111827">DMUX · 写回 RF 或交给 SU</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. VRF 两个写口指向不同执行单元，且写区间不重叠</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. MRF 唯一写口三选一：LU 的 ld.vm_mask、VALU0 的比较类、MEXE</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. MRF 唯一写口三选一：LU 的 ld.mask、VALU0 的比较类、MEXE</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SRF 六个写口按 PRF_op.SRF_WT_EN 位图使能，虚拟端口时分复用无争用</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 目标是 SU → 直接交给 M8，不经 RF</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">VRF 允许读写完全重叠或完全不重叠，不允许部分重叠</text>
@@ -828,9 +841,49 @@ CM 访问延迟        VU 侧 14T
 ISQ 深度           8（待定）
 算力               32 MAC/T（FP32 口径）
 内部启动延迟        40T（流水启动 5T + 20 条指令算地址 30T + core 发射 5T）
-寄存器偏移          动态参数区 0x0000～0x002C；静态配置区 N×0x100 + 0x1000 起；Profile 区 0x4000 起
+寄存器偏移          动态参数 0x0000～0x002C；静态配置组 N×0x100 + 0x1000～0x1058；全局静态 0x1F00/0x1F04；DSA-RF 0x2000/0x2004；状态 0x3000～0x302C；Profile 0x4000～0x4104
 Top-K              K 固定为 16
+VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍；st.mask 要求 8 的整数倍；vswap2.v 要求偶数
 ```
+
+### Profile 计数器的 32 个地址与口径
+
+| 偏移（`_lo` / `_hi`） | 名称 | 计数口径 |
+| - | - | - |
+| `0x4008` / `0x400C` | prof_run_cycle | `RUN=1` 的采样窗口 Cycle 数 |
+| `0x4010` / `0x4014` | total_busy_cycle | `BUSY=1` 的累计 Cycle 数 |
+| `0x4018` / `0x401C` | cfg_wr_num | 配置通路上生效的寄存器写次数 |
+| `0x4020` / `0x4024` | cfg_wr_stall_cycle | 配置写因目标静态配置组正被引用而阻塞的周期数 |
+| `0x4028` / `0x402C` | macro_inst_total_num | 累计发射的宏指令条数 |
+| `0x4030` / `0x4034` | macro_inst_retire_num | 累计退休的宏指令条数 |
+| `0x4038` / `0x403C` | isq_full_cycle | `ISQ_FULL=1` 的累计周期数 |
+| `0x4040` / `0x4044` | issue_stall_fence_cycle | 队首宏指令置 `MACRO_INST_FENCE` 而未派发的周期数 |
+| `0x4048` / `0x404C` | issue_stall_cmfence_cycle | 队首宏指令置 `CM_FENCE` 而未派发的周期数 |
+| `0x4050` / `0x4054` | issue_stall_dep_cycle | Scoreboard 数据依赖阻塞的周期数 |
+| `0x4058` / `0x405C` | issue_stall_eu_cycle | 执行分组结构冒险阻塞的周期数 |
+| `0x4060` / `0x4064` | issue_starve_cycle | 硬件有空位而 ISQ 为空的周期数 |
+| `0x4068` / `0x406C` | lu_busy_cycle | LU 有未完成 CM 读请求的周期数 |
+| `0x4070` / `0x4074` | cm_ld_req_num | 发往 CM 的读请求拍数（一拍 128 Byte） |
+| `0x4078` / `0x407C` | cm_ld_stall_cycle | LU 因 CM 读带宽 / 延迟停顿的周期数 |
+| `0x4080` / `0x4084` | su_busy_cycle | SU 有未完成 CM 写请求（含等写响应）的周期数 |
+| `0x4088` / `0x408C` | cm_st_req_num | 发往 CM 的写请求拍数（一拍 128 Byte） |
+| `0x4090` / `0x4094` | cm_st_stall_cycle | SU 因 CM 写带宽 / 延迟停顿的周期数 |
+| `0x4098` / `0x409C` | valu0_busy_cycle | VALU0 实际参与计算的周期数 |
+| `0x40A0` / `0x40A4` | valu1_busy_cycle | VALU1 同上 |
+| `0x40A8` / `0x40AC` | valu2_busy_cycle | VALU2 同上 |
+| `0x40B0` / `0x40B4` | vsfu0_busy_cycle | VSFU0 同上；BF16 下两个 VSFU 拼接，该逻辑单元同时计入两者 |
+| `0x40B8` / `0x40BC` | vsfu1_busy_cycle | VSFU1 同上 |
+| `0x40C0` / `0x40C4` | mexe_busy_cycle | MEXE 同上 |
+| `0x40C8` / `0x40CC` | sexe_busy_cycle | SEXE 同上，三次迭代累加 |
+| `0x40D0` / `0x40D4` | vrf_rd_p0_busy_cycle | VRF 读端口 0 被占用的周期数 |
+| `0x40D8` / `0x40DC` | vrf_rd_p1_busy_cycle | VRF 读端口 1 同上 |
+| `0x40E0` / `0x40E4` | vrf_wt_p0_busy_cycle | VRF 写端口 0 同上 |
+| `0x40E8` / `0x40EC` | vrf_wt_p1_busy_cycle | VRF 写端口 1 同上 |
+| `0x40F0` / `0x40F4` | mrf_wt_busy_cycle | MRF 唯一写端口被占用的周期数 |
+| `0x40F8` / `0x40FC` | nan_replace_cnt | 替换模式下被换成 `NAN_REPLACE_VALUE` 的 element 数 |
+| `0x4100` / `0x4104` | inf_replace_cnt | 替换模式下被换成 ±`INF_REPLACE_VALUE` 的 element 数 |
+
+`0x4004` 是未实现地址。
 
 ***
 
@@ -844,7 +897,7 @@ Top-K              K 固定为 16
 | stream_id 取自 VU-Core CSR 或 trigger 的 STREAM_ID 字段，task_id 只取前者 | F5 | `vu_ids_source` |
 | VU-Core CSR 那一组走 dsa_ids 直连，写 trigger 那一拍采样 | F5a | `vu_ids_direct` |
 | 动态参数区与静态模板区都能用 dsawi 的 16 bit 字节地址直接寻址 | F2 | `reg_addressing` |
-| TYPE_VL 三字段随 STATIC_DYNAMIC_MASK 切换 | F6 | `type_vl_switch` |
+| TYPE_VL 四字段随 STATIC_DYNAMIC_MASK 一起切换 | F6 | `type_vl_switch` |
 | 静态配置组被引用时配置写阻塞，in-flight 按改写前执行完 | F7、F8 | `static_cfg_block` |
 | 三条配置通路共享寄存器视图，流控独立 | F9 | `three_cfg_paths` |
 | status / macro_inst_left / Profile 软件写无效不报错 | F10 | `readonly_status` |
@@ -852,11 +905,20 @@ Top-K              K 固定为 16
 | Scoreboard 检测 RAW / WAR / WAW | F17 | `scoreboard_dep` |
 | 最多两条相邻宏指令重叠 | F18 | `macro_overlap_two` |
 | CM 访存冲突硬件不追踪，靠 MACRO_INST_FENCE | F19 | `macro_inst_fence` |
-| DATA_BROADCAST 不参与乱序调度 | F20 | `data_broadcast` |
+| 含 Vector 数据广播的宏指令必须置 MACRO_INST_FENCE，硬件不检测广播 | F20 | `macro_inst_fence` |
+| CM_FENCE 只等前序的 CM 访问，纯计算的前序不等待 | F19 | `cm_fence` |
 | 单条宏指令的五类容量上限 | F21 | `macro_resource_cap` |
 | 配平依赖树是软件的责任，硬件只提供 bypass 与广播 | F22 | `no_hw_buffer_queue` |
 | 未分配与不支持的 OPCODE 按无操作处理，不报异常 | F23 | `opcode_nop` |
 | LU / SU 的格式转换与三处舍入 | F24～F26、F47 | `vu_convert_round` |
+| 归约输出与 SU 输入两处的 NaN / Inf 替换与上报 | F46a | `nan_inf_replace` |
+| 全局静态替换值不随 CONFIG_IDX 切换 | F2a | `global_static` |
+| 快照窗口按年龄编号，sticky 那份随 error_info 锁存 | F15c、F52 | `snapshot_window` |
+| 首错锁存 error_info 与 6 个错误上下文寄存器，读 error_code 一起清 | F15、F15c、F23a | `error_context` |
+| VL 的三处粒度要求 | F49d | `vl_granularity` |
+| mask_op 的四种来源，一个 MRF 读端口只服务一个消费者 | F21、F35 | `mask_sources` |
+| VSFU0 / VSFU1 两个单元：FP32 各自独立，BF16 拼接 | F40a | `vsfu_pair` |
+| VALU2 的 vswap2 与两条 slide 只搬位置 | F39 | `valu2_move` |
 | CM 一次固定 1024 bit，不支持 burst | F27 | `cm_no_burst` |
 | 跨 128 B 边界的拆分与重组由 LU / SU 完成 | F28 | `cross_128b` |
 | VRF 两个写口指向不同单元且写区间不重叠 | F32 | `vrf_write_ports` |
@@ -879,12 +941,37 @@ Top-K              K 固定为 16
   * 代价是拆分边界由硬件资源上限决定，软件要自己算一个算子拆成几条
 * **为什么 CM 访存依赖不追踪**
   * 追踪 CM 冲突要在 DSA 里维护地址范围的重叠判断，成本高
-  * 交给软件用 `MACRO_INST_FENCE` 显式隔离。建模时若默认硬件会挡，结果会偏乐观
+  * 交给软件显式隔离：要等此前全部宏指令完成就置 `MACRO_INST_FENCE`，只求 CM 上的顺序就置 `CM_FENCE`（代价更小，纯计算的前序不等待）。建模时若默认硬件会挡，结果会偏乐观
 * **为什么归一化用求倒数加向量乘标量而不是向量除法**
   * 避免全吞吐的向量流水去等约 20～30 cycle 的除法
 * **为什么执行单元之间不提供软件可见的缓冲队列**
   * 提供队列就要提供队列的调度与观测，接口面积大
   * 只提供 bypass 与广播，配平交给软件：级数差一级用 `vmv.v.v` 对齐，差得多就拆成多条宏指令
+* **CM 地址不合规只置位、不丢弃那次访存**
+  * 硬件在发起访问前自检对齐，不合规就把这笔 Load / Store 丢掉、请求不发出，只置 `CM_ADDR_ERROR`
+  * 模型照发不误：现网 kernel 的向量访存按 16 B 偏移落在 CM 上（`MOE_SW_HEAD_BYTES` 那一段软件头），按硬件语义这笔会被丢弃，而模型的地址是比较级、不是字节精确的。建模这一处取「照发并记录异常」，等 kernel 的访存地址改到 32 B 对齐再收紧
+  * 影响面：对齐不合规时模型会算出一个硬件不会算出的结果。用例 `MisalignedAddrRaisesCmAddrError` 只验异常位与「不挡住这一条宏指令」
+* **CM_FENCE 的等待条件按「带 CM 访问的前序宏指令退休」近似**
+  * 硬件等的是前序那条的「LU 读数据已取回、SU 写已写响应齐」，不等它整条做完
+  * 模型没有 CM 访问完成的逐条记录，只能等那条退休。比硬件严格一点，介于 `CM_FENCE` 与 `MACRO_INST_FENCE` 之间，两者仍可区分（纯计算的前序不等）
+* **RF 端口的 busy 计数器按「派发一次记一拍」**
+  * 硬件记的是端口被占用的周期数
+  * 模型里端口沿用整条宏指令，逐拍统计要跨级拉线，取的是派发那一拍加一。要看「谁占得多」够用，要看绝对占用率会偏小
+* **ECC 异常没有产生源**
+  * `error_code` 的四位 ECC 异常与 `vrf_err_info` / `mrf_err_info` / `srf_err_info` / `cm_err_info` / `cm_err_addr` 五个上下文寄存器都在、字段与清零时机都照文档实现
+  * 但模型没有 ECC 注入通路，也没有 `RaiseError` 的调用方：这几个位恒为 0、寄存器恒为空。等真机 / 注入用例进来时再接
+* **元素级数值运算的 NaN / Inf 按 `numeric::ClampNanInf` 收口**
+  * 硬件上除两个收口位置（归约输出、SU 写出输入）之外的 NaN / Inf 都原样透传
+  * 模型逐 element 算完统一过一道 `ClampNanInf`（NaN 与 ±Inf 都压成 ±最大值），只有那两个收口位置按 `NAN_INF_REPLACE_EN` 处理。这样参考实现与模型走同一套算法，逐 bit 比对仍然成立；对不产生 NaN / Inf 的输入（全部现有用例与向量）没有任何差别
+* **`CFG_ERROR` 放弃派发但仍走空泡退休**
+  * MAS：派发前合法性检查失败即置 `CFG_ERROR` 并放弃派发；入队时加上的全局 / 静态组 in-flight 计数在退休时减一
+  * 模型发一条空配置微指令（各单元按无操作）走完 LU→…→M9，这样 `macro_inst_left`、`HoldCfg` 与快照窗口都按退休回收。sticky 仍标未派发
+* **异常不停止后续发射**
+  * MAS 写「上报异常后停止派发新的宏指令」
+  * 现网 kernel 的向量地址带 16 B 软件头，模型会持续置 `CM_ADDR_ERROR`；若因此停发，MoE 整条链都会挂。模型维持 F23a：置位异常不中断后续宏指令
+* **快照窗口的 `SNAP_DISPATCHED` 指「已出 ISQ 交给 pipe_ctrl」**
+  * 硬件指的是「已派发到执行单元」
+  * 被 `CFG_ERROR` 拦下的那几条没进执行单元，模型另记一笔把它们算成「仍在排队」，与 sticky 那一份的口径一致
 * **模型把向量通路的 element 一律按 FP32 存，`DATA_TYPE` 因此只改吞吐不改数**
   * 硬件上 `DATA_TYPE` 定的是向量通路内部的精度：置 BF16 时一拍吃 64 个 element，中间的加乘也是 BF16 的
   * 模型只取了前一半：`VuOperand.vec` 是一串 `float`，`DATA_TYPE` 影响 LANES（一段几个 element）与 F47 那三处窄化点，通路内部的加乘仍按 FP32 算

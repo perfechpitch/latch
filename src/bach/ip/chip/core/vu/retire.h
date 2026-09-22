@@ -81,8 +81,11 @@ class VuRetire : public BachModule {
     last_seq = in->Seq();
 
     VuMacroInst const& inst = f->uops.inst;
-    // 通路上一路带下来的转换异常这时候记进 error_code。
-    if (f->error != 0) cfg_reg.RaiseError(f->error);
+    // 通路上一路带下来的异常这时候记进 error_code，上下文按首错锁存。
+    if (f->error != 0) cfg_reg.ReportError(f->error, f->err_unit, &inst);
+    if (f->nan_replaced != 0 || f->inf_replaced != 0) {
+      cfg_reg.AddReplaces(f->nan_replaced, f->inf_replaced);
+    }
 
     // 一条宏指令拆成几段流过时，前几段只是它的一截，走完最后一段这一条才算完。
     if (!f->seg_last) {

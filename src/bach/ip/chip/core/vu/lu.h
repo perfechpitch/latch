@@ -5,12 +5,14 @@
 //
 // 从 Core Mem 读向量、Mask 与标量，顺带做格式转换。CM 侧有 FP8_e4m3 / MXFP8 /
 // BF16 / FP32 四种，向量通路内部只有 BF16 与 FP32 两种，所以低转高一律是精确
-// 扩宽，只有 ld.fp32.vm 在 DATA_TYPE=BF16 下是高转低。那一档按 ROUND_MODE
-// 窄化，结果为 NaN 时置 DATA_CVT_ERROR。
+// 扩宽，只有 ld.fp32.v 在 DATA_TYPE=BF16 下是高转低：按 ROUND_MODE 窄化，有限
+// 值上溢写饱和值、下溢写 0，Inf / NaN 原样透传，都不置位。
 //
-// CM 接口一次固定 1024 bit，不支持 burst，请求地址按 128 B 对齐。向量按 32 B
-// 对齐、标量按 4 B 对齐，所以一条向量的两端都可能落在 128 B 块的中间：本级把
-// 请求向下对齐到块边界，多读的部分收齐后截掉，这就是跨 128 B 边界的拆分与重组。
+// CM 接口一次固定 1024 bit，不支持 burst，请求地址按 128 B 对齐。向量与掩码按
+// 32 B 对齐、标量按 4 B 对齐，所以一条向量的两端都可能落在 128 B 块的中间：
+// 本级把请求向下对齐到块边界，多读的部分收齐后截掉，这就是跨 128 B 边界的拆分
+// 与重组。地址不满足当前访问格式的对齐要求时置位 CM_ADDR_ERROR（硬件到这一步
+// 就把这笔 Load 丢弃、请求不发出；模型照发不误，见 vu.md 的「取舍」一节）。
 //
 // 14 拍的访问延迟由 Core Mem 那一侧给，本级只按 valid/ready 收发。
 
@@ -111,15 +113,18 @@ class VuLu : public BachModule {
 
     if (!uops->cfg.lu.Active()) {
       // 本条不读 CM，直接往下走。
-      flow->seg_len = uops->inst.Vl();
-      held = flow;
-      holding = true;
-      out_seq = ++emit_seq;
-      out->Drive(held, out_seq);
+      EmitNow(flow);
       return;
     }
     Plan(*uops);
     out->Idle();
+  }
+
+  void EmitNow(VuFlowPtr const& f) {
+    held = f;
+    holding = true;
+    out_seq = ++emit_seq;
+    out->Drive(held, out_seq);
   }
 
   // 算这一条要读哪几个 128 B 块。
@@ -130,7 +135,7 @@ class VuLu : public BachModule {
     numeric::DataType t = CmType(op);
     uint64_t elem_bits = numeric::ElemBitsOf(t);
     // Mask 一位一个 element，按 8 B 为单位搬运；标量固定 4 B。
-    uint64_t want = op == LuOp::kLdVmMask ? ((vl + 63) / 64) * 8
+    uint64_t want = op == LuOp::kLdMask ? ((vl + 63) / 64) * 8
                     : op == LuOp::kLdSFp32
                         ? 4
                         : (vl * elem_bits + 7) / 8;
@@ -147,10 +152,14 @@ class VuLu : public BachModule {
     }
 
     uint64_t addr = inst.LdAddr();
-    // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。违反置 CM_ADDR_ERROR，
-    // 本条照走。硬件只自检对齐、不做长度检查，不阻塞流水。
+    // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。不合规置 CM_ADDR_ERROR，
+    // 硬件到这一步就把这笔 Load 丢弃、请求不发出；模型照发不误（见 vu.md 的
+    // 「取舍」一节），只把异常位记下来。
     uint64_t grain = op == LuOp::kLdSFp32 ? kVuScalarAlign : kVuCmAlign;
-    if (addr % grain != 0) flow->error |= kVuErrCmAddr;
+    if (addr % grain != 0) {
+      flow->error |= kVuErrCmAddr;
+      flow->err_unit = kVuErrUnitLu;
+    }
     // 请求地址向下对齐到 128 B 块，前面多出来的那一截收齐后截掉。
     head = addr % kVuVrfEntryBytes;
     base = addr - head;
@@ -231,6 +240,7 @@ class VuLu : public BachModule {
       auto seg = std::make_shared<VuFlow>();
       seg->uops = flow->uops;
       seg->error = flow->error;
+      seg->err_unit = flow->err_unit;
       seg->seg = seg_done;
       seg->seg_base = seg_done * seg_len;
       seg->seg_len = last ? vl - seg->seg_base : seg_len;
@@ -264,7 +274,7 @@ class VuLu : public BachModule {
     LuOp op = LuOp(uops.cfg.lu.opcode);
     uint64_t vl = f->SegLen();
 
-    if (op == LuOp::kLdVmMask) {
+    if (op == LuOp::kLdMask) {
       // Mask 一位一个元素，唯一能写 MRF 的 LU 指令。
       f->lu.mask.reserve(vl);
       for (uint64_t i = 0; i < vl; ++i) {
@@ -301,13 +311,12 @@ class VuLu : public BachModule {
       }
     }
 
-    // ld.fp32.vm 在 DATA_TYPE=BF16 下是唯一的高转低，按 ROUND_MODE 窄化。
+    // ld.fp32.v 在 DATA_TYPE=BF16 下是唯一的高转低，按 ROUND_MODE 窄化：有限值
+    // 上溢写饱和值、下溢写 0，Inf / NaN 原样透传，都不置位。
     if (op == LuOp::kLdFp32 && inst.Bf16()) {
       numeric::RoundMode mode = inst.Round();
       for (uint64_t i = 0; i < v.size(); ++i) {
-        uint16_t h = numeric::NarrowBf16(v[i], mode);
-        if (numeric::NarrowMakesNan(v[i], h)) f->error |= kVuErrDataCvt;
-        v[i] = numeric::FromBf16(h);
+        v[i] = numeric::FromBf16(numeric::NarrowBf16(v[i], mode));
       }
     }
     f->lu.vec = std::move(v);

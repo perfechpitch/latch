@@ -3,9 +3,11 @@
 // 步 8 的判据：逐条计算原语与参考实现逐 bit 比对。参考实现写在这个文件里，按
 // 硬件的顺序算：归约是 LANES 内先加再走树，换成整条顺序加就不是同一个 bit。
 //
-// 除计算原语外，另外五件事各有用例：trigger 写一次执行一次、静态配置组被引用时
-// 配置写阻塞、Scoreboard 挡住有依赖的宏指令、MACRO_INST_FENCE 与 DATA_BROADCAST
-// 各自的派发条件、VL 的两个边界。
+// 除计算原语外，另外几件事各有用例：trigger 写一次执行一次、静态配置组被引用时
+// 配置写阻塞、Scoreboard 挡住有依赖的宏指令、MACRO_INST_FENCE 与 CM_FENCE 各自
+// 的派发条件、VL 的两个边界，以及《VU-DSA 寄存器整理》里后加的那几档——mask_op
+// 的四种来源、VSFU0/VSFU1、两条 slide 与 vswap2、NaN / Inf 替换与上报、快照窗口、
+// 全局静态替换值、DSA-RF 后门的 RF_SEL 与错误上下文寄存器。
 
 #include <gtest/gtest.h>
 
@@ -257,9 +259,11 @@ uint64_t PrfWord(uint64_t vrf_p0, uint64_t vrf_p1, uint64_t mrf,
   return vrf_p0 | (vrf_p1 << 8) | (mrf << 16) | (srf_en << 24);
 }
 
-// mask_op：VALU0、VALU1、VALU2、VSFU 各两位。
-uint64_t MaskWord(uint64_t v0, uint64_t v1, uint64_t v2, uint64_t vsfu) {
-  return v0 | (v1 << 2) | (v2 << 4) | (vsfu << 6);
+// mask_op：VALU0、VALU1、VALU2 各占一个字节，取值是 src_sel 编码
+// （0x00 不用、0x01 LU 的 ld.mask bypass、0x40/0x41 MRF 读端口）。
+uint64_t MaskWord(uint64_t v0, uint64_t v1 = kVuMaskSelNone,
+                  uint64_t v2 = kVuMaskSelNone) {
+  return (v0 & 0xFFu) | ((v1 & 0xFFu) << 8) | ((v2 & 0xFFu) << 16);
 }
 
 uint64_t TypeVlWordOf(uint64_t vl, bool bf16) {
@@ -326,6 +330,18 @@ constexpr uint64_t kVl = 64;
 constexpr uint64_t kStream = 3;
 constexpr uint64_t kTask = 7;
 
+// 配一条纯计算的宏指令：不读也不写 CM，只把 SRF 的一个标量广播成一条向量写回
+// VRF。CM_FENCE 与纯计算前序的关系用它搭对照。
+void SetupComputeOnly(Rig& rig, uint64_t group) {
+  rig.WriteStatic(group, kVuValu0Op,
+                  OpWord(uint64_t(ValuOp::kMvVf), kSrcSrfP0 + 1));
+  rig.WriteStatic(group, kVuPrfOp, PrfWord(kSrcValu0, 0, 0, 0));
+  rig.WriteStatic(group, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(group, kVuStaticDupOffset + kVuSrfRdIndex0, SrfWord(0, 5));
+  rig.WriteStatic(group, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(40));
+}
+
 // 配一条「LU 读 FP32 → 一个执行单元算 → SU 写回 FP32」的宏指令。各执行单元的
 // 用例都在它上面换 op 与源。静态副本区放地址与 VL，动态区不用。
 void SetupChain(Rig& rig, uint64_t op_reg, uint64_t op_word, uint64_t su_src,
@@ -383,10 +399,13 @@ void Mxfp8RoundTrip(bool round_up) {
 
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
-  uint64_t su = OpWord(uint64_t(SuOp::kStMxfp8), kSrcLu) |
+  uint64_t su = OpWord(uint64_t(SuOp::kStMxfp8), kSrcValu2) |
                 (round_up ? kVuSuScaleRoundUp : 0);
   rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
   rig.WriteStatic(0, kVuSuOp, su);
+  // LU 的直通只用于两侧数据类型一致的情形（读 FP32 又写 MXFP8 不算），所以
+  // 这里经 VALU2 的 vmv.v.v 转一手：它就是一级原样直通。
+  rig.WriteStatic(0, kVuValu2Op, OpWord(uint64_t(ValuOp::kMvVv), kSrcLu));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                   TypeVlWord(kN, false, numeric::RoundMode::kRne));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
@@ -403,7 +422,8 @@ void Mxfp8RoundTrip(bool round_up) {
   back.ldmem->Poke(at, want_data);
   back.ldmem->PokeScale(at, want_scale);
   back.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdMxfp8)));
-  back.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
+  back.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcValu2));
+  back.WriteStatic(0, kVuValu2Op, OpWord(uint64_t(ValuOp::kMvVv), kSrcLu));
   back.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                    TypeVlWord(kN, false, numeric::RoundMode::kRne));
   back.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, at);
@@ -479,7 +499,7 @@ TEST(Vu, VsfuExp) {
   std::vector<float> in = Tame(kVl, 0x202);
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
 
-  SetupChain(rig, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kExp), kSrcLu), kSrcVsfu);
+  SetupChain(rig, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kExp), kSrcLu), kSrcVsfu0);
   rig.Write(kVuMacroInstTrigger, TriggerWord(0));
   rig.Run(400);
 
@@ -497,7 +517,7 @@ TEST(Vu, VsfuSigmoid) {
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
 
   SetupChain(rig, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu),
-             kSrcVsfu);
+             kSrcVsfu0);
   rig.Write(kVuMacroInstTrigger, TriggerWord(0));
   rig.Run(400);
 
@@ -544,8 +564,8 @@ TEST(Vu, Valu1SortMax16) {
   std::vector<float> in = Tame(kVl, 0x205);
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
 
-  SetupChain(rig, kVuValu1Op,
-             OpWord(uint64_t(ValuOp::kSortmax16), kSrcNone, kSrcLu),
+  // Top-K 的向量源挂 src1，SRC2_SEL / SRC3_SEL 被忽略。
+  SetupChain(rig, kVuValu1Op, OpWord(uint64_t(ValuOp::kSortmax16), kSrcLu),
              kSrcValu1);
   rig.Write(kVuMacroInstTrigger, TriggerWord(0));
   rig.Run(400);
@@ -597,7 +617,7 @@ TEST(Vu, LoadMaskThenMexeLogic) {
   rig.ldmem->Poke(kSrcAddr, bits);
 
   // 组 0：ld.vm_mask → MRF entry 0。
-  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdVmMask)));
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdMask)));
   rig.WriteStatic(0, kVuPrfOp, PrfWord(0, 0, kSrcLu, 0));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
@@ -644,7 +664,7 @@ TEST(Vu, MexeCountPopulation) {
   bits[1] = 0x0F;
   rig.ldmem->Poke(kSrcAddr, bits);
 
-  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdVmMask)));
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdMask)));
   rig.WriteStatic(0, kVuPrfOp, PrfWord(0, 0, kSrcLu, 0));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
@@ -668,8 +688,9 @@ TEST(Vu, MexeCountPopulation) {
   EXPECT_EQ(rig.vu->Regfiles().ReadSrf(30), float(want));
 }
 
-TEST(Vu, ValuMaskKeepsUnselectedElements) {
-  // 掩码位为 0 的 element 不更新目的寄存器。掩码来源由 mask_op 给，不占
+TEST(Vu, ValuMaskTakesPassThroughSource) {
+  // 掩码位为 0 的 element 不参与运算，目的在该位置取本指令的透传源：双操作数
+  // 逐元素类取 src2、乘累加类取累加器 src3。掩码来源由 mask_op 给，不占
   // SRC*_SEL。
   Rig rig;
   std::vector<float> in = Tame(kVl, 0x220);
@@ -684,7 +705,7 @@ TEST(Vu, ValuMaskKeepsUnselectedElements) {
   rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
   rig.WriteStatic(0, kVuValu0Op,
                   OpWord(uint64_t(ValuOp::kFaddVv), kSrcLu, kSrcVrfP0));
-  rig.WriteStatic(0, kVuMaskOp, MaskWord(kVuMaskP0, 0, 0, 0));
+  rig.WriteStatic(0, kVuMaskOp, MaskWord(kVuMaskSelMrfP0));
   rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcValu0, 0, 0, 0));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
@@ -697,13 +718,10 @@ TEST(Vu, ValuMaskKeepsUnselectedElements) {
 
   std::vector<float> got = rig.vu->Regfiles().ReadVrf(16, kVl, false);
   for (uint64_t i = 0; i < kVl; ++i) {
-    if (m[i]) {
-      float want = numeric::ClampNanInf(base[i] + in[i]);
-      EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want)) << "i=" << i;
-    } else {
-      // 未选中的位置保持写目标原有的值。这一轮写目标是空的 VRF 段，所以是 0。
-      EXPECT_EQ(numeric::BitsOf(got[i]), 0u) << "i=" << i;
-    }
+    // 选中的位置算 src2 + src1，未选中的位置直接取 src2。两处都含 base[i]，
+    // 差在选中的那几处多加了 src1。
+    float want = m[i] ? numeric::ClampNanInf(base[i] + in[i]) : base[i];
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want)) << "i=" << i;
   }
 }
 
@@ -868,22 +886,35 @@ TEST(Vu, FenceWaitsForAllPrior) {
   EXPECT_GT(rig.vu->Profile().Counter(VuCounter::kStallFenceCycle), 0u);
 }
 
-TEST(Vu, BroadcastWaitsForNonLoadPredecessors) {
-  // DATA_BROADCAST 的那一条等除 CM-Load 外的前序宏指令全部完成才派发。前一条
-  // 只读 CM，所以这一条不必等。
+TEST(Vu, CmFenceWaitsForPriorCmAccess) {
+  // CM_FENCE 的那一条等前序宏指令的 CM 访问做完才派发。前一条既有 LU 读又有
+  // SU 写，所以这一条要等。
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x308)));
-  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
-  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
-                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
-  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  SetupChain(rig, 0, 0, kSrcLu);
   rig.Write(kVuMacroInstTrigger, TriggerWord(0));
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigBroadcast));
+  SetupComputeOnly(rig, 1);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigCmFence));
   rig.Run(800);
 
   EXPECT_EQ(rig.sink->got.size(), 2u);
-  EXPECT_EQ(rig.vu->Profile().Counter(VuCounter::kStallBcastCycle), 0u)
-      << "前一条只有 CM-Load，DATA_BROADCAST 不该等它";
+  EXPECT_GT(rig.vu->Profile().Counter(VuCounter::kStallCmFenceCycle), 0u);
+  EXPECT_EQ(rig.vu->Profile().Counter(VuCounter::kStallFenceCycle), 0u)
+      << "这一条没置 MACRO_INST_FENCE，不该记到 Fence 那一档";
+}
+
+TEST(Vu, CmFenceIgnoresPureComputePredecessors) {
+  // 纯计算的前序宏指令不碰 CM，CM_FENCE 不等它。
+  Rig rig;
+  SetupComputeOnly(rig, 0);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  SetupComputeOnly(rig, 1);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigCmFence));
+  rig.Run(800);
+
+  EXPECT_EQ(rig.sink->got.size(), 2u);
+  EXPECT_EQ(rig.vu->Profile().Counter(VuCounter::kStallCmFenceCycle), 0u)
+      << "前一条是纯计算，CM_FENCE 不该等它";
 }
 
 // ── OPCODE 与异常 ──
@@ -920,6 +951,41 @@ TEST(Vu, VrfWritePortsMustDifferOrCfgError) {
   rig.Run(400);
 
   EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrCfg, 0u);
+  EXPECT_EQ(rig.vu->Isq().Left(), 0u)
+      << "CFG_ERROR 放弃派发后仍须退休，否则 inflight / 静态组引用泄漏";
+  EXPECT_EQ(rig.sink->got.size(), 1u);
+}
+
+TEST(Vu, CfgErrorRetiresAndNextMacroRuns) {
+  // 非法配置拦下后必须归还在飞计数，下一条合法宏指令才能继续发。
+  Rig rig;
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x31A)));
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcLu, kSrcLu, 0, 0));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+
+  std::vector<float> in = Tame(kVl, 0x31B);
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+  // 合法那条另占一组，避免踩着组 0 里还没清掉的非法 PRF_op。
+  rig.WriteStatic(1, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(1, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1));
+  rig.Run(800);
+
+  EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrCfg, 0u);
+  EXPECT_EQ(rig.vu->Isq().Left(), 0u);
+  ASSERT_EQ(rig.sink->got.size(), 2u);
+  std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, kVl * 4));
+  for (size_t i = 0; i < in.size(); ++i) {
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(in[i])) << "i=" << i;
+  }
 }
 
 TEST(Vu, MaskPortCannotBeSharedOrCfgError) {
@@ -930,7 +996,7 @@ TEST(Vu, MaskPortCannotBeSharedOrCfgError) {
   rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
   rig.WriteStatic(0, kVuValu0Op, OpWord(uint64_t(ValuOp::kFaddVv), kSrcLu, kSrcLu));
   rig.WriteStatic(0, kVuValu1Op, OpWord(uint64_t(ValuOp::kFaddVv), kSrcLu, kSrcLu));
-  rig.WriteStatic(0, kVuMaskOp, MaskWord(kVuMaskP0, kVuMaskP0, 0, 0));
+  rig.WriteStatic(0, kVuMaskOp, MaskWord(kVuMaskSelMrfP0, kVuMaskSelMrfP0));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
@@ -938,6 +1004,34 @@ TEST(Vu, MaskPortCannotBeSharedOrCfgError) {
   rig.Run(400);
 
   EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrCfg, 0u);
+  EXPECT_EQ(rig.vu->Isq().Left(), 0u);
+}
+
+TEST(Vu, RfIndexWrapsAndRaisesRfIdxError) {
+  // 起始索引 + 占用 entry 越过 512 时回绕到 entry 0，同时置 RF_IDX_ERROR，
+  // 流水不停滞。
+  Rig rig;
+  std::vector<float> tail(32, 1.5f);
+  std::vector<float> head(32, 2.5f);
+  rig.vu->Regfiles().WriteVrf(511, tail, false, numeric::RoundMode::kRne);
+  rig.vu->Regfiles().WriteVrf(0, head, false, numeric::RoundMode::kRne);
+  rig.WriteStatic(0, kVuValu2Op, OpWord(uint64_t(ValuOp::kMvVv), kSrcVrfP0));
+  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcValu2));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(64, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(511));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Run(400);
+
+  EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrRfIndex, 0u);
+  EXPECT_EQ(rig.vu->Isq().Left(), 0u);
+  ASSERT_EQ(rig.sink->got.size(), 1u);
+  std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, 64 * 4));
+  for (uint64_t i = 0; i < 32; ++i) {
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(1.5f)) << "i=" << i;
+    EXPECT_EQ(numeric::BitsOf(got[32 + i]), numeric::BitsOf(2.5f)) << "i=" << i;
+  }
 }
 
 // ── LU / SU 的转换与舍入 ──
@@ -950,7 +1044,10 @@ TEST(Vu, LoadFp32NarrowsToBf16UnderRoundMode) {
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
 
   rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
-  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStBf16), kSrcLu));
+  // LU 的直通要求两侧数据类型一致（读 FP32 又写 BF16 不算），经 VALU2 的
+  // vmv.v.v 转一手：它不改数据格式、不产生舍入，窄化仍然只发生在 LU。
+  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStBf16), kSrcValu2));
+  rig.WriteStatic(0, kVuValu2Op, OpWord(uint64_t(ValuOp::kMvVv), kSrcLu));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
                   TypeVlWord(kVl, true, numeric::RoundMode::kRtz));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
@@ -1117,6 +1214,433 @@ TEST(Vu, ProfileStopsWhenRunCleared) {
 }
 
 }  // namespace
+
+// ── 寄存器整理里后加的那几档 ──
+
+namespace {
+
+// 读配置总线上的寄存器：数据走 dsa_rdata 异步回来。
+class CfgReader : public BachModule {
+ public:
+  CfgReader(ClockPtr c, std::shared_ptr<DsaCfgPort> p,
+            std::shared_ptr<DsaRdataPort> r)
+      : BachModule(c, "cfg_reader"), port(std::move(p)), rdata(std::move(r)) {}
+
+  void Ask(uint64_t addr) { q.push_back(addr); }
+  // 最近一次读回来的值；还没有就返回 false。
+  bool Take(uint64_t& out) {
+    if (!has) return false;
+    out = last;
+    has = false;
+    return true;
+  }
+
+ protected:
+  void Step() override {
+    if (rdata->Valid()) {
+      last = rdata->Rdata();
+      has = true;
+    }
+    if (driving) {
+      if (!port->Ready()) return;
+      q.pop_front();
+      driving = false;
+    }
+    if (q.empty()) {
+      port->Idle();
+      return;
+    }
+    port->DriveRead(q.front(), ++seq);
+    driving = true;
+  }
+
+ private:
+  std::shared_ptr<DsaCfgPort> port;
+  std::shared_ptr<DsaRdataPort> rdata;
+  std::deque<uint64_t> q;
+  bool driving = false, has = false;
+  uint64_t seq = 0, last = 0;
+};
+
+// 一条「LU 读 → VALU2 → SU 写」的链，各执行单元的用例都用它。
+void SetupValu2(Rig& rig, uint64_t op_word, uint64_t srf_idx3 = 0) {
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuValu2Op, op_word);
+  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcValu2));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  if (srf_idx3 != 0) {
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuSrfRdIndex0,
+                    SrfWord(0, 0, 0, srf_idx3));
+  }
+}
+
+}  // namespace
+
+TEST(Vu, Valu2SwapsAdjacentPairs) {
+  // vswap2.v：vd[2k] = src1[2k+1]、vd[2k+1] = src1[2k]。
+  Rig rig;
+  std::vector<float> in = Tame(kVl, 0x230);
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+  SetupValu2(rig, OpWord(uint64_t(ValuOp::kSwap2), kSrcLu));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Run(400);
+
+  std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, kVl * 4));
+  ASSERT_EQ(got.size(), in.size());
+  for (uint64_t i = 0; i + 1 < kVl; i += 2) {
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(in[i + 1])) << "i=" << i;
+    EXPECT_EQ(numeric::BitsOf(got[i + 1]), numeric::BitsOf(in[i])) << "i=" << i;
+  }
+}
+
+TEST(Vu, Valu2SlidesFillWithScalar) {
+  // 两条 slide：低端 / 高端补标量（挂 src1，VALU2 硬连线的 SRF 读端口是 p3），
+  // 向量挂 src2。
+  const float fill = 7.5f;
+  std::vector<float> in = Tame(kVl, 0x231);
+
+  for (uint64_t up = 0; up < 2; ++up) {
+    Rig rig;
+    rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+    rig.vu->Regfiles().WriteSrf(3, fill);
+    SetupValu2(rig,
+               OpWord(up ? uint64_t(ValuOp::kSlide1Up)
+                         : uint64_t(ValuOp::kSlide1Down),
+                      kSrcSrfP0 + 3, kSrcLu),
+               3);
+    rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+    rig.Run(400);
+
+    std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, kVl * 4));
+    ASSERT_EQ(got.size(), in.size());
+    for (uint64_t i = 0; i < kVl; ++i) {
+      float want = up ? (i == 0 ? fill : in[i - 1])
+                      : (i + 1 < kVl ? in[i + 1] : fill);
+      EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want))
+          << (up ? "slide1up i=" : "slide1down i=") << i;
+    }
+  }
+}
+
+TEST(Vu, Vsfu0AndVsfu1RunIndependentlyInFp32) {
+  // FP32 下两个 VSFU 是两个可独立配置的单元，各配各的 op 与源，结果分别经
+  // VRF 的两个写口写回（0x05 = VSFU0、0x06 = VSFU1）。
+  Rig rig;
+  std::vector<float> in = Tame(kVl, 0x232);
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuVsfuOp,
+                  OpWord(uint64_t(VsfuOp::kExp), kSrcLu) |
+                      (OpWord(uint64_t(VsfuOp::kSqrt), kSrcLu) << 16));
+  rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcVsfu0, kSrcVsfu1, 0, 0));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, 32));
+  // LU 同时喂两个 VSFU：同一个源供给两个消费者就是广播，按约定置 Fence。
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigFence));
+  rig.Run(400);
+
+  std::vector<float> e = rig.vu->Regfiles().ReadVrf(0, kVl, false);
+  std::vector<float> s = rig.vu->Regfiles().ReadVrf(32, kVl, false);
+  ASSERT_EQ(e.size(), in.size());
+  for (uint64_t i = 0; i < kVl; ++i) {
+    EXPECT_EQ(numeric::BitsOf(e[i]),
+              numeric::BitsOf(numeric::ClampNanInf(std::exp(in[i]))))
+        << "VSFU0 i=" << i;
+    EXPECT_EQ(numeric::BitsOf(s[i]),
+              numeric::BitsOf(numeric::ClampNanInf(std::sqrt(in[i]))))
+        << "VSFU1 i=" << i;
+  }
+}
+
+TEST(Vu, SuInputReplacesNanAndInf) {
+  // 替换模式下，SU 写出输入阶段的 NaN 换成 NAN_REPLACE_VALUE、±Inf 换成
+  // ±INF_REPLACE_VALUE（0x1F00 / 0x1F04 是全局静态，所有宏指令共享）。
+  Rig rig;
+  std::vector<float> in = Tame(kVl, 0x233);
+  in[3] = std::numeric_limits<float>::quiet_NaN();
+  in[5] = std::numeric_limits<float>::infinity();
+  in[7] = -std::numeric_limits<float>::infinity();
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+  rig.Write(kVuInfReplaceValue, numeric::BitsOf(6.5f));
+  rig.Write(kVuNanReplaceValue, numeric::BitsOf(1.25f));
+
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne) |
+                      kVuNanInfReplaceEn);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Run(400);
+
+  std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, kVl * 4));
+  ASSERT_EQ(got.size(), in.size());
+  for (uint64_t i = 0; i < kVl; ++i) {
+    float want = in[i];
+    if (i == 3) want = 1.25f;
+    if (i == 5) want = 6.5f;
+    if (i == 7) want = -6.5f;
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want)) << "i=" << i;
+  }
+  EXPECT_EQ(rig.vu->ConfigRegister().ErrorCode() & kVuErrNan, 0u)
+      << "替换模式下不置 NAN_ERROR";
+  EXPECT_GT(rig.vu->Profile().Counter(VuCounter::kNanReplaceCnt), 0u);
+}
+
+TEST(Vu, SuInputReportsNanWhenReplaceDisabled) {
+  // 替换没开时 NaN 原样透传，并置位 NAN_ERROR、把 user_id 锁进 nan_err_info。
+  Rig rig;
+  std::vector<float> in = Tame(kVl, 0x234);
+  in[3] = std::numeric_limits<float>::quiet_NaN();
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+  rig.vu->ConfigRegister().SetCoreIds(kStream, kTask, 5);
+
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Run(400);
+
+  auto& cfg = rig.vu->ConfigRegister();
+  EXPECT_NE(cfg.ErrorCode() & kVuErrNan, 0u);
+  EXPECT_EQ(cfg.ErrorInfo() & kVuErrInfoValid, kVuErrInfoValid);
+  EXPECT_EQ((cfg.ErrorInfo() >> kVuErrInfoFirstShift) & 0xF,
+            uint64_t(4)) << "FIRST_ERR 应是 NAN_ERROR 的位号";
+  EXPECT_EQ((cfg.ErrorInfo() >> kVuErrInfoUnitShift) & 0xF, kVuErrUnitSu);
+  EXPECT_EQ(cfg.ErrorInfo() & 0xFFFFu, 5u) << "锁下来的是这条宏指令的 user_id";
+  EXPECT_EQ(cfg.NanErrInfo(), 5u | kVuErrCtxValid);
+
+  // 读 error_code 把这些上下文一起清掉。
+  EXPECT_NE(cfg.TakeErrorCode(), 0u);
+  EXPECT_EQ(cfg.ErrorInfo(), 0u);
+  EXPECT_EQ(cfg.NanErrInfo(), 0u);
+}
+
+TEST(Vu, VlGranularityChecksRaiseCfgError) {
+  // MXFP8 访存与间隔访问要求 VL 是 32 的整数倍，st.mask 与 vswap2.v 各要求 8 的
+  // 倍数与偶数。不满足置 CFG_ERROR，宏指令不执行。
+  auto run = [](uint64_t lu, uint64_t su, uint64_t valu2, uint64_t vl) {
+    Rig rig;
+    rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(256, 0x235)));
+    if (lu) rig.WriteStatic(0, kVuLuOp, OpWord(lu));
+    if (su) rig.WriteStatic(0, kVuSuOp, OpWord(su, kSrcLu));
+    if (valu2) rig.WriteStatic(0, kVuValu2Op, OpWord(valu2, kSrcLu));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(vl, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+    rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+    rig.Run(200);
+    return rig.vu->ConfigRegister().ErrorCode();
+  };
+
+  // ld.mxfp8（0x02）的 VL 不是 32 的整数倍。
+  EXPECT_NE(run(uint64_t(LuOp::kLdMxfp8), uint64_t(SuOp::kNop), 0, 48) &
+                kVuErrCfg,
+            0u);
+  EXPECT_EQ(run(uint64_t(LuOp::kLdMxfp8), uint64_t(SuOp::kNop), 0, 64) &
+                kVuErrCfg,
+            0u);
+  // st.mask（0x05）的 VL 不是 8 的整数倍。
+  EXPECT_NE(run(uint64_t(LuOp::kLdFp32), uint64_t(SuOp::kStMask), 0, 60) &
+                kVuErrCfg,
+            0u);
+  // vswap2.v（0x24）的 VL 是奇数。
+  EXPECT_NE(run(uint64_t(LuOp::kLdFp32), uint64_t(SuOp::kStFp32),
+                uint64_t(ValuOp::kSwap2), 63) &
+                kVuErrCfg,
+            0u);
+  EXPECT_EQ(run(uint64_t(LuOp::kLdFp32), uint64_t(SuOp::kStFp32),
+                uint64_t(ValuOp::kSwap2), 64) &
+                kVuErrCfg,
+            0u);
+}
+
+TEST(Vu, ErrorInfoLatchesFirstError) {
+  // 非法配置在调度阶段被拦下：本条不执行，上下文照锁。FIRST_ERR 给的是首次
+  // 置位的 error_code 位号，ERR_UNIT 给上报单元，配置总线访问那条报 0x0。
+  Rig rig;
+  rig.vu->ConfigRegister().SetCoreIds(kStream, kTask, 9);
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x236)));
+  // 两个 VRF 写口指向同一个执行单元 → CFG_ERROR。
+  rig.WriteStatic(2, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(2, kVuPrfOp, PrfWord(kSrcLu, kSrcLu, 0, 0));
+  rig.WriteStatic(2, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(2, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  // 快照窗口先选到 sticky 那一份，跑完再读。
+  rig.Write(kVuSnapshotAddr, kVuSnapSelSticky << kVuSnapSelShift);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(2));
+  rig.Run(200);
+
+  auto& cfg = rig.vu->ConfigRegister();
+  EXPECT_EQ(cfg.ErrorInfo() & kVuErrInfoValid, kVuErrInfoValid);
+  EXPECT_EQ((cfg.ErrorInfo() >> kVuErrInfoFirstShift) & 0xF, 1u)
+      << "CFG_ERROR 是 bit[1]";
+  EXPECT_EQ((cfg.ErrorInfo() >> kVuErrInfoUnitShift) & 0xF, kVuErrUnitNone);
+  EXPECT_EQ((cfg.ErrorInfo() >> kVuErrInfoCfgIdxShift) & 0x7, 2u);
+  EXPECT_EQ(cfg.ErrorInfo() & 0xFFFFu, 9u);
+  // 没派发的那一条只在 sticky 快照里。
+  EXPECT_EQ(rig.vu->ConfigRegister().SnapshotData() & kVuSnapValid,
+            kVuSnapValid);
+  EXPECT_EQ(rig.vu->ConfigRegister().SnapshotData() & kVuSnapDispatched, 0u);
+}
+
+// 跑的过程中读快照窗口：等宏指令进了窗口，先写 snapshot_addr 选条目，隔几拍把
+// snapshot_data 读回来。一个 clock 只能 Continue 一次，所以探针得自己按拍走。
+class SnapProbe : public BachModule {
+ public:
+  SnapProbe(ClockPtr c, std::shared_ptr<DsaCfgPort> p,
+            std::shared_ptr<DsaRdataPort> r, Vu& v, uint64_t snap_addr)
+      : BachModule(c, "snap_probe"),
+        port(std::move(p)),
+        rdata(std::move(r)),
+        vu(v),
+        want(snap_addr) {}
+
+  bool Got() const { return got; }
+  uint64_t Value() const { return value; }
+
+ protected:
+  void Step() override {
+    if (rdata->Valid()) {
+      value = rdata->Rdata();
+      got = true;
+    }
+    // 等这一条进 ISQ 的窗口再动手。
+    if (vu.Isq().SnapCount() == 0) {
+      port->Idle();
+      return;
+    }
+    if (hold) {
+      if (!port->Ready()) return;
+      hold = false;
+      ++stage;
+    }
+    if (stage == 0) {
+      // 写 snapshot_addr：交出去（hold 落下）之后 stage 才进到 1。
+      port->Drive(kVuSnapshotAddr, want, ++seq);
+      hold = true;
+      return;
+    }
+    if (stage == 1) {
+      port->DriveRead(kVuSnapshotData, ++seq);
+      hold = true;
+      return;
+    }
+    port->Idle();
+  }
+
+ private:
+  std::shared_ptr<DsaCfgPort> port;
+  std::shared_ptr<DsaRdataPort> rdata;
+  Vu& vu;
+  uint64_t want = 0;
+  uint64_t seq = 0, stage = 0, value = 0;
+  bool hold = false, got = false;
+};
+
+TEST(Vu, SnapshotWindowReadsInFlightParams) {
+  // 快照窗口按年龄编号已发射未退休的宏指令，SNAP_IDX 选动态参数寄存器：
+  // 0x2 是 TYPE_VL，给出的是硬件实际用的那一份。
+  Rig rig;
+  const uint64_t vl = 4096;
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(vl, 0x237)));
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(vl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+
+  // 读到窗口的路径独立于宏指令流水线：调试通路照样能读。SNAP_IDX=2 是 TYPE_VL，
+  // 给出的是硬件实际用的那一份。
+  auto dbg = std::make_shared<DsaCfgPort>(rig.clk);
+  rig.vu->ConfigRegister().AttachPath(VuCfgPath::kDebug, dbg);
+  SnapProbe probe(rig.clk, dbg, rig.vu->RdataPtr(), *rig.vu,
+                  (2u << kVuSnapIdxShift) | (0u << kVuSnapSelShift));
+  rig.Run(120);
+
+  ASSERT_TRUE(probe.Got());
+  EXPECT_EQ(probe.Value() & kVuVlMask, vl);
+}
+
+TEST(Vu, RegisterMapCoversNewBlocks) {
+  Rig rig;
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x238)));
+
+  // 0x4004 是未实现地址：该次访问不产生副作用，置 REG_ADDR_ERROR。
+  rig.Write(kVuProfileBase + 0x04, 1);
+
+  // DSA-RF 后门：RF_SEL 选哪一块，RF_ADDR 就是那一块内的字节地址。
+  // SRF[3] 在 SRF 内的字节地址是 3 × 4 = 0x0C。
+  rig.Write(kVuRegFileAddr, (kVuRfSelSrf << kVuRfSelShift) | 0x0C);
+  rig.Write(kVuRegFileData, numeric::BitsOf(2.5f));
+  // MRF[3] 的高半字在 MRF 内的字节地址是 3 × 8 + 4 = 0x1C。高半字装的是
+  // entry 内第 32～63 个 element 的掩码位，只有 BF16 那一档用得到。
+  rig.Write(kVuRegFileAddr, (kVuRfSelMrf << kVuRfSelShift) | 0x1C);
+  rig.Write(kVuRegFileData, 0x0000FFFFu);
+  // 最后拿一个没有对应 RF 的 RF_SEL（11）写同一处：置 RF_IDX_ERROR，写入被丢弃。
+  rig.Write(kVuRegFileAddr, (3u << kVuRfSelShift) | 0x0C);
+  rig.Write(kVuRegFileData, numeric::BitsOf(9.0f));
+  rig.Run(120);
+
+  EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrRegAddr, 0u);
+  EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrRfIndex, 0u);
+  EXPECT_EQ(numeric::BitsOf(rig.vu->Regfiles().ReadSrf(3)),
+            numeric::BitsOf(2.5f))
+      << "选到没有的 RF，写入不该落到任何一块上";
+  std::vector<bool> m = rig.vu->Regfiles().ReadMrf(3, 64, true);
+  EXPECT_TRUE(m[32]) << "高半字的 bit0 对应 entry 内第 32 个 element";
+  EXPECT_FALSE(m[48]);
+}
+
+TEST(Vu, MaskComesFromLdMaskBypass) {
+  // mask_op 取 0x01 时掩码直接取本条 ld.mask 载入的那一份，不占 MRF 读端口。
+  // 两个操作数都从 VRF 取：掩码只管哪些 element 参与运算。
+  Rig rig;
+  std::vector<float> a = Tame(kVl, 0x239);
+  std::vector<float> b = Tame(kVl, 0x23A);
+  rig.vu->Regfiles().WriteVrf(0, a, false, numeric::RoundMode::kRne);
+  rig.vu->Regfiles().WriteVrf(8, b, false, numeric::RoundMode::kRne);
+  // 掩码的字节流从 CM 载进来，每个 element 一位；偶数位置置 1。
+  std::vector<uint8_t> bits((kVl + 7) / 8, 0);
+  for (uint64_t i = 0; i < kVl; ++i) {
+    if (i % 2 == 0) bits[i / 8] = uint8_t(bits[i / 8] | (1u << (i % 8)));
+  }
+  rig.ldmem->Poke(kSrcAddr, bits);
+
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdMask)));
+  rig.WriteStatic(0, kVuValu0Op,
+                  OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcVrfP1));
+  rig.WriteStatic(0, kVuMaskOp, MaskWord(kVuMaskSelLu));
+  rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcValu0, 0, 0, 0));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kVl, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(0, 8));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(16));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Run(400);
+
+  std::vector<float> got = rig.vu->Regfiles().ReadVrf(16, kVl, false);
+  for (uint64_t i = 0; i < kVl; ++i) {
+    // 选中的位置算 src2 + src1，未选中的位置取透传源 src2。
+    float want = (i % 2 == 0) ? numeric::ClampNanInf(b[i] + a[i]) : b[i];
+    EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(want)) << "i=" << i;
+  }
+}
 
 // ── 与 reference/ 那一份的逐 bit 比对 ──
 

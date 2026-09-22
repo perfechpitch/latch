@@ -32,8 +32,19 @@ make -C src/bach/compiler/kernel
 ```
 
 四样产物都落在 `kernel/build/`：`.hex` 是装载用的镜像，`.sym` 是编译器取 `TASK_PC` 用的
-符号表，`.elf` 与 `.dump` 是编译中间件与对着看用的。`.hex` 由 `gen_hwconfig.py` 拷进
-bundle 下各套配置的目录。镜像不在就跳过，用例自己会报 `kernel 还没编`。
+符号表，`.elf` 与 `.dump` 是编译中间件与对着看用的。镜像不在就跳过，用例自己会报
+`kernel 还没编`。
+
+`kernel/` 里动过任何一处，**重编之后还要重跑 `gen_hwconfig.py`**：
+
+```shell
+cd src/bach/compiler && python3 gen_hwconfig.py --topo topo/<拓扑名>.json
+```
+
+`_start` 或任一个 `task_*` 的代码尺寸一变，后面所有 task 入口都平移；bundle 里 `.bachir`
+的 `TASK_PC` / `DATAIN` 是生成时按 `.sym` **写死**的，`.hex` 也是那一步拷进去的。只重编不
+重跑，`moe_chip` / `moe_lpu` / `moe_lpu_tokens` 会成对地停在旧镜像上——**用例照绿，但跑的
+不是新 kernel**。只换其中一半更糟：PC 与镜像差几个字节，核从指令中间起跑。
 
 ***
 
@@ -96,7 +107,7 @@ weights 加载那一条 path 只在那个用例里用，不进 bundle，由用�
 | TS | `ts`、`ts_config`、`ts_chain`、`ts_issue`、`ts_done`、`ts_credit` | 59 |
 | DTE | `dte`、`dte_inbound`、`dte_commit`、`dte_lane`、`dte_completion`、`dte_tables` | 53 |
 | MU | `mu`、`mu_issue` | 27 |
-| VU | `vu` | 36 |
+| VU | `vu` | 47 |
 | RV core | `rv_core`、`rv_lsq`、`rv_task`、`custom0` | 25 |
 | 三块存储 | `memory` | 23 |
 | 数值格式 | `numeric`、`numeric_cross` | 21 |

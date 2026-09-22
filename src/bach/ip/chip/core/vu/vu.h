@@ -63,6 +63,9 @@ class Vu {
         clock, "profile", *cfg_reg, *isq, *pipe, *lu, *su,
         std::array<VuValu*, 3>{valu[0].get(), valu[1].get(), valu[2].get()},
         *vsfu, *mexe, *sexe, gid, false);
+    // 配置总线读 Profile 计数器的窗口。快照窗口由 ISQ 自己挂（它建得比这一级
+    // 早，构造函数里就接上了）。
+    cfg_reg->AttachCounterWindow(profile.get());
     Bind();
   }
 

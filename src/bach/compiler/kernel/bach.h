@@ -377,12 +377,14 @@ static inline u32 dte_template(u32 idx) {
 #define VU_EVENT_EN                  (1u << 16)
 #define VU_STREAM_ID_OVERRIDE        (1u << 17)
 #define VU_STREAM_ID_SHIFT           18  /* [21:18] */
-#define VU_MACRO_INST_FENCE          (1u << 24)
-#define VU_DATA_BROADCAST            (1u << 25)
+#define VU_MACRO_INST_FENCE          (1u << 24)  /* 等此前全部宏指令完成 */
+#define VU_CM_FENCE                  (1u << 25)  /* 只等前序的 CM 访问做完 */
 
-/* TYPE_VL 位域：[15:0] VL、[16] DATA_TYPE、[19:17] ROUND_MODE */
+/* TYPE_VL 位域：[15:0] VL、[16] DATA_TYPE、[19:17] ROUND_MODE、
+ * [20] NAN_INF_REPLACE_EN */
 #define VU_DATA_TYPE_SHIFT  16
 #define VU_ROUND_MODE_SHIFT 17
+#define VU_NAN_INF_REPLACE_EN (1u << 20)
 
 /* 静态配置组内的偏移。前一段是各执行单元的 op 与 PRF_op，后一段是动态参数
  * 寄存器的静态副本，副本区起点是 VU_STATIC_DUP */

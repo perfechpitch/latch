@@ -34,8 +34,9 @@ class VuMexe : public VuExeStage {
     VuOpReg const& r = f.uops.cfg.mexe;
     MexeOp op = MexeOp(r.opcode);
     uint64_t vl = f.SegLen();
-    // ms2 可取 VALU0 的 Mask bypass（不占 MRF 读端口）或 MRF_rd_p0；ms1 只能
-    // 取 MRF_rd_p1，单操作数指令必须置 0x00。
+    // 源操作数 1 恒为掩码：LU 的 ld.mask bypass（不占 MRF 读端口）、VALU0 的
+    // 比较 / vfclass 结果（同样不占），或 MRF_rd_p0 / p1。源操作数 2 随编码而定：
+    // 双操作数掩码逻辑时是第二个掩码，vmiuset / vmiset 时是 16 个 INT16 索引。
     std::vector<bool> const& a = VuSrcOf(f, r.src1).mask;
     std::vector<bool> const& b = VuSrcOf(f, r.src2).mask;
     VuOperand& o = f.mexe;
@@ -89,14 +90,19 @@ class VuMexe : public VuExeStage {
         break;
       }
       case MexeOp::kIuset: case MexeOp::kIset: {
-        // 按 Top-K 给的 16 个索引清位或置位。索引跟着源操作数走。
+        // 掩码走 src1，16 个 INT16 索引走 src2：取 0x03（VALU1 的 Top-K 输出
+        // 直接接过来）或 0x30/0x31（读回此前落在 VRF 里的索引）。取完一轮就把
+        // 这 16 位清掉或置上，下一轮取的是次大的一批。
+        //
+        // 索引向量定长 1 个 VRF entry、与 VL 无关；有效候选不足 16 个时多余位置
+        // 由 Top-K 填 −1（全 1），这里按无效索引忽略，不改变任何 Mask 位。
         o.mask.assign(vl, false);
         for (uint64_t i = 0; i < vl; ++i) o.mask[i] = Bit(a, i);
-        // 索引通道来自 VALU1 的 Top-K：取完一轮就把这 16 位清掉或置上，
-        // 下一轮取的是次大的一批。
-        std::vector<uint16_t> const& idx = f.valu[1].index;
+        std::vector<uint16_t> const& idx = VuSrcOf(f, r.src2).index;
         for (uint16_t at : idx) {
-          if (at < o.mask.size()) o.mask[at] = op == MexeOp::kIset;
+          if (at != 0xFFFFu && at < o.mask.size()) {
+            o.mask[at] = op == MexeOp::kIset;
+          }
         }
         break;
       }

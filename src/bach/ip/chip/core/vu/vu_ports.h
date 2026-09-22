@@ -97,10 +97,11 @@ struct VuFlow {
   uint64_t seg_base = 0;
   bool seg_last = true;
   // 各执行单元的输出。SEXE 三次迭代各占一格：DMUX 的六个 SRF 写口是逐次
-  // 迭代各写一个的，挤在一格里会把前一次的结果覆盖掉。
+  // 迭代各写一个的，挤在一格里会把前一次的结果覆盖掉。VSFU 两格对应两个功能
+  // 相同的单元，BF16 下拼接成一个逻辑单元、只有第 0 格有结果。
   VuOperand lu, su_in;
   std::array<VuOperand, 3> valu;
-  VuOperand vsfu;
+  std::array<VuOperand, 2> vsfu;
   VuOperand mexe;
   std::array<VuOperand, 3> sexe;
   // SMUX 这一级从 RF 读出来的：VRF 两个读口、MRF 两个读口、SRF 八个读口。
@@ -108,7 +109,13 @@ struct VuFlow {
   std::array<VuOperand, 2> vrf_rd;
   std::array<VuOperand, 2> mrf_rd;
   std::array<VuOperand, kVuSrfRdPorts> srf_rd;
+  // 通路上攒下的异常位，退休那一拍记进 error_code；err_unit 是首个上报异常的
+  // 单元，进 error_info.ERR_UNIT。
   uint64_t error = 0;
+  uint64_t err_unit = kVuErrUnitNone;
+  // 替换模式下本段被换掉的 NaN / Inf element 数，退休时累进 Profile 计数器。
+  uint64_t nan_replaced = 0;
+  uint64_t inf_replaced = 0;
 
   // 本段多少个元素。各级按它算，不再直接取 VL：分段之后 VL 是整条的长度。
   uint64_t SegLen() const { return seg_len != 0 ? seg_len : uops.inst.Vl(); }

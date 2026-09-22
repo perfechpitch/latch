@@ -115,27 +115,14 @@ class VuSmux : public BachModule {
     }
   }
 
-  // 这一条有没有哪一路源指向这个编码。
+  // 这一条有没有哪一路源指向这个编码；MRF 读口的占用方还要算上运算掩码，
+  // 那一类走 mask_op 不走 SRC*_SEL。
   static bool Uses(VuStaticCfg const& c, uint64_t sel) {
-    const VuOpReg* regs_list[] = {&c.lu,      &c.su,      &c.valu[0],
-                                  &c.valu[1], &c.valu[2], &c.vsfu,
-                                  &c.mexe,    &c.sexe[0], &c.sexe[1],
-                                  &c.sexe[2]};
-    for (VuOpReg const* r : regs_list) {
-      if (!r->Active()) continue;
-      if (r->src1 == sel || r->src2 == sel || r->src3 == sel) return true;
-    }
-    return false;
+    return VuUsesSrc(c, sel);
   }
 
-  // MRF 读口的占用方多一类：四个 VEXE 的运算掩码走 mask_op，不走 SRC*_SEL。
   static bool UsesMrf(VuStaticCfg const& c, uint64_t port) {
-    if (Uses(c, kSrcMrfP0 + port)) return true;
-    uint64_t want = port == 0 ? kVuMaskP0 : kVuMaskP1;
-    for (uint64_t v = 0; v < 4; ++v) {
-      if (c.MaskSelOf(v) == want) return true;
-    }
-    return false;
+    return VuUsesMrfPort(c, port);
   }
 
   VuRegfiles& regs;
