@@ -82,31 +82,31 @@ MoeCase ReadMoeCase() {
   return c;
 }
 
-// topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
+// topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
   for (size_t i = 0; i < t.size(); ++i) {
     uint64_t at = i * kTopkEntryBytes;
-    b[at] = uint8_t(t[i].expert_id & 0xFFu);
-    b[at + 1] = uint8_t((t[i].expert_id >> 8) & 0xFFu);
+    b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
+    b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
     for (int k = 0; k < 4; ++k) b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
   }
   return b;
 }
 
-// topK 里第 0 个是全局 17 号专家、组内第 1 个，第 1 个是全局 5 号、组内第 0 个。
+// topK 里第 0 个是组内第 1 个专家，第 1 个是组内第 0 个；topK 直接存组内序号。
 constexpr uint64_t kLocal[kn::kExperts] = {1, 0};
 
-// 一个 core 要的那几样：token、topK 表、本组专家表、三个矩阵的那一片。
+// 一个 core 要的那几样：token、topK 表、三个矩阵的那一片。
 template <typename Cmem, typename Mmem>
 void PokeCoreData(Cmem& cm, Mmem& mm, Mu& mu, MoeCase const& want) {
   cm.Poke(kn::kTokenOff, want.token);
   cm.PokeScale(kn::kTokenOff, want.token_scale);
-  mu.EpInfo().SetLocalEpTable({5, 17});
-  // topK 表由 DTE 搬运时经专用数据线直接写进 MU 的 topK_ep_table，不落 Core Mem。
-  // 这几笔 MU 任务都走 stream 0。
-  mu.EpInfo().WriteTopk(0, TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
+  // topK 表由 DTE 搬运时经专用数据线直接写进 MU 的 topK_ep_table，不落 Core Mem；
+  // 直接存组内序号。这几笔 MU 任务都走 stream 0。
+  mu.EpInfo().WriteTopk(
+      0, TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}}));
   kn::PokeCoreWeights(mm, want.group, want.chip, want.slot, kLocal);
 }
 
@@ -621,12 +621,11 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
     WriteDotChain(core, want.slot);
 
-    // boot 期装进去的那几样：权重按专家在本组内的序号摆，topK 表与本组的专家
-    // 名单一起给。topK 由 DTE 搬运时经专用数据线写进 MU 的 topK_ep_table，这里
-    // 直接注入同一份（本 core 的 MU 任务走 stream 0）。token 由 Router 送进来。
-    core.GetMu().EpInfo().SetLocalEpTable({5, 17});
+    // boot 期装进去的那几样：权重按专家在本组内的序号摆，topK 表直接存组内序号。
+    // topK 由 DTE 搬运时经专用数据线写进 MU 的 topK_ep_table，这里直接注入同一份
+    // （本 core 的 MU 任务走 stream 0）。token 由 Router 送进来。
     core.GetMu().EpInfo().WriteTopk(
-        0, TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}}));
+        0, TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}}));
     kn::PokeCoreWeights(core.Mmem(), want.group, want.chip, want.slot, kLocal);
 
     auto token = std::make_shared<Message>();

@@ -142,35 +142,33 @@ inline void ExpectSame(std::vector<uint8_t> const& got,
 
 // ── 每个 core 的数据 ──
 
-// topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
+// topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
   for (size_t i = 0; i < t.size(); ++i) {
     uint64_t at = i * kTopkEntryBytes;
-    b[at] = uint8_t(t[i].expert_id & 0xFFu);
-    b[at + 1] = uint8_t((t[i].expert_id >> 8) & 0xFFu);
+    b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
+    b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
     for (int k = 0; k < 4; ++k) b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
   }
   return b;
 }
 
-// topK 里第 0 个是全局 17 号专家、组内第 1 个，第 1 个是全局 5 号、组内第 0 个。
+// topK 里第 0 个是组内第 1 个专家，第 1 个是组内第 0 个；topK 直接存组内序号。
 constexpr uint64_t kLocal[kn::kExperts] = {1, 0};
 
-// boot 期铺进一个计算 core 的数据：本组专家表、topK 表与本 core 分到的那一片
-// 权重。group 是 EP 组号，chip 是这颗 chip 在组里的序号，slot 是这个 core 的
-// 逻辑槽位。
+// boot 期铺进一个计算 core 的数据：topK 表与本 core 分到的那一片权重。group 是
+// EP 组号，chip 是这颗 chip 在组里的序号，slot 是这个 core 的逻辑槽位。
 //
 // MU 按 stream_id 读那一片里的 topK 表，连续发的几个 token 各占一个 stream，所以
 // 每个 stream 各铺一份。各 token 选的是同两个专家，每份都一样。
 inline void SetUpCoreData(Core& core, uint64_t group, uint64_t chip,
                           uint64_t slot) {
-  core.GetMu().EpInfo().SetLocalEpTable({5, 17});
   // topK 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table，
-  // 每个 stream 各占一份。多 token 各自落在自己的 stream 上，得各有一份，否则只有
-  // 0 号 stream 有专家、别的 stream 算出全 0。
-  auto topk = TopkBytes({{17, kn::kWep[0]}, {5, kn::kWep[1]}});
+  // 直接存组内序号；每个 stream 各占一份。多 token 各自落在自己的 stream 上，得有
+  // 各有一份，否则只有 0 号 stream 有专家、别的 stream 算出全 0。
+  auto topk = TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
   for (uint64_t s = 0; s < kn::kStreamNum; ++s) {
     core.GetMu().EpInfo().WriteTopk(s, topk);
   }

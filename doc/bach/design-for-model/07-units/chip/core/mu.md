@@ -64,10 +64,10 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <rect x="832" y="110" width="330" height="154.0" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="844" y="131" font-size="11" fill="#111827" font-weight="600">gen_ep_info</text>
 <text x="844.0" y="148.0" font-size="8.5" fill="#475569">按任务信息索引 topK 激活专家信息</text>
-<text x="844.0" y="161.5" font-size="8.5" fill="#475569">用 topK 里的 global index 索引 local_ep_table</text>
-<text x="844.0" y="175.0" font-size="8.5" fill="#475569">　转成 local index，方便算 weight 访存地址</text>
-<text x="844.0" y="188.5" font-size="8.5" fill="#475569">local_ep_table 记录当前 EP Group 内有哪些专家</text>
-<text x="844.0" y="202.0" font-size="8.5" fill="#475569">　及各自在组内的序号</text>
+<text x="844.0" y="161.5" font-size="8.5" fill="#475569">topK 直接存组内序号（local index）</text>
+<text x="844.0" y="175.0" font-size="8.5" fill="#475569">　读出来就用来算 weight 访存地址</text>
+<text x="844.0" y="188.5" font-size="8.5" fill="#475569">组内序号是上游在把 topK 广播进本 EP Group</text>
+<text x="844.0" y="202.0" font-size="8.5" fill="#475569">　之前就压好的</text>
 <text x="844.0" y="215.5" font-size="8.5" fill="#475569">topK_ep_table：DTE 经专用数据线写入，每 stream ≤ 256 B</text>
 <text x="844.0" y="229.0" font-size="8.5" fill="#475569">　FC1 / FC3 只需 ids，FC2 需 ids 与 weights</text>
 <text x="844.0" y="242.5" font-size="8.5" fill="#475569">router_expert_count = 0 时忽略 topK 相关寄存器</text>
@@ -148,7 +148,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <path d="M375.6 75.0 L379.9 109.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
 <path d="M992.5 74.0 L996.9 109.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
 <rect x="1017.0" y="84.5" width="119.9" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="1077" y="92" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">local_ep_table 与静态配置</text>
+<text x="1077" y="92" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">静态配置</text>
 <path d="M510.0 180.2 L555.0 186.9" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
 <rect x="512.8" y="173.5" width="39.3" height="10.5" fill="#ffffff" opacity="0.92"/>
 <text x="532.5052976910911" y="181.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">trigger</text>
@@ -217,8 +217,8 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | 编号 | 功能 |
 | - | - |
 | F9 | 按任务信息索引 topK 激活专家信息 |
-| F10 | 用 topK 里的 global index 索引 `local_ep_table` 转成 local index，方便算 weight 访存地址 |
-| F11 | `local_ep_table` 记录当前 EP Group 内有哪些专家以及各自在组内的序号 |
+| F10 | topK 直接存组内序号（local index），读出来就用来算 weight 访存地址 |
+| F11 | 组内序号由上游在把 topK 广播进本 EP Group 之前压好，MU 不做 global→local 翻译 |
 | F12 | `topK_ep_table` 由 DTE 搬运时经 DTE→MU 专用数据线按 `stream_id` 直接写入（256 B，1 拍），MU 计算时与 token、weight 同时读，不再有 task 启动时的前置串行读 |
 | F13 | token 数据与 topK 信息分开存放：FC1 / FC3 只需 topK ids，FC2 需 ids 与 weights |
 | F14 | `router_expert_count = 0` 时忽略 topK 相关寄存器 |
@@ -295,7 +295,7 @@ port cmem_wr (master, valid/ready, clk)           // stq → Core Mem，132 B；
 port mmem_rd (master, valid/ready, clk)           // Weight ldq → Matrix Mem，只读；一个行地址广播到各 bank
   out req_valid · req_addr[24:0]
   in  req_ready · rsp_valid · rsp_rdata[65535:0] · rsp_scale[8191:0]   // 8 KB data + 1 KB scale
-port cfg (slave, ctrl_noc 写事务, clk)            // local_ep_table 与静态配置
+port cfg (slave, ctrl_noc 写事务, clk)            // 静态配置
   in  cfg_valid · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0]
   out cfg_rdata[31:0]
 ```
@@ -307,8 +307,7 @@ port cfg (slave, ctrl_noc 写事务, clk)            // local_ep_table 与静态
 ```
 mem regfile         FF 阵列   静态配置组 + 动态参数寄存器                          1R1W  dsa_cfg 写            复位 0
 mem issue_q         FIFO      16 × 任务描述                                        1W1R  顺序执行              复位空
-mem local_ep_table  FF 阵列   当前 EP Group 内的专家与组内序号                      1R    编译侧算好，boot 期经 ctrl_noc 写入  复位由输入给
-mem topK_ep_table   FF 阵列   16 stream × 256 B，每项 {expert_id 2 B, weight 4 B}   1W1R  DTE 经专用数据线写入，MU 计算时读  复位空
+mem topK_ep_table   FF 阵列   16 stream × 256 B，每项 {local_ep_index 2 B, weight 4 B}  1W1R  DTE 经专用数据线写入，MU 计算时读  复位空
 mem token_ldq       FIFO      16 × {addr[17:0], tag}                                1W1R  取决于读延时           复位空
 mem rd_outstanding  FF 阵列   16 × 256 B = 4 KB                                     1RW   掩盖 latency          复位空
 mem weight_ldq      FIFO      4 × {addr[24:0]}                                      1W1R  各 lane 地址相同       复位空
@@ -481,9 +480,6 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <rect x="20" y="102" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="106" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">topK_ep_table · FF 16×256 B · 1W1R（DTE 写、MU 读）</text>
-  <rect x="20" y="156" width="168" height="42" fill="#ffffff" stroke="#374151"/>
-  <rect x="24" y="160" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="177" font-size="10" fill="#374151" text-anchor="middle">local_ep_table · FF · 1R</text>
   <rect x="649" y="63" width="176" height="92" fill="#f1f5f9" stroke="#334155"/>
   <rect x="649" y="63" width="176" height="18" fill="#334155"/>
   <text x="737" y="76" font-size="10.5" fill="#ffffff" text-anchor="middle">EP_INFO</text>
@@ -493,15 +489,14 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <rect x="232" y="30" width="373" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="46" font-size="8.5" fill="#6b7280">M3</text>
   <text x="591" y="46" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="250" y="66" font-size="12" fill="#111827">gen_ep_info · 全局专家号转组内序号</text>
+  <text x="250" y="66" font-size="12" fill="#111827">gen_ep_info · 读 topK 组内序号</text>
   <text x="250" y="88" font-size="10.5" fill="#475569">1. router_expert_count == 0 → 跳过本级，忽略 topK 相关寄存器</text>
-  <text x="250" y="108" font-size="10.5" fill="#475569">2. ids = topK_ep_table[stream_id] 的 expert_id 列表</text>
-  <text x="250" y="128" font-size="10.5" fill="#475569">3. local_idx[j] = local_ep_table[ids[j]]</text>
+  <text x="250" y="108" font-size="10.5" fill="#475569">2. ids = topK_ep_table[stream_id] 的 local_ep_index 列表</text>
+  <text x="250" y="128" font-size="10.5" fill="#475569">3. local_idx[j] = ids[j]（直接是组内序号）</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. FC2 另取 weight 字段；FC1 与 FC3 只取 ids</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">token 数据与 topK 分开存放</text>
   <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#aru3)" fill="none"/>
   <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#aru3)" fill="none"/>
-  <path d="M188 177 L231 177" stroke="#475569" marker-end="url(#aru3)" fill="none"/>
   <path d="M605 109 L648 109" stroke="#475569" marker-end="url(#aru3)" fill="none"/>
 </svg>
 ```
@@ -766,7 +761,7 @@ Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一
 | streamID / taskID / userID 由软件写进动态配置寄存器 | F3 | `mu_ids_by_software` |
 | issue_q 顺序执行，任务切换无 bubble | F6、F7 | `mu_issue_q` |
 | task 间三段重叠 | F8 | `mu_three_stage_overlap` |
-| topK 的 global index 经 local_ep_table 转 local index | F10、F11 | `gen_ep_info` |
+| topK 直接存组内序号（local index），读出来就算 weight 访存地址 | F10、F11 | `gen_ep_info` |
 | topK_ep_table 由 DTE 经专用数据线直接写入 | F12 | `topk_wr` |
 | router_expert_count = 0 时忽略 topK 寄存器 | F14 | `no_topk` |
 | 循环顺序由内往外是 tile_K、专家、tile_N | F16 | `tile_order` |

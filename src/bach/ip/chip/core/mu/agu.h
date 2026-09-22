@@ -61,7 +61,7 @@ class MuAgu {
            s.k_idx * TokenBytes();
   }
   // 权重按专家在本 EP Group 内的序号排，与 topK 里的先后无关，所以要外面把
-  // 全局专家号翻成组内序号再传进来。激活与结果那两侧按 topK 的先后排。
+  // 组内序号传进来（topK 里直接存的就是组内序号）。激活与结果那两侧按 topK 的先后排。
   uint64_t WeightAddr(MuStep const& s, uint64_t local_ep) const {
     // 各 lane 访存地址相同，只发一个地址然后逐级脉动到各 lane。
     return cfg.b_addr + local_ep * cfg.b_expert_stride +

@@ -95,7 +95,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="642" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
 <rect x="324" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="336" y="551" font-size="11" fill="#111827" font-weight="600">MU DSA（七个模块）</text>
-<text x="336.0" y="568.0" font-size="8.5" fill="#475569">regfile · issue_q 16 · gen_ep_info（local_ep_table）</text>
+<text x="336.0" y="568.0" font-size="8.5" fill="#475569">regfile · issue_q 16 · gen_ep_info（topK_ep_table）</text>
 <text x="336.0" y="581.5" font-size="8.5" fill="#475569">agu ×3 与 acu（越界 / 对齐检查 → Drain &amp; Trap）</text>
 <text x="336.0" y="595.0" font-size="8.5" fill="#475569">Token ldq 16（Rd outstanding 4 KB）· Weight ldq 4</text>
 <text x="336.0" y="608.5" font-size="8.5" fill="#475569">matrix exe：32 lane × 10 级 CSA 树，vlane 1 / 2</text>

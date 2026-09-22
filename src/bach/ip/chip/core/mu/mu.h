@@ -94,14 +94,12 @@ class Mu {
   GenEpInfo& EpInfo() { return *ep; }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return reg->RdataPtr(); }
 
-  // topK 里第 i 个专家在本 EP Group 内的序号。没配 topK 的那一档按 topK 里的
-  // 先后当序号用。
+  // topK 里第 i 个专家在本 EP Group 内的序号。topK 直接存组内序号，读出来就是；
+  // 没配 topK 的那一档按 topK 里的先后当序号用。
   uint64_t LocalEpOf(MuInflight const& f, uint64_t i) const {
     std::vector<TopkEntry> const& t = TopkOf(f);
     if (i >= t.size()) return i;
-    uint64_t local = 0;
-    if (!ep->ToLocal(t[i].expert_id, &local)) return i;
-    return local;
+    return t[i].local_ep_index;
   }
   // topK 里第 i 个专家的权重。合并成一份时乘它。
   float WeightOf(MuInflight const& f, uint64_t i) const {

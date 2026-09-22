@@ -90,7 +90,7 @@ make -C src/bach/compiler/kernel                                    # kernel 变
 python3 src/bach/compiler/gen_hwconfig.py --topo src/bach/compiler/topo/<拓扑名>.json
 ```
 
-权重、topK 表、本组专家表，以及第 0 行 R core 在 Share Mem 里表示“只等本行结果”的那个标志，仍由用例铺：那几样是模型参数不是配置。
+权重、topK 表，以及第 0 行 R core 在 Share Mem 里表示“只等本行结果”的那个标志，仍由用例铺：那几样是模型参数不是配置。
 weights 加载那一条 path 只在那个用例里用，不进 bundle，由用例自己铺。
 
 `moe_lpu` 与 `moe_lpu_tokens` 的 chip 之间由用例直接对接，走的不是 `Lpu` 那一层的装配，也没有 PCIe Switch 与进出口桩。算得对与装配对这两件因此分在不同的用例里。
