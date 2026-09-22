@@ -600,13 +600,13 @@ class IdsHolder : public BachModule {
   uint64_t stream_, task_, user_;
 };
 
-// topK 表在数据线里的样子：每项 {expert_id 2 B, weight 4 B}。
+// topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(t.size() * kTopkEntryBytes, 0);
   for (size_t i = 0; i < t.size(); ++i) {
     uint64_t at = i * kTopkEntryBytes;
-    b[at] = uint8_t(t[i].expert_id & 0xFFu);
-    b[at + 1] = uint8_t((t[i].expert_id >> 8) & 0xFFu);
+    b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
+    b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
     for (int k = 0; k < 4; ++k) b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
   }
@@ -727,11 +727,10 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
     wgt.push_back(TamePattern(want.b_dtype, k * n, 0xA20 + e));
     cmem.Poke(want.a_addr + e * want.token_expert_stride, tok.back());
   }
-  // topK 里第 0 个是全局 17 号专家、组内第 1 个，第 1 个是全局 5 号、组内第 0 个。
+  // topK 里第 0 个是组内第 1 个专家，第 1 个是组内第 0 个；topK 直接存组内序号。
   // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
-  mu.EpInfo().SetLocalEpTable({5, 17});
   const float w0 = 0.75f, w1 = 0.25f;
-  mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{17, w0}, {5, w1}}));
+  mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{1, w0}, {0, w1}}));
   mmem.Poke(want.b_addr + 1 * want.b_expert_stride, wgt[0]);
   mmem.Poke(want.b_addr + 0 * want.b_expert_stride, wgt[1]);
 
@@ -819,9 +818,9 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   for (uint64_t e = 0; e < want.expert_count; ++e) {
     wgt.push_back(TamePattern(want.b_dtype, k * n, 0xB10 + e));
   }
-  mu.EpInfo().SetLocalEpTable({5, 17});
-  // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
-  mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{17, 1.0f}, {5, 1.0f}}));
+  // topK 直接存组内序号：第 0 个是组内第 1 个，第 1 个是组内第 0 个。表由 DTE
+  // 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
+  mu.EpInfo().WriteTopk(want.stream_id, TopkBytes({{1, 1.0f}, {0, 1.0f}}));
   mmem.Poke(want.b_addr + 1 * want.b_expert_stride, wgt[0]);
   mmem.Poke(want.b_addr + 0 * want.b_expert_stride, wgt[1]);
 

@@ -347,7 +347,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F45 | 支持纯包头任务（`data_len = 0`），进出 core 都可以 |
 | F46 | 地址的一条规矩：软件逐段配基址（`CFG_ADDRi`）与 stride（`CFG_STRIDEi`），偏移由硬件用 `stream_id` 算出来：`stream_start_i = CFG_ADDRi + stream_id × CFG_STRIDEi`。`stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE，软件不需要知道这个 token 落在 Core Mem 的哪一片。stride 配 0 退化为纯物理地址 |
 | F47 | 通用寻址式子是 `stream_start_i = CFG_ADDRi + stream_id × CFG_STRIDEi`，**Cmem 一侧用低 20 bit、Mmem 一侧用低 26 bit**：Mmem 段软件直接配物理地址（stride 配 0），Cmem 段软件配段内偏移、硬件叠 `stream_id × CFG_STRIDEi` 再加 stream 基址。route 100（Mmem→Cmem）源端不叠 stride。每段落哪块存储由该段地址高 4 bit tag 译码（0x0 Cmem / 0x1 Mmem / 0x2 scale / 0x3 topK / 0x4 header） |
-| F48 | scale 的长度由软件配段 2 的 `CFG_DATA_LEN2`（字节），硬件不再自己算：默认每 32 个元素 1 B，即 `data_len / 32`。topK 是旁带、长度记 0、内容随包整笔写 MU（每项 `{expert_id 2 B, weight 4 B}`，每 stream 上限 256 B） |
+| F48 | scale 的长度由软件配段 2 的 `CFG_DATA_LEN2`（字节），硬件不再自己算：默认每 32 个元素 1 B，即 `data_len / 32`。topK 是旁带、长度记 0、内容随包整笔写 MU（每项 `{local_ep_index 2 B, weight 4 B}`，每 stream 上限 256 B） |
 | F49 | Matrix Mem 一侧不加 stream 偏移，Core Mem 一侧加：Matrix Mem 放的是模型 weight 与按 pattern 排好序送来的 token，位置软件自己算准；Core Mem 按 stream 切成 16 片，谁占哪片由 TS 定，软件配的时候还不知道 |
 | F49a | MXFP8 数据的 scale 随数据走：带 scale 段（地址译码命中 0x2）的任务在进核、出核以及 Matrix Mem 与 Router 之间搬运时，把 scale 与数据一起读写。scale 是 E8M0，每 32 个元素 1 B；MXFP8 数据在 Core Mem 与 Matrix Mem 里都按每 128 B 配 4 B scale（Matrix Mem 的 scale 区按 1 : 8 留）。默认用例里一个 token 包是 6144 B 数据加 192 B scale，每个 core 的权重每个矩阵每个专家是 196608 B 数据加 6144 B scale |
 
@@ -932,7 +932,7 @@ MSG 包结构          包头标记 2 B + Router 信息 4 B（path_id 1 B + path
                    reduce 包另在硬件字段里带 reduce_seq 6 bit，取发这一包的 task_id
 包长范围            最短 16 B，最长 64 KB、实际支持到 (16 K + 32) B；不设包尾，结束靠包长度计数
 reduce 包           软件辅助信息固定 16 B，Router 做加法时跳过这 16 B
-scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len / 32）；topK 是旁带长度 0，每项 {expert_id 2 B, weight 4 B}、每 stream 上限 256 B
+scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len / 32）；topK 是旁带长度 0，每项 {local_ep_index 2 B, weight 4 B}、每 stream 上限 256 B
 ```
 
 ***

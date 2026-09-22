@@ -173,7 +173,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <text x="1010" y="694" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2router_ch　256 B</text>
 <rect x="1110" y="108" width="110" height="40" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="1118" y="123" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#0d9488" font-weight="700" text-anchor="start">MU</text>
-<text x="1118" y="137" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">local_ep_table</text>
+<text x="1118" y="137" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">topK_ep_table</text>
 <text x="1118" y="149" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">128 B / 256 B</text>
 <path d="M810 178 L1090 178 L1090 138 L1109.3 138" stroke="#0d9488" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkac)"/>
 <text x="950" y="174" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#0d9488" font-weight="400" text-anchor="middle">topK 复制给 MU　128 B / 256 B</text>
@@ -549,7 +549,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 <rect x="40" y="600" width="624" height="72" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
 <text x="50" y="619" font-size="11" fill="#111827" font-weight="600">MU · topK_ep_table（或 Core Mem 独立空间）</text>
 <text x="50" y="635.0" font-size="8.8" fill="#2563eb">→ topk_base_addr + stream_id × 256 B，每 stream 上限 256 B</text>
-<text x="50" y="647.5" font-size="8.8" fill="#475569">长度硬件按 router_ep_count × 6 B 算，每项 {expert_id 2 B, weight 4 B}</text>
+<text x="50" y="647.5" font-size="8.8" fill="#475569">长度硬件按 router_ep_count × 6 B 算，每项 {local_ep_index 2 B, weight 4 B}</text>
 <rect x="696" y="280" width="640" height="398" rx="6" fill="#eef8f4" stroke="#a8d8c6" stroke-width="1.1"/>
 <text x="708" y="298" font-size="10.5" fill="#6b7280" font-weight="600">B core / R core：三类连排进 Matrix Mem，包头与 shareMem 单放</text>
 <rect x="712" y="306" width="608" height="100" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
@@ -601,7 +601,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 | - | - | - | - |
 | 包头（硬件 + 软件） | 每项 18 B = `core_mask` 2 B + 软件包头 16 B | DTE 内 Hmem 一张表，16 项按 `stream_id` 索引，共 288 B | Core Mem 独立空间，容量软件分配 |
 | scale | `data_len / 32`，只有 MXFP8 有 | Core Mem 的 scale 区 | Matrix Mem，与 data 连排 |
-| topK | `router_ep_count × 6 B`，每项 `{expert_id 2 B, weight 4 B}`，每 stream 上限 256 B | MU 内 `topK_ep_table`，或 Core Mem 独立空间，由软件配 | Matrix Mem，与 data 连排 |
+| topK | `router_ep_count × 6 B`，每项 `{local_ep_index 2 B, weight 4 B}`，每 stream 上限 256 B | MU 内 `topK_ep_table`，或 Core Mem 独立空间，由软件配 | Matrix Mem，与 data 连排 |
 | data | `data_len` | Core Mem 按 stream 分片 | Matrix Mem |
 
 几处对得上的地方：
@@ -948,7 +948,7 @@ void data_in_config() {
   dsawi scale_stride, X
 
   // topK：dst_addr = topk_base_addr + stream_id × 256B，每个 stream 上限 256B
-  //   搬运长度 = router_ep_count × 6B，每项 {expert_id 2B, weight 4B}
+  //   搬运长度 = router_ep_count × 6B，每项 {local_ep_index 2B, weight 4B}
   dsawi topk_base_addr, X
 }
 ```

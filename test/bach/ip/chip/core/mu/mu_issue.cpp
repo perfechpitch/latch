@@ -1,8 +1,8 @@
-// issue_q 的三段重叠，以及 topK 的全局专家号翻成组内序号。
+// issue_q 的三段重叠，以及 topK 里的组内序号。
 //
 // 一笔任务要按 tile 走 kblock × nblock 遍，三个计数记的是发了几个读、算完几个、
-// 写回几个；三段重叠就落在这三个计数的差上。topK 存的是 global index，算 weight
-// 地址要的是 local index，中间隔着 local_ep_table。
+// 写回几个；三段重叠就落在这三个计数的差上。topK 直接存组内序号（local index），
+// 算 weight 地址读出来就用，中间没有 global→local 的翻译。
 
 #include <gtest/gtest.h>
 
@@ -117,24 +117,6 @@ TEST(BachMuIssueQ, DepthIsSixteen) {
   RT::Reset();
 }
 
-// 全局专家号经 local_ep_table 翻成组内序号；不在本组里就是配置错误。
-TEST(BachMuGenEpInfo, GlobalIndexBecomesLocal) {
-  ClockPtr clk = MakeClock(0, kPeriod);
-  GenEpInfo g(clk, "gen", 0, false);
-  // 本组内有 3 个专家，全局号分别是 17、5、23。
-  g.SetLocalEpTable({17, 5, 23});
-
-  uint64_t local = 0;
-  EXPECT_TRUE(g.ToLocal(17, &local));
-  EXPECT_EQ(local, 0u);
-  EXPECT_TRUE(g.ToLocal(5, &local));
-  EXPECT_EQ(local, 1u);
-  EXPECT_TRUE(g.ToLocal(23, &local));
-  EXPECT_EQ(local, 2u);
-  EXPECT_FALSE(g.ToLocal(99, &local)) << "不在本组里的翻不出来";
-  RT::Reset();
-}
-
 // topK 表由 DTE 搬运时经专用数据线按 stream_id 写进 topK_ep_table，MU 计算时按
 // stream_id 读回同一份，各 stream 互不串。
 TEST(BachMuGenEpInfo, DteWritesTopkMuReadsByStream) {
@@ -145,8 +127,8 @@ TEST(BachMuGenEpInfo, DteWritesTopkMuReadsByStream) {
     std::vector<uint8_t> b(kTopkEntryBytes * t.size(), 0);
     for (uint64_t i = 0; i < t.size(); ++i) {
       uint64_t off = i * kTopkEntryBytes;
-      b[off] = uint8_t(t[i].expert_id & 0xFF);
-      b[off + 1] = uint8_t((t[i].expert_id >> 8) & 0xFF);
+      b[off] = uint8_t(t[i].local_ep_index & 0xFF);
+      b[off + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFF);
       uint32_t w = numeric::BitsOf(t[i].weight);
       for (int k = 0; k < 4; ++k) {
         b[off + 2 + k] = uint8_t((w >> (8 * k)) & 0xFF);
@@ -156,27 +138,27 @@ TEST(BachMuGenEpInfo, DteWritesTopkMuReadsByStream) {
   };
 
   // DTE 按 stream_id 各写一份，写进 FF 阵列。
-  g.WriteTopk(0, pack({{17, 0.5f}, {5, 0.25f}}));
-  g.WriteTopk(3, pack({{23, 1.0f}}));
+  g.WriteTopk(0, pack({{1, 0.5f}, {0, 0.25f}}));
+  g.WriteTopk(3, pack({{2, 1.0f}}));
 
   // MU 按 stream_id 读回，各自那份互不串。
   ASSERT_EQ(g.Topk(0, 2).size(), 2u);
-  EXPECT_EQ(g.Topk(0, 2)[0].expert_id, 17u);
+  EXPECT_EQ(g.Topk(0, 2)[0].local_ep_index, 1u);
   EXPECT_FLOAT_EQ(g.Topk(0, 2)[1].weight, 0.25f);
   ASSERT_EQ(g.Topk(3, 1).size(), 1u);
-  EXPECT_EQ(g.Topk(3, 1)[0].expert_id, 23u);
+  EXPECT_EQ(g.Topk(3, 1)[0].local_ep_index, 2u);
   RT::Reset();
 }
 
-// 从 Core Mem 读回来的字节按每项 {expert_id 2 B, weight 4 B} 解开。
+// 从 DTE 写进来的字节按每项 {local_ep_index 2 B, weight 4 B} 解开。
 TEST(BachMuGenEpInfo, TopkBytesAreParsedSixBytesEach) {
   std::vector<uint8_t> bytes(kTopkEntryBytes * 2, 0);
-  // 第一项：expert 0x0011，weight 1.0f。
+  // 第一项：local_ep_index 0x0011，weight 1.0f。
   bytes[0] = 0x11;
   bytes[1] = 0x00;
   uint32_t one = numeric::BitsOf(1.0f);
   for (int k = 0; k < 4; ++k) bytes[2 + k] = uint8_t((one >> (8 * k)) & 0xFF);
-  // 第二项：expert 0x0102，weight 0.5f。
+  // 第二项：local_ep_index 0x0102，weight 0.5f。
   bytes[6] = 0x02;
   bytes[7] = 0x01;
   uint32_t half = numeric::BitsOf(0.5f);
@@ -184,9 +166,9 @@ TEST(BachMuGenEpInfo, TopkBytesAreParsedSixBytesEach) {
 
   std::vector<TopkEntry> t = GenEpInfo::Parse(bytes, 2);
   ASSERT_EQ(t.size(), 2u);
-  EXPECT_EQ(t[0].expert_id, 0x11u);
+  EXPECT_EQ(t[0].local_ep_index, 0x11u);
   EXPECT_FLOAT_EQ(t[0].weight, 1.0f);
-  EXPECT_EQ(t[1].expert_id, 0x102u);
+  EXPECT_EQ(t[1].local_ep_index, 0x102u);
   EXPECT_FLOAT_EQ(t[1].weight, 0.5f);
   // 每 stream 的 topK 区上限 256 B。
   EXPECT_EQ(kTopkBytesPerStream / kTopkEntryBytes, 42u);

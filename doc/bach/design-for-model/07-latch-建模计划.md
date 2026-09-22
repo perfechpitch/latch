@@ -387,7 +387,7 @@ LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章
 | 类 | 内容 | 来源 |
 | - | - | - |
 | 拓扑与部署 | chip 数 48、tray 数 3（编译器叫 rack）、tray 形状 4 层 × 4 chip、每颗 chip 的 `core_bad_mask`（chip 一律 2×5，中间两列 `0x084` 即 core2、core7 是坏 core，两侧 `0x000`）、全局进出口位置（`global_top_left` / `global_bottom_right`）、逻辑 ↔ 物理 core 映射、切分参数（EP / TP / PP / DP 与四种模式之一）、GPU 数与每 GPU 的 batch | 编译侧 |
-| 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项）、datain_task、TS 的 ROUTER_TABLE、`stream_num`、`SELF_START`、`B_core_direction`、`trigger_task_chain_en`、DTE 业务模式下进核那一笔的配置（`route`、回不回 Ack、标志表的基址与一个槽位多大）、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、MU `local_ep_table`、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
+| 每 core 配置 | RouterTable（每 path 一表项、三份副本一致）、Credit Bypass Route、task_chain（≤ 64 项）、datain_task、TS 的 ROUTER_TABLE、`stream_num`、`SELF_START`、`B_core_direction`、`trigger_task_chain_en`、DTE 业务模式下进核那一笔的配置（`route`、回不回 Ack、标志表的基址与一个槽位多大）、DTE 包头表（硬件包头静态表 64 项、软件包头 16 × 64 项）、VU 8 组静态配置、Core Mem 的 reissue 预留空间 | 编译侧 |
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 的权重分片与落 Matrix Mem 的地址（真实部署每 core 27 MiB，含共享专家；默认用例 EPTP-NK 下每 core 两个专家的 W1、W3、W2，MXFP8 带 scale，约 1.2 MiB）；注入表（每 token 的 6368 B 级联包与注入拍：6144 B MXFP8 数据、192 B scale、32 B 软件信息）；参考实现的期望输出 | 编译侧 + `reference/` |
 
@@ -407,7 +407,7 @@ split_param   {ep, tp, pp, dp, mode, gpu_num, batch}                            
 core_cfg      48 × 10 × {rtab 64 项, credit_bypass, task_chain 64 项,
                          ts_route 64 项, path_task_map 64 项（DTE）, datain_task, cfg_misc,
                          dtein（DTE 业务模式的进核配置与标志表几何）,
-                         cmem_part, lut 64 项, local_ep_table, vu_static 8 组}   各单元
+                         cmem_part, lut 64 项, vu_static 8 组}   各单元
 credit_init   48 × 10 × 每 {path_id, stream_id} 一个初值                        TS
 kernel_img    每类 core 一个 {itcm 字节流, dtcm 字节流, task_pc 表 64 项}        RV core
 weight_shard  48 × 10 × {字节流, 落 Matrix Mem 的地址}                          入口桩
