@@ -7,16 +7,16 @@
 chrome://tracing。
 
 **与 tracetto 显示的是同一份数据**：段与标签都走 `spans.py` 里那套（`core_spans`
-折段、`ROWS` 那七行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
+折段、`ROWS` 那九行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
 
 两边的对应关系（Perfetto 只有「process → thread」两级，tracetto 是
-「chip → core → 七行」三级，压掉最上面一级）：
+「chip → core → 九行」三级，压掉最上面一级）：
 
-    pid  = 一个配了任务的 core，名字写成 `chip0.core1`，左栏能直接搜
-    tid  = 那条 core 的七行之一，名字就是行名（TS / DTE-Core / …）
+    pid  = 一个派角色的 core，名字写成 `chip0.core1`，左栏能直接搜
+    tid  = 那条 core 的九行之一，名字就是行名（TS-DTE / DTE-Core / …）
     X 事件 = 一个段，`User_id 77 CORE-MU 5 813拍`
 
-**顺序**：进程按 chip 升序、再按 core 升序，每个进程里七行按 tracetto 的行序。
+**顺序**：进程按 chip 升序、再按 core 升序，每个进程里九行按 tracetto 的行序。
 这两层各自再发一条排序键（`process_sort_index` / `thread_sort_index`）钉死 ——
 **Perfetto 是按名字排轨道的，不按 pid / tid**（实测：不发键时 chip10 跑到 chip2
 前面、TS 掉到第五行），而名字的字典序本来就排不对。试过把序号写进名字里（`chip00`
@@ -37,8 +37,8 @@ chrome://tracing。
     有用，而这个转换器给不出有意义的分类；
   · 分隔符用最紧的写法，整数不写小数，一行一个事件（方便 grep，代价 ~1 B/行）。
 
-要更小就把整份 gzip：实测 1.24 MB → ~89 KB（它太重复了 —— 八千多个段只有 113 种
-不同的名字，402 个 core 的元数据块字面一样）。
+要更小就把整份 gzip：实测 1.31 MB → ~89 KB（它太重复了 —— 九千多个段只有 72 种
+不同的名字，408 个 core 的元数据块字面一样）。
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def build(prefix: str) -> dict:
                 if key in core_sig:
                     ordered.append((chip, core, key))
 
-        # 元数据：每个 core 一个进程名，七行各一条 thread_name。
+        # 元数据：每个 core 一个进程名，九行各一条 thread_name。
         #
         # 顺序靠这两组排序键钉死：**Perfetto 是按名字排轨道的，不按 pid / tid**
         # （实测：不给键时 chip10 跑到 chip2 前面、TS 掉到第五行）。而名字的字典序
@@ -112,7 +112,7 @@ def build(prefix: str) -> dict:
         # 想按 core 找一段也能直接 grep。组内按时间升序。
         #
         # 整场没跑过的行不补占位：Perfetto 只画有事件的轨道，那些行会整条不出现
-        # （moe_lpu 上 2856 条轨道里有 108 条），这一点与 tracetto 的固定七行不同。
+        # （moe_lpu 上 2856 条轨道里有 108 条），这一点与 tracetto 的固定九行不同。
         spans_cnt = 0
         for ordinal, (_chip, _core, key) in enumerate(ordered):
             pid = ordinal + 1

@@ -1,7 +1,7 @@
 """建索引：按 core 并行、原子发布、复用没变的。
 
-- **按 core 切**：一个 core 的十五个信号 → 九条行是天然不可分的单位（`core_spans` 一起要这十五个），
-  402 个配了任务的 core 就是 402 个任务；先拿每个 core 的事件数当权重，降序动态派发，免得一个重
+- **按 core 切**：一个 core 的六个信号 → 九条行是天然不可分的单位（`core_spans` 要这六个），
+  408 个 core 就是 408 个任务；先拿每个 core 的事件数当权重，降序动态派发，免得一个重
   core 拖尾。
 - **用 spawn 不用 fork**：`/api/reload` 触发的重建是在服务已经起了线程之后，fork 只继承
   调用线程、别的线程可能正握着锁 → 经典死锁；而这里 fork 又几乎没有好处（worker 反正要
@@ -259,7 +259,7 @@ def _tick(done: int, total: int, t0: float, tty: bool) -> None:
 def core_files_ok(out_dir: Path, manifest: Dict) -> bool:
     """索引文件还在不在、有没有被截断。
 
-    manifest 里记了每个 core 文件的字节数，开机时比一遍（402 次 stat，~1 ms）——
+    manifest 里记了每个 core 文件的字节数，开机时比一遍（408 次 stat，~1 ms）——
     被删掉或者截断过就能当场发现，不用等到读某个窗口时炸。
     """
     sizes = manifest.get("core_size")

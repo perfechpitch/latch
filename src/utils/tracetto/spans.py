@@ -2,7 +2,7 @@
 
 波形是逐拍采样的，一个信号只在值变化时记一笔。所以「某一位连续为 1」就是它相邻两笔之间
 的那段，段的拍数是两个时间戳之差。段的形状统一是 `[t0, t1, user, task]`，`user` / `task`
-为 -1 表示认不出是哪一笔。
+为 -1 表示认不出配对上下发（真波形上这是常态，不是边缘情况）。
 
 这一层是**参考实现**：索引里存的就是它算出来的段，自检拿它对拍。
 
@@ -24,6 +24,7 @@ UNITS = ("DTE", "MU", "VU")
 SIG_TS_UNIT = "ts_unit"
 SIG_TS_TASK = "ts_task"
 SIG_TS_USER = "ts_user"
+SIG_TS_DONE = "ts_done"
 SIG_TS_INFLIGHT = "ts_inflight"
 # RV core 的两端：起点是执行器接下队头那笔（PC 跳到 task_pc），终点是 kernel 交还。
 SIG_RV_START = "rv_start"
@@ -33,7 +34,7 @@ SIG_RV_DONE = "rv_done"
 SIG_RV_DONE_TASK = "rv_done_task"
 SIG_RV_DONE_USER = "rv_done_user"
 # DSA 的两端：起点是各家过门槛那一拍（DTE 过 Commit 准入、MU 进 issue_q、VU 被
-# ISQ 收下），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
+# ISQ 收下），终点是各家把完成报回去那一拍（VU 只记最后一条宏指令）。
 SIG_DSA_START = "dsa_start"
 SIG_DSA_START_TASK = "dsa_start_task"
 SIG_DSA_START_USER = "dsa_start_user"
@@ -47,8 +48,8 @@ RV_EDGE = (SIG_RV_START, SIG_RV_START_TASK, SIG_RV_START_USER,
 DSA_EDGE = (SIG_DSA_START, SIG_DSA_START_TASK, SIG_DSA_START_USER,
             SIG_DSA_DONE, SIG_DSA_DONE_TASK, SIG_DSA_DONE_USER)
 
-READ_SIGS = (SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER) + RV_EDGE + DSA_EDGE
-# 波形里缺了这几条，对应的行是空的，启动时要说清楚缺什么。
+READ_SIGS = (SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE + DSA_EDGE
+# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。
 NEW_SIGS = (SIG_TS_USER,) + RV_EDGE + DSA_EDGE
 
 # 索引里一个 core 的九条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
@@ -60,16 +61,20 @@ LANES = (
 )
 LANES_PER_CORE = len(LANES)
 
-# 画面上一个 core 的七行：(显示名, ((通道号, 颜色号), ...))。颜色一共九种。
+# 画面上一个 core 的九行：(显示名, ((通道号, 颜色号), ...))。颜色一共九种。
 #
-# TS 那一条由三条通道叠起来 —— 实测这三个通道在时间上从不重叠（moe_lpu 全波形
-# 347202 个忙拍里 0 拍重叠），所以直接画在同一格里，按单元用三种颜色区分；其余
-# 六行各取一条通道。
+# TS 按设计文档拆成三行，DTE / MU / VU 各取一条通道。拆开之前是三条通道叠在同一
+# 格里靠颜色分 —— 那靠的是「实测三者在时间上从不重叠」（moe_lpu 全波形 1531756 个
+# 忙拍里 0 拍重叠）；即便如此，一眼答「哪一路在忙」仍要先认色，分开画就不用。其余
+# 六行各取一条通道，现在每行都只有一条 —— 多通道叠一行的机制（row_parts 一行列多
+# 个 part）留着，索引与前端都不用动它。
 #
 # 颜色只按「行」与「单元」分，与 user 无关：同一个颜色下可以有很多个 user，谁是谁
 # 靠段上的 User_id 字认。用户数上千，按 user 上色必然撞色，撞了反而更认不出来。
 ROWS = (
-    ("TS", ((0, 0), (1, 1), (2, 2))),
+    ("TS-DTE", ((0, 0),)),
+    ("TS-MU", ((1, 1),)),
+    ("TS-VU", ((2, 2),)),
     ("DTE-Core", ((3, 3),)),
     ("DTE-DSA", ((6, 4),)),
     ("MU-Core", ((5, 5),)),
@@ -174,81 +179,57 @@ def edge_spans(starts: List[dict], dones: List[dict],
     return out
 
 
-def pair_chain(issues: List[dict], starts: List[dict], dones: List[dict],
-               t_end: int) -> List[List[int]]:
-    """TS 那一行：每笔从下发到它做完 DSA 的全程。
+def pair_chain(spans: List[Tuple[int, int]],
+               events: List[dict]) -> List[List[int]]:
+    """TS 三行里的任一行（按单元各跑一次）：每笔从下发到它做完 DSA 的全程，
+    所以段起点前移到配对的下发那一刻。
 
-    DSA 的起手与完成边沿都带 task 与 user，按身份认回下发的那一笔：同一 task、同一
-    user 的下发里，下发时刻不晚于这条边沿的最后一笔；一笔都不早于它就归同一身份的
-    第一笔。一笔 task 的 DSA 边沿可以有好几对（MU 一个 task 发几笔、VU 发几条宏指
-    令），都认回同一笔，段 = [下发那一刻, 段末)：
-
-      认到的起手多于完成     还没做完，段末是波形末
-      认到了起手             段末是最后一次完成那一拍
-      只认到完成             段末是最后一次完成的下一拍（DTE 的搬入只有完成）
-
-    一条边沿也没认到的下发丢掉（有的 task 不经过 DSA）。身份是占位、或者没有同一身
-    份的下发的边沿，按 edge_spans 折成段，标 -1。
-
-    索引要求一条通道里的段互不相交。段按起点排好之后，前一段的末晚于后一段的起点
-    时，前一段截在后一段起点那一拍：后一笔下发了，前一笔在 TS 这一行就到此为止，没
-    画进来的那一截在 DSA 那一行看得到。
+    一笔 task 的 DSA 活儿会碎成好几段 —— 真波形上这是常态。所以认领不是「一段对一
+    笔」：按时间序贪心，每个下发事件认领「起点不早于它、还没被认领的」第一个段，
+    再把「下一个下发之前」起头的后续段一并吃进同一段，段 =
+    [下发那一刻, 最后吃进来那一段的末)。认领不上的下发事件丢掉（有的 task 不经过
+    DSA）；没被认领的段退回原区间并标 -1 —— 下发之前就有的那些走这一支。不按下发
+    序号与 ts_done 硬配 —— ts_done 不分路，几笔并发时分不清哪次完成是哪一笔的。
     """
-    by_id: Dict[Tuple[int, int], List[int]] = {}
-    for i, e in enumerate(issues):
-        by_id.setdefault((e["task"], e["user"]), []).append(i)
-
-    def owner(e: dict) -> int:
-        idx = by_id.get((e["task"], e["user"]))
-        if e["task"] == 0xFF or e["user"] == 0xFFFF or not idx:
-            return -1
-        hit = idx[0]
-        for i in idx:
-            if issues[i]["t"] <= e["t"]:
-                hit = i
-        return hit
-
-    got_start = [0] * len(issues)
-    got_done: List[List[int]] = [[] for _ in issues]
-    lost_start: List[dict] = []
-    lost_done: List[dict] = []
-    for e in starts:
-        i = owner(e)
-        if i < 0:
-            lost_start.append(e)
-        else:
-            got_start[i] += 1
-    for e in dones:
-        i = owner(e)
-        if i < 0:
-            lost_done.append(e)
-        else:
-            got_done[i].append(e["t"])
-
     out: List[List[int]] = []
-    for i, e in enumerate(issues):
-        if got_start[i] == 0 and not got_done[i]:
-            continue
-        if got_start[i] > len(got_done[i]):
-            end = t_end
-        elif got_start[i] == 0:
-            end = max(got_done[i]) + 1
-        else:
-            end = max(got_done[i])
-        out.append([e["t"], max(end, e["t"] + 1), e["user"], e["task"]])
-    for s in edge_spans(lost_start, lost_done, t_end):
-        out.append([s[0], s[1], -1, -1])
+    used = [False] * len(spans)
+    for i, e in enumerate(events):
+        # 下一笔下发的那一刻就是这一笔的吸收上界：它之后起头的碎段归下一笔。
+        nxt = events[i + 1]["t"] if i + 1 < len(events) else None
+        end = None
+        for j, (t0, t1) in enumerate(spans):
+            if used[j] or t0 < e["t"]:
+                continue
+            # 段按起点升序，撞上下一笔那一刻之后就不用再看了：后面都归下一笔。
+            if nxt is not None and t0 >= nxt:
+                break
+            used[j] = True
+            end = t1
+        if end is not None:
+            out.append([e["t"], end, e["user"], e["task"]])
+    for j, (t0, t1) in enumerate(spans):
+        if not used[j]:
+            out.append([t0, t1, -1, -1])
     out.sort(key=lambda s: s[0])
-    for i in range(len(out) - 1):
-        out[i][1] = min(out[i][1], out[i + 1][0])
-    return [s for s in out if s[1] > s[0]]
+    return out
+
+
+def delta_ticks(ts: list, vs: list) -> List[int]:
+    """只加不清零的累计量，取相邻两拍的差，差大于 0 的地方就是一次完成。"""
+    out: List[int] = []
+    prev = 0
+    for t, v in zip(ts, vs):
+        if v > prev:
+            out.append(t)
+        prev = v
+    return out
 
 
 def core_paths(reader: TraceReader) -> Tuple[Dict[int, set], Dict[str, Dict[str, int]]]:
     """扫一遍模块树，把 core 找出来。
 
     返回 (每个 chip 有哪些 core, 每个 core 有哪些要读的信号)。
-    坏 core 与 TS 没配过任务的好 core 只有 Router 那一组信号，一个要读的都没有，但仍然会出现在
+    不派角色的 core 只有 Router 那一组信号，一个要读的都没有，但仍然会出现在
     树里 —— 所以 core 的集合是从「任何挂在 chipN.coreM 下的信号」取的，不是
     从要读的那几个取的。
     """
@@ -280,7 +261,7 @@ def trace_t_end(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> int
     """波形的末尾 = 要读的那些信号里最大的 t_last。
 
     **不能用全信号的 max** —— 别的模块（sink、c2c 那些）会把它顶上去，实测
-    moe_lpu 是要读的 35672、全信号是 36194。也不逐事件解：段头里就有 t_last。
+    moe_lpu 是要读的 38758、全信号是 39404。也不逐事件解：段头里就有 t_last。
     """
     out = 0
     seen = set()
@@ -323,9 +304,10 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
         dsa_starts, dsa_dones = ends_of(DSA_EDGE, u)
+        dsa = edge_spans(dsa_starts, dsa_dones, t_end)
         core_rows.append(edge_spans(rv_starts, rv_dones, t_end))
-        dsa_rows.append(edge_spans(dsa_starts, dsa_dones, t_end))
-        chain_rows.append(pair_chain(issue, dsa_starts, dsa_dones, t_end))
+        dsa_rows.append(dsa)
+        chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
     return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows}
 
 
