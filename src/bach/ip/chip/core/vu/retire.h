@@ -7,9 +7,9 @@
 // 减一、把它从 Scoreboard 上摘掉、释放对这一组静态配置的引用。被阻塞的配置写
 // 这时生效并解除阻塞。
 //
-// dsa_done 报给 TS 的 stream_id 与 task_id 就是写 trigger 那一拍从 dsa_ids 采下
-// 来的那一组；STREAM_ID_OVERRIDE 置位时 stream_id 用的是 trigger 里显式给定的值。
-// EVENT_EN 置位时同拍另发一个 Event 硬件同步信号。
+// dsa_done 只在 EVENT_EN 置位时发给 TS：stream_id 与 task_id 是写 trigger 那一拍
+// 从 dsa_ids 采下来的那一组（STREAM_ID_OVERRIDE 置位时 stream_id 用 trigger 里
+// 的值），同拍把 event 拉高。未置 EVENT_EN 的宏指令照常退休，不打完成口。
 
 #include <memory>
 #include <string>
@@ -43,16 +43,11 @@ class VuRetire : public BachModule {
   void AttachDone(std::shared_ptr<DonePort> p) { done = std::move(p); }
 
   uint64_t Retired() const { return retired.Get(); }
-  // 刚退休那一条宏指令的笔数与身份。一条宏指令退休就报一次 dsa_done，这与硬件
-  // 发给 TS 的是同一拍、同一笔。Core 层发波形要用：这一层自己的信号在 chip 级被
-  // TraceOffScope 关掉了，只能由 Core 统一发。
+  // 刚发给 TS 的那一笔 dsa_done 的笔数与身份。只在 EVENT_EN 置位的宏指令退休时
+  // 加一，与打到完成口上的是同一拍、同一笔。Core 层发波形要用。
   //
-  // 不按「在飞归零」记 —— VU 不知道 task 的边界（那是软件的事），实测同一笔 task
-  // 里 ISQ 会真的空好几次，按归零记会漏掉终点、段一路拉到波形末尾。一笔 task 的
-  // 「最后一条宏指令完成」由波形那一侧把这些段并起来表达。
-  //
-  // 注意：配了 kRvOnly 的档上，TS 收到的 task_done 不是这一路，而是 RV core 轮询
-  // macro_inst_left 到 0 之后的 ACK —— 那个已经由 rv_done 记着。
+  // 未置 EVENT_EN 的宏指令仍退休（减 left、摘记分板、放静态组），只是不报 TS。
+  // 多宏任务只在最后一条置 EVENT_EN，TS 配 kDsa 等这一笔；kRvOnly 仍只看 rv_done。
   uint64_t MacroDoneCnt() const { return retire_cnt; }
   uint64_t MacroDoneTask() const { return done_task; }
   uint64_t MacroDoneStream() const { return done_stream; }
@@ -97,13 +92,15 @@ class VuRetire : public BachModule {
     pipe.Retire(inst.seq);
     cfg_reg.ReleaseCfg(inst.cfg_idx);
 
-    // 一条宏指令退休就报一次。一个 task 发了几条时，最后由 RV core 轮询
-    // macro_inst_left 到 0 再报 TS，那一档的 TASK_RECV_UNIT 配 00，只收 RV core
-    // 的 ACK。
+    // 只有 EVENT_EN 才把完成打给 TS。一个 task 发了几条时，只在最后一条置位，
+    // TASK_RECV_UNIT 配 DSA，TS 收齐 rv_done 与这一笔 dsa_done。
+    if (!inst.event_en) {
+      done->Idle();
+      return;
+    }
     done->Drive(inst.stream_id, inst.task_id);
-    if (inst.event_en) done->event = 1;
+    done->event = 1;
     ++retire_cnt;
-    // 报给 TS 的那一拍就是它，身份从指令上取。
     done_stream = inst.stream_id;
     done_task = inst.task_id;
     done_user = inst.user_id;

@@ -138,27 +138,27 @@ void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
     q.push_back({kVuStaticBase + group * kVuStaticStride + off, data});
   };
   uint64_t vl = kn::kSegInter;
-  st(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
-  st(0, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
-  st(0, kVuSuOp, OpWord(uint64_t(SuOp::kNop)));
-  st(0, kVuPrfOp, kSrcVsfu0);
-  st(0, kVuStaticDupOffset + kVuVrfWtIndex, kVrfSig);
-  st(0, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
-
   st(1, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
-  st(1, kVuValu0Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
+  st(1, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
   st(1, kVuSuOp, OpWord(uint64_t(SuOp::kNop)));
-  st(1, kVuPrfOp, kSrcValu0);
-  st(1, kVuStaticDupOffset + kVuVrfRdIndex, kVrfSig);
-  st(1, kVuStaticDupOffset + kVuVrfWtIndex, kVrfGate);
+  st(1, kVuPrfOp, kSrcVsfu0);
+  st(1, kVuStaticDupOffset + kVuVrfWtIndex, kVrfSig);
   st(1, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
 
   st(2, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
   st(2, kVuValu0Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
-  st(2, kVuSuOp, OpWord(uint64_t(SuOp::kStMxfp8), kSrcValu0));
-  st(2, kVuPrfOp, 0);
-  st(2, kVuStaticDupOffset + kVuVrfRdIndex, kVrfGate);
+  st(2, kVuSuOp, OpWord(uint64_t(SuOp::kNop)));
+  st(2, kVuPrfOp, kSrcValu0);
+  st(2, kVuStaticDupOffset + kVuVrfRdIndex, kVrfSig);
+  st(2, kVuStaticDupOffset + kVuVrfWtIndex, kVrfGate);
   st(2, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
+
+  st(3, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
+  st(3, kVuValu0Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
+  st(3, kVuSuOp, OpWord(uint64_t(SuOp::kStMxfp8), kSrcValu0));
+  st(3, kVuPrfOp, 0);
+  st(3, kVuStaticDupOffset + kVuVrfRdIndex, kVrfGate);
+  st(3, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
 }
 
 // 一个专家那三条：fc1 与 fc3 从 red 那一包的数据段读，act 写 FC2 输入那一处。
@@ -169,12 +169,13 @@ void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red,
   uint64_t fc3 = red + (kn::kExperts + e) * kn::kPartStride;
   uint64_t act = kn::kActOff + e * kn::kActStride;
   uint64_t const rd[3] = {fc1, fc1, fc3};
-  for (uint64_t g = 0; g < 3; ++g) {
-    q.push_back({kVuLdAddr, rd[g]});
+  for (uint64_t i = 0; i < 3; ++i) {
+    uint64_t g = i + 1;   // 与 kernel_vu.c 的 gate_setup 同组：1 / 2 / 3
+    q.push_back({kVuLdAddr, rd[i]});
     q.push_back({kVuStAddr, act});
     q.push_back({kVuMacroInstTrigger, kVuMaskLdAddr | kVuMaskStAddr |
                                           (g << kVuTrigCfgIdxShift) |
-                                          kVuTrigFence});
+                                          kVuTrigFence | kVuTrigEventEn});
   }
 }
 
@@ -272,8 +273,8 @@ class MoeRig : public BachModule {
       stage = 3;
       return;
     }
-    // 每个专家三条宏指令各报一次完成。真实链路里由 RV core 轮询
-    // macro_inst_left 收尾，这一份直接数。
+    // 每个专家三条宏指令各报一次完成。真实链路里只最后一条置 EVENT_EN；
+    // 这一份 C++ 直写 trigger，每条都带 EVENT_EN，所以按条数。
     if (stage == 3 && vdones >= 3 * kn::kExperts) {
       Submit(q, {kFc2Mode, kn::kSegInter / kn::kFc2K,
                  kn::kSegEmbed / kn::kFc2N, kn::kActOff, kn::kMmW2,
@@ -499,7 +500,7 @@ void WriteDotChain(Core& core, uint64_t slot) {
   core.GetTs().Cfg().WriteTask(3, red);
 
   core.GetTs().Cfg().WriteTask(
-      4, Task(SendUnit::kVu, RecvUnit::kRvOnly, "task_vu_gate", "vu"));
+      4, Task(SendUnit::kVu, RecvUnit::kDsa, "task_vu_gate", "vu"));
   core.GetTs().Cfg().WriteTask(
       5, Task(SendUnit::kMu, RecvUnit::kDsa,
               ("task_mu_fc2_s" + s).c_str(), "mu"));

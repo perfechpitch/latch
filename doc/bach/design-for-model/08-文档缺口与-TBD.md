@@ -92,7 +92,7 @@
 | DTE 仲裁时同一个 stream 上谁先 | TS MAS 的 DTE_Arb 一节：“两者属于同一Stream时优先选择Generated任务” | TS LLD 的 DTE-ARB-FUNC-002：“同SID冲突时由DataIn拥有该候选和完整Bundle” | 按 MAS |
 | Bypass 那一路怎么和普通候选比 | TS MAS 性能特性 3：“方案2：全部按照最老用户原则仲裁” | TS LLD 的 DTE-ARB-FUNC-004：“normal结果与Special Bypass同时有效时按本地RR偏好选择” | Bypass 那一路不占 stream、没有年龄，模型按最老算 |
 | 权重加载怎么派 DTE | TS LLD 的 TS-FUNC-001 与 DTE Arbiter：`weights_loading` 由 0 置 1 时向 DTE 发一笔只有 PC 的搬入请求，身份字段全 0，优先级最高 | 第 10 章“装 weights 的包照常通知 TS，落点取自包头”一条：每个装 weights 的包都 trigger TS，按 `DATAIN_TASK_PC` 派 DTE，loader 数够了中断 SCP | TS MAS 只写“硬件执行搬运weights操作”。模型按后者 |
-| VU 的 event 送不送 TS | VU MAS F50：“可向 TS 发 Event 同步信号”（`vu_event`） | TS MAS 与 TS LLD 的 `vu2ts_done_ch` 都只有 uid、tid、sid、valid，没有 event | 模型把 `event` 留在 VU 的完成口上，TS 收下不处理 |
+| VU 的 event 送不送 TS | VU MAS F50：“可向 TS 发 Event 同步信号”（`vu_event`） | TS MAS 与 TS LLD 的 `vu2ts_done_ch` 都只有 uid、tid、sid、valid，没有 event | **已定：只有 `EVENT_EN` 才发 `dsa_done`**，同拍拉高 `event`。TS 把这一路当普通 DSA ACK，不另处理 `event` |
 | 《TS_通信机制》的配置示例 | 《TS_通信机制》5.3 节（TS MAS 的 Programming Sequence 引它作任务链配置示例）：`self_start`、`B_reissue`、`P2P_reissue`、`task_reduce_iss`、`exe_mask`、`dsa_en` / `exe_dest` 各一列 | TS MAS 寄存器表：这几列都已不在，换成 `TASK_TYPE`、`TASK_P2P_REISSUE_TID` 与全局 `SELF_START` | 按 MAS。《软件栈》照录的四张表仍是原文的旧位域 |
 | TS 找后继的算法 | TS MAS 的 Task Ctrl 一节：`SKIP_MASK = ~END_MASK & ((DATA_IN_MASK & done_bitmap) \| (REISSUE_MASK & ~stream.reissue))`，“End Task 即使已经提前完成也不能被跳过” | TS LLD 的 Task Generator：`search_mask = after_current_mask & through_end_mask & ~completion_bitmap`，“若Future End已经提前完成，其完成位会移除End”；MAS 寄存器表已没有重发标志位，`REISSUE_MASK` 派生不出来 | 按 LLD：跳过的项在 trigger 那一刻就并进完成位图，找后继只看一张位图 |
 | DTE 仲裁里重发任务是不是最高 | TS MAS 的 DTE_Arb 一节：“Reissue任务优先级最高，并从head_ptr开始选择最老的Reissue” | 同一份 MAS 的性能特性 3：固定优先级的方案 1 划掉，“方案2：全部按照最老用户原则仲裁” | 按性能特性的方案 2 |

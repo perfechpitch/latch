@@ -344,7 +344,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | 编号 | 功能 |
 | - | - |
 | F49d | 访存格式对 VL 的粒度要求：MXFP8 访存与间隔访问要求 VL 为 32 的整数倍，`st.mask` 要求 8 的整数倍，`vswap2.v` 要求 VL 为偶数。不满足置位 `CFG_ERROR`，宏指令不执行 |
-| F50 | 可向 TS 发送 Event 硬件同步信号（`EVENT_EN`），用于更细粒度的任务调度与软硬件解耦 |
+| F50 | 只有 `EVENT_EN` 置位的宏指令退休才把 `dsa_done` 发给 TS，同拍拉高 `event`；未置位照常退休、不打完成口。TS 把这一路当普通 DSA ACK |
 | F51 | Profile 计数器区从 0x4000 起（`profile_ctrl` 在 0x4000，计数器从 0x4008 起，共 32 个 64-bit 计数器、拆成 64 个 32 位寄存器到 0x4104）。发射期的四个 `issue_stall_*` 按 fence > cmfence > dep > eu 归因，一拍只记一项、可以相加 |
 | F52 | 快照窗口：`snapshot_addr.SNAP_SEL` 按年龄选已发射未退休的宏指令（`0x00` 最老、`0xFF` 选 sticky），`SNAP_IDX` 选 12 个动态参数寄存器之一或状态字；窗口的读取不占执行单元与寄存器堆端口，`BUSY=1` 时也能读 |
 
@@ -360,7 +360,7 @@ port dsa_rdata (master, 脉冲, clk)                // 读寄存器的异步返�
   out valid · rdata[31:0]
 port dsa_ids (slave, 电平, clk)                   // VU RV core 的 CSR 直连；写 macro_inst_trigger 那一拍采样
   in  stream_id[3:0] · task_id[5:0]                 // RV core 侧驱动四项，VU 只取这两项
-port dsa_done (master, 脉冲, clk)                 // → TS：宏指令退休；EVENT_EN 置位时另发 Event 同步信号
+port dsa_done (master, 脉冲, clk)                 // → TS：仅 EVENT_EN 置位的宏指令退休时发，同拍 event=1
   out valid · stream_id[3:0] · task_id[5:0] · event   // 取自 dsa_ids 采样的那一组，STREAM_ID_OVERRIDE 置位时 stream_id 改用 trigger 里显式给定的值
 port cmem_ld (master, valid/ready, clk)           // LU → Core Mem，一次固定 1024 bit，不 burst
   out req_valid · req_addr[31:0]
@@ -811,8 +811,8 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="66" font-size="12" fill="#111827">宏指令退休 · 释放配置组并报完成</text>
   <text x="250" y="88" font-size="10.5" fill="#475569">1. 该宏指令的全部微指令都完成 → macro_inst_left −= 1</text>
   <text x="250" y="108" font-size="10.5" fill="#475569">2. 释放对 static_cfg[cfg_idx] 的引用，被阻塞的配置写这时生效</text>
-  <text x="250" y="128" font-size="10.5" fill="#475569">3. dsa_done = {valid=1, stream_id, task_id}，取自 M2 锁存的那一组</text>
-  <text x="250" y="148" font-size="10.5" fill="#475569">4. EVENT_EN → event = 1，与完成同拍发给 TS</text>
+  <text x="250" y="128" font-size="10.5" fill="#475569">3. EVENT_EN 置位 → dsa_done = {valid=1, stream_id, task_id, event=1}</text>
+  <text x="250" y="148" font-size="10.5" fill="#475569">4. 未置 EVENT_EN → 不打完成口，只退休</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">退休后被阻塞的静态配置写入生效并解除阻塞</text>
   <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
   <path d="M188 123 L231 123" stroke="#475569" marker-end="url(#arq9)" fill="none"/>
@@ -930,7 +930,7 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | SEXE 操作数只有三处来源，不支持立即数与 MEXE | F44 | `sexe_operand_source` |
 | 归约按 LANES 内再 ⌈log2 SEG⌉ 级累加，与参考实现同序 | F45 | `reduce_tree_order` |
 | VL 边界：0 等效 1，超上限等效 16384，不报错 | F48 | `vl_clamp` |
-| 可向 TS 发 Event 同步信号 | F50 | `vu_event` |
+| 只有 EVENT_EN 才把 dsa_done 发给 TS | F50 | `vu_event` · `EventEnRaisesEvent`、`LoadStoreRoundTrip` |
 
 ***
 

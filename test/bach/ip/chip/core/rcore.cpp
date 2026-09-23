@@ -133,7 +133,7 @@ void WriteRcoreChains(Core& core) {
 
   TaskEntry add;
   add.send_unit = SendUnit::kVu;
-  add.recv_unit = RecvUnit::kRvOnly;
+  add.recv_unit = RecvUnit::kDsa;
   add.task_pc = SymbolOf("task_vu_add", "vu");
   core.GetTs().Cfg().WriteTask(2, add);
 

@@ -664,7 +664,7 @@ def dot_chain():
                   path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_user_init"),
                   path_id=CHIP_RED_PATH, wait_wake=True),
-        ChainItem(4, "VU", "RV_ONLY", ("vu", "task_vu_gate")),
+        ChainItem(4, "VU", "DSA", ("vu", "task_vu_gate")),
         ChainItem(5, "DTE", "DSA", ("dte", "task_dte_send_fc2in"),
                   path_id=FC2_BCAST_PATH),
         ChainItem(6, "MU", "DSA", ("mu", "task_mu_fc2_s" + s)),
@@ -707,7 +707,7 @@ def rcore_chain(out_path):
     return [
         ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find")),
         ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_load")),
-        ChainItem(2, "VU", "RV_ONLY", ("vu", "task_vu_add")),
+        ChainItem(2, "VU", "DSA", ("vu", "task_vu_add")),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_rc_send"),
                   path_id=out_path, end=True),
     ]

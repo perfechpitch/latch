@@ -353,10 +353,9 @@ class Core : public BachModule {
   // 终点是各家把完成报回来的那一拍：
   //   DTE  两侧完成条件配齐、且带 task_last 的那一笔报到 TS，no_ack 的不报。
   //   MU   整个 task 的 tile 都写回、写回落地后再空两拍。
-  //   VU   每条宏指令退休报一次，与它发给 TS 的是同一拍同一笔。一个 task 发几条
-  //        就会报几次 —— VU 不知道 task 的边界，那是软件的事。要「这笔 task 从下
-  //        发到最后一条宏指令做完」的整段，看 TS 那一行：它会把这一笔的几段并起来。
-  //        配了 kRvOnly 的档上 TS 收的是 RV core 轮询之后的 ACK，那一路在 rv_done 里。
+  //   VU   只有 EVENT_EN 置位的宏指令退休才报，与发给 TS 的是同一拍同一笔。
+  //        未置位的照常退休、不打完成口。多宏任务只在最后一条置位，TS 配
+  //        kDsa 收齐 rv_done 与这一笔。kRvOnly 仍只看 rv_done。
   //
   // 身份与 ts_task / ts_user 同宽：task 8 bit、user 16 bit，本拍没有就填
   // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
@@ -400,8 +399,8 @@ class Core : public BachModule {
   // 时间。交还是一定发生的，通不通知 TS 由 kernel 写进 task_done 的值定，波形
   // 上以交还为准，这样不通知 TS 的那几档也有闭合点。
   //
-  // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()、VU 轮询 MACRO_INST_LEFT），
-  // 不含 DSA 自己的执行时间。
+  // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()），不含 DSA 自己的执行时间。
+  // VU 多宏任务不再轮询 MACRO_INST_LEFT，交还在写完最后一条 trigger 之后。
   void EmitRv() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;

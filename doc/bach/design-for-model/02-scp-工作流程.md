@@ -335,7 +335,7 @@
     * RouterTable 多副本全部写完 Router 才回完成；SCP 拿到完成后再写 DTE 与 ReduceModule 各自的那一份，硬件不代为同步
 * ④ 解复位：SCP 写 clk / reset 模块
   * RV core 从 `boot_pc` 跑 firmware：配 CSR、初始化 gp / sp，执行 **WFT 指令**进 wait
-  * WFT 指令：通知 TS 允许下发新任务；可选通知 IPI 向 SCP 上报状态（boot 阶段用）。它不是那 6 条自定义指令之一，编码取 custom-0 的空档 `funct3 = 011`、操作数字段全 0（`0x0000300B`），`bit31` 留给 IPI 那一位。固件侧写在 `src/bach/compiler/kernel/start.s` 的 `wait_loop`；模型不实现它（不跑 firmware 那一段）
+  * WFT 指令：通知 TS 允许下发新任务；可选通知 IPI 向 SCP 上报状态（boot 阶段用）。它不是那 6 条自定义指令之一，编码取 custom-0 的空档 `funct3 = 011`、操作数字段全 0（`0x0000300B`），`bit31` 留给 IPI 那一位。固件侧当前写在 `src/bach/compiler/kernel/start.s` 的收尾，编码是 F14 那条不通知 TS 的 `task_done`（`funct3 = 010`、`0x0000200B`），不是 WFT。模型按这条 `task_done` 跑完 `_start` 进 wait，不实现 WFT 011
   * DTE 要能解析 MSG 并执行，解析程序是 DTE kernel 里的一段，随 kernel 镜像装入；MU、VU 不需要
   * TS 无控制核，复位清 0 进 wait_cfg；Router wait_cfg；DSA idle
 * ⑤ 收 boot done

@@ -318,7 +318,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | F54 | 两类完成直接丢掉：权重加载期间的全部完成事件；自启动模式下带 `stream_id = 15`、`task_id = 63` 的完成，它来自 Bypass 那一路搬入 |
 | F55 | 自启动模式的表项没有用户号，Task 0 的 RV core 完成带回 `user_id` 时写进表项并置 `user_id_vld` |
 | F56 | PID 更新任务（`TASK_TYPE = 5`）完成时，把 RV core 完成带回的 PID 写进 `task_path_id` 并置 `pid_pending` |
-| F57 | VU 的 DSA 完成带 `event` 位，VU 的 `EVENT_EN` 置位时随完成一起拉高；TS 收下不处理 |
+| F57 | VU 只在 `EVENT_EN` 置位时发 `dsa_done`，同拍把 `event` 拉高；未置位不发。TS 把这一路当普通 DSA ACK，不另处理 `event` |
 
 ### credit 与退休
 
@@ -425,7 +425,7 @@ DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录）�
 
 ### 模型里四种 core 的任务链
 
-`recv` 一栏是 `TASK_RECV_UNIT`，`type` 一栏是 `TASK_TYPE`。MU 与 VU 的项只收 RV core 那一路，四种 core 相同。
+`recv` 一栏是 `TASK_RECV_UNIT`，`type` 一栏是 `TASK_TYPE`。VU 多宏任务（门控 / 求和）最后一条置 `EVENT_EN`，`recv` 配 DSA，TS 收齐 RV ACK 与这一笔 `dsa_done`。
 
 默认用例是 EPTP-NK：FC1、FC3 在 chip 间切 N、chip 内切 K，FC2 在 chip 间切 K、chip 内切 N。每颗 chip 的 8 个计算 core 按逻辑槽位 `s`（0～7）分工，槽位 0～6 配计算 core 的链，槽位 7 配 dot core 的链。同一个 kernel 镜像服务全部槽位，按槽位变化的项（FC1、FC3 部分和，FC2，发给 dot core）每个槽位一个入口，由 `TASK_CHAIN_n_PC` 选。
 
@@ -448,7 +448,7 @@ DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录）�
 | 1 | FC1、FC3 部分和，槽位 7 | MU | 00 | 0 | 0 | 0 | — | 0 |
 | 2 | 部分和出核，逐级 reduce；它是归约链的链尾，结果交回本 core | DTE | 01 | 0 | 4 | 1 | chip 内归约 path | 0 |
 | 3 | 归约结果搬入 | DTE | 01 | 1 | 0 | 0 | chip 内归约 path | 0 |
-| 4 | silu·dot·量化：每个专家一份，BF16 读，MXFP8 写 | VU | 00 | 0 | 0 | 0 | — | 0 |
+| 4 | silu·dot·量化：每个专家一份，BF16 读，MXFP8 写 | VU | 01 | 0 | 0 | 0 | — | 0 |
 | 5 | FC2 输入广播 | DTE | 01 | 0 | 0 | 待定 | FC2 输入广播 path | 0 |
 | 6 | FC2 第 7 段，直接写进 concat 区 | MU | 00 | 0 | 0 | 0 | — | 0 |
 | 7～13 | concat 搬入，每个上游 core 一项：第 7 + k 项收槽位 k 发来的那一段 | DTE | 01 | 1 | 0 | 0 | 槽位 k 的 concat path | 0 |
@@ -470,7 +470,7 @@ FC2 输入广播与发给 dot core 这两项的 `credit_en` 还没有定。
 | - | - | - | - | - | - | - | - | - |
 | 0 | 查一个用户的两半是否集齐（`task_rc_find`） | MU | 00 | 0 | 0 | 0 | — | 0 |
 | 1 | 从 Matrix Mem 搬两半进 Core Mem（`task_dte_rc_load`） | DTE | 01 | 0 | 0 | 0 | — | 0 |
-| 2 | 求和，VL = 6144 的 BF16 相加（`task_vu_add`） | VU | 00 | 0 | 0 | 0 | — | 0 |
+| 2 | 求和，VL = 6144 的 BF16 相加（`task_vu_add`） | VU | 01 | 0 | 0 | 0 | — | 0 |
 | 3 | 结果出核，送下一行 R core（`task_dte_rc_send`） | DTE | 01 | 0 | 0 | 0 | 出核 path | 1 |
 
 ### 四种 core 级切分模式的任务链

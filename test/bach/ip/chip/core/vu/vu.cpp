@@ -371,10 +371,8 @@ TEST(Vu, LoadStoreRoundTrip) {
   for (size_t i = 0; i < in.size(); ++i) {
     EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(in[i])) << "i=" << i;
   }
-  ASSERT_EQ(rig.sink->got.size(), 1u);
-  EXPECT_EQ(rig.sink->got[0].stream_id, kStream);
-  EXPECT_EQ(rig.sink->got[0].task_id, kTask);
-  EXPECT_EQ(rig.sink->got[0].event, 0u);
+  EXPECT_TRUE(rig.sink->got.empty())
+      << "EVENT_EN 未置位时不得把 dsa_done 发给 TS";
 }
 
 // st.mxfp8 与 ld.mxfp8：SU 按块算出 scale，连着数据写回；LU 连着 scale 读回来
@@ -732,8 +730,8 @@ TEST(Vu, TriggerRunsOncePerWrite) {
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x301)));
   SetupChain(rig, 0, 0, kSrcLu);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   rig.Run(600);
 
   EXPECT_EQ(rig.sink->got.size(), 2u);
@@ -747,7 +745,8 @@ TEST(Vu, StreamIdOverrideDoesNotTouchTaskId) {
   rig.vu->ConfigRegister().SetCoreIds(2, 41);
   SetupChain(rig, 0, 0, kSrcLu);
   rig.Write(kVuMacroInstTrigger,
-            TriggerWord(0, 0, kVuTrigSidOverride | (9u << kVuTrigSidShift)));
+            TriggerWord(0, 0, kVuTrigEventEn | kVuTrigSidOverride |
+                                 (9u << kVuTrigSidShift)));
   rig.Run(400);
 
   ASSERT_EQ(rig.sink->got.size(), 1u);
@@ -762,7 +761,9 @@ TEST(Vu, EventEnRaisesEvent) {
   rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   rig.Run(400);
 
-  ASSERT_EQ(rig.sink->got.size(), 1u);
+  ASSERT_EQ(rig.sink->got.size(), 1u) << "EVENT_EN 置位才把 dsa_done 发给 TS";
+  EXPECT_EQ(rig.sink->got[0].stream_id, kStream);
+  EXPECT_EQ(rig.sink->got[0].task_id, kTask);
   EXPECT_EQ(rig.sink->got[0].event, 1u);
 }
 
@@ -863,8 +864,8 @@ TEST(Vu, ScoreboardStallsOnOverlap) {
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
   rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0));
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   rig.Run(800);
 
   EXPECT_EQ(rig.sink->got.size(), 2u);
@@ -878,8 +879,8 @@ TEST(Vu, FenceWaitsForAllPrior) {
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x307)));
   SetupChain(rig, 0, 0, kSrcLu);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigFence));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn | kVuTrigFence));
   rig.Run(800);
 
   EXPECT_EQ(rig.sink->got.size(), 2u);
@@ -892,9 +893,9 @@ TEST(Vu, CmFenceWaitsForPriorCmAccess) {
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x308)));
   SetupChain(rig, 0, 0, kSrcLu);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   SetupComputeOnly(rig, 1);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigCmFence));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigEventEn | kVuTrigCmFence));
   rig.Run(800);
 
   EXPECT_EQ(rig.sink->got.size(), 2u);
@@ -907,9 +908,9 @@ TEST(Vu, CmFenceIgnoresPureComputePredecessors) {
   // 纯计算的前序宏指令不碰 CM，CM_FENCE 不等它。
   Rig rig;
   SetupComputeOnly(rig, 0);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   SetupComputeOnly(rig, 1);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigCmFence));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigEventEn | kVuTrigCmFence));
   rig.Run(800);
 
   EXPECT_EQ(rig.sink->got.size(), 2u);
@@ -927,7 +928,7 @@ TEST(Vu, UnassignedOpcodeIsNop) {
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
   SetupChain(rig, kVuValu2Op, OpWord(uint64_t(ValuOp::kFdivVv), kSrcLu, kSrcLu),
              kSrcLu);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   rig.Run(400);
 
   ASSERT_EQ(rig.sink->got.size(), 1u);
@@ -953,7 +954,8 @@ TEST(Vu, VrfWritePortsMustDifferOrCfgError) {
   EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrCfg, 0u);
   EXPECT_EQ(rig.vu->Isq().Left(), 0u)
       << "CFG_ERROR 放弃派发后仍须退休，否则 inflight / 静态组引用泄漏";
-  EXPECT_EQ(rig.sink->got.size(), 1u);
+  EXPECT_TRUE(rig.sink->got.empty())
+      << "未置 EVENT_EN 的退休不得把 dsa_done 发给 TS";
 }
 
 TEST(Vu, CfgErrorRetiresAndNextMacroRuns) {
@@ -981,7 +983,8 @@ TEST(Vu, CfgErrorRetiresAndNextMacroRuns) {
 
   EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrCfg, 0u);
   EXPECT_EQ(rig.vu->Isq().Left(), 0u);
-  ASSERT_EQ(rig.sink->got.size(), 2u);
+  EXPECT_TRUE(rig.sink->got.empty())
+      << "未置 EVENT_EN 不得把 dsa_done 发给 TS";
   std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, kVl * 4));
   for (size_t i = 0; i < in.size(); ++i) {
     EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(in[i])) << "i=" << i;
@@ -1026,7 +1029,7 @@ TEST(Vu, RfIndexWrapsAndRaisesRfIdxError) {
 
   EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrRfIndex, 0u);
   EXPECT_EQ(rig.vu->Isq().Left(), 0u);
-  ASSERT_EQ(rig.sink->got.size(), 1u);
+  EXPECT_TRUE(rig.sink->got.empty());
   std::vector<float> got = Fp32Of(rig.stmem->Peek(kDstAddr, 64 * 4));
   for (uint64_t i = 0; i < 32; ++i) {
     EXPECT_EQ(numeric::BitsOf(got[i]), numeric::BitsOf(1.5f)) << "i=" << i;
@@ -1101,7 +1104,9 @@ TEST(Vu, MisalignedAddrRaisesCmAddrError) {
   rig.Write(kVuMacroInstTrigger, TriggerWord(0));
   rig.Run(400);
 
-  EXPECT_EQ(rig.sink->got.size(), 1u) << "对齐不合规不该挡住这一条";
+  EXPECT_EQ(rig.vu->Isq().Left(), 0u) << "对齐不合规不该挡住这一条";
+  EXPECT_TRUE(rig.sink->got.empty())
+      << "未置 EVENT_EN 不得把 dsa_done 发给 TS";
   EXPECT_NE(rig.vu->ConfigRegister().ErrorCode() & kVuErrCmAddr, 0u);
 }
 
@@ -1121,7 +1126,7 @@ TEST(Vu, ThreeCfgPathsShareOneRegisterView) {
   noc_writer.Push(kVuStaticBase + kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
 
   rig.vu->ConfigRegister().SetCoreIds(6, 12);
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   rig.Run(500);
 
   ASSERT_EQ(rig.sink->got.size(), 1u);

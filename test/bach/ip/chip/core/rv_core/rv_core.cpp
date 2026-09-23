@@ -386,3 +386,53 @@ TEST(BachRvCore, CsrReadsCurrentTaskIds) {
   EXPECT_EQ(task_seen, 7u);
   EXPECT_EQ(user_seen, 61u);
 }
+
+// 装完镜像从 _start 跑 firmware：设 sp/gp、调 kernel_init，最后一条不通知 TS 的
+// task_done 进 wait。这段必须在 TS 下发之前自己跑完，不能再靠 ResetAbi 替它。
+TEST(BachRvCore, FirmwareRunsStartThenWaits) {
+  if (!KernelBuilt("dte")) GTEST_SKIP() << "kernel 还没编";
+  uint64_t insts = 0, finishes = 0, dones = 0;
+  bool at_wait = false;
+  uint64_t pc = 0, start_pc = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RvCore rv(clk, "rv_dte", RvUnit::kDte);
+    RvDriver drv(clk, rv);
+    MemSides mem(clk, rv);
+    rv.LoadImage(KernelDir() + "kernel_dte.hex");
+    start_pc = SymbolOf("dte", "_start");
+    ASSERT_EQ(start_pc, 0u);
+
+    class IdleTs : public BachModule {
+     public:
+      IdleTs(ClockPtr c, RvCore& core) : BachModule(c, "ts"), rv(core) {}
+      uint64_t dones = 0;
+
+     protected:
+      void Step() override {
+        rv.Cmd().Idle();
+        if (rv.Done().Valid()) ++dones;
+        rv.DsaCfg().DriveReady(true);
+      }
+
+     private:
+      RvCore& rv;
+    };
+    IdleTs ts(clk, rv);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    insts = rv.Exec().Insts();
+    finishes = rv.TaskQueue().Finishes();
+    dones = ts.dones;
+    at_wait = rv.Exec().AtWait();
+    pc = rv.Exec().Pc();
+  }
+  RT::Reset();
+  EXPECT_TRUE(at_wait) << "firmware 应以不通知 TS 的 task_done 进 wait";
+  EXPECT_GE(insts, 6u) << "_start 至少要跑完 la sp / la gp / call kernel_init / 收尾";
+  EXPECT_LT(insts, 40u) << "firmware 应收在 wait，不能继续取 ITCM 后面的零";
+  EXPECT_EQ(finishes, 0u) << "firmware 的收尾不是一笔业务 task，task_queue 不应记完成";
+  EXPECT_EQ(dones, 0u) << "不得向 TS 报完成";
+  EXPECT_GT(pc, start_pc);
+}

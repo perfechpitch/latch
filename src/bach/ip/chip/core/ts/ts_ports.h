@@ -68,8 +68,8 @@ class TaskCmdPort : public Logic {
 class DonePort : public Logic {
  public:
   // pid：RV core 的 ACK 带回的 PID。只有 PID 更新任务用它，DSA 的 ACK 不带。
-  // event：VU 的 DSA ACK 上 EVENT_EN 置位时随完成一起拉高，是 VU 向 TS 发的
-  // Event 同步信号。TS 这一侧不消费它。
+  // event：VU 只在 EVENT_EN 置位时才打 dsa_done，同拍把这一位拉高。TS 把这一路
+  // 当普通 DSA ACK，不另处理 event。
   Logic64 valid, stream_id, user_id, task_id, pid, event;
 
   explicit DonePort(ClockPtr c)

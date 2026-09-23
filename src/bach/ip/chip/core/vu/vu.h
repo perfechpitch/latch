@@ -106,9 +106,9 @@ class Vu {
 
   // 末级先做：一条宏指令在一拍里最多前进一级，与逐模块各占协程时逐拍相同。
   void RunStep() {
-    // 软件轮询 macro_inst_left 等这一批宏指令做完，条数由这里每拍写进去。
-    // 归零的判据是 ISQ 空且 store 落地：离开 SU 的写请求还要经端口到存储，所以
-    // 要连着空过两拍。报早了下游按完成往下走，读到的是这一段的旧值。
+    // macro_inst_left 由这里每拍写进去。归零的判据是 ISQ 空且 store 落地：离开
+    // SU 的写请求还要经端口到存储，所以要连着空过两拍。kernel 多宏任务不再轮询
+    // 它，完成改由最后一条的 EVENT_EN 报 dsa_done。
     bool busy = !isq->Quiescent() || !pipe->Quiescent() || !su->Quiescent();
     if (busy) {
       idle_cycles = 0;
