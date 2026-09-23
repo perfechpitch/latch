@@ -381,7 +381,7 @@
 | F35 | 不需要初始化 |
 | F36 | 只被三个 RV core 的访存指令与 DTE DSA 的 shareMem 写口读写 |
 | F37 | 三种用途：task 之间的共享数据；B core / R core 的用户数据映射表的更新与查询；标量数据 |
-| F38 | B core 用它存一对 `head` / `tail` 指针把收发两条链耦合起来；R core 用它存 `arrive_num[gpu_id][token_id]` 与两张 `tmp_info[stream_id]` |
+| F38 | B core 用它存一对 `head` / `tail` 指针把收发两条链耦合起来；R core 用它存按 `user_id` 寻址的软件映射表、按 ready 顺序排 `user_id` 的软件用户 FIFO（头尾指针），以及 `tmp_info1[stream_id]` |
 | F39 | 四个 master 的仲裁规则原文未给，建模按轮询（待定） |
 
 ### Core Mem 容量口径的来源
@@ -769,7 +769,7 @@ Matrix Mem bank 数    **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对�
 | Matrix Mem 按 core 角色扮演三种角色 | F33 | `mmem_roles` |
 | Share Mem 32 KB、5～10 拍、不需要初始化 | F34、F35 | `smem_basic` |
 | Share Mem 只被三个 RV core 与 DTE 读写 | F36 | `smem_masters` |
-| B core 的 head / tail 与 R core 的 arrive_num 存在 Share Mem | F38 | `smem_tables` |
+| B core 的 head / tail，以及 R core 的映射表与用户 FIFO，存在 Share Mem | F38 | `smem_tables` |
 | Core Mem 容量按四类功能相加，逐级归约不占容量 | F40、F41 | `cmem_capacity_four` |
 | Broadcast MSG 在本 core 不能修改 | F43 | `broadcast_msg_immutable` |
 | VU 中间值不占 Core Mem | F45 | `vu_no_intermediate` |

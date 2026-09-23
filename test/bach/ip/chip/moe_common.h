@@ -209,9 +209,8 @@ constexpr uint64_t kUserId = 77;
 
 // 第几笔落在 B core 的 Matrix Mem 哪里。发方按送出的笔数算，B core 按收下的笔
 // 数算，同一条规则。与 compiler/kernel/bach.h 的 BC_SLOTS 与 bc_land 同源。
-constexpr uint64_t kBcSlots = 16;
 inline uint64_t BcoreLand(uint64_t seq) {
-  return (seq % kBcSlots) * kn::kBcTokenBytes;
+  return (seq % kn::kBcSlots) * kn::kBcTokenBytes;
 }
 
 // 第 k 个 token：6144 个 MXFP8，192 个 scale 接在后面。path 与落点由调用方给：
@@ -245,7 +244,7 @@ inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId
 // 一个包落哪个 core 由包头的 path_core_mask 挑，位号就是槽位号。bundle 里不用这个号。
 constexpr uint64_t kWeightsPath = 12;
 // 与 compiler/kernel/bach.h 的 WEIGHTS_CNT_OFF 同源。
-constexpr uint64_t kWeightsCntOff = 0x05D0;
+constexpr uint64_t kWeightsCntOff = kn::kWeightsCntOff;
 // 一个权重包搬多少数据：两个 tile，一包的 scale 另占 512 B。
 constexpr uint64_t kWeightsChunk = 2 * kn::kTileBytes;
 constexpr uint64_t kWeightsScale = kWeightsChunk / 32;
@@ -406,13 +405,15 @@ class SpreadHarness : public BachModule {
   // 停钟那一拍。一个 token 从进入口到结果出口一共走了多少拍。
   uint64_t stopped_at = 0;
   // ── 连续发 token 那一段。留空就只发构造时给的那一包 ──
-  // GPU 那一侧按额度发：一个 token 占一份额度，它的结果从出口出来才还回来；入口
-  // 桥收不下就不发。每个 token 一个用户号，不许重复：系统保证有效的 user_id 唯
-  // 一。R core 按用户号模 16 取槽，模 16 相同的两个 token 不同时在路上，前一个
-  // 的结果出来了后一个才发。tokens 里排在前面的先发。这些 token 一律送进
-  // B core，落点按送出的笔数在发的时候填。
+  // GPU 默认不限额度（credit 为 kGpuUnlimited）：入口桥收不下就不发。每个 token
+  // 一个用户号，不许重复，且必须小于 R core 槽数（槽号就是 user_id，不取模）。
+  // R core 上前一个还在路上则后一个先不发。token_gap 非 0 时按这个间隔拍发。
+  // tokens 里排在前面的先发。这些 token 一律送进 B core，落点按送出的笔数在发
+  // 的时候填。
   std::vector<MessagePtr> tokens;
-  uint64_t credit = 0;
+  static constexpr uint64_t kGpuUnlimited = ~uint64_t{0};
+  uint64_t credit = kGpuUnlimited;
+  uint64_t token_gap = 0;
   // 每个 token 发出去的那一拍，与 tokens 一一对应；还没发的是 0。
   std::vector<uint64_t> sent_at;
   // ── weights 加载那一段。留空就只跑业务那一段 ──
@@ -481,7 +482,10 @@ class SpreadHarness : public BachModule {
       out_msgs.push_back(f.msg);
       out_at.push_back(CycleNow());
       // 这个 token 的结果出来了：还一份额度，R core 上它那个槽空出来了。
-      if (busy_slots.erase(f.msg->user_id % kn::kRcSlots) != 0) ++credit;
+      if (busy_slots.erase(f.msg->user_id) != 0 &&
+          credit != kGpuUnlimited) {
+        ++credit;
+      }
     }
 
     // 结果全部收到、所有计算 core 的任务链都走空就停表。拍数上限只作兜底：
@@ -520,24 +524,31 @@ class SpreadHarness : public BachModule {
   // 出口上要收到几包结果。
   uint64_t OutWanted() const { return tokens.empty() ? 1 : tokens.size(); }
 
-  // 连续发的那一段：额度还有、入口桥收得下，就发排在最前面、R core 上那个槽空着
-  // 的那一个 token。
+  // 连续发的那一段：入口桥收得下，就发排在最前面、R core 上那个槽空着的那一个
+  // token。credit 不是 kGpuUnlimited 时还要看 GPU 额度。token_gap 非 0 时距上一
+  // 个发出去的还要满这么多拍。
   MessagePtr PickToken(uint64_t now) {
     LOGCHECK(fire_at != 0, "SpreadHarness: 连续发的起点不能是第 0 拍。");
     if (sent_at.size() != tokens.size()) {
       sent_at.assign(tokens.size(), 0);
       std::set<uint64_t> users;
-      for (MessagePtr const& m : tokens) users.insert(m->user_id);
+      for (MessagePtr const& m : tokens) {
+        LOGCHECK(m->user_id < kn::kRcSlots,
+                 "SpreadHarness: user_id 就是 R core 槽号，必须小于槽数。");
+        users.insert(m->user_id);
+      }
       LOGCHECK(users.size() == tokens.size(),
                "SpreadHarness: 连续发的 token 每个一个用户号，不许重复。");
     }
-    if (now < fire_at || credit == 0 || feed_room == 0) return MessagePtr();
+    if (now < fire_at || feed_room == 0) return MessagePtr();
+    if (token_gap != 0 && now < fire_at + sent * token_gap) return MessagePtr();
+    if (credit != kGpuUnlimited && credit == 0) return MessagePtr();
     for (uint64_t i = 0; i < tokens.size(); ++i) {
       if (sent_at[i] != 0) continue;
-      uint64_t slot = tokens[i]->user_id % kn::kRcSlots;
+      uint64_t slot = tokens[i]->user_id;
       if (busy_slots.count(slot) != 0) continue;
       busy_slots.insert(slot);
-      --credit;
+      if (credit != kGpuUnlimited) --credit;
       --feed_room;
       sent_at[i] = now;
       tokens[i]->dst_addr = BcoreLand(sent++);

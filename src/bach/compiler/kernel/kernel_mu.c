@@ -107,58 +107,24 @@ TASK void task_mu_fc2_s7(void) { mu_fc2(7); }
 
 /* ===== R core 链二的第一步 =====
  *
- * 一个用户在本 core 占一个槽，两半各一包，每包搬完由硬件把这一半的 valid 标志置
- * 起来。这里循环扫标志表：一个槽前一半到了，后一半也到了（链首只等前一半），就把
- * 这个槽的两个标志清掉、把槽号交给后面几步、把这个槽是哪个用户写回身份寄存器，
- * 再向 TS 报完成。
- *
- * 扫不到就一直扫：这个 RV core 在 R core 的任务链上没有别的活，长期占用不挡
- * 同一个 core 上的其他 task。这一档不调 DSA。 */
-
-/* 第 s 槽第 h 半的标志 */
-static u32 rc_flag(u32 s, u32 h) {
-  return RC_FLAG_OFF + (s * 2u + h) * 4u;
-}
+ * 槽号就是 user_id。链一已经把 ready 的用户按顺序写入 FIFO，这里只比头尾指针：
+ * 相等就继续等，不等就弹出队头，把槽号交给后面几步。弹出时清掉这一槽的映射计数
+ * 和硬件标志，同一用户下一轮重新计。这一档不调 DSA。 */
 
 TASK void task_rc_find(void) {
-  u32 head = smem_read(RC_HEAD_OFF);
-  u32 s = 0;
   for (;;) {
-    /* 一圈查四个槽，两半的标志一次都读出来：八笔读连着发出去，在 lsq 里重叠，
-       一圈就是一次访存的往返。读一个等一个的话，扫一遍要八倍的时间。四个槽里
-       有几个齐了就取槽号最小的，与一圈查一个槽、从头扫起是同一个次序。两半要
-       一次读齐：只看前半、回头再查后半的话，一个槽前半先到后半没到时会停在它
-       身上，把同一圈里两半都齐的槽跳过去。
-       一圈再多查几个就不划算了：命中多半落在头几个槽上，多读的那些白发一趟，
-       实测一圈查八个反而比四个慢。RC_SLOTS 是 4 的倍数，这四个槽不会跨过表尾 */
-    u32 a0 = smem_read(rc_flag(s, 0));
-    u32 b0 = smem_read(rc_flag(s, 1));
-    u32 a1 = smem_read(rc_flag(s + 1, 0));
-    u32 b1 = smem_read(rc_flag(s + 1, 1));
-    u32 a2 = smem_read(rc_flag(s + 2, 0));
-    u32 b2 = smem_read(rc_flag(s + 2, 1));
-    u32 a3 = smem_read(rc_flag(s + 3, 0));
-    u32 b3 = smem_read(rc_flag(s + 3, 1));
-    u32 hit = RC_SLOTS;
-    if (a0 != 0 && (head != 0 || b0 != 0)) {
-      hit = s;
-    } else if (a1 != 0 && (head != 0 || b1 != 0)) {
-      hit = s + 1;
-    } else if (a2 != 0 && (head != 0 || b2 != 0)) {
-      hit = s + 2;
-    } else if (a3 != 0 && (head != 0 || b3 != 0)) {
-      hit = s + 3;
-    }
-    if (hit < RC_SLOTS) {
-      smem_write(rc_flag(hit, 0), 0);
-      smem_write(rc_flag(hit, 1), 0);
-      smem_write(RC_SLOT_OFF + stream_id() * 4, hit);
-      set_user_id(smem_read(RC_USER_OFF + hit * 4));
-      task_done(1);
-      return;
-    }
-    s = s + 4;
-    if (s >= RC_SLOTS) s = 0;
+    u32 h = smem_read(RC_READY_HEAD_OFF);
+    u32 t = smem_read(RC_READY_TAIL_OFF);
+    if (h == t) continue;
+    u32 s = smem_read(RC_READY_Q_OFF + (h & (RC_READY_CAP - 1u)) * 4u);
+    smem_write(RC_READY_HEAD_OFF, h + 1u);
+    smem_write(RC_MAP_OFF + s * 4u, 0);
+    smem_write(rc_flag_off(s, 0), 0);
+    smem_write(rc_flag_off(s, 1), 0);
+    smem_write(RC_SLOT_OFF + stream_id() * 4, s);
+    set_user_id(s);
+    task_done(1);
+    return;
   }
 }
 
@@ -185,7 +151,12 @@ TASK void task_bc_wait(void) {
       smem_write(BC_FLAG_OFF + slot * 4, 0);
       smem_write(BC_HEAD_OFF, head + 1);
       smem_write(BC_SLOT_OFF + stream_id() * 4, slot);
-      set_user_id(smem_read(BC_USER_OFF + slot * 4));
+      u32 u;
+      do {
+        u = smem_read(BC_USER_OFF + slot * 4);
+      } while ((u & 0x80000000u) == 0);
+      smem_write(BC_USER_OFF + slot * 4, 0);
+      set_user_id(u & 0x7fffffffu);
       task_done(1);
       return;
     }

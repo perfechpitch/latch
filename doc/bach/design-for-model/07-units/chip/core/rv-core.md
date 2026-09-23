@@ -301,7 +301,7 @@ kernel 清单按 RV core 分：
 | `weights_loader` | DTE core | 用标量指令算出这一片权重落 Matrix Mem 的地址，再发 DTE 指令把数据从 Router 搬过去 | DTE DSA |
 | `bcore_datain` | DTE core | 把 Share Mem 里 `head` 指的槽位地址配给 DTE DSA，DSA 搬完置 `head = head + 1` | DTE DSA |
 | `broadcast` | DTE core | 把 `tail` 指的槽位配给 DTE DSA 搬到 Router，搬完置 `tail = tail + 1` | DTE DSA |
-| `check_flag` | MU core | B core 上循环比较 `head` 与 `tail`；R core 上循环扫 `arrive_num` 找等于 2 的项，找到就清零并写 `tmp_info1[stream_id]` | RV core 自己 |
+| `check_flag` | MU core | B core 上循环比较 `head` 与 `tail`；R core 上比较软件用户 FIFO 的头尾，不等就弹出一个 `user_id` 写 `tmp_info1[stream_id]` | RV core 自己 |
 | `token_datain` | DTE core | 按包头判断这是任务链里哪一步的数据，把 Router buffer 里的数据配给 DTE DSA 搬进 Core Mem | DTE DSA |
 | `dataout` | DTE core | 按 `task_id` 查 `path_id` 与 `size` 改写硬件包头，把 Core Mem 里的结果配给 DTE DSA 搬到 Router | DTE DSA |
 | `mu_gemv` | MU core | 判断 8 个激活专家里哪些落在本 EP 组、挑出加权权重、配好 Mmem 与 Cmem 地址，写两条 `dsawi`（先 `topk_stream_stride`，后 `trigger`）启动 | MU DSA |

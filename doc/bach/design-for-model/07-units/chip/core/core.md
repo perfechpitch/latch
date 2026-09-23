@@ -85,7 +85,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1536.0" y="335.0" font-size="8.5" fill="#475569">　　　　+ DTE DSA 的 shareMem 写</text>
 <text x="1536.0" y="348.5" font-size="8.5" fill="#475569">用途：task 间共享数据</text>
 <text x="1536.0" y="362.0" font-size="8.5" fill="#475569">B core 的 head / tail 指针</text>
-<text x="1536.0" y="375.5" font-size="8.5" fill="#475569">R core 的 arrive_num 与 tmp_info 表</text>
+<text x="1536.0" y="375.5" font-size="8.5" fill="#475569">R core 的映射表与用户 FIFO</text>
 <text x="1812" y="402.0" font-size="8.5" fill="#9ca3af" text-anchor="end">四个 master 仲裁</text>
 <rect x="324" y="364" width="330" height="106" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="336" y="385" font-size="11" fill="#111827" font-weight="600">MU RV core</text>

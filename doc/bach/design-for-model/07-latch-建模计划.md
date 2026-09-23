@@ -471,7 +471,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | 类 | reason |
 | - | - |
-| 依赖 | 等前序 task 完成、等 datain 数据到达、等 Router `reduce_done`、等 DSA 读寄存器返回、等 Completion RS 的 Join、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的 arrive_num == 2 |
+| 依赖 | 等前序 task 完成、等 datain 数据到达、等 Router `reduce_done`、等 DSA 读寄存器返回、等 Completion RS 的 Join、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的用户 FIFO 头尾不等 |
 | 资源 | 等 stream 坑、等 VC credit、等 Reduce credit、等入口桩的 grant、等 TaskQueue / ISQ / issue_q 项、等 Lane、等 bank 端口、等 RV core 空闲、等 dsa_iss 通道、等 DTE Buffer credit、等 Xbar 出口、等 ReduceModule 上下文 |
 
 瓶颈由此能定位到具体资源而不只是慢，而且只有资源那一半是改参数动得了的。

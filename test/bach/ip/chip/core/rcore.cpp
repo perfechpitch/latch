@@ -3,10 +3,10 @@
 // 一个用户的两笔从两个方向来：本行结果与上一行 R core 送来的累加结果，在本 core
 // 上等齐了再相加送下一行。两条链：
 //
-//   链一  由 Router 触发。落点与 valid 标志都由硬件按包头办，datain 那一段只
-//         把这个槽是哪个用户记进 Share Mem
-//   链二  自启动。MU 扫标志表找齐了的槽 → DTE 把整槽从 Matrix Mem 搬到 Core
-//         Mem → VU 两笔求和 → DTE 把结果送下一行
+//   链一  由 Router 触发。落点与 valid 标志都由硬件按包头办。datain 按 user_id
+//         把软件映射表加一，两笔都到了才把这个用户写入 FIFO
+//   链二  自启动。MU 从 FIFO 弹出队头 → DTE 把整槽从 Matrix Mem 搬到 Core Mem
+//         → VU 两笔求和 → DTE 把结果送下一行
 //
 // 一半是一包：16 B 软件辅助信息后面接 6144 个 BF16。这一份验的是两条链接起来
 // 之后走不走得通、加出来的数对不对。用户之间乱序到达那一档由“三个用户交叉着来”
@@ -27,6 +27,7 @@
 #include "base/runtime.h"
 #include "bach/common/numeric/formats.h"
 #include "bach/ip/chip/core/core.h"
+#include "test/bach/ip/chip/kn_data.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -58,14 +59,14 @@ bool KernelBuilt() {
 // ── 摆放 ──
 //
 // 与 compiler/kernel/bach.h 的 RC_* 同源，改一处要一起改。
-constexpr uint64_t kSlots = 16;
+constexpr uint64_t kSlots = kn::kRcSlots;
 // 一笔是一包，包首 16 B 是软件辅助信息，后面是 kOutN 个 BF16；一半装一笔。
 constexpr uint64_t kOutN = 6144;
 constexpr uint64_t kPacketBytes = kReduceSwHeaderBytes + kOutN * 2;
-constexpr uint64_t kHalfBytes = 0x3080;
-constexpr uint64_t kSlotBytes = 2 * kHalfBytes;
+constexpr uint64_t kHalfBytes = kn::kRcHalfBytes;
+constexpr uint64_t kSlotBytes = kn::kRcSlotBytes;
 constexpr uint64_t kMmBase = 0x000000;
-constexpr uint64_t kFlagOff = 0x0000;
+constexpr uint64_t kFlagOff = kn::kRcFlagOff;
 constexpr uint64_t kSumOff = 0x0000;
 
 constexpr uint64_t kInPath = 3;
@@ -73,7 +74,7 @@ constexpr uint64_t kOutPath = 0;
 
 // 一个用户在 R core 上的落点。half 为 0 是本行结果，为 1 是上一行送来的累加结果。
 uint64_t Land(uint64_t user, uint64_t half) {
-  return kMmBase + (user % kSlots) * kSlotBytes + half * kHalfBytes;
+  return kMmBase + user * kSlotBytes + half * kHalfBytes;
 }
 
 // 一笔的 payload：16 B 头，后面是 kOutN 个 BF16。
@@ -354,7 +355,7 @@ TEST(BachRcore, WhoeverIsCompleteFirstGoesFirst) {
   EXPECT_EQ(order[2], 5u);
 }
 
-// 只到一笔就不动：链二扫不到两半都齐的槽，一直等。
+// 只到一笔就不动：映射表还没到两笔，FIFO 里没有这个用户，链二一直等。
 TEST(BachRcore, OnePartAloneWaits) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
   std::vector<MessagePtr> got;

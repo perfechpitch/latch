@@ -703,7 +703,7 @@ def bcore_chain(out_path, next_path=0):
 
 
 def rcore_chain(out_path):
-    """R core 的链二：扫标志表、搬进 Core Mem、两半求和、送下一行。"""
+    """R core 的链二：从用户 FIFO 取一个 ready 用户、搬进 Core Mem、两半求和、送下一行。"""
     return [
         ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find")),
         ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_load")),
@@ -723,13 +723,25 @@ DATAIN_SYM = {
 # 业务模式下进核那一笔（DTEIN）：(route, no_ack, 标志表基址, 一个槽位多大)。
 # route 0 落 Core Mem、1 落 Matrix Mem。计算 core 落 Core Mem、回 Ack、不置标志；
 # B core 与 R core 落 Matrix Mem、不回 Ack，搬完置标志。标志表几何与 kernel/bach.h
-# 同源：B core 是 BC_FLAG_OFF 与 BC_TOKEN_BYTES，R core 是 RC_FLAG_OFF 与
-# RC_HALF_BYTES。
+# 同源：槽数按 Matrix Mem 容量算，B core 再受 Share Mem 标志表大小限制。
 ROUTE_CM, ROUTE_MM = 0, 1
+MMEM_BYTES = 36 * 1024 * 1024
+SMEM_BYTES = 32 * 1024
+TS_STREAM_NUM = 16
+BC_TOKEN_BYTES = 6144
+RC_HALF_BYTES = 0x3080
+RC_SLOT_BYTES = 2 * RC_HALF_BYTES
+RC_SLOTS = MMEM_BYTES // RC_SLOT_BYTES
+RC_FLAG_OFF = 0
+BC_SLOTS_MM = MMEM_BYTES // BC_TOKEN_BYTES
+BC_SMEM_OVERHEAD = 4 + 4 + TS_STREAM_NUM * 4 + 4 + 4 + 4
+BC_SLOTS_SM = (SMEM_BYTES - BC_SMEM_OVERHEAD) // 8
+BC_SLOTS = min(BC_SLOTS_MM, BC_SLOTS_SM)
+BC_FLAG_OFF = 0
 DTEIN_OF_ROLE = {
     "NORMAL": (ROUTE_CM, 0, 0x0000, 0),
-    "BROADCAST": (ROUTE_MM, 1, 0x0500, 6144),
-    "REDUCTION": (ROUTE_MM, 1, 0x0000, 0x3080),
+    "BROADCAST": (ROUTE_MM, 1, BC_FLAG_OFF, BC_TOKEN_BYTES),
+    "REDUCTION": (ROUTE_MM, 1, RC_FLAG_OFF, RC_HALF_BYTES),
 }
 
 # 角色分配：组头 chip 的 core0 是 B core，最后一列 chip 的 core9 是 R core。

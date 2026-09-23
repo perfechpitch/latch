@@ -1,13 +1,9 @@
 // 一层 MoE 摊在 48 颗 chip 上连续跑 32 个 token。拓扑、配置表、kernel 与各 core
-// 的数据同 moe_lpu.cpp，差别在 GPU 那一侧一直发：GPU 一侧有 16 份额度，一个
-// token 占一份，它的结果从出口出来才还回来。32 个 token 发完之前，额度一直用满。
+// 的数据同 moe_lpu.cpp。GPU 每 100 拍注入一个 token；R core 槽号就是 user_id，
+// 不扫表。user_id 必须小于 R core 槽数。
 //
 // 每个 token 一个用户号，按发的先后编：系统保证有效的 user_id 唯一，一个号在某个
-// core 上的 stream 退休之前不会再来。R core 按用户号模 16 取槽，第 k 个 token 与
-// 第 k + 16 个落同一个槽，前一个的结果出来了后一个才发。
-//
-// 额度取 16：B core 的环形缓冲与 R core 的槽都是 16 格，计算 core 的 stream 表
-// 与 Router 的归约上下文也是 16 项。
+// core 上的 stream 退休之前不会再来。
 //
 // 这一份跑得久，与单 token 那一份各自一个目标，方便单独跑。
 
@@ -24,17 +20,16 @@ using namespace latch::bach::moetest;
 namespace {
 
 constexpr uint64_t kTokens = 32;
-constexpr uint64_t kCredit = 16;
 
 // 记波形的 chip 数，从第 0 颗数起。
 constexpr uint64_t kTraceChips = kLpuChips;
 
 }  // namespace
 
-// 32 个 token 各一个用户号，第 k 个是 kUserId + k，内容各不相同。出口上 32 包
-// 结果逐包与参考实现逐字节相同：按用户号认出是第几个 token，落点按下一行 R core
-// 上这个用户那一槽的后一半算。跑完各计算 core 的任务链都走空。
-TEST(BachMoeLpu, ThirtyTwoTokensWithSixteenCredits) {
+// 32 个 token 各一个用户号，第 k 个的 user_id 就是 k（也是 R core 槽号）。出口上
+// 32 包结果逐包与参考实现逐字节相同：按用户号认出是第几个 token，落点按下一行
+// R core 上这个用户那一槽的后一半算。跑完各计算 core 的任务链都走空。
+TEST(BachMoeLpu, ThirtyTwoTokens) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 200000;
   Vectors want = ReadVectors("moe_lpu_tokens.txt");
@@ -60,11 +55,11 @@ TEST(BachMoeLpu, ThirtyTwoTokensWithSixteenCredits) {
     SpreadHarness harness(clk, all, GridLinks(kGridY, kGridX), feed, sink, 0,
                           kChipW, kLpuChips - 1, kChipE, /*at=*/2, kMaxCycles,
                           MessagePtr());
+    harness.token_gap = 100;
     for (uint64_t k = 0; k < kTokens; ++k) {
-      // 落点在发的时候按送出的笔数填。
-      harness.tokens.push_back(MakeToken(kBcastInPath, 0, kUserId + k, k));
+      // 槽号就是 user_id，从 0 起编，必须小于 R core 槽数。
+      harness.tokens.push_back(MakeToken(kBcastInPath, 0, k, k));
     }
-    harness.credit = kCredit;
     clk->Continue();
     RT::JoinAll();
     CheckStreamDrained(all);
@@ -85,7 +80,7 @@ TEST(BachMoeLpu, ThirtyTwoTokensWithSixteenCredits) {
   }
   if (got.size() == kTokens && sent_at.size() == kTokens) {
     for (uint64_t i = 0; i < got.size(); ++i) {
-      uint64_t k = got[i]->user_id - kUserId;
+      uint64_t k = got[i]->user_id;
       std::cerr << "    token " << k << " 发 " << sent_at[k] << " 出 "
                 << out_at[i] << " 走了 " << out_at[i] - sent_at[k] << "\n";
     }
@@ -93,8 +88,7 @@ TEST(BachMoeLpu, ThirtyTwoTokensWithSixteenCredits) {
   ASSERT_EQ(got.size(), kTokens) << "出口上要收到每个 token 一包结果";
   std::set<uint64_t> seen;
   for (MessagePtr const& m : got) {
-    ASSERT_GE(m->user_id, kUserId);
-    uint64_t k = m->user_id - kUserId;
+    uint64_t k = m->user_id;
     ASSERT_LT(k, kTokens) << "出口上来了一包不认识的用户 " << m->user_id;
     ASSERT_TRUE(seen.insert(k).second) << "第 " << k << " 个 token 的结果多出来一包";
     CheckOutMsg(*m, want.Bytes("out" + std::to_string(k)),

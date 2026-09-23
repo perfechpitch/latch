@@ -136,13 +136,38 @@ TASK void task_dte_send_row(void) {
   task_done(1);
 }
 
+/* 把一个已经 ready 的 user_id 写入软件用户 FIFO 的尾。队满就等链二把队头弹走。 */
+static void rc_fifo_push(u32 u) {
+  u32 t = smem_read(RC_READY_TAIL_OFF);
+  u32 h = smem_read(RC_READY_HEAD_OFF);
+  while (t - h >= RC_READY_CAP) {
+    h = smem_read(RC_READY_HEAD_OFF);
+  }
+  smem_write(RC_READY_Q_OFF + (t & (RC_READY_CAP - 1u)) * 4u, u);
+  smem_write(RC_READY_TAIL_OFF, t + 1u);
+}
+
+/* 这一槽已经置起的硬件 valid 有几项。包头先到、数据后到，标志是搬完才写的。 */
+static u32 rc_flags_set(u32 u) {
+  u32 a = smem_read(rc_flag_off(u, 0));
+  u32 b = smem_read(rc_flag_off(u, 1));
+  return (a != 0u ? 1u : 0u) + (b != 0u ? 1u : 0u);
+}
+
 /* ===== R core 的两段 =====
  *
- * 进核那一笔的落点与 valid 标志都由硬件按包头办：Header Parser 解析包头就建
- * 描述符，搬完由 Completion RS 把标志写出去。这里只把这个槽是哪个用户记下来，
- * 链二找到齐了的槽之后要按它认人；再弹掉这个包的包头。 */
+ * 进核那一笔的落点与 valid 标志都由硬件按包头办。这里按 user_id 把软件映射表加
+ * 一，记下又到了一笔，并等到这一笔的数据确实落进 Matrix Mem。非链首加到两笔、
+ * 链首加到一笔，才把这个用户写入 FIFO，每个用户只入队一次。再弹掉这个包的包头。
+ * user_id 就是槽号。 */
 TASK void task_dte_rc_datain(void) {
-  smem_write(RC_USER_OFF + (user_id() % RC_SLOTS) * 4, user_id());
+  u32 u = user_id();
+  u32 n = smem_read(RC_MAP_OFF + u * 4u) + 1u;
+  smem_write(RC_MAP_OFF + u * 4u, n);
+  while (rc_flags_set(u) < n) {
+  }
+  u32 need = smem_read(RC_HEAD_OFF) != 0u ? 1u : 2u;
+  if (n == need) rc_fifo_push(u);
   hdr_pop();
   task_yield();
 }
@@ -170,7 +195,8 @@ TASK void task_dte_rc_send(void) {
  * 记在第几格按自己收下的笔数算，与发方算落点用的是同一条规则 */
 TASK void task_dte_bc_datain(void) {
   u32 n = smem_read(BC_RECV_OFF);
-  smem_write(BC_USER_OFF + (n % BC_SLOTS) * 4, user_id());
+  /* 高位置 1：链二等得到“已经写过”，user_id 0 也能用 */
+  smem_write(BC_USER_OFF + (n % BC_SLOTS) * 4, user_id() | 0x80000000u);
   smem_write(BC_RECV_OFF, n + 1);
   hdr_pop();
   task_yield();

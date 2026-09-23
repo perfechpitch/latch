@@ -24,6 +24,7 @@
 #include "base/clock.h"
 #include "base/runtime.h"
 #include "bach/ip/chip/core/core.h"
+#include "test/bach/ip/chip/kn_data.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -55,12 +56,11 @@ bool KernelBuilt() {
 // ── 摆放 ──
 //
 // 与 compiler/kernel/bach.h 的 BC_* 同源，改一处要一起改。
-constexpr uint64_t kSlots = 16;
-// 一笔 token 是 6144 个 MXFP8，包里数据后面接 192 个 scale。
-constexpr uint64_t kTokenBytes = 6144;
+constexpr uint64_t kSlots = kn::kBcSlots;
+constexpr uint64_t kTokenBytes = kn::kBcTokenBytes;
 constexpr uint64_t kScaleBytes = kTokenBytes / 32;
 constexpr uint64_t kMmBase = 0x000000;
-constexpr uint64_t kFlagOff = 0x0500;
+constexpr uint64_t kFlagOff = kn::kBcFlagOff;
 
 constexpr uint64_t kInPath = 3;
 constexpr uint64_t kOutPath = 0;

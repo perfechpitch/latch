@@ -197,32 +197,48 @@ static inline u32 moe_concat(u32 s) {
 
 /* ===== R core：一行一个，各行结果逐行相加 =====
  *
- * 每个用户在本 core 占一个槽，槽里两半：本行 4 颗 chip 的 dot core 逐跳归约出来
- * 的本行结果落前一半，上一行 R core 送过来的累加结果落后一半。落哪一半由发方在
- * 包头的 dst_addr 里指定，槽号按 user_id 取模算。一半一包，摆法同行链那一包。
+ * 每个用户在本 core 占一个槽，槽号就是 user_id，不许取模、也不许超过 RC_SLOTS。
+ * 槽里两半：本行结果落前一半，上一行 R core 送来的累加结果落后一半。落哪一半由
+ * 发方在包头的 dst_addr 里指定。一半一包，摆法同行链那一包。
  *
- * 一包搬完硬件就把这一半的 valid 标志置起来；链二扫到一个槽两半的标志都齐了，
- * 就把整个槽搬进 Core Mem 求和。 */
-#define RC_SLOTS       16u
+ * Share Mem 里两样东西，都按软件维护：
+ *   映射表  按 user_id 寻址，记下这个用户已经搬进 Matrix Mem 几笔。非链首固定等
+ *           两笔，两笔都到了才算 ready；链首没有上方那一笔，左侧到了就算 ready
+ *   用户 FIFO  按变成 ready 的顺序写入 user_id，头尾指针写入和读出
+ * 链一每来一包把映射表加一，刚变成 ready 才入队一次。链二只从 FIFO 弹出队头，
+ * 再搬进 Core Mem 求和，不扫表。 */
+#define BACH_MMEM_BYTES (36u * 1024u * 1024u)      /* 与 matrix_mem.h 同源 */
+#define BACH_SMEM_BYTES (32u * 1024u)              /* 与 share_mem.h 同源 */
+#define TS_STREAM_NUM  16u                         /* 计算 core 的 stream 表深 */
+
 #define RC_HALF_BYTES  0x3080u                     /* 一包按 128 B 对齐 */
 #define RC_SLOT_BYTES  (2u * RC_HALF_BYTES)        /* 一个用户占的地方 */
 #define RC_MM_BASE     0x000000u                   /* 槽在 Matrix Mem 的起点 */
+/* 槽数按 Matrix Mem 能放下多少个用户来 */
+#define RC_SLOTS       (BACH_MMEM_BYTES / RC_SLOT_BYTES)
 
 _Static_assert(RC_HALF_BYTES >= MOE_ROW_BYTES && RC_HALF_BYTES % 128u == 0,
                "一半要装得下行链那一包，并按 128 B 对齐");
+_Static_assert(RC_SLOTS != 0, "R core 槽数按 Matrix Mem 容量算");
 
-/* Share Mem 里的两张表。标志表每半一项：硬件按落点除以一半的长度找项，所以第 s
- * 槽第 h 半那一项是 s × 2 + h。用户表每槽一项，由 datain 那一段写，链二按它认这
- * 个槽是哪个用户 */
+/* Share Mem。硬件标志表每半一项：按落点除以一半的长度找项，第 s 槽第 h 半是
+ * s × 2 + h。软件映射表每用户一项，记已经到了几笔。 */
 #define RC_FLAG_OFF    0x0000u
-#define RC_USER_OFF    0x0200u
-#define RC_SLOT_OFF    0x0300u                     /* 链二每 stream 记一个槽号 */
-/* 本 core 是不是这条 R core 链的链首。链首那一行没有上一行，槽的另一半一直是 0，
- * 加上去不改值，所以它等一包就走；其余行等两包。非零表示是链首 */
-#define RC_HEAD_OFF    0x0380u
+#define RC_MAP_OFF     (RC_FLAG_OFF + RC_SLOTS * 2u * 4u)
+#define RC_SLOT_OFF    (RC_MAP_OFF + RC_SLOTS * 4u) /* 链二每 stream 记一个槽号 */
+/* 本 core 是不是这条 R core 链的链首。链首那一行没有上一行，左侧到了就 ready；
+ * 其余行固定等两笔。非零表示是链首。先不看包头里的 core_mask */
+#define RC_HEAD_OFF    (RC_SLOT_OFF + TS_STREAM_NUM * 4u)
+/* 软件用户 FIFO：只放已经 ready 的 user_id。链一写尾，链二读头 */
+#define RC_READY_CAP      64u
+#define RC_READY_HEAD_OFF (RC_HEAD_OFF + 4u)
+#define RC_READY_TAIL_OFF (RC_READY_HEAD_OFF + 4u)
+#define RC_READY_Q_OFF    (RC_READY_TAIL_OFF + 4u)
 
-_Static_assert(RC_FLAG_OFF + RC_SLOTS * 2u * 4u <= RC_USER_OFF,
-               "标志表每半一项，要放得进用户表之前那一段");
+_Static_assert((RC_READY_CAP & (RC_READY_CAP - 1u)) == 0,
+               "用户 FIFO 深度是 2 的幂，取下标用与");
+_Static_assert(RC_READY_Q_OFF + RC_READY_CAP * 4u <= BACH_SMEM_BYTES,
+               "R core 标志表、映射表与用户 FIFO 要放得进 Share Mem");
 
 /* Core Mem 里的摆放。两半在 Matrix Mem 里连着，搬到 Core Mem 也原样连着，一笔
  * 搬运就够。每一半开头那 16 B 是软件辅助信息，求和只算数据那一段。求和结果写回
@@ -233,9 +249,15 @@ _Static_assert(RC_FLAG_OFF + RC_SLOTS * 2u * 4u <= RC_USER_OFF,
 /* 两半求和借用的 VRF 起点。一条 VL 为 MOE_EMBED 的 FP32 向量占 192 个 entry */
 #define RC_VRF     16u
 
-/* 一个用户在 R core 上的落点。half 为 0 是本行结果，为 1 是上一行的累加结果 */
+/* 第 s 槽第 h 半的标志 */
+static inline u32 rc_flag_off(u32 s, u32 h) {
+  return RC_FLAG_OFF + (s * 2u + h) * 4u;
+}
+
+/* 一个用户在 R core 上的落点。half 为 0 是本行结果，为 1 是上一行的累加结果。
+ * user 就是槽号，调用方保证 user < RC_SLOTS */
 static inline u32 rc_land(u32 user, u32 half) {
-  return RC_MM_BASE + (user % RC_SLOTS) * RC_SLOT_BYTES + half * RC_HALF_BYTES;
+  return RC_MM_BASE + user * RC_SLOT_BYTES + half * RC_HALF_BYTES;
 }
 
 /* ===== B core：组内广播的发起点 =====
@@ -260,23 +282,33 @@ static inline u32 rc_land(u32 user, u32 half) {
  *
  * 一份 token 在 B core 上发两笔：一笔广播给本组各 core，落点由收方自己的配置
  * 定；一笔转给下一个 EP 组的 B core，落点要按这一条规则算好写进包头 */
-#define BC_SLOTS       16u
 #define BC_TOKEN_BYTES MOE_EMBED                   /* 一笔 token：6144 个 MXFP8 */
 #define BC_MM_BASE     0x000000u
+/* 槽数按 Matrix Mem 能放下多少笔 token 来；标志+用户每槽 8 B，Share Mem 不够
+ * 就再截一刀 */
+#define BC_SLOTS_MM    (BACH_MMEM_BYTES / BC_TOKEN_BYTES)
+#define BC_SMEM_OVERHEAD (4u + 4u + TS_STREAM_NUM * 4u + 4u + 4u + 4u)
+#define BC_SLOTS_SM    ((BACH_SMEM_BYTES - BC_SMEM_OVERHEAD) / 8u)
+#define BC_SLOTS       (BC_SLOTS_MM < BC_SLOTS_SM ? BC_SLOTS_MM : BC_SLOTS_SM)
+
+_Static_assert(BC_SLOTS != 0, "B core 槽数按 Matrix Mem 容量算");
 
 /* Share Mem 里的几样。标志表由硬件搬完之后写，用户表与收包计数由链一写，一对
  * 指针与槽号由链二写 */
-#define BC_FLAG_OFF    0x0500u
-#define BC_USER_OFF    0x0540u
-#define BC_HEAD_OFF    0x0580u
-#define BC_TAIL_OFF    0x0584u
-#define BC_SLOT_OFF    0x0588u                     /* 链二每 stream 记一个槽号 */
-#define BC_RECV_OFF    0x05C8u                     /* 链一收下的笔数 */
-#define BC_SENT_OFF    0x05CCu                     /* 往下一组转出的笔数 */
+#define BC_FLAG_OFF    0x0000u
+#define BC_USER_OFF    (BC_FLAG_OFF + BC_SLOTS * 4u)
+#define BC_HEAD_OFF    (BC_USER_OFF + BC_SLOTS * 4u)
+#define BC_TAIL_OFF    (BC_HEAD_OFF + 4u)
+#define BC_SLOT_OFF    (BC_TAIL_OFF + 4u)          /* 链二每 stream 记一个槽号 */
+#define BC_RECV_OFF    (BC_SLOT_OFF + TS_STREAM_NUM * 4u) /* 链一收下的笔数 */
+#define BC_SENT_OFF    (BC_RECV_OFF + 4u)          /* 往下一组转出的笔数 */
 
 /* weights 加载阶段搬进本 core 的笔数。数满了 loader 中断 SCP，SCP 才把这颗
  * core 切到业务模式 */
-#define WEIGHTS_CNT_OFF 0x05D0u
+#define WEIGHTS_CNT_OFF (BC_SENT_OFF + 4u)
+
+_Static_assert(WEIGHTS_CNT_OFF + 4u <= BACH_SMEM_BYTES,
+               "B core 标志表与用户表要放得进 Share Mem");
 
 /* 第几笔落在 Matrix Mem 的哪里 */
 static inline u32 bc_land(u32 idx) {

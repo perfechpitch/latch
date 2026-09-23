@@ -657,7 +657,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 
 * 任务数据传输完成后，按 `sharemem_waddr` / `sharemem_data` 写 shareMem，然后通知 TS
 * 只在 B core 与 R core 使用
-* 存 user_id 与 token entry 的 valid 标志，由软件维护：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid
+* 存 user_id 与 token entry 的 valid 标志，由软件维护：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid。R core 上这块 Share Mem 还放按 `user_id` 寻址的软件映射表，以及按 ready 顺序排 `user_id` 的软件用户 FIFO（头尾指针）
 
 ***
 
