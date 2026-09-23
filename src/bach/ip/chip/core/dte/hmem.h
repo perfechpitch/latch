@@ -1,7 +1,7 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_HMEM_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_HMEM_
 
-// Hmem、Fast LUT、RouterTable 副本、stream_cache。
+// Hmem、RouterTable 副本、stream_cache。
 //
 // 这几张表都是 DTE 自己持有、按索引直接读的静态或半静态内容，收在一个模块里。
 //
@@ -12,12 +12,6 @@
 //
 // 对齐后包头段（段 0）统一走 header_table（端点 tag 0x4），不再区分计算 core 与
 // B/R core 各自存哪。
-//
-// Fast LUT：从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE
-// Setup Time，目标压到 10T 以内。常规任务不走 RV core 的配置 kernel：task_id
-// 命中 Fast LUT 后硬件拿表项内容与 user_id 索引到的 User Base Register 拼出
-// descriptor，直接推进 TaskQueue，命中路径 4T；未命中才启动 RV core 的 kernel，
-// 代价是 Core Latency + 4T。它只加速任务配置，不改路由定义、数据通路和完成条件。
 //
 // stream_cache 是 Router 那张 stream 表的副本，只跟随、不分配：真正建表项只有
 // Router 能做，这份靠 Router 各方向送回的 credit release 同步，用处是包要重发
@@ -44,18 +38,11 @@ struct HmemEntry {
   uint64_t gpu_id = 0, token_id = 0;
 };
 
-// Fast LUT 一项。
-struct FastLutEntry {
-  bool valid = false;
-  uint64_t length = 0;
-  uint64_t ctrl_flags = 0;
-};
-
 class Hmem : public BachModule {
  public:
   Hmem(ClockPtr clock, const std::string& name, uint64_t parent = 0,
        bool tick = true)
-      : BachModule(clock, name, parent, tick), hits(clock), misses(clock) {
+      : BachModule(clock, name, parent, tick) {
     rtab_copy.assign(kPathNum, NoOpEntry());
     path_task.assign(kPathNum, 0);
   }
@@ -73,23 +60,6 @@ class Hmem : public BachModule {
   void SetCoreMask(uint64_t stream_id, uint64_t mask) {
     Entry(stream_id).core_mask = mask;
   }
-
-  // ── Fast LUT：boot 期经 ctrl_noc 配好，按 task_id 索引 ──
-  void PreloadLut(uint64_t task_id, uint64_t length, uint64_t flags) {
-    LOGCHECK(task_id < kPathNum, "Hmem: Fast LUT 下标越界。");
-    lut[task_id] = {true, length, flags};
-  }
-  // 命中就能走 4T 的快路径，不命中要启动 RV core 的 kernel。
-  bool LutHit(uint64_t task_id) {
-    bool hit = task_id < kPathNum && lut[task_id].valid;
-    if (hit) {
-      ++hit_pending;
-    } else {
-      ++miss_pending;
-    }
-    return hit;
-  }
-  FastLutEntry const& Lut(uint64_t task_id) const { return lut.at(task_id); }
 
   // ── RouterTable 副本：按 PathID 查 VC 与资源需求 ──
   // 软件负责写入并保证与 Router、ReduceModule 三方一致，硬件不同步。
@@ -140,28 +110,17 @@ class Hmem : public BachModule {
     return false;
   }
 
-  uint64_t Hits() const { return hits.Get(); }
-  uint64_t Misses() const { return misses.Get(); }
-
  protected:
-  void Step() override {
-    hits = hit_pending;
-    misses = miss_pending;
-    TracePerCycle("lut_hits", hit_pending);
-  }
+  void Step() override {}
 
  private:
   static constexpr uint64_t kStreamCacheEntries = 16;
 
   std::array<HmemEntry, kStreamCacheEntries> hmem{};
-  std::array<FastLutEntry, kPathNum> lut{};
   std::vector<RouteEntry> rtab_copy;
   std::vector<uint64_t> path_task;
   std::array<std::array<bool, kStreamCacheEntries>, kR2RNum> cache_valid{};
   std::array<std::array<uint64_t, kStreamCacheEntries>, kR2RNum> cache_user{};
-  uint64_t hit_pending = 0, miss_pending = 0;
-
-  Logic64 hits, misses;
 };
 
 }  // namespace bach

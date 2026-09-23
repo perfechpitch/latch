@@ -155,6 +155,23 @@ class ReduceModule : public BachModule {
   bool HoldsUser(uint64_t user) const { return ctx.count(user) != 0; }
   uint64_t ContextUsed() const { return ctx.size(); }
 
+  // 诊断用：倒出一个用户的分区状态。
+  std::string DumpCtx(uint64_t user) const {
+    auto it = ctx.find(user);
+    if (it == ctx.end()) return "noctx";
+    char b[160];
+    std::snprintf(b, sizeof(b),
+                  "busy=%d seq=%llu expect=0x%llx done=0x%llx got=%llu/%llu/%llu",
+                  it->second.busy ? 1 : 0,
+                  (unsigned long long)it->second.reduce_seq,
+                  (unsigned long long)it->second.expect_mask,
+                  (unsigned long long)it->second.in_done_mask,
+                  (unsigned long long)it->second.got[0],
+                  (unsigned long long)it->second.got[1],
+                  (unsigned long long)it->second.got[2]);
+    return std::string(b);
+  }
+
   // 正在做的任务有几笔：从首份输入进来到结果尾 flit 交付。
   uint64_t OutQueued() const { return out_q.size(); }
   uint64_t Accepted() const { return accepted.Get(); }

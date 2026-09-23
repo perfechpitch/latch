@@ -1,7 +1,7 @@
 // DTE 自己持有的那几张表，以及出核那一层的仲裁。
 //
-// Hmem 按 stream_id 索引，硬件包头与软件包头合并成一项；Fast LUT 按 task_id 索引，
-// 命中才走快路径；stream_cache 只跟随不分配；本级 Reduce credit 按用户记。
+// Hmem 按 stream_id 索引，硬件包头与软件包头合并成一项；stream_cache 只跟随不分配；
+// 本级 Reduce credit 按用户记。
 // 出核四个通道对 Router 那一个口轮转，一个包的几拍不许被别的包插进来。
 
 #include <gtest/gtest.h>
@@ -50,17 +50,6 @@ TEST(BachDteHmem, PathTaskMapIsReadOnlyHere) {
   EXPECT_EQ(h.PathTask(7), 3u);
   EXPECT_EQ(h.PathTask(8), 5u);
   EXPECT_EQ(h.PathTask(9), 0u) << "没配过的回 0";
-  RT::Reset();
-}
-
-// Fast LUT：命中走快路径，不命中要启动 RV core 的 kernel。
-TEST(BachDteHmem, FastLutHitAndMiss) {
-  ClockPtr clk = MakeClock(0, kPeriod);
-  Hmem h(clk, "hmem", 0, false);
-  EXPECT_FALSE(h.LutHit(3)) << "没配过就是不命中";
-  h.PreloadLut(3, 512, 0);
-  EXPECT_TRUE(h.LutHit(3));
-  EXPECT_FALSE(h.LutHit(4));
   RT::Reset();
 }
 
