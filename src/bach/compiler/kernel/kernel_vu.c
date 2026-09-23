@@ -49,8 +49,8 @@ TASK void task_vu_compute(void) {
  *
  * 读的是 chip 内归约出来的两份部分和，按 FP32 算，写回的是 FC2 输入，scale 随
  * 数据写进 scale 旁带。第 8 项不是第 1 项：一条 VL=256 的 FP32 向量占 8 个 entry，
- * VRF 索引是 entry 号。三条之间是 VRF 上的先后，而记分板只查 Core Mem 的地址
- * 重叠，所以逐条置 MACRO_INST_FENCE。 */
+ * VRF 索引是 entry 号。三条之间是 VRF 上的 RAW / WAW，记分板会串起来，
+ * 不必再置 MACRO_INST_FENCE。 */
 
 #define VRF_SIG  0u
 #define VRF_GATE 8u
@@ -63,7 +63,8 @@ static u32 op_word(u32 opcode, u32 src1, u32 src2) {
   return opcode | (src1 << VU_SRC1_SHIFT) | (src2 << VU_SRC2_SHIFT);
 }
 
-/* 三组静态配置，几个专家共用：地址每条走动态副本 */
+/* 三组静态配置，几个专家共用：地址每条走动态副本。boot 时写进 kernel_init，
+ * 任务里不再重配。 */
 static void gate_setup(void) {
   u32 type_vl = MOE_SEG_INTER;   /* FP32、RNE 都是 0 */
 
@@ -92,35 +93,34 @@ static void gate_setup(void) {
   vu_static(3, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
 }
 
-/* 发一条宏指令：地址走动态副本，逐条置 fence。event_en 只给本 task 最后一条，
- * 前面的条不报 TS，避免一 task 多条 dsa_done 把链推过头。 */
-static void vu_fire(u32 group, u32 ld, u32 st, u32 event_en) {
+/* 发一条宏指令：地址走动态副本。event_en 只给本 task 最后一条，前面的条不报
+ * TS，避免一 task 多条 dsa_done 把链推过头。fence 等此前全部宏做完再派发。 */
+static void vu_fire(u32 group, u32 ld, u32 st, u32 event_en, u32 fence) {
   dsa_write(VU_LD_ADDR, ld);
   dsa_write(VU_ST_ADDR, st);
   dsa_write(VU_MACRO_INST_TRIGGER,
             VU_MASK_LD_ADDR | VU_MASK_ST_ADDR
-                | (group << VU_CONFIG_IDX_SHIFT) | VU_MACRO_INST_FENCE
-                | (event_en ? VU_EVENT_EN : 0u));
+                | (group << VU_CONFIG_IDX_SHIFT)
+                | (event_en ? VU_EVENT_EN : 0u)
+                | (fence ? VU_MACRO_INST_FENCE : 0u));
 }
 
 /* 每个专家一份：silu(FC1)·FC3，量化成 MXFP8 作为 FC2 输入。
  *
  * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA：RV 立刻 task_done(1)，TS
- * 等最后一条退休的 dsa_done。前面几条有 MACRO_INST_FENCE，最后一条退休时
- * 整批复完。 */
+ * 等最后一条退休的 dsa_done。VRF 依赖把整串钉在最后一条后面，fence 传 0。 */
 TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
   u32 e;
-  gate_setup();
   for (e = 0; e < MOE_EXPERTS; ++e) {
     u32 fc1 = red + e * MOE_PART_STRIDE;
     u32 fc3 = red + (MOE_EXPERTS + e) * MOE_PART_STRIDE;
     u32 act = base + MOE_ACT_OFF + e * MOE_ACT_STRIDE;
     u32 last = (e + 1u == MOE_EXPERTS);
-    vu_fire(1, fc1, act, 0);
-    vu_fire(2, fc1, act, 0);
-    vu_fire(3, fc3, act, last);
+    vu_fire(1, fc1, act, 0, 0);
+    vu_fire(2, fc1, act, 0, 0);
+    vu_fire(3, fc3, act, last, 0);
   }
   task_done(1);
 }
@@ -132,7 +132,8 @@ TASK void task_vu_gate(void) {
  *   组 4  LU 读前一半（BF16）→ 写 VRF
  *   组 5  LU 读后一半（BF16）→ VALU0 与 VRF 相加 → SU 按 BF16 写回 Core Mem
  *
- * 向量长度是 MOE_EMBED，与门控那三条的 MOE_SEG_INTER 不同，所以另占两组静态配置。 */
+ * 向量长度是 MOE_EMBED，与门控那三条的 MOE_SEG_INTER 不同，所以另占两组静态配置。
+ * 与 gate_setup 一样，boot 时写进 kernel_init。 */
 static void add_setup(void) {
   /* 读写与中间一律 BF16，RNE。向量通路的一拍吃多少个 element 由 DATA_TYPE 定：
      BF16 一拍 64 个，正好是 CM 一拍 128 B 装的个数，一个块一段流过去；配成 FP32
@@ -158,17 +159,18 @@ static void add_setup(void) {
 /* R core 链二的求和那一步：本行结果与上一行送来的那一份逐元素相加。
  *
  * 两半开头那 16 B 是软件辅助信息，跳过；结果写回前一半的同一处。与门控同一档：
- * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA。 */
+ * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA。组 5 读组 4 的 VRF，fence 传 0。 */
 TASK void task_vu_add(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 at = MOE_SW_HEAD_BYTES;
-  add_setup();
-  vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at, 0);
-  vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at, 1);
+  vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at, 0, 0);
+  vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at, 1, 0);
   task_done(1);
 }
 
 void kernel_init(void) {
-  /* VL 与精度用第 0 组静态配置里的 static_TYPE_VL，这里不覆盖动态值 */
-  dsa_write(VU_TYPE_VL, 0);
+  /* 静态组在 firmware 里配一次：组 0 留给 compute，1/2/3 门控，4/5 求和。
+   * TYPE_VL 走各组静态副本，不写动态寄存器。 */
+  gate_setup();
+  add_setup();
 }
