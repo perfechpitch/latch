@@ -1,26 +1,25 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_COMMIT_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_COMMIT_
 
-// Commit：两个任务入口在这里汇成同一套内部任务模型。
+// Commit：中央 TaskQueue + 按通道资源 dispatch。
 //
-// 一个高层任务必须同时拿到三样才接纳：目标通道读侧的 TaskQueue 项、写侧的
-// TaskQueue 项、Completion RS 项。任一侧没有空间时整体保持，Header 入口向 Router
-// 反压。这条规则挡住「读已经开始、写还没有落脚点」的半任务。
+// 对齐飞书《DTE DSA》：所有任务（进核 + 出核）统一从 RV core 的配置入口来。RV core
+// 配好寄存器写 CFG_TRIGGER 后，Regfile 把快照出的 Descriptor 送进中央 TaskQueue
+// （深度 16，保存「已快照、尚未 dispatch」的完整 TaskDesc，不同通道的任务可乱序
+// 下发）；Commit 再按目标通道的读/写 TaskQueue 槽、Completion RS 槽、出核的 VC
+// credit 从队头 dispatch。
 //
-// 两个入口竞争准入时 Router 那一路优先：一拍只准入一笔，RV core 起的出核任务
-// 先进 PendingTaskQ 等 VC credit，够了才来申请；等 credit 的任务不占 TaskQueue 项
-// 也不占 Completion RS 项。
+// 「三样一起拿」的语义从 Fire 时刻移到 dispatch 时刻：dispatch 时检查目标 Lane 的
+// 读侧 + 写侧 TaskQueue 项与 Completion RS 项，任一侧没有空间就整体保持（挡住
+// 「读已开始、写没落脚点」的半任务）；出核任务还要先看这条 VC 通路发不发得出。
 //
-// PendingTaskQ 排在 Commit 之前：RV core 配好一个出核任务后，先按 path_id 查出
-// 走哪个 VC 与资源需求，credit 不够的进 PendingTaskQ 等，够了才来 Commit 申请
-// 那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项。
-// 这是「资源的持有与等待不成环」在 DTE 上的落点。
+// 反压：中央 TaskQueue 满（16）就不收 Regfile 送来的 Descriptor，Regfile 据此拉低
+// dsa_cfg 的 req_ready 反压 RV core。
 
 #include <deque>
-#include <map>
-#include <vector>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
@@ -34,92 +33,59 @@ namespace bach {
 
 class Commit : public BachModule {
  public:
-
   Commit(ClockPtr clock, const std::string& name, Hmem& tables,
          uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         hmem(tables),
-        from_parser(std::make_shared<DescPort>(clock)),
         from_rv(std::make_shared<DescPort>(clock)),
         to_rs(std::make_shared<AdmitPort>(clock)),
         admitted(clock),
         stalled(clock),
-        pending_len(clock) {}
+        queued(clock) {}
 
-  std::shared_ptr<DescPort> ParserPortPtr() const { return from_parser; }
-  // 装配层把 Parser 那一侧的口接过来：一根线两端是同一个对象。
-  void RebindParser(std::shared_ptr<DescPort> p) { from_parser = std::move(p); }
   DescPort& FromRv() { return *from_rv; }
   std::shared_ptr<DescPort> FromRvPtr() const { return from_rv; }
   void RebindRv(std::shared_ptr<DescPort> p) { from_rv = std::move(p); }
 
-  // Xbar 每拍发布各方向各 VC 还发不发得出，出核任务发数据之前读它。
+  // Xbar 每拍发布各方向各 VC 还发不发得出，出核任务 dispatch 之前读它。
   void AttachVcLevel(std::shared_ptr<CreditLevelPort> p) {
     vc_level = std::move(p);
   }
 
-  // 准入一笔后往这几个口上发：每个 Lane 一个，Completion RS 一个。
+  // dispatch 一笔后往这几个口上发：每个 Lane 一个，Completion RS 一个。
   void AddLanePort(std::shared_ptr<AdmitPort> p) {
     to_lane.push_back(std::move(p));
   }
   std::shared_ptr<AdmitPort> RsPortPtr() const { return to_rs; }
 
   uint64_t Admitted() const { return admitted.Get(); }
-  // 出核那一路（RV core 写 trigger 起的任务）过准入的笔数与身份。只数这一路：
-  // Router 入站那一路由 HeaderParser 直接送进来，不算一笔 DTE task。过准入就是
-  // 这一笔过门槛、真正开始搬的那一拍，之前还要在 PendingTaskQ 里等 VC credit。
-  uint64_t RvAdmitted() const { return rv_admit_cnt; }
+  // 过 dispatch 门槛（真正开始搬）的笔数与刚过那一笔的身份。所有任务都从 RV core
+  // 的配置入口来，所以这里数的就是 DTE 的全部任务；之前还要在中央 TaskQueue 里等
+  // 通道资源 / VC credit。
+  uint64_t RvAdmitted() const { return admit_cnt; }
   uint64_t StartTask() const { return start_task; }
   uint64_t StartUser() const { return start_user; }
   uint64_t Stalled() const { return stalled.Get(); }
-  uint64_t PendingLen() const { return pending_len.Get(); }
+  uint64_t Queued() const { return queued.Get(); }
 
-  bool Quiescent() const override { return pending.empty(); }
+  bool Quiescent() const override { return central_q.empty() && !holding; }
 
  protected:
   void Step() override {
-    // 一拍只准入一笔，所以这三步的先后就是优先级：Router 入站那一笔先进，其次
-    // 是 PendingTaskQ 里等到 credit 的出核任务。TakeFromRv 只是把新到的出核任务
-    // 放进 PendingTaskQ 等 credit，不占准入的名额，排在最后。
-    TakeFromParser();
-    TryAdmitPending();
+    // 先收新任务进中央 TaskQueue，再从队头 dispatch 一笔，最后把 dispatch 出的那
+    // 一笔集中发出去（端口每拍必须驱动一次，散在几处写会互相盖掉）。
     TakeFromRv();
-    // 准入的那一笔集中在这里发出去：端口每拍必须驱动一次，散在几处写会互相
-    // 盖掉。同线程同拍两次写同一个 Latch 不触发断言。
+    TryDispatch();
     Deliver();
 
     admitted = admit_pending;
     stalled = stall_pending;
-    pending_len = pending.size();
+    queued = central_q.size();
     TracePerCycle("admitted", admit_pending);
-    TracePerCycle("pending", pending.size());
+    TracePerCycle("queued", central_q.size());
   }
 
  private:
-  void TakeFromParser() {
-    if (!from_parser->Valid()) {
-      from_parser->DriveAccepted(false);
-      return;
-    }
-    if (from_parser->Seq() == last_parser_seq) {
-      from_parser->DriveAccepted(true);
-      return;
-    }
-    auto d = from_parser->Desc();
-    if (!d) {
-      from_parser->DriveAccepted(false);
-      return;
-    }
-    // Router 优先：Router 的配置总是先进。
-    if (!TryAdmit(*d)) {
-      ++stall_pending;
-      from_parser->DriveAccepted(false);
-      return;
-    }
-    last_parser_seq = from_parser->Seq();
-    from_parser->DriveAccepted(true);
-  }
-
   void TakeFromRv() {
     if (!from_rv->Valid()) {
       from_rv->DriveAccepted(false);
@@ -134,16 +100,59 @@ class Commit : public BachModule {
       from_rv->DriveAccepted(false);
       return;
     }
-    if (pending.size() >= kPendingTaskQDepth) {
+    if (central_q.size() >= kCentralTaskQDepth) {
       from_rv->DriveAccepted(false);
       return;
     }
-    // 出核任务先进 PendingTaskQ 等 credit，够了才去 Commit 申请那三样。
+    // 快照一份进中央 TaskQueue，走归约路径的出核任务在这里标成 reduce 包。
     Descriptor nd = *d;
     MarkReducePkt(nd);
-    pending.push_back(nd);
+    central_q.push_back(nd);
     last_rv_seq = from_rv->Seq();
     from_rv->DriveAccepted(true);
+  }
+
+  // 从队头往后扫，dispatch 第一个目标通道就绪的任务。不同通道的任务可乱序下发：
+  // 队头那个出核任务还堵在 VC credit 上时，后面别的通道的任务可以先行。三样一起
+  // 拿——读侧 TaskQueue、写侧 TaskQueue、Completion RS；出核任务再查 VC credit。
+  void TryDispatch() {
+    if (holding) return;
+    if (central_q.empty()) return;
+    for (auto it = central_q.begin(); it != central_q.end(); ++it) {
+      Descriptor const& d = *it;
+
+      // 出核任务 dispatch 之前实时检查这条 VC 通路上的 flit credit。下游 Stream
+      // 资源与本级 Rmem 资源不在这里查，TS 下发之前已经申请到；Reduce 包也一样。
+      // 进核任务不走这条通路，不查。
+      if (!IsInbound(d.route)) {
+        RouteEntry const& e = hmem.Rtab(d.path_id);
+        if (!VcOk(d, e)) continue;
+      }
+
+      uint64_t lane = d.Lane();
+      if (lane >= to_lane.size()) continue;
+      // Lane 的 ready 已经把读写两侧的 TaskQueue 都算进去了。
+      if (!to_lane[lane]->Ready() || !to_rs->Ready()) continue;
+
+      // 三样齐了才真正 dispatch：地址展开已在 Regfile 的 Fire 里算好。
+      held = std::make_shared<Descriptor>(d);
+      held_lane = lane;
+      holding = true;
+      ++admit_seq;
+      // 内部序号：所有任务在这里汇成同一套编号，Completion RS 按它 Join。
+      held->commit_seq = admit_seq;
+      // 出核任务要发出去的那个包在这里造好（进核任务的包头已由 Header Parser 记进
+      // Hmem，这里不再写）。身份要在 erase 之前取，d 就指着要 dispatch 的那一项。
+      start_task = d.task_id;
+      start_user = d.user_id;
+      if (!held->msg && !IsInbound(held->route)) MakeOutboundMsg(*held);
+      ++admit_cnt;
+      ++admit_pending;
+      central_q.erase(it);
+      return;
+    }
+    // 走到这里：队列非空但一个都 dispatch 不出去，记一次 stall。
+    ++stall_pending;
   }
 
   // 走归约路径出核的包标成 reduce 包（F74），包头的 reduce_seq 打上发方的
@@ -154,24 +163,6 @@ class Commit : public BachModule {
     if (hmem.Rtab(d.path_id).operation == Operation::kForward) return;
     d.reduce_pkt = true;
     d.reduce_seq = d.task_id;
-  }
-
-  void TryAdmitPending() {
-    if (pending.empty()) return;
-    Descriptor const& d = pending.front();
-    // 发数据之前实时检查这条 VC 通路上的 flit credit。下游 Stream 资源与本级
-    // Rmem 资源不在这里查，TS 下发之前已经申请到；Reduce 包也一样。
-    RouteEntry const& e = hmem.Rtab(d.path_id);
-    if (!VcOk(d, e)) return;
-    if (!TryAdmit(d)) {
-      ++stall_pending;
-      return;
-    }
-    // 出核这一笔过门槛了。身份要在 pop_front 之前取，d 就指着队头那一项。
-    start_task = d.task_id;
-    start_user = d.user_id;
-    ++rv_admit_cnt;
-    pending.pop_front();
   }
 
   // 出核任务要发出去的那个包在这里造好，读回来的数据往它的 payload 里填。
@@ -210,33 +201,6 @@ class Commit : public BachModule {
     return true;
   }
 
-  // 三样一起拿：读侧 TaskQueue、写侧 TaskQueue、Completion RS。三样都是别的
-  // 模块的队列，所以问的是它们上一拍报的 ready，那是「下一拍一定收得下」的
-  // 承诺，往它们队列里放东西的只有本模块一家，承诺到下一拍仍然成立。
-  bool TryAdmit(Descriptor const& d) {
-    if (holding) return false;
-    uint64_t lane = d.Lane();
-    if (lane >= to_lane.size()) return false;
-    // Lane 的 ready 已经把读写两侧的 TaskQueue 都算进去了。
-    if (!to_lane[lane]->Ready() || !to_rs->Ready()) return false;
-    // 同时完成地址展开：源地址、目的地址、按任务边界切分的元数据都在这一步算好。
-    held = std::make_shared<Descriptor>(d);
-    held_lane = lane;
-    holding = true;
-    ++admit_seq;
-    // 内部序号：两个入口来的任务在这里汇成同一套编号，Completion RS 按它 Join。
-    held->commit_seq = admit_seq;
-    // 进核那一笔把 DPU 那一对包头记进 Hmem，出核造包时取回来。
-    if (held->msg && IsInbound(held->route)) {
-      HmemEntry& h = hmem.Entry(held->stream_id);
-      h.gpu_id = held->msg->gpu_id;
-      h.token_id = held->msg->token_id;
-    }
-    if (!held->msg && !IsInbound(held->route)) MakeOutboundMsg(*held);
-    ++admit_pending;
-    return true;
-  }
-
   // 发出去，直到两边都收下。一次握手最少两拍，接收方按序号认。
   void Deliver() {
     for (uint64_t i = 0; i < to_lane.size(); ++i) {
@@ -258,21 +222,21 @@ class Commit : public BachModule {
 
   Hmem& hmem;
   std::shared_ptr<CreditLevelPort> vc_level;
-  std::shared_ptr<DescPort> from_parser, from_rv;
+  std::shared_ptr<DescPort> from_rv;
   std::vector<std::shared_ptr<AdmitPort>> to_lane;
   std::shared_ptr<AdmitPort> to_rs;
   std::shared_ptr<Descriptor> held;
   bool holding = false;
   uint64_t held_lane = 0, admit_seq = 0;
 
-  std::deque<Descriptor> pending;
-  // 每个 stream 当前这笔 reduce task 下一包该打几号。
-  uint64_t last_parser_seq = 0, last_rv_seq = 0;
+  // 中央 TaskQueue：保存「已快照、尚未 dispatch」的完整 TaskDesc。
+  std::deque<Descriptor> central_q;
+  uint64_t last_rv_seq = 0;
   uint64_t admit_pending = 0, stall_pending = 0;
-  // 出核那一路过准入的笔数与刚过的那一笔的身份，供 Core 层发波形。
-  uint64_t rv_admit_cnt = 0, start_task = 0, start_user = 0;
+  // 过 dispatch 门槛的笔数与刚过的那一笔的身份，供 Core 层发波形。
+  uint64_t admit_cnt = 0, start_task = 0, start_user = 0;
 
-  Logic64 admitted, stalled, pending_len;
+  Logic64 admitted, stalled, queued;
 };
 
 }  // namespace bach

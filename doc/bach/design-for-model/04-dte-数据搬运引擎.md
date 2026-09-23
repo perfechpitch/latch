@@ -39,7 +39,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 
 | Route | 走哪个通道 | 说明 |
 | - | - | - |
-| Router → MM | `in_ch` | Header Parser 解析后 Commit 成对建立读写两侧 |
+| Router → MM | `in_ch` | 配置驱动：RV core 配 CFG + trigger，Commit 成对建立读写两侧 |
 | Router → CM | `in_ch` | 同上 |
 | MM → Router | `out_ch[n]`，n 由这条 path 的 VC 定 | 出口是 Router TX |
 | CM → Router | `out_ch[n]`，n 由这条 path 的 VC 定 | 出口是 Router TX |
@@ -230,7 +230,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <text x="24" y="66" font-size="10.5" fill="#475569">图里画的是一个通道；进核通道 1 条，出核通道 4 条与 4 个 VC 一一对应，各有一套 RD_CH1 / WR_CH1</text>
 <rect x="210" y="96" width="730" height="60" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
 <text x="221" y="118" font-size="12" fill="#111827" font-weight="600">Commit：配对接纳，不产生半任务</text>
-<text x="221" y="134" font-size="9.5" fill="#475569">一个高层任务必须同时拿到通道读侧的 TaskQueue 项、写侧的 TaskQueue 项和 Completion RS 项；任一侧没有空间就整体保持，Header 入口向 Router 反压。同一步完成地址展开</text>
+<text x="221" y="134" font-size="9.5" fill="#475569">一个高层任务必须同时拿到通道读侧的 TaskQueue 项、写侧的 TaskQueue 项和 Completion RS 项；任一侧没有空间就整体保持（半任务防护）。地址展开在 Regfile Fire 时已算好</text>
 <rect x="30" y="200" width="160" height="110" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
 <text x="41" y="220" font-size="12" fill="#111827" font-weight="600">Router RX</text>
 <text x="41" y="236" font-size="9.5" fill="#475569">AXI-Stream</text>
@@ -366,7 +366,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 
 两侧的名字沿用原来那套：进核通道的两侧叫 `RD_CH0` 与 `WR_CH0`，出核通道的两侧叫 `RD_CH1` 与 `WR_CH1`。**出核现在有四个通道实例，每个实例各有一套**，下文讲逐拍行为时说的是其中一个实例。
 
-出核前查什么也跟着分了工：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查好，**DTE 这一侧只查 VC 通路上的 flit credit**，不够就在 `PendingTaskQ` 等。
+出核前查什么也跟着分了工：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查好，**DTE 这一侧只查 VC 通路上的 flit credit**，不够就在中央 TaskQueue 里等。
 
 > **取舍**：通道按 VC 切而不是按读写方向切，是《MU / DTE 需求整理和遗留问题分析》的结论。按方向切挡不住“一个 VC 阻塞导致其他 VC 的包也发不出去”这条死锁路径，因为所有出核任务共用同一条出口。
 >
@@ -380,9 +380,9 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 2. 同一通道写侧的 TaskQueue 项
 3. Completion RS 项
 
-* 任一侧没有空间，Commit 整体保持，Header 入口向 Router 反压
+* 任一侧没有空间，Commit 整体保持，队列里后面别的通道的任务可以先行（不同通道可乱序下发）
 * 这条规则挡住“读已经开始、写还没有落脚点”的半任务
-* Commit 同时完成地址展开：源地址、目的地址、按任务边界切分的元数据都在这一步算好
+* 地址展开在 Regfile Fire 时已算好，Commit dispatch 只分配内部序号 `commit_seq`
 
 ### 中间 Buffer 与 read-ahead
 
@@ -440,14 +440,10 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 
 ### Inbound：Router → MM / CM
 
-1. Router 以 AXI-Stream 发送 Header，Header Parser 在首拍锁存并检查 opcode / route、长度、身份字段和帧格式。
-2. Header Parser 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配
-   TaskQueue 项和完成跟踪项。
-3. 两侧资源全部可用时 Commit 原子成功，RD_CH0 建立 Router 接收上下文，WR_CH0 建立 MM / CM 写入上下文。
-   否则 Header 入口保持背压。Commit 同时完成地址展开：源地址、目的地址与按任务边界切分的元数据都在这一步算好。
-4. **Header Commit 成功之后才允许 Payload Fire**：`in_core_data_ch` 的 `tready` 要在 inbound buffer 有空、
-   且 Commit 三样资源都够时才拉高。Payload 由 RD_CH0 控制写入 inbound buffer，
-   附带 `task_id`、有效字节与任务边界信息；buffer 满时通过 TREADY 向 Router 反压。
+1. 任务由 DTE RV core 配寄存器 + 写 `CFG_TRIGGER` 起：Regfile 快照 Descriptor（落点由软件配 `CFG_ADDRx_DST`），送进 Commit 的中央 TaskQueue。
+2. Router 以 AXI-Stream 发送 Header，Header Parser 在首拍锁存并检查长度、身份字段和帧格式，把包头上下文存进 Header Table；它不生成 Descriptor。
+3. Commit 从中央 TaskQueue dispatch：目标通道 RD_CH0 / WR_CH0 的 TaskQueue 项与 Completion RS 项都可用时才原子成功，RD_CH0 建立 Router 接收上下文，WR_CH0 建立 MM / CM 写入上下文。进核任务与到达的数据包按顺序 FIFO 配对。
+4. Payload 由 Header Parser 逐拍转发，RD_CH0 控制写入 inbound buffer，附带 `task_id`、有效字节与任务边界信息；buffer 满时通过 TREADY 向 Router 反压。
 5. WR_CH0 从 inbound buffer 按任务边界取数，经 DMA_XBAR 写入目标 MM / CM。
 6. RD_CH0 的帧接收结束和 WR_CH0 的写请求与响应 Drain 分别进入 Completion RS，
    二者按 `task_id` Join 后才向 TS 产生一次 `task_done`。
@@ -663,11 +659,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 
 ## 软件怎么配一个任务
 
-DTE 有两个任务入口：
-
-* **Router 搬入的任务**：Descriptor 编码在 AXI-Stream 帧的 Header 里，由 Header Parser 直接解析后提交
-* **其余任务**：由 RV core 配
-* 两个入口在 Commit 边界汇成同一套内部任务模型
+DTE 只有一个任务入口：所有任务（进核 + 出核）都由 RV core 配寄存器 + 写 `CFG_TRIGGER` 起，Regfile 快照 Descriptor 送进 Commit 的中央 TaskQueue。Router 入站帧不是任务入口——Header Parser 只存包头、转发 payload。
 
 这一节讲 RV core 这一侧：写哪些寄存器、每个参数管什么、地址怎么算出来、五个方向各自怎么配。
 
@@ -1056,8 +1048,8 @@ DTE 解析 Header 时用到的逻辑字段与各自的检查：
 | 逻辑字段 | 用途 | 检查 |
 | - | - | - |
 | `version` / `header_len` | Header 格式版本与有效长度 | 版本受支持，`header_len` 不超过首拍有效字节 |
-| `packet_type` / `route` | 标识这是 DTE 搬入任务，并选 Router → MM 还是 Router → CM | 其他 Route 在 Header Parser 阶段拒绝，不产生外部请求 |
-| `dst_addr` | 目的存储的基地址 | 在目的端地址范围内，满足对齐 |
+| `packet_type` / `route` | 标识这是 DTE 搬入任务 | 其他 Route 在 Header Parser 阶段拒绝，不产生外部请求 |
+| `dst_addr` | 目的存储的基地址（配置驱动后落点由软件配 `CFG_ADDRx_DST`，此字段不再参与选址） | 在目的端地址范围内 |
 | `byte_count` | Payload 总有效字节数 | 与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
 | `task_id` / `stream_id` | 建立任务身份与完成归属 | 未完成上下文中不得重复占用 |
 | `attributes` / `reserved` | 后续控制属性与格式扩展 | 未定义位为约定默认值，当前不据此改变基线 Route 行为 |

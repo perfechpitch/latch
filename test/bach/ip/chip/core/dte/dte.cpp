@@ -1,9 +1,11 @@
 // DTE 的行为基线。
 //
-// 步 7 的判据：五个搬运方向各一个用例，Commit 配对接纳与 Join 各一个。
+// 对齐飞书《DTE DSA》后，任务统一从 RV core 的配置入口来（写 CFG 寄存器 + trigger），
+// 进核不再是包驱动：Header Parser 只存包头 + 转发 payload，数据落点由 CFG_ADDRx_DST
+// 配。进核任务与数据包按到达顺序 FIFO 配对（第 N 个进核任务配第 N 个到达的包）。
 //
-// 重点覆盖三条最容易实现错的：Commit 三样一起拿（挡住半任务）、Join 两侧都满足
-// 才报完成、通道之间乱序不互相堵。
+// 重点覆盖：进核搬进 Core Mem、scale 段落 scale 旁带、纯包头任务、非法帧丢弃、
+// Commit 三样一起拿（挡住半任务）、Join 两侧都满足才报完成、Buffer 满反压 Router。
 
 #include <gtest/gtest.h>
 
@@ -25,8 +27,6 @@ constexpr Time kPeriod = 1;
 // DTE 是十一个模块，加驱动就超过默认的 8 个协程槽位。
 void EnsureSlots() { RT::Reset(8, 8); }
 
-// 身份取自包头：stream_id 是这个用户在本 core 上的槽位，task_id 是任务链上的
-// 第几步。DTE 报完成时原样带给 TS。
 MessagePtr MakeMsg(uint64_t user, uint64_t path, uint64_t bytes,
                    uint64_t stream = 0, uint64_t task = 0) {
   auto m = std::make_shared<Message>();
@@ -38,48 +38,149 @@ MessagePtr MakeMsg(uint64_t user, uint64_t path, uint64_t bytes,
   return m;
 }
 
-// 扮演 Router 的 CoreStation：按 AXI-Stream 往 DTE 送一个整包。
-class RouterFeeder : public BachModule {
- public:
-  RouterFeeder(ClockPtr c, Dte& target, uint64_t fire_at, MessagePtr pkt)
-      : BachModule(c, "feeder"), dte(target), at(fire_at), msg(std::move(pkt)) {
-    total = FlitsOf(msg->size);
-  }
+// 一笔任务的 CFG_TRANS_MODE：低 3 位 route，[6:3] addr_valid，[9] ack_ts_en。
+uint64_t TransMode(Route r, uint64_t addr_valid, bool ack = true) {
+  return uint64_t(r) | (addr_valid << kDteAddrValidShift) |
+         (ack ? kDteAckTsEn : 0);
+}
 
-  uint64_t sent = 0;
+// 扮演 Router 的 CoreStation：按脚本在指定拍送一串整包（每个包可多拍）。反压时
+// 保持数据不变，看见 ready 才换下一拍。端口带序号，保持期间接收方不会消费两遍。
+class FrameFeeder : public BachModule {
+ public:
+  struct Item {
+    uint64_t at = 0;
+    MessagePtr msg;
+  };
+
+  FrameFeeder(ClockPtr c, Dte& target, std::vector<Item> seq)
+      : BachModule(c, "feeder"), dte(target), items(std::move(seq)) {}
+
+  uint64_t sent = 0;  // 已送出的拍数
 
  protected:
   void Step() override {
     uint64_t now = CycleNow();
     CoreDataPort& p = dte.FromRouter();
-    if (now < at || sent >= total) {
-      p.Idle();
-      return;
-    }
-    // 反压时保持数据不变，看见 ready 才换下一笔。端口带序号，所以保持期间
-    // 接收方不会把同一笔消费两遍。
+
     if (driving) {
-      if (!p.Ready()) return;
+      if (!p.Ready()) return;  // 反压：这一拍保持，不换
       ++sent;
+      ++beat;
       driving = false;
-      if (sent >= total) {
+    }
+
+    // 没有包在发：找下一个到点的包。
+    if (!msg) {
+      while (cursor < items.size() && items[cursor].at <= now) {
+        msg = items[cursor].msg;
+        total = FlitsOf(msg->size);
+        beat = 0;
+        ++cursor;
+        break;
+      }
+      if (!msg) {
         p.Idle();
         return;
       }
     }
-    uint64_t left = msg->size - sent * kFlitBytes;
+
+    if (beat >= total) {  // 这一包发完了
+      msg.reset();
+      p.Idle();
+      return;
+    }
+    uint64_t left = msg->size - beat * kFlitBytes;
     uint64_t n = left > kFlitBytes ? kFlitBytes : left;
-    bool last = (sent + 1 == total);
-    p.Drive(n, last, sent == 0, 0, msg);
+    bool last = (beat + 1 == total);
+    p.Drive(n, last, beat == 0, 0, msg);
     driving = true;
   }
 
  private:
   Dte& dte;
-  uint64_t at, total = 0;
-  MessagePtr msg;
+  std::vector<Item> items;
+  uint64_t cursor = 0, beat = 0, total = 0;
   bool driving = false;
+  MessagePtr msg;
 };
+
+// 扮演 DTE RV core：按脚本逐笔写寄存器（每笔保持到被收下），每个任务最后一笔是
+// 写 CFG_TRIGGER；每拍驱动四个直连身份信号。配置驱动进核/出核的统一入口。
+class RvCfgDriver : public BachModule {
+ public:
+  struct Wr {
+    uint64_t addr = 0, data = 0;
+  };
+  struct Task {
+    uint64_t stream = 0, task = 0, user = 0, path = 0;
+    std::vector<Wr> wr;
+  };
+
+  RvCfgDriver(ClockPtr c, Dte& target, std::shared_ptr<DsaIdsPort> p,
+              std::vector<Task> cfg, uint64_t start = 0)
+      : BachModule(c, "rv"), dte(target), ids(std::move(p)),
+        tasks(std::move(cfg)), start_at(start) {}
+
+ protected:
+  void Step() override {
+    uint64_t now = CycleNow();
+    DsaCfgPort& cfg = dte.Cfg();
+    if (now < start_at || task_cursor >= tasks.size()) {
+      ids->Drive(0, 0, 0, 0);
+      cfg.Idle();
+      return;
+    }
+    Task const& t = tasks[task_cursor];
+    ids->Drive(t.stream, t.task, t.user, t.path);
+
+    if (driving) {
+      if (!cfg.Ready()) {  // 没被收下就保持同一笔
+        cfg.Drive(held_addr, held_data, held_seq);
+        return;
+      }
+      driving = false;
+    }
+    if (wr_cursor < t.wr.size()) {
+      held_addr = t.wr[wr_cursor].addr;
+      held_data = t.wr[wr_cursor].data;
+      held_seq = ++next_seq;
+      ++wr_cursor;
+      driving = true;
+      cfg.Drive(held_addr, held_data, held_seq);
+      return;
+    }
+    // 这一笔任务写完，切下一个。
+    ++task_cursor;
+    wr_cursor = 0;
+    cfg.Idle();
+  }
+
+ private:
+  Dte& dte;
+  std::shared_ptr<DsaIdsPort> ids;
+  std::vector<Task> tasks;
+  uint64_t start_at;
+  uint64_t task_cursor = 0, wr_cursor = 0;
+  uint64_t next_seq = 0;
+  bool driving = false;
+  uint64_t held_addr = 0, held_data = 0, held_seq = 0;
+};
+
+// 进核一笔纯数据任务的配置脚本：段 1 = 数据，落 dst，长 len，完成后通知 TS。
+RvCfgDriver::Task InboundTask(uint64_t stream, uint64_t task, uint64_t user,
+                              uint64_t dst, uint64_t len) {
+  RvCfgDriver::Task t;
+  t.stream = stream;
+  t.task = task;
+  t.user = user;
+  t.path = 0;
+  t.wr = {{kDteRegAddr1Dst, dst},
+          {kDteRegDataLen1, len},
+          {kDteRegTransMode, TransMode(Route::kRouterToCm, 1u << 1)},
+          {kDteRegTrigger, 0}};
+  return t;
+}
 
 // 扮演三块存储：一律收得下、隔两拍回响应。
 class MemSide : public BachModule {
@@ -156,34 +257,44 @@ class TsSide : public BachModule {
   Dte& dte;
 };
 
+// 挂四块存储口（不接 CoreMem，只计数）。
+void AttachDummyMem(Dte& dte, ClockPtr clk, std::vector<std::shared_ptr<MemPort>>& out) {
+  out.push_back(std::make_shared<MemPort>(clk));
+  out.push_back(std::make_shared<MemPort>(clk));
+  out.push_back(std::make_shared<MemPort>(clk));
+  out.push_back(std::make_shared<MemPort>(clk));
+  dte.AttachCmemRd(out[0]);
+  dte.AttachCmemWr(out[1]);
+  dte.AttachMmemRd(out[2]);
+  dte.AttachMmemWr(out[3]);
+}
+
 }  // namespace
 
-// Router → CM：一个整包进来，搬进 Core Mem，两侧 Join 后向 TS 报一次完成。
+// Router → CM：配置起一笔进核任务，一个整包进来，搬进 Core Mem，两侧 Join 后向 TS
+// 报一次完成。
 TEST(BachDte, InboundRouterToCoreMem) {
   uint64_t dones = 0, writes = 0, parsed = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    DteCfg cfg;
-    cfg.inbound.route = Route::kRouterToCm;
-    Dte dte(clk, "dte", cfg);
+    Dte dte(clk, "dte", DteCfg{});
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
+    auto ids = std::make_shared<DsaIdsPort>(clk);
+    dte.AttachIds(ids);
 
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
-
-    RouterFeeder feed(clk, dte, 2, MakeMsg(11, 0, 512));
-    MemSide mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    RvCfgDriver rv(clk, dte, ids,
+                   {InboundTask(/*stream=*/0, /*task=*/0, /*user=*/11,
+                                /*dst=*/0x100, /*len=*/512)},
+                   2);
+    FrameFeeder feed(clk, dte, {{20, MakeMsg(11, 0, 512)}});
+    MemSide m(clk, mem);
     TsSide ts(clk, dte);
     clk->Continue(200 * kPeriod);
     RT::JoinAll();
     dones = ts.dones;
-    writes = mem.writes;
+    writes = m.writes;
     parsed = ts.parsed;
   }
   RT::Reset();
@@ -192,8 +303,9 @@ TEST(BachDte, InboundRouterToCoreMem) {
   EXPECT_EQ(dones, 1u);    // exactly-once：只报一次
 }
 
-// 带 scale 的包：payload 是 MXFP8 数据后面接 scale。数据那一段落 Core Mem，包尾
-// 那一段落同一段地址的 scale 旁带，每 32 B 数据一个。
+// 带 scale 的包：payload 是 MXFP8 数据后面接 scale。数据段落 Core Mem，scale 段
+// 落同一段地址的 scale 旁带，每 32 B 数据一个。分段由 CFG_ADDR2_DST 的端点 tag
+// （0x2 = scale）决定，不再看包头的 scale_valid。
 TEST(BachDte, InboundScaleLandsInScaleSideband) {
   constexpr uint64_t kData = 512;
   constexpr uint64_t kAt = 0x80;
@@ -205,9 +317,7 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    DteCfg cfg;
-    cfg.inbound.route = Route::kRouterToCm;
-    Dte dte(clk, "dte", cfg);
+    Dte dte(clk, "dte", DteCfg{});
     CoreMem cmem(clk, "cmem");
     dte.AttachCmemRd(cmem.PortPtr(kCmemDteRd));
     dte.AttachCmemWr(cmem.PortPtr(kCmemDteWr));
@@ -215,13 +325,27 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
     auto mm_wr = std::make_shared<MemPort>(clk);
     dte.AttachMmemRd(mm_rd);
     dte.AttachMmemWr(mm_wr);
+    auto ids = std::make_shared<DsaIdsPort>(clk);
+    dte.AttachIds(ids);
+
+    // 段 1 = 数据（512 B），段 2 = scale（16 组，端点 tag 0x2，落点同数据地址）。
+    RvCfgDriver::Task t;
+    t.stream = 0;
+    t.task = 0;
+    t.user = 11;
+    t.path = 0;
+    t.wr = {{kDteRegAddr1Dst, kAt},
+            {kDteRegDataLen1, kData},
+            {kDteRegAddr2Dst, (uint64_t(SegEndpoint::kScale) << kEpShift) | kAt},
+            {kDteRegDataLen2, scale.size()},
+            {kDteRegTransMode, TransMode(Route::kRouterToCm, (1u << 1) | (1u << 2))},
+            {kDteRegTrigger, 0}};
+    RvCfgDriver rv(clk, dte, ids, {t}, 2);
 
     MessagePtr m = MakeMsg(11, 0, kData + scale.size());
-    m->scale_valid = 1;
-    m->dst_addr = kAt;
     m->payload = data;
     m->payload.insert(m->payload.end(), scale.begin(), scale.end());
-    RouterFeeder feed(clk, dte, 2, m);
+    FrameFeeder feed(clk, dte, {{20, m}});
     MemSide mem(clk, {mm_rd, mm_wr});
     TsSide ts(clk, dte);
     clk->Continue(300 * kPeriod);
@@ -236,23 +360,29 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
   EXPECT_EQ(got_scale, scale) << "包尾那一段进 scale 旁带";
 }
 
-// 纯包头任务：data_len 为 0，Header beat 同时带 TLAST，照样走完并报完成。
+// 纯包头任务：配置只有 route + ack_ts_en、没有数据段，Header beat 同时带 TLAST，
+// 照样走完并报完成。
 TEST(BachDte, HeaderOnlyTask) {
   uint64_t dones = 0, parsed = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
-    RouterFeeder feed(clk, dte, 2, MakeMsg(12, 0, 0));
-    MemSide mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
+    auto ids = std::make_shared<DsaIdsPort>(clk);
+    dte.AttachIds(ids);
+
+    RvCfgDriver::Task t;
+    t.stream = 0;
+    t.task = 0;
+    t.user = 12;
+    t.path = 0;
+    t.wr = {{kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
+            {kDteRegTrigger, 0}};
+    RvCfgDriver rv(clk, dte, ids, {t}, 2);
+    FrameFeeder feed(clk, dte, {{20, MakeMsg(12, 0, 0)}});
+    MemSide m(clk, mem);
     TsSide ts(clk, dte);
     clk->Continue(150 * kPeriod);
     RT::JoinAll();
@@ -264,30 +394,24 @@ TEST(BachDte, HeaderOnlyTask) {
   EXPECT_EQ(dones, 1u);
 }
 
-// 非法 Header 进 Drop Frame：不生成 Descriptor、不发存储请求，只消费到 TLAST。
+// 非法 Header 进 Drop Frame：不存包头、不发存储请求，只消费到 TLAST。
 TEST(BachDte, IllegalHeaderDropsFrame) {
   uint64_t parsed = 0, dropped = 0, writes = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
     // 超过单任务上限 32 KB，这一帧要被丢掉
-    RouterFeeder feed(clk, dte, 2, MakeMsg(13, 0, 64 * 1024));
-    MemSide mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    FrameFeeder feed(clk, dte, {{2, MakeMsg(13, 0, 64 * 1024)}});
+    MemSide m(clk, mem);
     TsSide ts(clk, dte);
     clk->Continue(400 * kPeriod);
     RT::JoinAll();
     parsed = ts.parsed;
     dropped = ts.dropped;
-    writes = mem.writes;
+    writes = m.writes;
   }
   RT::Reset();
   EXPECT_EQ(parsed, 0u);
@@ -295,21 +419,15 @@ TEST(BachDte, IllegalHeaderDropsFrame) {
   EXPECT_EQ(writes, 0u);   // 丢的帧不发存储请求
 }
 
-// Commit 三样一起拿：Completion RS 占满之后不再接纳，挡住半任务。
+// Commit 三样一起拿：Completion RS 占满之后不再 dispatch，挡住半任务。
 TEST(BachDte, CommitNeedsAllThreeResources) {
   uint64_t admitted = 0, stalled = 0, peak = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
 
     // 存储侧一直不 ready，任务做不完，Completion RS 会被占满
     class DeadMem : public BachModule {
@@ -325,35 +443,23 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
      private:
       std::vector<std::shared_ptr<MemPort>> ports;
     };
-    DeadMem mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    DeadMem mem_dead(clk, mem);
+    auto ids = std::make_shared<DsaIdsPort>(clk);
+    dte.AttachIds(ids);
 
-    // 连着灌很多个纯包头任务，把 RS 占满
-    class ManyFrames : public BachModule {
-     public:
-      ManyFrames(ClockPtr c, Dte& d) : BachModule(c, "many"), dte(d) {}
-      uint64_t sent = 0;
-      bool driving = false;
-
-     protected:
-      void Step() override {
-        CoreDataPort& p = dte.FromRouter();
-        if (driving) {
-          if (!p.Ready()) return;   // 保持，不换
-          ++sent;
-          driving = false;
-        }
-        if (sent >= 30) {
-          p.Idle();
-          return;
-        }
-        p.Drive(16, true, true, 0, MakeMsg(100 + sent, 0, 16));
-        driving = true;
-      }
-
-     private:
-      Dte& dte;
-    };
-    ManyFrames many(clk, dte);
+    // 连着配 30 个纯包头任务，把 RS 占满（RS 只有 16 项）。
+    std::vector<RvCfgDriver::Task> tasks;
+    for (uint64_t i = 0; i < 30; ++i) {
+      RvCfgDriver::Task t;
+      t.stream = i % 8;
+      t.task = i;
+      t.user = 100 + i;
+      t.path = 0;
+      t.wr = {{kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
+              {kDteRegTrigger, 0}};
+      tasks.push_back(t);
+    }
+    RvCfgDriver rv(clk, dte, ids, tasks, 2);
 
     class Probe : public BachModule {
      public:
@@ -375,7 +481,7 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
       Dte& dte;
     };
     Probe probe(clk, dte);
-    clk->Continue(200 * kPeriod);
+    clk->Continue(400 * kPeriod);
     RT::JoinAll();
     admitted = probe.admitted;
     stalled = probe.stalled;
@@ -388,9 +494,9 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
   EXPECT_GT(stalled, 0u);   // 后面的被挡住了，不是丢了
 }
 
-// Join：一笔任务的两侧都满足才报完成，不会报两次。三帧走同一个 path，所以
-// task_id 是同一个（都是任务链上的那一步），认哪两半属于同一笔靠的是 Commit
-// 分配的内部序号。
+// Join：一笔任务的两侧都满足才报完成，不会报两次。三笔走同一个 path，认哪两半
+// 属于同一笔靠的是 Commit 分配的内部序号。三个进核任务与三个包按到达顺序 FIFO
+// 配对。
 TEST(BachDte, JoinReportsExactlyOnce) {
   uint64_t dones = 0, joined = 0;
   std::vector<uint64_t> tasks;
@@ -398,46 +504,23 @@ TEST(BachDte, JoinReportsExactlyOnce) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
+    auto ids = std::make_shared<DsaIdsPort>(clk);
+    dte.AttachIds(ids);
 
-    class ThreeFrames : public BachModule {
-     public:
-      ThreeFrames(ClockPtr c, Dte& d) : BachModule(c, "three"), dte(d) {}
-      uint64_t sent = 0;
-      bool driving = false;
-
-     protected:
-      void Step() override {
-        CoreDataPort& p = dte.FromRouter();
-        if (driving) {
-          if (!p.Ready()) return;
-          ++sent;
-          driving = false;
-        }
-        if (sent >= 3) {
-          p.Idle();
-          return;
-        }
-        p.Drive(16, true, true, 0,
-                MakeMsg(200 + sent, 0, 16, /*stream=*/sent, /*task=*/sent));
-        driving = true;
-      }
-
-     private:
-      Dte& dte;
-    };
-    ThreeFrames three(clk, dte);
-    MemSide mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    std::vector<RvCfgDriver::Task> cfg;
+    std::vector<FrameFeeder::Item> pkts;
+    for (uint64_t s = 0; s < 3; ++s) {
+      cfg.push_back(InboundTask(s, s, 200 + s, 0x200 + s * 0x1000, 16));
+      pkts.push_back({40 + s * 10, MakeMsg(200 + s, 0, 16, /*stream=*/s, /*task=*/s)});
+    }
+    RvCfgDriver rv(clk, dte, ids, cfg, 2);
+    FrameFeeder feed(clk, dte, pkts);
+    MemSide m(clk, mem);
     TsSide ts(clk, dte);
 
-    clk->Continue(200 * kPeriod);
+    clk->Continue(400 * kPeriod);
     RT::JoinAll();
     dones = ts.dones;
     tasks = ts.tasks;
@@ -459,14 +542,8 @@ TEST(BachDte, BufferFullBackpressuresRouter) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
 
     // 存储侧不收，写那一半推不动，buffer 会满
     class DeadMem : public BachModule {
@@ -482,9 +559,15 @@ TEST(BachDte, BufferFullBackpressuresRouter) {
      private:
       std::vector<std::shared_ptr<MemPort>> ports;
     };
-    DeadMem mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
-    // 一个很大的包：256 B × 100 拍，buffer 只有 16 拍
-    RouterFeeder feed(clk, dte, 2, MakeMsg(30, 0, 100 * 256));
+    DeadMem mem_dead(clk, mem);
+    auto ids = std::make_shared<DsaIdsPort>(clk);
+    dte.AttachIds(ids);
+
+    // 一个很大的包：256 B × 100 拍，buffer 只有 32 拍
+    constexpr uint64_t kBig = 100 * 256;
+    RvCfgDriver rv(clk, dte, ids,
+                   {InboundTask(0, 0, 30, 0x400, kBig)}, 2);
+    FrameFeeder feed(clk, dte, {{20, MakeMsg(30, 0, kBig)}});
     TsSide ts(clk, dte);
     clk->Continue(200 * kPeriod);
     RT::JoinAll();
@@ -506,14 +589,8 @@ TEST(BachDte, TriggerSamplesDirectIds) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);
     dte.AttachIds(ids);
 
@@ -553,7 +630,7 @@ TEST(BachDte, TriggerSamplesDirectIds) {
       std::shared_ptr<DsaIdsPort> ids;
     };
     RvSide rv(clk, dte, ids);
-    MemSide mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    MemSide m(clk, mem);
     TsSide ts(clk, dte);
     // 出核那一侧一律收得下。
     class RouterSink : public BachModule {
@@ -592,14 +669,8 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Dte dte(clk, "dte", DteCfg{});
-    auto cm_rd = std::make_shared<MemPort>(clk);
-    auto cm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachCmemRd(cm_rd);
-    dte.AttachCmemWr(cm_wr);
-    auto mm_rd = std::make_shared<MemPort>(clk);
-    auto mm_wr = std::make_shared<MemPort>(clk);
-    dte.AttachMmemRd(mm_rd);
-    dte.AttachMmemWr(mm_wr);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);
     dte.AttachIds(ids);
 
@@ -625,7 +696,7 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
       std::shared_ptr<DsaIdsPort> ids;
     };
     HoldOne hold(clk, dte, ids);
-    MemSide mem(clk, {cm_rd, cm_wr, mm_rd, mm_wr});
+    MemSide m(clk, mem);
     TsSide ts(clk, dte);
     clk->Continue(120 * kPeriod);
     RT::JoinAll();

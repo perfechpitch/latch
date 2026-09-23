@@ -468,8 +468,16 @@ static inline void smem_write(u32 off, u32 v) { mmio_write(SMEM_BASE, off, v); }
  * 包头队列。读队头那个包的包头字段，写 ROUTER_HDR_POP 把它弹出，下一个包头映射
  * 上来。一个进核的包对应一笔 datain 任务，那一笔做完弹它自己的包头 */
 #define ROUTER_IO_BASE 0x00180000u
-#define ROUTER_HDR_POP 32u
+#define ROUTER_HDR_SIZE   8u
+#define ROUTER_HDR_DST    24u
+#define ROUTER_HDR_SCALE  28u
+#define ROUTER_HDR_POP    32u
 static inline void hdr_pop(void) { mmio_write(ROUTER_IO_BASE, ROUTER_HDR_POP, 1); }
+/* 队头那个包的三个包头字段：落点、总长、带不带 scale。配置驱动下 datain 任务照着
+ * 它们配一笔进核搬运。 */
+static inline u32 hdr_size(void) { return mmio_read(ROUTER_IO_BASE, ROUTER_HDR_SIZE); }
+static inline u32 hdr_dst_addr(void) { return mmio_read(ROUTER_IO_BASE, ROUTER_HDR_DST); }
+static inline u32 hdr_scale_valid(void) { return mmio_read(ROUTER_IO_BASE, ROUTER_HDR_SCALE); }
 
 /* 当前 task 的身份，硬件随任务下发写进来 */
 static inline u32 stream_id(void) { return mmio_read(TASK_CTRL_BASE, TC_STREAM_ID); }

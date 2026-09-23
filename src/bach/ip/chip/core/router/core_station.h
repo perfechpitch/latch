@@ -53,7 +53,8 @@ enum HdrRegOffset : uint64_t {
   kHdrCoreMask = 12,
   kHdrStreamId = 16,
   kHdrTaskId = 20,
-  kHdrReissue = 28,
+  kHdrDstAddr = 24,     // 落点：收方按它搬进存储（配置驱动下由 datain 任务读）
+  kHdrScaleValid = 28,  // 带 scale 的包：包尾那一段进 scale 旁带
   kHdrPopOffset = 32,
   kHdrRegBytes = 36,
 };
@@ -170,10 +171,13 @@ class CoreStation : public BachModule {
                  "CoreStation: 包头队列是空的，没有可弹出的。");
         hdr_fifo.pop_front();
         ++pop_cnt;
+        // 写也要回一个响应：cm_lsq 里读与写共用一条 flight 队列按 FIFO 配响应，
+        // 不回的话这一笔写永远留在队头，把后面读的响应带偏（读到错的数据）。
+        hdr_rsp = ByteBlockPtr();
       } else {
         hdr_rsp = std::make_shared<ByteBlock>(HeaderBytes(r.addr, r.bytes));
-        hdr_rsp_at = CycleNow() + kHdrReadLatency;
       }
+      hdr_rsp_at = CycleNow() + kHdrReadLatency;
     }
     hdr->DriveSlave(true, rsp, data);
   }
@@ -192,7 +196,8 @@ class CoreStation : public BachModule {
       case kHdrCoreMask: v = m->path_core_mask; break;
       case kHdrStreamId: v = m->stream_id; break;
       case kHdrTaskId: v = m->task_id; break;
-      case kHdrReissue: v = m->reissue; break;
+      case kHdrDstAddr: v = m->dst_addr; break;
+      case kHdrScaleValid: v = m->scale_valid; break;
       default: v = 0; break;
     }
     for (uint64_t i = 0; i < out.size() && i < 8; ++i) {

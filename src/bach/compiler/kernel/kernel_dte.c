@@ -58,13 +58,52 @@ static void send_seg(u32 off, u32 bytes) {
   dte_move(off, 0, bytes, DTE_MODE_CMEM_TO_ROUTER, 1);
 }
 
-/* datain：包一到 DTE 就自己起搬运，不必这里再配一笔。落点与 scale 都由包头带
- * 着，DTE 自己办，这一笔只弹掉这个包的包头。搬运的完成由 DTE 报 TS，所以这里
- * 交还自己就走。软件包头表那套（硬件包头抄进按 stream 排的软件包头表）在新模型
- * 里不落地，去掉。
- *
- * 一个计算 core 上几项搬入任务（token、FC2 输入、归约结果、concat）都走它。 */
+/* 进核那一笔的配置：数据从 Router 的包来（没有源地址），落 dst。带 scale 时包尾
+ * 那一段进 scale 旁带；flag_addr 非 0 时搬完往 Share Mem 写 4 B 的 1（置到齐/占用
+ * 标志）。落 Core Mem 叠 stream 偏移，落 Matrix Mem 是物理地址不叠。完成后带
+ * ack_ts_en：普通 core 的 recv_unit=kDsa 等 DSA 这一路；B/R core 的 no_ack 由 SCP
+ * 切模式时配，Fire 时压掉这一档。 */
+static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
+                                                               u32 mode,
+                                                               u32 flag_addr) {
+  u32 tmode = mode & 0x7u;
+  u32 stride = (tmode == DTE_MODE_ROUTER_TO_CMEM) ? CMEM_STREAM_STRIDE : 0u;
+  u32 addr_valid = (1u << 1);  /* 段 1 = 数据 */
+  dsa_write(DTE_ADDR1_DST, dst);
+  dsa_write(DTE_STRIDE1, stride);
+  dsa_write(DTE_DATA_LEN1, len);
+  if (mode & DTE_SCALE_VALID) {
+    addr_valid |= (1u << 2);
+    dsa_write(DTE_ADDR2_DST, dte_ep(DTE_EP_SCALE, dst & 0x0FFFFFFFu));
+    dsa_write(DTE_STRIDE2, stride);
+    dsa_write(DTE_DATA_LEN2, len / 32u);
+  }
+  if (flag_addr != 0u) {
+    dsa_write(DTE_SM_W_ADDR, flag_addr);
+    dsa_write(DTE_SM_W_DATA, 1u);
+  }
+  u32 trans = tmode | (addr_valid << DTE_ADDR_VALID_SHIFT)
+                    | (mode & (DTE_HW_HEADER_OP | DTE_WR_SHAREMEM_FLAG))
+                    | DTE_ACK_TS_EN;
+  dsa_write(DTE_TRANS_MODE, trans);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+
+/* 一个包的 payload 里数据那一段的长度：带 scale 时 size = D + ceil(D / 32)，由此
+ * 反推 D。 */
+static u32 data_bytes(u32 size, u32 scale_valid) {
+  return scale_valid ? size - (size + 32u) / 33u : size;
+}
+
+/* datain：配置驱动下由这里照包头配一笔进核搬运，再把包头弹掉。落点与 scale 都
+ * 从包头读来，DTE 按配置搬。一个计算 core 上几项搬入任务（token、FC2 输入、归约
+ * 结果、concat）都走它。 */
 TASK void task_dte_user_init(void) {
+  u32 size = hdr_size();
+  u32 scale = hdr_scale_valid();
+  u32 data = data_bytes(size, scale);
+  dte_inbound(hdr_dst_addr(), data,
+              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0);
   hdr_pop();
   task_done(1);
 }
@@ -138,11 +177,15 @@ TASK void task_dte_send_row(void) {
 
 /* ===== R core 的两段 =====
  *
- * 进核那一笔的落点与 valid 标志都由硬件按包头办：Header Parser 解析包头就建
- * 描述符，搬完由 Completion RS 把标志写出去。这里只把这个槽是哪个用户记下来，
- * 链二找到齐了的槽之后要按它认人；再弹掉这个包的包头。 */
+ * 进核那一笔的落点由包头 dst_addr 给（落哪一半是发方算好的），这一笔照它配进核
+ * 搬运，搬完由 Completion RS 往标志表写这一半的 valid。这里另把这个槽是哪个用户
+ * 记下来，链二找到齐了的槽之后要按它认人；再弹掉这个包的包头。 */
 TASK void task_dte_rc_datain(void) {
   smem_write(RC_USER_OFF + (user_id() % RC_SLOTS) * 4, user_id());
+  u32 landing = hdr_dst_addr();
+  u32 data = hdr_size();  /* BF16，不带 scale */
+  dte_inbound(landing, data, DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
+              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u);
   hdr_pop();
   task_yield();
 }
@@ -164,14 +207,19 @@ TASK void task_dte_rc_send(void) {
   task_done(1);
 }
 
-/* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点、scale 与 valid 标志都由
- * 硬件按包头办。这里只把这一格是哪个用户记下来，链二发的时候要按它认人。
+/* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点按自己收下的笔数取模算，
+ * scale 随它进 scale 旁带，搬完置那一格的 valid。这里把这一格是哪个用户记下来，
+ * 链二发的时候要按它认人。
  *
  * 记在第几格按自己收下的笔数算，与发方算落点用的是同一条规则 */
 TASK void task_dte_bc_datain(void) {
   u32 n = smem_read(BC_RECV_OFF);
   smem_write(BC_USER_OFF + (n % BC_SLOTS) * 4, user_id());
   smem_write(BC_RECV_OFF, n + 1);
+  u32 landing = bc_land(n);
+  dte_inbound(landing, BC_TOKEN_BYTES,
+              DTE_MODE_ROUTER_TO_MMEM | DTE_SCALE_VALID | DTE_WR_SHAREMEM_FLAG,
+              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u);
   hdr_pop();
   task_yield();
 }
@@ -202,13 +250,18 @@ TASK void task_dte_retire(void) {
 }
 
 /* weights 加载模式下由 datain_task 的 pc 指到这里。
- * 这一阶段进核那一笔落 Matrix Mem，落点是包头里的 dst_addr，搬运由 DTE 自己
- * 起，scale 随包头的标记落进 scale 旁带，所以这里只数搬进来几笔。数满了中断
- * SCP，SCP 再把这颗 core 切到业务模式。Matrix Mem 一侧硬件不叠 stream 偏移，
- * 包头里带的就是最终地址。 */
+ * 这一阶段进核那一笔落 Matrix Mem，落点是包头里的 dst_addr，scale 随包头的标记落
+ * 进 scale 旁带，这里照它配一笔进核搬运，另数搬进来几笔。数满了中断 SCP，SCP 再
+ * 把这颗 core 切到业务模式。Matrix Mem 一侧硬件不叠 stream 偏移，包头里带的就是
+ * 最终地址。 */
 TASK void task_dte_weights_loader(void) {
   u32 n = smem_read(WEIGHTS_CNT_OFF);
   smem_write(WEIGHTS_CNT_OFF, n + 1);
+  u32 size = hdr_size();
+  u32 scale = hdr_scale_valid();
+  u32 data = data_bytes(size, scale);
+  dte_inbound(hdr_dst_addr(), data,
+              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0);
   hdr_pop();
   task_yield();
 }

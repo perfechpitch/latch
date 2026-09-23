@@ -87,14 +87,7 @@ class Agcu {
     }
   }
 
-  // 进核那一路保持包驱动：落点由包头 dst_addr 给，落 Core Mem 时叠自己的 stream
-  // 偏移，落 Matrix Mem 时直接用。返回最终地址。
-  uint64_t InboundAddr(uint64_t sid, SegEndpoint kind, uint64_t off) const {
-    if (kind == SegEndpoint::kMmem) return off;
-    return cm.stream_base + sid * cm.stream_stride + off;
-  }
-
-  // Core Mem 一侧加 stream 偏移，Matrix Mem 一侧不加（保留给进核 Cmem 用）。
+  // Core Mem 一侧加 stream 偏移，Matrix Mem 一侧不加。
   uint64_t DataAddr(uint64_t stream_id, bool core_mem, uint64_t off) const {
     if (!core_mem) return off;
     return cm.stream_base + stream_id * cm.stream_stride + off;

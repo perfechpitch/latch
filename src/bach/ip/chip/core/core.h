@@ -104,10 +104,10 @@ class Core : public BachModule {
     dte->SetInbound(in);
   }
   // 切进 weights 加载模式：这一阶段进来的是权重，落 Matrix Mem；这一阶段不建
-  // stream 表项，进核那一笔没有可报的对象，不回 Ack，也不置标志。
+  // stream 表项，进核那一笔没有可报的对象，不回 Ack，也不置标志。落点由 kernel
+  // 配的 TRANS_MODE 表达，这里只切 no_ack。
   void SetWeightsInbound() {
     InboundCfg in;
-    in.route = Route::kRouterToMm;
     in.no_ack = true;
     dte->SetInbound(in);
   }

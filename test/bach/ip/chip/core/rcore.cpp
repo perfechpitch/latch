@@ -65,7 +65,6 @@ constexpr uint64_t kPacketBytes = kReduceSwHeaderBytes + kOutN * 2;
 constexpr uint64_t kHalfBytes = 0x3080;
 constexpr uint64_t kSlotBytes = 2 * kHalfBytes;
 constexpr uint64_t kMmBase = 0x000000;
-constexpr uint64_t kFlagOff = 0x0000;
 constexpr uint64_t kSumOff = 0x0000;
 
 constexpr uint64_t kInPath = 3;
@@ -245,14 +244,11 @@ std::vector<uint8_t> GatherSum(Core& core) {
   return core.Cmem().Peek(kSumOff + kReduceSwHeaderBytes, kOutN * 2);
 }
 
-// R core 在业务模式下进核那一笔：落 Matrix Mem、不回 Ack，搬完置到齐标志。
+// R core 在业务模式下进核那一笔：不回 Ack。落点与搬完置到齐标志的地址由 kernel
+// 配 CFG 表达（TRANS_MODE / SM_W_ADDR/DATA），这里只切 no_ack。
 InboundCfg RcoreInbound() {
   InboundCfg in;
-  in.route = Route::kRouterToMm;
   in.no_ack = true;
-  in.flag_base = kFlagOff;
-  // 到齐标志每半一项：硬件按落点除以这个格子大小找项。
-  in.flag_entry_bytes = kHalfBytes;
   return in;
 }
 

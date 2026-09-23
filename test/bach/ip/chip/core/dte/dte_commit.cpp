@@ -1,7 +1,9 @@
-// Commit：两个任务入口在这里汇成同一套内部任务模型。
+// Commit：所有任务（进核 + 出核）统一从 RV core 的配置入口来，进中央 TaskQueue
+// （深度 16）再按通道资源 dispatch。
 //
-// 三样一起拿才接纳；出核任务先在 PendingTaskQ 等 credit，够了才来申请那三样；
-// 两个入口竞争时先配 Router 那一侧；出核要发的那个包在这里造好。
+// 三样一起拿（Lane 读/写槽 + Completion RS）从 Fire 时刻移到 dispatch 时刻；出核
+// 任务还要看 VC credit；不同通道的任务可乱序下发（队头堵在 VC 上时后面的进核任务
+// 先行）；中央 TaskQueue 满 16 反压 RV core；出核要发的那个包在这里造好。
 
 #include <gtest/gtest.h>
 
@@ -22,8 +24,10 @@ constexpr Time kPeriod = 1;
 
 void EnsureSlots() { RT::Reset(8, 8); }
 
+// 进核任务由 RV core 配寄存器 + trigger 起，不带着 Router 送进来的原包（包头已由
+// Header Parser 落 Header Table），所以这里不给 msg。
 std::shared_ptr<Descriptor> Inbound(uint64_t user, uint64_t path,
-                                    uint64_t bytes) {
+                                    uint64_t /*bytes*/) {
   auto d = std::make_shared<Descriptor>();
   d->valid = true;
   d->route = Route::kRouterToCm;
@@ -31,11 +35,6 @@ std::shared_ptr<Descriptor> Inbound(uint64_t user, uint64_t path,
   d->path_id = path;
   d->stream_id = 0;
   d->task_id = 1;
-  auto m = std::make_shared<Message>();
-  m->user_id = user;
-  m->path_id = path;
-  m->size = bytes;
-  d->msg = m;
   return d;
 }
 
@@ -72,12 +71,11 @@ RouteEntry Reduce(uint64_t flow) {
   return e;
 }
 
-// 两个入口灌任务、扮演各 Lane 与 Completion RS 收准入。
+// 单入口灌任务、扮演各 Lane 与 Completion RS 收 dispatch。
 class CommitHarness : public BachModule {
  public:
   struct Job {
     uint64_t at = 0;
-    bool from_rv = false;
     std::shared_ptr<Descriptor> d;
   };
 
@@ -96,11 +94,13 @@ class CommitHarness : public BachModule {
     MessagePtr msg;
   };
   std::vector<Got> admits;
+  // Commit 收下的 Descriptor 数（一个任务只数一次），中央 TaskQueue 深与峰值。
+  uint64_t rv_accepted = 0, queued = 0, peak_queued = 0;
 
  protected:
   void Step() override {
     uint64_t now = CycleNow();
-    // 末级先做：先看上一拍准入的那一笔。
+    // 末级先做：先看上一拍 dispatch 出的那一笔。
     for (uint64_t i = 0; i < lane_ports.size(); ++i) {
       if (!lane_ports[i]->Valid()) continue;
       uint64_t seq = lane_ports[i]->Seq();
@@ -112,12 +112,12 @@ class CommitHarness : public BachModule {
     for (auto& p : lane_ports) p->DriveReady(now >= lane_ready_from);
     rs_port->DriveReady(now >= rs_ready_from);
 
-    // 两个入口都保持到被收下：等对方收下的那几拍要一直发同一个号，每拍换号
-    // 的话接收方按序号去重就把同一笔认成好几笔。
-    Feed(*cm.ParserPortPtr(), parser_hold, false, now);
-    Feed(cm.FromRv(), rv_hold, true, now);
-
+    Feed(cm.FromRv(), rv_hold, now);
     cm.RunStep();
+
+    if (cm.FromRv().Accepted()) ++rv_accepted;
+    queued = cm.Queued();
+    if (queued > peak_queued) peak_queued = queued;
   }
 
  private:
@@ -128,11 +128,13 @@ class CommitHarness : public BachModule {
     uint64_t cursor = 0;
   };
 
-  void Feed(DescPort& port, Hold& h, bool from_rv, uint64_t now) {
+  // 入口保持到被收下：等对方收下的那几拍要一直发同一个号，每拍换号的话接收方
+  // 按序号去重就把同一笔认成好几笔。
+  void Feed(DescPort& port, Hold& h, uint64_t now) {
     if (h.active && port.Accepted()) h.active = false;
     if (!h.active) {
       for (uint64_t i = h.cursor; i < jobs.size(); ++i) {
-        if (jobs[i].from_rv != from_rv || jobs[i].at > now) continue;
+        if (jobs[i].at > now) continue;
         h.d = jobs[i].d;
         h.seq = port.NextSeq();
         h.active = true;
@@ -151,7 +153,7 @@ class CommitHarness : public BachModule {
   std::vector<std::shared_ptr<AdmitPort>> lane_ports;
   std::shared_ptr<AdmitPort> rs_port;
   std::array<uint64_t, 8> last_seq{};
-  Hold parser_hold, rv_hold;
+  Hold rv_hold;
 };
 
 struct Bench {
@@ -174,7 +176,7 @@ struct Bench {
 
 }  // namespace
 
-// 三样一起拿才接纳：Completion RS 没有空位时整体等，不产生半任务。
+// 三样一起拿才 dispatch：Completion RS 没有空位时整体等，不产生半任务。
 TEST(BachDteCommit, NoAdmitUntilAllThreeAreThere) {
   uint64_t before = 0, after = 0;
   {
@@ -183,7 +185,7 @@ TEST(BachDteCommit, NoAdmitUntilAllThreeAreThere) {
     Bench b(clk);
     b.hmem->PreloadRtab(7, Forward(kFlowRight));
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, false, Inbound(41, 7, 512)}};
+    h.jobs = {{2, Inbound(41, 7, 512)}};
     h.rs_ready_from = 20;  // Completion RS 到第 20 拍才有位置
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
@@ -197,27 +199,28 @@ TEST(BachDteCommit, NoAdmitUntilAllThreeAreThere) {
   EXPECT_EQ(after, 1u) << "齐了之后放行";
 }
 
-// 两个入口同一拍来时先配 Router 那一侧。
-TEST(BachDteCommit, RouterSideGoesFirstWhenBothCompete) {
+// 不同通道的任务可乱序下发：队头那个出核任务堵在 VC credit 上时，后面到的那笔
+// 进核任务（不查 VC）照样先行 dispatch。
+TEST(BachDteCommit, VcBlockedHeadDoesNotBlockLaterInbound) {
   std::vector<uint64_t> users;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
-    b.hmem->PreloadRtab(7, Forward(kFlowRight));
-    b.hmem->PreloadRtab(8, Forward(kFlowRight));
+    b.hmem->PreloadRtab(9, Forward(kFlowRight));
+    // 往右那条 VC 通路一个空位都没有：电平口不驱，读出来全是 0。
+    auto level = std::make_shared<CreditLevelPort>(clk);
+    b.commit->AttachVcLevel(level);
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    // RV core 那一侧先来一拍，Router 那一侧紧接着；两笔在同一拍上竞争准入。
-    h.jobs = {{2, /*from_rv=*/true, Outbound(52, 8, 256)},
-              {3, /*from_rv=*/false, Inbound(41, 7, 512)}};
+    // 出核那笔先来，堵在 VC credit；进核那笔后到，不同通道，乱序先走。
+    h.jobs = {{2, Outbound(52, 9, 256)}, {4, Inbound(41, 7, 512)}};
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
     for (auto const& a : h.admits) users.push_back(a.user);
   }
   RT::Reset();
-  ASSERT_EQ(users.size(), 2u);
-  EXPECT_EQ(users[0], 41u) << "竞争时先配 Router 的那一笔";
-  EXPECT_EQ(users[1], 52u);
+  ASSERT_EQ(users.size(), 1u);
+  EXPECT_EQ(users[0], 41u) << "进核任务不受队头出核任务的 VC 阻塞，乱序先走";
 }
 
 // Reduce 包与其他出核包一样只看 VC credit：本级 Rmem 资源由 TS 在下发前申请，
@@ -230,7 +233,7 @@ TEST(BachDteCommit, ReducePacketNeedsOnlyVcCredit) {
     Bench b(clk);
     b.hmem->PreloadRtab(9, Reduce(kFlowRight));
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, true, Outbound(52, 9, 1024)}};
+    h.jobs = {{2, Outbound(52, 9, 1024)}};
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
     admitted = h.admits.size();
@@ -239,35 +242,30 @@ TEST(BachDteCommit, ReducePacketNeedsOnlyVcCredit) {
   EXPECT_EQ(admitted, 1u) << "VC 通路收得下就放行";
 }
 
-// PendingTaskQ 满了只反压出核这条链，进核那一路照走。
-TEST(BachDteCommit, FullPendingQueueOnlyStallsOutbound) {
-  uint64_t inbound_admits = 0;
+// 中央 TaskQueue 满 16 就反压 RV core：Lane 一直不放行，任务只进不 dispatch，
+// 收满 16 笔之后第 17 笔就不收了。
+TEST(BachDteCommit, CentralQueueFullBackpressuresRv) {
+  uint64_t rv_accepted = 0, admits = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
-    b.hmem->PreloadRtab(7, Forward(kFlowRight));
-    b.hmem->PreloadRtab(9, Forward(kFlowRight));
-    // 往右那条 VC 通路一个空位都没有：电平口不驱，读出来全是 0，出核那几笔一直
-    // 堵在 PendingTaskQ。
-    auto level = std::make_shared<CreditLevelPort>(clk);
-    b.commit->AttachVcLevel(level);
+    b.hmem->PreloadRtab(8, Forward(kFlowRight));
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    // 先把 PendingTaskQ 灌满。
-    for (uint64_t i = 0; i < kPendingTaskQDepth + 2; ++i) {
-      h.jobs.push_back({2 + i * 2, true, Outbound(60 + i, 9, 256)});
+    h.lane_ready_from = 1000;  // Lane 一直不放，任务只进中央 TaskQueue 不 dispatch
+    h.rs_ready_from = 1000;
+    for (uint64_t i = 0; i < 20; ++i) {
+      h.jobs.push_back({2 + i * 2, Outbound(60 + i, 8, 256)});
     }
-    // 再从 Router 那一侧送一笔进核任务。
-    h.jobs.push_back({2 + (kPendingTaskQDepth + 3) * 2, false,
-                      Inbound(41, 7, 512)});
     clk->Continue(200 * kPeriod);
     RT::JoinAll();
-    for (auto const& a : h.admits) {
-      if (a.user == 41u) ++inbound_admits;
-    }
+    rv_accepted = h.rv_accepted;
+    admits = h.admits.size();
   }
   RT::Reset();
-  EXPECT_EQ(inbound_admits, 1u) << "出核那条链堵住不影响进核";
+  EXPECT_EQ(admits, 0u) << "Lane 不放行，一笔都不 dispatch";
+  EXPECT_EQ(rv_accepted, kCentralTaskQDepth)
+      << "中央 TaskQueue 满 16 就反压，第 17 笔起不收";
 }
 
 // 出核要发的那个包在 Commit 建好：路由号与长度按这一笔的配置写进包头。
@@ -279,7 +277,7 @@ TEST(BachDteCommit, OutboundMessageIsBuiltAtCommit) {
     Bench b(clk);
     b.hmem->PreloadRtab(8, Forward(kFlowRight));
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, true, Outbound(52, 8, 640)}};
+    h.jobs = {{2, Outbound(52, 8, 640)}};
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
     if (!h.admits.empty()) msg = h.admits.front().msg;
@@ -292,8 +290,8 @@ TEST(BachDteCommit, OutboundMessageIsBuiltAtCommit) {
   EXPECT_EQ(msg->payload.size(), 640u) << "payload 的位置先留出来";
 }
 
-// 内部序号一笔一个：两个入口来的任务在这里汇成同一套编号。
-TEST(BachDteCommit, CommitSeqIsUniqueAcrossBothEntries) {
+// 内部序号一笔一个：进核 + 出核任务在这里汇成同一套编号。
+TEST(BachDteCommit, CommitSeqIsUniqueAcrossAllTasks) {
   std::vector<uint64_t> seqs;
   {
     EnsureSlots();
@@ -302,9 +300,9 @@ TEST(BachDteCommit, CommitSeqIsUniqueAcrossBothEntries) {
     b.hmem->PreloadRtab(7, Forward(kFlowRight));
     b.hmem->PreloadRtab(8, Forward(kFlowRight));
     CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, false, Inbound(41, 7, 256)},
-              {6, true, Outbound(52, 8, 256)},
-              {10, false, Inbound(42, 7, 256)}};
+    h.jobs = {{2, Inbound(41, 7, 256)},
+              {6, Outbound(52, 8, 256)},
+              {10, Inbound(42, 7, 256)}};
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
     for (auto const& a : h.admits) seqs.push_back(a.commit_seq);

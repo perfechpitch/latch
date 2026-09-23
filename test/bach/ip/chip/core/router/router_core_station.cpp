@@ -397,10 +397,11 @@ TEST(BachCoreStation, HeaderIsReadThenPopped) {
     pops = b.cs->Popped();
   }
   RT::Reset();
-  ASSERT_EQ(vals.size(), 3u);
+  ASSERT_EQ(vals.size(), 4u);
   EXPECT_EQ(vals[0], 81u) << "队头那个包的 user_id";
   EXPECT_EQ(vals[1], 512u) << "同一个包的 size";
-  EXPECT_EQ(vals[2], 82u) << "弹出之后映射上来的是下一个包";
+  EXPECT_EQ(vals[2], 0u) << "弹出那一笔回的响应，写没有读数据";
+  EXPECT_EQ(vals[3], 82u) << "弹出之后映射上来的是下一个包";
   EXPECT_EQ(pops, 1u);
   EXPECT_EQ(depth_at_end, 1u) << "两个进来、弹出一个，还剩一个";
 }

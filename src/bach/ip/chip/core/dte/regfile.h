@@ -21,7 +21,7 @@
 // Cfg Reg File（普通配置）。为此维护一个 19 项「已显式写」dirty 掩码，Trigger Fire
 // 时清零。
 //
-// 反压：Commit 的 PendingTaskQ 满时它不收这一笔 Descriptor，本模块保持着重发，
+// 反压：Commit 的中央 TaskQueue 满时它不收这一笔 Descriptor，本模块保持着重发，
 // 同时拉低 dsa_cfg 的 req_ready 反压 RV core。
 //
 // 读寄存器隔几拍才回：读不支持同步返回，返回数据走独立的 dsa_rdata 口。同拍
@@ -157,6 +157,10 @@ class DteRegfile : public BachModule {
   std::shared_ptr<DescPort> OutPtr() const { return out; }
   void AttachOut(std::shared_ptr<DescPort> p) { out = std::move(p); }
 
+  // B core、R core 与 weights 加载阶段进核的包不建 stream 表项，进核那一笔的完成
+  // 没有可报的对象，不回 Ack。SCP 切模式时配，Fire 时落进进核任务的 no_ack。
+  void SetInboundNoAck(bool on) { inbound_no_ack = on; }
+
   // ── 观测 ──
   DteConfig const& Template(uint64_t i) const { return tpl.at(i); }
   DteConfig const& CfgFile() const { return cfg_file; }
@@ -175,7 +179,7 @@ class DteRegfile : public BachModule {
     Publish();
     if (!rdata_used) rdata->Idle();
 
-    // PendingTaskQ 满时本模块手上压着一笔发不出去，此时不再收新的配置写。
+    // 中央 TaskQueue 满时本模块手上压着一笔发不出去，此时不再收新的配置写。
     cfg->DriveReady(!holding);
     triggers = trig_cnt;
     writes = write_cnt;
@@ -289,6 +293,8 @@ class DteRegfile : public BachModule {
     d->path_id = ids->Path();
     d->vc = ids->Vc();
     d->route = Route(merged.trans_mode & kDteModeMask);
+    // 进核任务不回 Ack 的档位（B/R core 与 weights 加载阶段），由 SCP 切模式时配。
+    d->no_ack = IsInbound(d->route) && inbound_no_ack;
     uint64_t addr_valid = (merged.trans_mode >> kDteAddrValidShift) &
                           kDteAddrValidMask;
     d->hw_header_op = (merged.trans_mode & kDteHwHeaderOp) != 0;
@@ -334,6 +340,8 @@ class DteRegfile : public BachModule {
 
   std::shared_ptr<Descriptor> held;
   bool holding = false, rdata_used = false;
+  // 进核任务不回 Ack 的档位，由 SCP 切模式时配。
+  bool inbound_no_ack = false;
   uint64_t last_seq = 0, held_seq = 0, trig_cnt = 0, write_cnt = 0, read_cnt = 0;
 
   Logic64 triggers, writes;

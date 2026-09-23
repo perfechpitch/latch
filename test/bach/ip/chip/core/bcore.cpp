@@ -60,7 +60,6 @@ constexpr uint64_t kSlots = 16;
 constexpr uint64_t kTokenBytes = 6144;
 constexpr uint64_t kScaleBytes = kTokenBytes / 32;
 constexpr uint64_t kMmBase = 0x000000;
-constexpr uint64_t kFlagOff = 0x0500;
 
 constexpr uint64_t kInPath = 3;
 constexpr uint64_t kOutPath = 0;
@@ -195,14 +194,11 @@ class BcoreHarness : public BachModule {
   std::vector<Job> jobs;
 };
 
-// B core 在业务模式下进核那一笔：落 Matrix Mem、不回 Ack，搬完置 token 槽位的
-// 标志。
+// B core 在业务模式下进核那一笔：不回 Ack。落点与搬完置 token 槽位标志的地址由
+// kernel 配 CFG 表达（TRANS_MODE / SM_W_ADDR/DATA），这里只切 no_ack。
 InboundCfg BcoreInbound() {
   InboundCfg in;
-  in.route = Route::kRouterToMm;
   in.no_ack = true;
-  in.flag_base = kFlagOff;
-  in.flag_entry_bytes = kTokenBytes;
   return in;
 }
 

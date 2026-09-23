@@ -7,8 +7,8 @@
 //
 // Hmem：一次搬运的对象是一个 MSG 包，进了 core 就按内容拆成四段、各存各的地方。
 // 硬件包头与软件包头合并成一张表存这里，16 项按 stream_id 索引，每项
-// {core_mask 2 B, sw_header 16 B}，共 288 B，软件只配一个地址。硬件只改硬件包头
-// 的 core_mask，RV core 改软件包头。
+// {core_mask 2 B, Hardware Used 1 B, sw_header 16 B}，软件只配一个地址。硬件只改
+// 硬件包头的 core_mask 与 Hardware Used，RV core 改软件包头。
 //
 // 对齐后包头段（段 0）统一走 header_table（端点 tag 0x4），不再区分计算 core 与
 // B/R core 各自存哪。
@@ -37,6 +37,7 @@ namespace bach {
 // Hmem 一项：硬件包头与软件包头合并。
 struct HmemEntry {
   uint64_t core_mask = 0;                 // 2 B，硬件改
+  uint64_t hardware_used = 0;             // 1 B，硬件改（Hardware Used 字段）
   std::array<uint8_t, 16> sw_header{};    // 16 B，RV core 改
   // DPU 写的那一对自定义包头。进核那一笔记在这里，出核造包时原样带上，出口
   // 桩按它认这是哪个 GPU 的第几个 token，中途丢掉就分不清了。

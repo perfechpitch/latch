@@ -54,9 +54,10 @@ namespace bach {
 // 延迟的拍数时，带宽就是「在飞数 ÷ 延迟」，取 4 只有 4/13。
 constexpr uint64_t kRdOutstanding = kDteBufFlits;
 
-// 一侧同时能保留几个已经 issue_done、还在等 drain 的任务边界。原文只说「可保留
-// 的任务边界数」是领先量的三项约束之一，没给数，取 2：一笔在等收敛，一笔在发。
-constexpr uint64_t kDrainSlots = 2;
+// 一侧同时能保留几个已经 issue_done、还在等 drain 的任务边界。对齐飞书《DTE DSA》
+// 「WR Lane TaskQ 深度 4，允许 Read Lane 先执行 4 个任务」：读这一半领先写那一半
+// 的任务边界数取 4。
+constexpr uint64_t kDrainSlots = 4;
 
 // 段是否参与 payload 的字节搬运。topK / header 段走旁带或 Hmem，不占 payload。
 inline bool PayloadSeg(SegEndpoint k) {
@@ -154,9 +155,9 @@ class Lane : public BachModule {
     return r == Route::kRouterToCm || r == Route::kMmToCm;
   }
 
-  // 这一笔在本通道的 buffer 里用哪个号认。进核那一路的号由 Header Parser 在
-  // Commit 之前就发给了 payload 口，所以用它的帧号；出核那一路用 Commit 的
-  // 内部序号。两条路各用各的 buffer，号撞不上。
+  // 这一笔在本通道的 buffer 里用哪个号认。进核那一路的号由 Lane 在 TakeAdmit 时按
+  // 到达顺序编（与 Header Parser 发给 payload 口的帧号对齐），所以用它的帧号；
+  // 出核那一路用 Commit 的内部序号。两条路各用各的 buffer，号撞不上。
   static uint64_t TagOf(Descriptor const& d) {
     return IsInbound(d.route) ? d.frame_seq : d.commit_seq;
   }
@@ -225,24 +226,33 @@ class Lane : public BachModule {
     auto d = admit->Desc();
     if (!d) return;
     last_admit_seq = admit->Seq();
-    q[kRd].Push(*d);
-    q[kWr].Push(*d);
+    // 进核任务按到达顺序编帧号：配置驱动的第 N 个进核任务配第 N 个到达的数据包
+    // （FIFO），与 Header Parser 给每帧编的号对齐。读写两半拿同一份号。
+    Descriptor nd = *d;
+    if (IsInbound(nd.route)) nd.frame_seq = ++inbound_frame_seq;
+    q[kRd].Push(nd);
+    q[kWr].Push(nd);
   }
 
   // 从 Header Parser 收 Payload 写进 inbound buffer。
   void TakePayload() {
     if (Outbound()) return;
-    payload->DriveReady(buffer.HasRoom(idx));
-    if (!payload->Valid()) return;
-    if (payload->Seq() == last_payload_seq) return;
-    if (!buffer.HasRoom(idx)) return;
-    last_payload_seq = payload->Seq();
-    uint64_t frame = payload->frame.Get();
-    bool last = payload->last.Get() != 0;
-    uint64_t n = payload->bytes.Get();
-    MessagePtr m = payload->msg.Get();
-    buffer.Push(idx, {frame, n, last, SliceOf(m, payload->off.Get(), n), m});
-    if (last) inbound_done.insert(frame);
+    // 收下这一拍：valid、序号新、buffer 还有位置才收。收不下就留在端口上重试
+    // （不推 last_payload_seq），靠 ready 反压上游。
+    if (payload->Valid() && payload->Seq() != last_payload_seq &&
+        buffer.HasRoom(idx)) {
+      last_payload_seq = payload->Seq();
+      uint64_t frame = payload->frame.Get();
+      bool last = payload->last.Get() != 0;
+      uint64_t n = payload->bytes.Get();
+      uint64_t off = payload->off.Get();
+      MessagePtr m = payload->msg.Get();
+      buffer.Push(idx, {frame, n, last, SliceOf(m, off, n), m});
+      if (last) inbound_done.insert(frame);
+    }
+    // 反压电平：buffer 留两格余量再报收得下，absorb 掉 ready 一拍延迟里已经在途
+    // 的那一拍，与 CoreStation 的准入电平（size + 2 <= depth）同一套。
+    payload->DriveReady(buffer.Credit(idx) >= 2);
   }
 
   // 已经 issue_done、在等响应收敛的那些：队头收敛了就报完成、出队。
@@ -483,6 +493,8 @@ class Lane : public BachModule {
   std::array<std::deque<ActiveCtx>, kHalfNum> drain_q;
   bool rd_reported = false, wr_reported = false;
   std::set<uint64_t> inbound_done;
+  // 进核任务按到达顺序编的帧号，与 Header Parser 给每帧编的号对齐。
+  uint64_t inbound_frame_seq = 0;
   uint64_t last_payload_seq = 0, last_admit_seq = 0;
   bool cmem_used = false, mmem_used = false, router_used = false;
   bool topk_driven = false;

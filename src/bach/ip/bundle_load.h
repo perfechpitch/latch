@@ -66,6 +66,7 @@ struct CorePlan {
   bool datain_weights = false;
   bool has_datain = false;
   InboundCfg dtein;                              // 业务模式下进核那一笔
+  Route dtein_route = Route::kRouterToCm;        // DTEIN 声明的落点，只用于角色校验
   bool has_dtein = false;
 };
 
@@ -117,14 +118,14 @@ inline void CheckRole(CoreKey const& key, CorePlan const& c) {
   switch (c.role) {
     case CoreRole::kCompute:
       Require(!c.self_start, key, "计算 core 的 SELF_START 要是 0");
-      Require(c.has_dtein && c.dtein.route == Route::kRouterToCm, key,
+      Require(c.has_dtein && c.dtein_route == Route::kRouterToCm, key,
               "计算 core 的 DTEIN 要落 Core Mem");
       break;
     case CoreRole::kBroadcast:
     case CoreRole::kReduce:
       Require(c.has_cfg && c.self_start, key,
               b ? "B core 的 SELF_START 要是 1" : "R core 的 SELF_START 要是 1");
-      Require(c.has_dtein && c.dtein.route == Route::kRouterToMm, key,
+      Require(c.has_dtein && c.dtein_route == Route::kRouterToMm, key,
               r ? "R core 的 DTEIN 要落 Matrix Mem"
                 : "B core 的 DTEIN 要落 Matrix Mem");
       break;
@@ -239,10 +240,10 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       uint64_t route = Num(tok[3]);
       LOGCHECK(route <= 1,
                "LoadBundle: DTEIN 的 route 只有 0 落 Core Mem、1 落 Matrix Mem。");
-      c.dtein.route = route == 0 ? Route::kRouterToCm : Route::kRouterToMm;
+      c.dtein_route = route == 0 ? Route::kRouterToCm : Route::kRouterToMm;
       c.dtein.no_ack = Num(tok[4]) != 0;
-      c.dtein.flag_base = Num(tok[5]);
-      c.dtein.flag_entry_bytes = Num(tok[6]);
+      // tok[5]/tok[6] 是旧的 flag_base / flag_entry_bytes，落点与标志表现在由
+      // kernel 配 CFG 表达，这两个字段读进来就丢。
       c.has_dtein = true;
     } else if (tag == "TSRTAB") {
       LOGCHECK(tok.size() == 6, "LoadBundle: TSRTAB 记录要五个字段。");

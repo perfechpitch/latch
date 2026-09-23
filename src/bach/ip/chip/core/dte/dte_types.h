@@ -8,13 +8,13 @@
 // 读一半、写一半各自排队各自推进，中间用 buffer 顶住速度差，完成时按 task_id
 // 合回一次 task_done。
 //
-// 任务从两个入口来，都在 Commit 边界汇成同一套内部任务模型：Router 入站帧的
-// Header 经 Header Parser 生成 Descriptor；DTE RV core 经寄存器写加 Trigger
-// 生成 Descriptor。
+// 任务统一从 RV core 的配置入口来：DTE RV core 经寄存器写加 Trigger 生成
+// Descriptor，进中央 TaskQueue，再在 Commit 边界按通道资源 dispatch 成同一套内部
+// 任务模型。
 //
 // 对齐飞书《DTE DSA》文档后，任务模型是 4 个通用段位：段 0 唯一与用途绑定 =
-// 包头（core_mask 2B + 软件包头 16B，stride 18B），段 1~3 通用，内容由软件约定，
-// DTE 不区分。各段端点属于 Mmem / Cmem / topK_table / header_table 的哪一个，
+// 包头（core_mask 2B + Hardware Used 1B + 软件包头 16B），段 1~3 通用，内容由软件
+// 约定，DTE 不区分。各段端点属于 Mmem / Cmem / topK_table / header_table 的哪一个，
 // 由该段地址所在的地址范围译码决定（同一个 Task 的不同段可以落在不同存储上）。
 
 #include <cstdint>
@@ -56,11 +56,12 @@ enum LaneHalf : uint64_t {
 
 // TaskQueue 深度不少于 16，与 TS 的 16 个 stream 对齐。
 constexpr uint64_t kTaskQueueDepth = 16;
+// 中央 TaskQueue 16 项，排在 Commit 之前：保存「已快照、尚未 dispatch」的完整
+// TaskDesc，不同通道的任务可乱序下发（对齐飞书《DTE DSA》）。
+constexpr uint64_t kCentralTaskQDepth = 16;
 // Completion RS 与 Done Pending 各 16 项。
 constexpr uint64_t kCompRsNum = 16;
 constexpr uint64_t kDonePendDepth = 16;
-// PendingTaskQ 16 项，排在 Commit 之前。
-constexpr uint64_t kPendingTaskQDepth = 16;
 // 一个通道一份中间 Buffer，8 KB，按 256 B 一项算 32 项，最大可掩盖 32 T 的
 // 访存延迟。五个通道各一份。
 constexpr uint64_t kDteBufFlits = 32;
@@ -113,9 +114,9 @@ struct Descriptor {
   // 业务上的 task_id 只在一个 stream 内唯一，同一拍在途的两笔任务可以带同一个
   // 值：一笔是 Router 送进来的搬入，另一笔是 RV core 配的搬出。
   uint64_t commit_seq = 0;
-  // Header Parser 给每一帧编的号。进核那一路用它认「这几拍属于哪一帧」：
-  // task_id 只说这一笔是任务链上的第几步，同一个 path 上连着来的几个包带的
-  // 是同一个值。
+  // 进核任务按到达顺序编的帧号：配置驱动的第 N 个进核任务对应第 N 个到达的数据包
+  // （FIFO），Lane 在准入时给进核任务编这个号，与 Header Parser 给每帧编的号对齐，
+  // 进核那一路用它认「这几拍属于哪一帧」。出核任务不用（走 commit_seq）。
   uint64_t frame_seq = 0;
   uint64_t task_id = 0;
   uint64_t stream_id = 0;

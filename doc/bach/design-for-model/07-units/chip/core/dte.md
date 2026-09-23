@@ -26,14 +26,14 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 | Route | 走哪个通道 | 说明 |
 | - | - | - |
-| Router → MM | 进核通道 `in_ch` | Header Parser 解析后 Commit 成对建立 |
+| Router → MM | 进核通道 `in_ch` | 配置驱动：RV core 配 CFG + trigger，Commit 成对建立 |
 | Router → CM | 进核通道 `in_ch` | 同上 |
 | MM → Router | 出核通道 `out_ch[n]`，n 由这条 path 的 VC 定 | 出口是 Router TX |
 | CM → Router | 出核通道 `out_ch[n]`，n 由这条 path 的 VC 定 | 出口是 Router TX |
 | MM → CM | 固定走 `out_ch[3]` | 出口切到 DMA WR1，硬件 route mask 只允许 CoreMem |
 | CM → MM | — | 本版本不支持，XBar 不提供 WR_CH1 到 Matrix Memory 的连接 |
 
-任务从两个入口来，都在 Commit 边界汇成同一套内部任务模型：Router 入站帧的 Header 经 Header Parser 生成 Descriptor；DTE RV core 经寄存器写加 Trigger 生成 Descriptor。
+任务只有一个入口：DTE RV core 配寄存器 + 写 `CFG_TRIGGER`，Regfile 快照 Descriptor 送进 Commit 的中央 TaskQueue（深度 16）。Router 入站帧不是任务入口——Header Parser 只是数据通路单元，把包头上下文存进 Header Table、逐拍转发 payload，与「进核任务 ↔ 数据包」按到达顺序 FIFO 配对。
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 1330" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="DTE DSA 第 0 层">
@@ -75,12 +75,12 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="1192.0" y="161.5" font-size="8.5" fill="#475569">　1. 目标通道读侧的 TaskQueue 项</text>
 <text x="1192.0" y="175.0" font-size="8.5" fill="#475569">　2. 同一通道写侧的 TaskQueue 项</text>
 <text x="1192.0" y="188.5" font-size="8.5" fill="#475569">　3. Completion RS 项</text>
-<text x="1192.0" y="202.0" font-size="8.5" fill="#475569">任一侧没有空间，Commit 整体保持，Header 入口向 Router 反压</text>
+<text x="1192.0" y="202.0" font-size="8.5" fill="#475569">任一侧没有空间，Commit 整体保持，队列里后面别的通道的任务可以先行</text>
 <text x="1192.0" y="215.5" font-size="8.5" fill="#475569">这条规则挡住“读已经开始、写还没有落脚点”的半任务</text>
-<text x="1192.0" y="229.0" font-size="8.5" fill="#475569">同时完成地址展开：源地址、目的地址、按任务边界切分的元数据</text>
-<text x="1192.0" y="242.5" font-size="8.5" fill="#475569">两个入口竞争准入时 Router 那一路优先：</text>
-<text x="1192.0" y="256.0" font-size="8.5" fill="#475569">　RV core 起的出核任务先进 PendingTaskQ 等 VC credit</text>
-<text x="1192.0" y="269.5" font-size="8.5" fill="#475569">　够了才申请那三样，不占 TaskQueue / Completion RS 项</text>
+<text x="1192.0" y="229.0" font-size="8.5" fill="#475569">地址展开在 Regfile Fire 时已算好，dispatch 只分配 commit_seq</text>
+<text x="1192.0" y="242.5" font-size="8.5" fill="#475569">中央 TaskQueue 从队头往后扫，dispatch 第一个三样齐的任务：</text>
+<text x="1192.0" y="256.0" font-size="8.5" fill="#475569">　出核任务 dispatch 前还要查 VC credit</text>
+<text x="1192.0" y="269.5" font-size="8.5" fill="#475569">　等 credit 的任务不占 Lane TaskQueue / Completion RS 项</text>
 <polygon points="599,44 710,44 701,74 590,74" fill="#f8fafc" stroke="#374151"/>
 <text x="650.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_done → TS</text>
 <polygon points="1289,44 1400,44 1391,74 1280,74" fill="#f8fafc" stroke="#374151"/>
@@ -111,8 +111,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="572" y="581" font-size="11" fill="#111827" font-weight="600">WR_CH0（进核写）· 进核通道 ×1</text>
 <text x="572.0" y="598.0" font-size="8.5" fill="#475569">从 inbound buffer 按任务边界取数</text>
 <text x="572.0" y="611.5" font-size="8.5" fill="#475569">经 DMA_XBAR 写入目标 Matrix Mem / Core Mem</text>
-<text x="572.0" y="625.0" font-size="8.5" fill="#475569">Router → MM：dst_addr 取自包头，不加 stream 偏移</text>
-<text x="572.0" y="638.5" font-size="8.5" fill="#475569">Router → CM：dst_addr 取自包头，再叠 stream 偏移</text>
+<text x="572.0" y="625.0" font-size="8.5" fill="#475569">Router → MM：落点由软件配 CFG_ADDRx_DST，不叠 stream 偏移</text>
+<text x="572.0" y="638.5" font-size="8.5" fill="#475569">Router → CM：落点由软件配 CFG_ADDRx_DST，再叠 stream 偏移</text>
 <text x="572.0" y="652.0" font-size="8.5" fill="#475569">　　+ stream_id × stream_stride</text>
 <text x="572.0" y="665.5" font-size="8.5" fill="#475569">写请求与响应 Drain 后进 Completion RS</text>
 <rect x="890" y="560" width="180" height="140.5" rx="4" fill="#f8fafc" stroke="#374151"/>
@@ -151,9 +151,9 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="572.0" y="998.0" font-size="8.5" fill="#475569">RouterTable 副本：按 PathID 查到 VC 与资源需求，软件写，三方一致</text>
 <text x="572.0" y="1011.5" font-size="8.5" fill="#475569">Reduce 包与其他出核包一样只查 VC credit</text>
 <text x="572.0" y="1025.0" font-size="8.5" fill="#475569">　本级 Rmem 资源由 TS 在下发前申请</text>
-<text x="572.0" y="1038.5" font-size="8.5" fill="#475569">　VC credit 不够就在 PendingTaskQ 等</text>
+<text x="572.0" y="1038.5" font-size="8.5" fill="#475569">　VC credit 不够就在中央 TaskQueue 里等</text>
 <text x="572.0" y="1052.0" font-size="8.5" fill="#475569">　ReduceModule 每完成一次 Reduce 并把 flit 发给下游就还一个</text>
-<text x="572.0" y="1065.5" font-size="8.5" fill="#475569">PendingTaskQ：没申请到下游 Stream 或 Reduce 资源的任务在这里等</text>
+<text x="572.0" y="1065.5" font-size="8.5" fill="#475569">中央 TaskQueue：已快照、尚未 dispatch 的任务在这里等（出核 dispatch 前查 credit）</text>
 <text x="572.0" y="1079.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4：按 VC0～3 多线程调度，单 VC 阻塞只阻塞该 buffer</text>
 <text x="572.0" y="1092.5" font-size="8.5" fill="#475569">进方向只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化</text>
 <text x="572.0" y="1106.0" font-size="8.5" fill="#475569">业务层 credit 分方向，先查 routing table 定方向再取 credit</text>
@@ -165,19 +165,19 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="1012.0" y="1011.5" font-size="8.5" fill="#475569">逻辑字段与检查：version / header_len · packet_type / route</text>
 <text x="1012.0" y="1025.0" font-size="8.5" fill="#475569">　dst_addr（在目的端范围内、满足对齐）· byte_count</text>
 <text x="1012.0" y="1038.5" font-size="8.5" fill="#475569">　task_id / stream_id（未完成上下文中不得重复占用）· attributes</text>
-<text x="1012.0" y="1052.0" font-size="8.5" fill="#475569">生成一个高层 Router 入站 Descriptor 请求 Commit</text>
-<text x="1012.0" y="1065.5" font-size="8.5" fill="#475569">一帧一任务：同一 Frame 只属于一个 Router→MM / Router→CM 任务</text>
+<text x="1012.0" y="1052.0" font-size="8.5" fill="#475569">把包头上下文存进 Header Table，不生成 Descriptor</text>
+<text x="1012.0" y="1065.5" font-size="8.5" fill="#475569">一帧一任务：同一 Frame 只属于一个进核任务，按到达顺序 FIFO 配对</text>
 <text x="1012.0" y="1079.0" font-size="8.5" fill="#475569">首拍固定为 Header：靠“上一帧 TLAST 已接受”判断下一拍是新 Header</text>
 <text x="1012.0" y="1092.5" font-size="8.5" fill="#475569">非法 Header 进 Drop Frame：不生成 Descriptor、不发存储器请求，</text>
 <text x="1012.0" y="1106.0" font-size="8.5" fill="#475569">　只消费到 TLAST 以恢复帧边界</text>
 <rect x="1360" y="960" width="350" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1372" y="981" font-size="11" fill="#111827" font-weight="600">Hmem</text>
-<text x="1372.0" y="998.0" font-size="8.5" fill="#475569">Hmem 288 B = 16 项 × {core_mask 2 B, sw_header 16 B}：</text>
+<text x="1372.0" y="998.0" font-size="8.5" fill="#475569">Hmem = 16 项 × {core_mask 2 B, hardware_used 1 B, sw_header 16 B}：</text>
 <text x="1372.0" y="1011.5" font-size="8.5" fill="#475569">　硬件包头与软件包头合并成一张表，按 stream_id 索引</text>
 <text x="1372.0" y="1025.0" font-size="8.5" fill="#475569">　软件只配一个地址；包头统一存 Hmem</text>
 <text x="1372.0" y="1038.5" font-size="8.5" fill="#475569">path_id 由 TS 直连送来，size 由 RV core 配寄存器；</text>
 <text x="1372.0" y="1052.0" font-size="8.5" fill="#475569">　不再有 path_id_table 与 task_len_table</text>
-<text x="1372.0" y="1065.5" font-size="8.5" fill="#475569">硬件只改 core_mask，RV core 改软件包头</text>
+<text x="1372.0" y="1065.5" font-size="8.5" fill="#475569">硬件只改 core_mask 与 hardware_used，RV core 改软件包头</text>
 <text x="1372.0" y="1079.0" font-size="8.5" fill="#475569">进核：只在需要分配新 stream_id 时才存包头（hw_header_op=1），</text>
 <text x="1372.0" y="1092.5" font-size="8.5" fill="#475569">　中间环节的 reduce 与 concat 任务直接丢弃</text>
 <text x="1372.0" y="1106.0" font-size="8.5" fill="#475569">出核：按 task_id 查出 path_id 与 size 改写进硬件包头</text>
@@ -200,7 +200,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="1410" y="90" font-size="8.5" fill="#6b7280" text-anchor="start">RV core 写 19 项配置寄存器，最后写 CFG_TRIGGER</text>
 <path d="M1180.0 200.5 L1140.9 187.3" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
 <rect x="1113.8" y="187.0" width="92.4" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="1160" y="194.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">Router 优先，RV 进 PendingTaskQ</text>
+<text x="1160" y="194.5" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">RV 配 CFG + trigger → 中央 TaskQueue</text>
 <path d="M1164.5 1194.5 L1160.1 1128.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
 <text x="1250" y="1216.5" font-size="8.5" fill="#6b7280" text-anchor="start">帧：首拍 Header，后续 Payload</text>
 <path d="M1200.0 960.0 L1200.0 701.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
@@ -259,14 +259,14 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F1 | 首拍锁存 Header，检查 opcode / route、长度、身份字段和帧格式 |
 | F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
-| F3 | 生成一个高层 Router 入站 Descriptor，请求 Commit 为 RD_CH0 与 WR_CH0 同时分配 TaskQueue 项和完成跟踪项 |
-| F3a | Descriptor 的 `stream_id` 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致。`task_id` 按 `path_id` 查本地的 `path_task_map`，由软件配成收方链上那一项搬入任务的下标：这一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号。一个 `path_id` 只能对一项 |
-| F3c | Descriptor 的 `dst_addr` 取自包头，落 Core Mem 的那一档收方再叠自己的 stream 偏移，落 Matrix Mem 的那一档就是最终地址。落哪块存储（`route`）与回不回 Ack（F3d）是本 core 的进核配置，由 SCP 在 core 配置阶段逐 core 写，对应 bundle 的 `DTEIN` 记录：业务模式下计算 core 落 Core Mem、回 Ack，B core 与 R core 落 Matrix Mem、不回 Ack。weights 加载阶段进来的都是权重，每个 core 都落 Matrix Mem、不回 Ack，切业务模式时 SCP 按 `DTEIN` 重配。坏 core 与不派角色的 core 不配这一项。发方那一侧没有指定收方落哪块存储的寄存器，包头里因此只带地址 |
+| F3 | 把包头上下文（core_mask / hardware_used / gpu_id / token_id）存进 Header Table，逐拍转发 payload；不生成 Descriptor——任务由 RV core 配置驱动 |
+| F3a | Descriptor 的 `stream_id` / `task_id` / `user_id` / `path_id` / `vcid` 由 RV core 经 STUPV 直连送来（F14a），不取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致 |
+| F3c | Descriptor 的 `dst_addr` 由软件配 `CFG_ADDRx_DST` + `stream_id × stride` 展开（F46/F47），落哪块存储由 `CFG_TRANS_MODE` 的 route 编码决定。回不回 Ack（F3d）是本 core 的进核配置，由 SCP 逐 core 写（`InboundCfg.no_ack`），对应 bundle 的 `DTEIN` 记录：业务模式下计算 core 落 Core Mem、回 Ack，B core 与 R core 落 Matrix Mem、不回 Ack；weights 加载阶段进来的都是权重，落 Matrix Mem、不回 Ack。坏 core 与不派角色的 core 不配这一项 |
 | F3d | B core 与 R core 的进核配置是不回 Ack（F3c）：这两种 core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象 |
 | F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
 | F4 | 一帧一任务：同一个 AXI-Stream Frame 只属于一个 Router → MM 或 Router → CM 任务，不允许任务间交织 |
 | F5 | 首拍固定为 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号 |
-| F6 | Header Commit 成功后才允许 Payload Fire；TLAST 标识最后一个 Payload beat；`byte_count` 为 0 时可由 Header beat 同时携带 TLAST |
+| F6 | Payload Fire 由 inbound buffer 是否有空决定（payload 口 ready，满则 TREADY 反压）；TLAST 标识最后一个 Payload beat；`byte_count` 为 0 时可由 Header beat 同时携带 TLAST |
 | F7 | TKEEP 按字节粒度生效，每个 Payload Fire 累计 TKEEP 有效字节，TLAST 时与 `byte_count` 比较 |
 | F8 | 非法 Header 进 Drop Frame 流程：不生成 Descriptor、不发存储器请求，只消费到 TLAST 以恢复帧边界 |
 
@@ -275,10 +275,10 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | 编号 | 功能 |
 | - | - |
 | F9 | 一个高层任务必须同时拿到三样才接纳：目标通道读侧的 TaskQueue 项、写侧的 TaskQueue 项、Completion RS 项 |
-| F10 | 任一侧没有空间时 Commit 整体保持，Header 入口向 Router 反压。这条规则挡住“读已经开始、写还没有落脚点”的半任务 |
-| F11 | 准入时给这笔分配内部序号（commit_seq），进核那一笔记下 DPU 的 gpu_id / token_id，出核那一笔造好要发出去的包。逐段地址展开与端点译码已在入口（regfile Fire / Header Parser）算好 |
-| F12 | 两个入口竞争准入时 Router 入站那一路（parser）优先：一拍只准入一笔，RV core 起的任务排在后面，先进 PendingTaskQ 等 VC credit 再来申请（F54） |
-| F13 | 两个任务入口在 Commit 边界汇成同一套内部任务模型 |
+| F10 | 任一侧没有空间时 Commit 整体保持，队列里后面别的通道的任务可以先行（不同通道可乱序下发）。这条规则挡住“读已经开始、写还没有落脚点”的半任务 |
+| F11 | dispatch 时给这笔分配内部序号（commit_seq）；进核那一笔的 gpu_id / token_id 由 Header Parser 记进 Hmem，出核那一笔造好要发出去的包。逐段地址展开与端点译码已在 Regfile Fire 算好 |
+| F12 | 中央 TaskQueue 从队头往后扫，一拍 dispatch 一笔三样齐的任务；队头那个出核任务堵在 VC credit 上时，后面别的通道的任务可以先行（不同通道可乱序下发） |
+| F13 | 只有一个任务入口：所有任务（进核 + 出核）都由 RV core 配 CFG + trigger 起，在 Commit 的中央 TaskQueue 汇成同一套内部任务模型 |
 | F14 | RV core 侧的配置序列：逐段写 19 项任务配置寄存器（0x004~0x04C，段 i 一组 `CFG_ADDRi_SRC` / `CFG_ADDRi_DST` / `CFG_STRIDEi` / `CFG_DATA_LENi`，加 `CFG_SM_W_ADDR` / `CFG_SM_W_DATA` / `CFG_TRANS_MODE`），一条指令写一个，最后写 `CFG_TRIGGER`（0x0000）提交任务。必须最后写 Trigger |
 | F14a | 写 Trigger 那一拍把 19 项配置（`temp_valid` 时以模板为底、显式写过的字段覆盖模板，否则全取 Cfg Reg File）与五个直连身份信号一起采下来拼成 4 段位 Descriptor。五个身份不由软件写：`streamID` / `taskID` / `userID` / `pathID` / `vcid` 从 RV core 直连过来，前四项取自 CSR，`vcid` 是 TS 随任务下发的 |
 | F14b | 一笔配置写在被收下之前一直保持同一个序号。每拍换号的话 DSA 按序号去重就把同一笔认成好几笔，写一次执行一次的 Trigger 会被执行好几遍 |
@@ -312,7 +312,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 | 编号 | 功能 |
 | - | - |
-| F27 | 只在同一笔任务的 RD 与 WR 两侧条件都满足时产生 `task_done`（Join）。认哪两半属于同一笔用的是 Commit 准入时分配的内部序号：`task_id` 只在一个 stream 内唯一，同一拍在途的两笔任务可以带同一个值（一笔是 Router 送进来的搬入，另一笔是 RV core 配的搬出）。向 TS 上报时用的仍是 `stream_id` 与 `task_id` |
+| F27 | 只在同一笔任务的 RD 与 WR 两侧条件都满足时产生 `task_done`（Join）。认哪两半属于同一笔用的是 Commit dispatch 时分配的内部序号（`commit_seq`）：`task_id` 只在一个 stream 内唯一，同一拍在途的两笔任务可以带同一个值。向 TS 上报时用的仍是 `stream_id` 与 `task_id` |
 | F28 | 同一拍多个 Join 命中时全部写入 Done Pending，不允许覆盖或丢失，由 Done Pending 负责串行化 |
 | F29 | 向 TS 的报告是 exactly-once |
 | F30 | 六个完成层级：`queued`（已进 TaskQueue 未装载）→ `active`（由对应 AGCU / Ctrl 执行）→ `issue_done`（该侧最后一个请求已 Fire）→ `drained`（相关响应、Buffer 数据和外部副作用均已收敛）→ `join_done`（同一 task_id 的 RD 与 WR 都满足）→ `task_done`（进 Done Pending 并与 TS 成功握手） |
@@ -322,7 +322,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 | 编号 | 功能 |
 | - | - |
-| F32 | Inbound（Router → MM / CM）：Router 以 AXI-Stream 发 Header → Header Parser 生成 Descriptor → Commit 为 RD_CH0 与 WR_CH0 同时分配 → RD_CH0 控制 Payload 写入 inbound buffer，附带 task_id、有效字节与任务边界 → WR_CH0 从 buffer 按任务边界取数经 DMA_XBAR 写入目标存储 → 两侧按 task_id Join |
+| F32 | Inbound（Router → MM / CM）：RV core 配 CFG + trigger 起任务 → Commit 从中央 TaskQueue dispatch，为 RD_CH0 与 WR_CH0 同时分配 → Router 以 AXI-Stream 发 Header，Header Parser 存包头、转发 payload → RD_CH0 控制 Payload 写入 inbound buffer，附带 task_id、有效字节与任务边界（进核任务与包按到达顺序 FIFO 配对）→ WR_CH0 从 buffer 按任务边界取数经 DMA_XBAR 写入目标存储 → 两侧按 task_id Join |
 | F33 | Outbound（MM / CM → Router）：Commit 原子拆成 RD_CH1 与 WR_CH1 → RD_CH1 的 AGCU 生成源端读地址，Read Ctrl 经 DMA_XBAR 读取，把返回数据连同 task_id 和边界元数据写入 outbound buffer → WR_CH1 按固化的 Route 选 Router TX 或 CoreMem Egress，从 buffer 按任务边界发出 → 同一任务的两侧都完成且 buffer 里该任务的数据已排空后才生成 `task_done` |
 | F34 | Inner（MM → CM）：完全走出核通道，固定占 `out_ch[3]`。先锁定 Matrix Mem 为读源、Core Mem 为写目标；数据经 DMA_XBAR RD、`ch1_rd_ctrl` 和 outbound buffer 到达 `ch1_wr_ctrl`；CH1 的出口绑定此时选 DMA WR1 而不是 Router TX；WR1 的硬件 route mask 只允许 CoreMem，因此不会把出核通道的数据写回 Matrix Mem |
 | F35 | 存储读、Buffer 搬运和 WR1 写可以流水重叠，但每一级仍各自遵守 valid / ready |
@@ -333,17 +333,17 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F36 | 一次搬运的对象是一个 MSG 包，进了 core 就按内容归到 4 个段位、各落各的存储：段 0 绑定包头，段 1~3 通用、内容由软件约定装 data / scale / topK。每个段落的存储由该段地址高 4 bit tag 译码决定（0x0 Cmem 数据 / 0x1 Mmem 数据 / 0x2 scale 旁带 / 0x3 topK_table / 0x4 header_table） |
 | F37 | topK 段由地址译码命中 `topK_table`（tag 0x3），进核落地时经旁带 `mu_topk` 按 `stream_id` 写进 MU 的 `topK_ep_table`（256 B 一拍、整笔只写一次）。DTE 与 MU 之间有这一条直连通路，不再走 `cmem_wr` 的独立 topK 区 |
-| F38 | 包头**统一合并成一张表**存 Hmem（Header Table，地址 0x3000~0x3FFF），16 项按 `stream_id` 索引，每项 `{core_mask 2 B, sw_header 16 B}` = 18 B，共 `16 × 18 B = 288 B`，软件只配一个地址。计算 core 的 data 落 Core Mem 按 stream 分片，scale 落 Core Mem 的 scale 旁带，topK 经旁带写 MU（F37） |
+| F38 | 包头**统一合并成一张表**存 Hmem（Header Table，地址 0x3000~0x3FFF），16 项按 `stream_id` 索引，每项 `{core_mask 2 B, hardware_used 1 B, sw_header 16 B}`，软件只配一个地址。计算 core 的 data 落 Core Mem 按 stream 分片，scale 落 Core Mem 的 scale 旁带，topK 经旁带写 MU（F37） |
 | F39 | B core / R core 上：包头同样进 Hmem 那张表（F38），不另开 Core Mem 空间。data 落 Matrix Mem，它的 scale 随它存进 Matrix Mem 的 scale 部分（F49a）；topK 同样由 topK 段译码命中后经旁带写 MU（F37），DTE 不再把它存进 Core Mem 或 Matrix Mem 的独立 topK 区 |
 | F40 | **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 由 TS 直连送过来（TS 配置时就带 `user_id` / `stream_id` / `path_id` / `task_id` 四样），`size` 由 RV core 配寄存器给，或按 `data_len` 算出来 |
-| F41 | 包头分工：硬件只改硬件包头（`core_mask`），RV core 改软件包头 |
+| F41 | 包头分工：硬件只改硬件包头（`core_mask` 与 `hardware_used`），RV core 改软件包头 |
 | F42 | 每段长度由各自的 `CFG_DATA_LENi`（字节）定：段 0 是包头（18 B），段 1~3 装 data / scale / topK 的内容由软件约定，data 段配 data 字节数、scale 段配 scale 字节数、topK 是旁带长度记 0（内容随包整笔写 MU）。各段落哪块存储由地址译码决定，长度不再按方向盖不同范围 |
 | F42a | `CFG_DATA_LEN` 是 16 bit，以字节为单位，一段最长 65535 B。段 0（包头）18 B 不要求对齐；段 1~3 软件须保证 8 B 整数倍 |
 | F43 | 进核时计算 core 只在这个 token 需要分配新 `stream_id` 时才存包头（`hw_header_op = 1`），中间环节的 reduce 与 concat 任务直接丢弃（`hw_header_op = 0`）；广播 token 进核必然带 topK，必须存下来 |
 | F44 | 出核时改写硬件包头：`path_id` 用 TS 送来的那个，`size` 用 RV core 配的寄存器（Concat 这类算完数据量会变的场景就靠它），`core_mask` 只在 Bach 做 MoE Route 时改；计算结果出核不带 topK |
 | F44a | 出核任务要发的那个包在 Commit 准入时就建好，身份与长度按 F44 填；读侧从存储取回的每一块按已填字节数排进它的 payload |
 | F44c | 出核造包时把 DTE 模板里的 `dst_addr` 抄进包头：那一项配的是收方的落点，发方这一笔自己用不着它 |
-| F44b | 出核不改的包头字段沿用进核那一笔的：DPU 写的 `gpu_id` 与 `token_id` 在进核那一笔记进 Hmem 里这个 `stream_id` 的软件包头，出核造包时取回来填上 |
+| F44b | 出核不改的包头字段沿用进核那一笔的：DPU 写的 `gpu_id` 与 `token_id` 在进核时由 Header Parser 记进 Hmem 里这个 `stream_id`，出核造包时取回来填上 |
 | F45 | 支持纯包头任务（`data_len = 0`），进出 core 都可以 |
 | F46 | 地址的一条规矩：软件逐段配基址（`CFG_ADDRi`）与 stride（`CFG_STRIDEi`），偏移由硬件用 `stream_id` 算出来：`stream_start_i = CFG_ADDRi + stream_id × CFG_STRIDEi`。`stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE，软件不需要知道这个 token 落在 Core Mem 的哪一片。stride 配 0 退化为纯物理地址 |
 | F47 | 通用寻址式子是 `stream_start_i = CFG_ADDRi + stream_id × CFG_STRIDEi`，**Cmem 一侧用低 20 bit、Mmem 一侧用低 26 bit**：Mmem 段软件直接配物理地址（stride 配 0），Cmem 段软件配段内偏移、硬件叠 `stream_id × CFG_STRIDEi` 再加 stream 基址。route 100（Mmem→Cmem）源端不叠 stride。每段落哪块存储由该段地址高 4 bit tag 译码（0x0 Cmem / 0x1 Mmem / 0x2 scale / 0x3 topK / 0x4 header） |
@@ -357,7 +357,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F50 | 任务数据传输完成后，按 `sharemem_waddr` / `sharemem_data` 写 shareMem，然后通知 TS |
 | F51 | 只在 B core 与 R core 使用，存 user_id 与 token entry 的 valid 标志：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid |
-| F51a | 搬入那一笔的标志由 Header Parser 建描述符时一并填：表的基址与一个槽位多大是本 core 的进核配置，由 SCP 在 core 配置阶段逐 core 写，对应 bundle 的 `DTEIN` 记录，B core 配 token 槽位，R core 配行结果槽位，计算 core 不配；第几项按包头的 `dst_addr` 除以槽位大小算，写进去的值是 valid。搬入的描述符不经 RV core 软件，标志的地址因此不能逐笔由软件配（原文只说了写哪里，没说搬入这一笔的地址怎么来） |
+| F51a | 搬入那一笔的标志由 kernel 配 CFG 表达（`CFG_SM_W_ADDR` / `CFG_SM_W_DATA` + `wr_sharemem_flag`），表的基址与槽位大小由软件逐笔配；第几项按落点除以槽位大小算，写进去的值是 valid。B core 配 token 槽位，R core 配行结果槽位，计算 core 不配 |
 
 ### 出核前的资源与流控
 
@@ -368,9 +368,9 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | 编号 | 功能 |
 | - | - |
 | F52 | DTE 内维护一份 RouterTable 副本，按 PathID 查到 VC 与资源需求；软件负责写入并保证与 Router、ReduceModule 三方一致 |
-| F53 | 发数据之前实时检查该任务所属 VC 通路上的 flit credit，不够就让任务在 `PendingTaskQ` 等；下游 Stream / Rmem 资源不在这里查，TS 下发之前已经申请到 |
-| F54 | `PendingTaskQ` 排在 Commit **之前**：RV core 配好一个出核任务后，VC 取 TS 随任务下发的 `vcid`，资源需求按 `path_id` 查，credit 不够的进 `PendingTaskQ` 等，够了才去 Commit 申请那三样。等 credit 的任务因此不占 TaskQueue 项，也不占 Completion RS 项 |
-| F55 | `PendingTaskQ` 满时拉低 `dsa_cfg` 的 `req_ready`，反压 DTE RV core，该 RV core 不能参与下一个用户的搬运。反压只落到出核这条链上，进核那条链的 Commit 资源不受影响 |
+| F53 | 发数据之前实时检查该任务所属 VC 通路上的 flit credit，不够就让任务在中央 TaskQueue 里等；下游 Stream / Rmem 资源不在这里查，TS 下发之前已经申请到 |
+| F54 | 中央 TaskQueue 排在 dispatch **之前**：RV core 配好任务后 Descriptor 先进中央 TaskQueue；dispatch 时出核任务查 VC credit，credit 不够的留在队列里等。等 credit 的任务因此不占 Lane TaskQueue 项，也不占 Completion RS 项 |
+| F55 | 中央 TaskQueue 满（16）时拉低 `dsa_cfg` 的 `req_ready`，反压 DTE RV core，该 RV core 不能参与下一个用户的搬运 |
 | F55a | 五个通道对每块存储的读与写各只有一个 master 口，由 DMA_XBAR 轮转仲裁。读与写各走各的口、各有各的轮转，一拍可以同时发一读一写。通道在入口各占几格，按序号把请求放进来；`req_ready` 报的是那几格还收不收得下 |
 | F55b | 四个出核通道对 Router 只有一个 `out_core_data_ch`，同样轮转仲裁。授权粘在一个通道上直到它把带 `tlast` 的那一拍发完，一个包的几拍中间不会插进别的包 |
 | F56 | Reduce 包与其他出核包一样只查 VC 通路上的 flit credit；本级 Rmem 的 credit 由 TS 按用户记，有 credit 才下发 reduce 任务 |
@@ -418,7 +418,7 @@ port router_credit (slave, 电平 + 脉冲, clk)          // Router 侧回来的
   in  vc_credit[3:0][7:0]
 port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss
   in  req_valid · req_we · req_addr[13:0] · req_wdata[31:0]
-  out req_ready                                         // = 配置通路未反压；上一笔 Descriptor 未被 Commit 收下（PendingTaskQ 满）时拉低
+  out req_ready                                         // = 配置通路未反压；中央 TaskQueue 满（16）时拉低
 port dsa_rdata (master, 脉冲, clk)                    // 读寄存器的异步返回
   out valid · rdata[31:0]
 port dsa_ids (slave, 电平, clk)                       // DTE RV core 的 CSR 直连；写 task_trigger 那一拍采样
@@ -458,7 +458,7 @@ mem rtab_copy        FF 阵列   64 项，RouterTable 的外部副本           
 mem path_task_map    FF 阵列   64 × task_id[5:0]，按 path_id 索引                      1R1W  boot 期由软件配          复位 0
 mem inbound_cfg      FF        {route, no_ack, flag_base, flag_entry_bytes}            1R1W  SCP 在 core 配置阶段写（bundle 的 DTEIN），weights 加载与业务模式各配一次  复位 0
 mem stream_cache     FF 阵列   3 方向 × 16 项 × {valid, user_id[15:0]}                 1R1W  Router 的 User Resource Allocation Table 的 cache，只跟随不分配  复位空
-mem pending_taskq    FIFO      16 × Descriptor                                        1W1R  排在 Commit 之前，资源没申请到的出核任务在这里等；满则拉低 dsa_cfg 的 req_ready  复位空
+mem central_taskq    FIFO      16 × TaskDesc                                           1W1R  中央 TaskQueue，收 Regfile Fire 出的「已快照、未 dispatch」任务；dispatch 时查通道资源，满则拉低 dsa_cfg 的 req_ready  复位空
 mem out_vc_buf[4]    FIFO      每 VC 一个，深度按整包容量                              1W1R  某 VC 阻塞只阻塞该 buffer  复位空
 mem cfg_file         FF 阵列   19 项 × 32 bit（4 段 × {src,dst,stride,len} + SM_W_ADDR/DATA + TRANS_MODE）+ 19 bit dirty 掩码  1RW  显式写过的字段覆盖模板；Trigger Fire 后清 dirty  复位 0
 mem template[8]      FF 阵列   8 套 × 19 项 × 32 bit，每套 128 B 对齐（0x1000~0x1FFF）    1RW   RV core 写；temp_valid 时以它为底、Cfg Reg File 覆盖  复位 0
@@ -543,7 +543,7 @@ stall_cycles  = cycles(valid && !ready)
   <rect x="150" y="414" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="160" y="428" font-size="8.5" fill="#92400e">M9</text>
   <text x="292" y="428" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
-  <text x="160" y="448" font-size="11" fill="#7c2d12">PendingTaskQ</text>
+  <text x="160" y="448" font-size="11" fill="#7c2d12">中央 TaskQueue</text>
   <text x="20" y="524" font-size="10.5" fill="#374151">各通道的 Active Context 彼此独立：任一条到 issue_done 就能激活下一个任务，不等配对的那一条。</text>
   <text x="20" y="552" font-size="10.5" fill="#374151">内部启动延迟 85 T 里，75 T 是 DTE RV core 上那 50 条算地址的指令，M1 到 M3 三拍加两级端口打拍构成“流水启动 5 T”。</text>
   <text x="20" y="580" font-size="10.5" fill="#374151">M9 排在 M2 之前：等资源的出核任务不占 TaskQueue 项，也不占 Completion RS 项。</text>
@@ -625,7 +625,7 @@ stall_cycles  = cycles(valid && !ready)
   <text x="250" y="119" font-size="10.5" fill="#475569">2. !ok → 整体保持，tready = 0，向 Router 反压</text>
   <text x="250" y="139" font-size="10.5" fill="#475569">3. ok → 分配 commit_seq；进核记 gpu_id/token_id，出核造包（F44）</text>
   <text x="250" y="159" font-size="10.5" fill="#475569">4. ok → {task_q[RD].push(d), task_q[WR].push(d), comp_rs 占一项}</text>
-  <text x="250" y="183" font-size="10" fill="#9ca3af">一拍只准入一笔，Router 那一路优先，RV core 先进 PendingTaskQ</text>
+  <text x="250" y="183" font-size="10" fill="#9ca3af">一拍 dispatch 一笔：从队头扫，目标通道就绪的任务先行（不同通道可乱序）</text>
   <path d="M188 66 L231 66" stroke="#475569" marker-end="url(#are2)" fill="none"/>
   <path d="M188 145 L231 145" stroke="#475569" marker-end="url(#are2)" fill="none"/>
   <path d="M188 199 L231 199" stroke="#475569" marker-end="url(#are2)" fill="none"/>
@@ -861,7 +861,7 @@ stall_cycles  = cycles(valid && !ready)
 </svg>
 ```
 
-### M9 · PendingTaskQ
+### M9 · 中央 TaskQueue
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 927 262" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -883,7 +883,7 @@ stall_cycles  = cycles(valid && !ready)
   <text x="104" y="219" font-size="10" fill="#374151" text-anchor="middle">stream_cache · FF 3×16 项 · 1R1W</text>
   <rect x="731" y="42" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="735" y="46" width="168" height="34" fill="none" stroke="#374151"/>
-  <text x="819" y="63" font-size="10" fill="#374151" text-anchor="middle">pending_taskq · FIFO 16 项 · 1W1R</text>
+  <text x="819" y="63" font-size="10" fill="#374151" text-anchor="middle">central_taskq · FIFO 16 项 · 1W1R</text>
   <rect x="731" y="96" width="176" height="70" fill="#f1f5f9" stroke="#334155"/>
   <rect x="731" y="96" width="176" height="18" fill="#334155"/>
   <text x="819" y="109" font-size="10.5" fill="#ffffff" text-anchor="middle">HDR_CMT</text>
@@ -892,14 +892,14 @@ stall_cycles  = cycles(valid && !ready)
   <rect x="232" y="25" width="455" height="212" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="41" font-size="8.5" fill="#6b7280">M9</text>
   <text x="673" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="250" y="61" font-size="12" fill="#111827">PendingTaskQ · 出核任务先拿授权</text>
+  <text x="250" y="61" font-size="12" fill="#111827">中央 TaskQueue · 所有任务先排队，dispatch 时拿授权</text>
   <text x="250" y="83" font-size="10.5" fill="#475569">1. e = rtab_copy[path_id]，取这条 path 是不是 Reduce；VC 取 desc.vcid</text>
-  <text x="250" y="103" font-size="10.5" fill="#475569">2. 查 vc_credit[desc.vcid] 够不够整包；下游 stream / Rmem 资源不查，TS 下发前已拿到</text>
+  <text x="250" y="103" font-size="10.5" fill="#475569">2. 出核查 vc_credit[desc.vcid] 够不够整包；下游 stream / Rmem 资源不查，TS 下发前已拿到</text>
   <text x="250" y="123" font-size="10.5" fill="#475569">3. reduce 包同样只看 VC credit，本级 Rmem 资源 TS 下发前已拿到</text>
-  <text x="250" y="143" font-size="10.5" fill="#475569">4. 不够 → pending_taskq.push(desc)，不进 M2；router_credit 到 → 出队进 M2</text>
+  <text x="250" y="143" font-size="10.5" fill="#475569">4. 不够 → 留在队列，不进 M2；router_credit 到 → 再 dispatch 进 M2</text>
   <text x="250" y="163" font-size="10.5" fill="#475569">5. stream_credit_vld 回来时按 action 更新 stream_cache；重发前本地先记账</text>
-  <text x="250" y="187" font-size="10" fill="#9ca3af">反压只落在出核这条链，进核的 Commit 资源不受影响</text>
-  <text x="250" y="205" font-size="10" fill="#9ca3af">pending_taskq 满 → dsa_cfg.req_ready = 0；stream_cache 只跟随，不分配</text>
+  <text x="250" y="187" font-size="10" fill="#9ca3af">队头出核任务堵在 credit 上时，后面别的通道的任务可以先行</text>
+  <text x="250" y="205" font-size="10" fill="#9ca3af">central_taskq 满 → dsa_cfg.req_ready = 0；stream_cache 只跟随，不分配</text>
   <path d="M188 49 L231 49" stroke="#475569" marker-end="url(#are9)" fill="none"/>
   <path d="M188 111 L231 111" stroke="#475569" marker-end="url(#are9)" fill="none"/>
   <path d="M188 165 L231 165" stroke="#475569" marker-end="url(#are9)" fill="none"/>
@@ -946,15 +946,15 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | 靠上一帧 TLAST 判断下一拍是新 Header | F5 | `frame_boundary` |
 | TKEEP 累计与 byte_count 比较 | F7 | `tkeep_count` |
 | 非法 Header 进 Drop Frame，只消费到 TLAST | F8 | `drop_frame` |
-| Commit 配对接纳：三样同时拿到才接纳 | F9、F10 | `commit_pairing` |
-| 进核任务的 stream_id 取自包头，task_id 按 path_id 查表 | F3a | `inbound_ids` |
-| 进核那一路按帧号认帧，同 path 的几个包不串 | F3b | `frame_seq_tag` |
+| Commit dispatch 三样一起拿：Lane 读/写槽 + Completion RS 都齐才下发 | F9、F10 | `dispatch_all_three` |
+| 进核任务的 stream_id / task_id 由软件配 CFG 表达，Header Parser 只按到达顺序存包头 | F3a | `inbound_ids` |
+| 进核任务 ↔ 数据包按到达顺序 FIFO 配对，同 path 的几个包不串 | F3b | `fifo_pairing` |
 | 写 Trigger 那一拍采样五个直连身份信号（STUPV） | F14a | `trigger_samples_ids` |
 | 一笔配置写在被收下之前保持同一个序号 | F14b | `cfg_seq_stable` |
 | DMA_XBAR 轮转仲裁五个通道对一块存储的访问 | F55a | `dma_xbar_arbitration` |
 | 四个出核通道轮转仲裁 Router 那一个口，一个包不被插断 | F55b | `out_arb_frame` |
 | 出核包在 Commit 建好，读回的数据排进它的 payload | F44a | `outbound_packing` |
-| 两个入口竞争准入时 Router 优先，RV core 先进 PendingTaskQ | F12 | `commit_bank_priority` |
+| 所有任务统一走 RV core 配 CFG + trigger，Regfile Fire 进中央 TaskQueue | F12 | `central_taskq` |
 | 必须最后写 CFG_TRIGGER，写 0x0000 提交任务 | F14 | `trigger_order` |
 | temp_valid 时以模板为底、显式写字段覆盖 | F14a | `template_override` |
 | 通道之间乱序，通道内读写两半独立 | F17 | `channel_ooo` |
@@ -982,7 +982,7 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | 每段长度由各自的 CFG_DATA_LENi 配，不再按方向盖不同范围 | F42 | `data_len_scope` |
 | hw_header_op 决定存不存包头 | F43 | `hw_header_op` |
 | 出核改写 path_id / size / core_mask | F41、F44 | `header_rewrite` |
-| 进核搬运的落点取自包头，发方在出核造包时写进去 | F3c、F44c | `dst_from_header` |
+| 进核搬运的落点由软件配 CFG_ADDRx_DST，出核造包时把落点写回包头 dst_addr | F3c、F44c | `dst_from_header` |
 | B core 与 R core 上进核那一笔不回 Ack | F3d | `inbound_no_ack` |
 | 进核落点、回不回 Ack 与标志表几何由 SCP 按 `DTEIN` 逐 core 配 | F3c、F51a | `inbound_cfg` |
 | DPU 的 gpu_id 与 token_id 随数据出核 | F44b | `dpu_header_relay` |
@@ -995,9 +995,9 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | shareMem 写：搬入置 valid、搬出置 invalid | F50、F51 | `sharemem_flag` |
 | 搬入那一笔的标志项按落点算，不逐笔由软件配 | F51a | `inbound_flag_index` |
 | 三份 RouterTable 副本一致 | F52 | `dte_rtab_copy` |
-| 出核前置申请，没拿到就在 PendingTaskQ 等 | F53 | `dte_pending_taskq` |
-| PendingTaskQ 排在 Commit 之前，等资源的任务不占 Completion RS | F54 | `pending_before_commit` |
-| PendingTaskQ 满只反压出核这条链，不影响进核 | F55 | `pending_full_backpressure` |
+| dispatch 前查通道资源，没拿到就在中央 TaskQueue 等 | F53 | `central_taskq` |
+| 中央 TaskQueue 排在 dispatch 之前，等资源的任务不占 Lane 队列 / Completion RS | F54 | `dispatch_before_lane` |
+| 中央 TaskQueue 满反压 Regfile（拉低 req_ready），不影响已入队的任务 | F55 | `central_q_backpressure` |
 | Reduce 包只查 VC credit，本级 Rmem 资源由 TS 申请 | F56 | `dte_reduce_vc_only` |
 | 出方向 4 个 VC buffer，单 VC 阻塞不影响其他 | F59 | `dte_vc_buffers` |
 | 进方向单 VC，搬完按 flit 释放 VC credit | F60 | `dte_single_vc_in` |

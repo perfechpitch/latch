@@ -3,13 +3,13 @@
 
 // DTE DSA 这一组八类模块的装配。
 //
-// 自身没有 Cycle()：构造各模块、把 Commit 的三样资源接到 Lane 与 Completion RS
+// 自身没有 Cycle()：构造各模块、把 Commit dispatch 的任务接到 Lane 与 Completion RS
 // 上、把 Header Parser 收下的 Payload 接进进核通道。
 //
 // 里面装了几件：
-//   HeaderParser   1 个，Router 入站帧的第一道
+//   HeaderParser   1 个，Router 入站帧的数据通路单元（存包头 + 转发 payload）
 //   DteRegfile     1 个，RV core 写的软件配置寄存器，写 trigger 起一笔任务
-//   Commit         1 个，两个任务入口在这里汇成同一套内部任务模型
+//   Commit         1 个，中央 TaskQueue + 按通道资源 dispatch
 //   Hmem           1 个，含 Fast LUT、RouterTable 副本、stream_cache
 //   Lane           5 个：in_ch 加 out_ch[0..3]
 //   DteXbar        1 个，五个通道与两块存储之间的仲裁
@@ -36,19 +36,13 @@ namespace latch {
 namespace bach {
 
 // 进核那一笔的配置，SCP 在 core 配置阶段逐 core 写。
+//
+// 对齐飞书《DTE DSA》后，进核改成配置驱动：落点与 shareMem 标志表都由 kernel 配
+// CFG 寄存器表达（route 走 CFG_TRANS_MODE，flag 走 CFG_SM_W_ADDR/DATA +
+// wr_sharemem_flag），这里只留 no_ack 一档——「进核不回 Ack」是 SCP 配的档位，
+// 与 kernel 的 CFG 无关。
 struct InboundCfg {
-  // 落 Core Mem 还是 Matrix Mem。落点的地址取自包头，落哪一块由这一项定：业务
-  // 模式下计算 core 落 Core Mem、B core 与 R core 落 Matrix Mem；weights 加载阶
-  // 段进来的是权重，一律落 Matrix Mem。
-  Route route = Route::kRouterToCm;
-  // 进来的包不建 stream 表项时，进核那一笔不回 Ack：B core、R core 与 weights
-  // 加载阶段是这一档。
-  bool no_ack = false;
-  // 标志表：进核那一笔搬完之后给落点所在的槽位置 valid 标志。表在 Share Mem
-  // 里，一项 4 B，第几项按落点除以槽位大小算。flag_entry_bytes 为 0 表示本 core
-  // 不置标志。
-  uint64_t flag_base = 0;
-  uint64_t flag_entry_bytes = 0;
+  bool no_ack = false;  // 进核不回 Ack 的档位
 };
 
 struct DteCfg {
@@ -71,11 +65,8 @@ class Dte {
     out_buf = std::make_unique<DteBuffer>(clock, "out_buf",
                                           kDteBufFlits * (kLaneNum - 1),
                                           kLaneNum - 1, gid, setting.tick);
-    parser = std::make_unique<HeaderParser>(clock, "parser", agcu, gid,
+    parser = std::make_unique<HeaderParser>(clock, "parser", *hmem, gid,
                                             setting.tick);
-    SetInbound(setting.inbound);
-    parser->AttachPathTask(
-        [this](uint64_t path) { return hmem->PathTask(path); });
     commit = std::make_unique<Commit>(clock, "commit", *hmem, gid,
                                       setting.tick);
     out_arb = std::make_unique<DteOutArb>(clock, "out_arb", gid,
@@ -89,16 +80,16 @@ class Dte {
       lanes.push_back(std::make_unique<Lane>(
           clock, "lane" + std::to_string(i), i, b, agcu, gid, setting.tick));
     }
+    // 进核不回 Ack 的档位由 Regfile 在 Fire 时落进 Descriptor。
+    SetInbound(setting.inbound);
     Wire();
   }
 
   // ── 对外 ──
-  // SCP 写进核那一笔的配置，切模式时重写一遍。
-  void SetInbound(InboundCfg const& in) {
-    parser->SetInboundRoute(in.route);
-    parser->SetInboundNoAck(in.no_ack);
-    parser->SetInboundFlag(in.flag_base, in.flag_entry_bytes);
-  }
+  // SCP 写进核那一笔的配置，切模式时重写一遍。进核不回 Ack 的档位由 Regfile 在
+  // Fire 时落进 Descriptor；route 与 flag 是配置驱动（route 由 kernel 配 TRANS_MODE，
+  // flag 由 kernel 配 CFG_SM_W_ADDR/DATA），InboundCfg 里只剩 no_ack 一档。
+  void SetInbound(InboundCfg const& in) { reg->SetInboundNoAck(in.no_ack); }
 
   CoreDataPort& FromRouter() { return parser->FromRouter(); }
   void AttachFromRouter(std::shared_ptr<CoreDataPort> p) {
@@ -185,14 +176,12 @@ class Dte {
 
  private:
   void Wire() {
-    // Commit 准入一笔后，把它分发给归属的 Lane 与 Completion RS。两处都走
+    // Commit dispatch 一笔后，把它分发给归属的 Lane 与 Completion RS。两处都走
     // 端口：一根线两端是同一个对象，各自的协程只碰自己的队列。
     for (auto& l : lanes) commit->AddLanePort(l->AdmitPtr());
     comp->AttachAdmit(commit->RsPortPtr());
 
-    // Commit 与 Header Parser 之间那根：两端指向同一个对象。
-    RebindParserPort();
-    // 寄存器组起的任务走同一种口交给 Commit。
+    // 寄存器组起的任务走 DescPort 交给 Commit 的中央 TaskQueue。
     commit->RebindRv(reg->OutPtr());
 
     // Payload 走端口交给进核通道的 RD 侧。
@@ -216,19 +205,6 @@ class Dte {
     }
   }
 
-  void RebindParserPort() {
-    // Commit 读的那个口就是 Parser 写的那个。
-    auto port = parser->ToCommitPtr();
-    commit_port = port;
-    // Commit 侧持有同一个 shared_ptr。
-    struct Rebinder {
-      static void Do(Commit& c, std::shared_ptr<DescPort> p) {
-        c.RebindParser(std::move(p));
-      }
-    };
-    Rebinder::Do(*commit, port);
-  }
-
   ClockPtr clk;
   DteCfg cfg;
   Agcu agcu;
@@ -243,7 +219,6 @@ class Dte {
   std::unique_ptr<CompletionRs> comp;
   std::vector<std::unique_ptr<Lane>> lanes;
   std::shared_ptr<MuTopkPort> mu_topk;
-  std::shared_ptr<DescPort> commit_port;
 };
 
 }  // namespace bach

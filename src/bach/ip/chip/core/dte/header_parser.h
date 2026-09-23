@@ -1,27 +1,27 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_HEADER_PARSER_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_HEADER_PARSER_
 
-// Header Parser：Router 入站帧的第一道。
+// Header Parser：Router 入站帧的数据通路单元。
+//
+// 对齐飞书《DTE DSA》：进核是配置驱动——任务由 RV core 配 CFG 寄存器 + trigger 起，
+// 落点由软件配 CFG_ADDRx_DST；Header Parser 只在包头阶段使能，负责帧边界判定、
+// 合法性检查，把包头上下文（core_mask / Hardware Used / 软件包头 / gpu_id /
+// token_id）存进 Header Table，再逐拍转发 payload 给进核通道的读侧。它不再生成
+// Descriptor。
 //
 // 首拍固定是 Header，靠「上一帧 TLAST 已接受」判断下一拍是新 Header，不依赖
-// Start-of-Frame 信号。首拍锁存后检查 opcode / route、长度、身份字段和帧格式，
-// 通过了就生成一个 Descriptor 请 Commit 为 RD 与 WR 两侧同时分配。
+// Start-of-Frame 信号。一帧一任务，不允许任务间交织。TLAST 标识最后一个 Payload
+// beat；byte_count 为 0 时可由 Header beat 同时携带 TLAST。
 //
-// 一帧一任务：同一个 AXI-Stream Frame 只属于一个搬入任务，不允许任务间交织。
-//
-// Header Commit 成功后才允许 Payload Fire。TLAST 标识最后一个 Payload beat；
-// byte_count 为 0 时可由 Header beat 同时携带 TLAST。
-//
-// 非法 Header 进 Drop Frame：不生成 Descriptor、不发存储器请求，只消费到 TLAST
-// 以恢复帧边界。丢的是这一帧，不是把通道卡死。
+// 非法 Header 进 Drop Frame：只消费到 TLAST 以恢复帧边界。丢的是这一帧，不是把
+// 通道卡死。
 
-#include <functional>
 #include <memory>
 #include <string>
 
 #include "base/log.h"
-#include "bach/ip/chip/core/dte/agcu.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
+#include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -30,12 +30,11 @@ namespace bach {
 
 class HeaderParser : public BachModule {
  public:
-  HeaderParser(ClockPtr clock, const std::string& name, Agcu const& addr_gen,
+  HeaderParser(ClockPtr clock, const std::string& name, Hmem& tables,
                uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
-        agcu(addr_gen),
+        hmem(tables),
         from_router(std::make_shared<CoreDataPort>(clock)),
-        to_commit(std::make_shared<DescPort>(clock)),
         payload(std::make_shared<PayloadPort>(clock)),
         parsed(clock),
         dropped(clock),
@@ -45,58 +44,20 @@ class HeaderParser : public BachModule {
   void AttachFromRouter(std::shared_ptr<CoreDataPort> p) {
     from_router = std::move(p);
   }
-  std::shared_ptr<DescPort> ToCommitPtr() const { return to_commit; }
 
-  // Payload 那些拍交给进核通道的 RD 侧，由它写进 inbound buffer，附带 task_id、
-  // 有效字节与任务边界。走端口，不直接碰对方的容器。
+  // Payload 那些拍交给进核通道的 RD 侧，由它写进 inbound buffer。走端口，不直接碰
+  // 对方的容器。
   std::shared_ptr<PayloadPort> PayloadPtr() const { return payload; }
-
-  // 进核数据往哪搬由软件配：Router → MM 还是 Router → CM。
-  // path_task_map 的副本由 Hmem 管，装配层把它交进来。
-  void AttachPathTask(std::function<uint64_t(uint64_t)> fn) {
-    path_task = std::move(fn);
-  }
-  void SetInboundRoute(Route r) {
-    LOGCHECK(IsInbound(r), "HeaderParser: 进核只能是 Router → MM 或 → CM。");
-    inbound = r;
-  }
-  // B core 与 R core 的 token entry valid 标志表。搬完之后由 Completion RS 写
-  // 出去，写出去了才通知 TS。软件自己写会写在数据落地之前。
-  // B core 与 R core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的
-  // 对象，不回 Ack。
-  void SetInboundNoAck(bool on) { inbound_no_ack = on; }
-  void SetInboundFlag(uint64_t base, uint64_t entry_bytes) {
-    flag_base = base;
-    entry_bytes_of_slot = entry_bytes;
-  }
 
   uint64_t Parsed() const { return parsed.Get(); }
   uint64_t Dropped() const { return dropped.Get(); }
   uint64_t Beats() const { return beats.Get(); }
 
-  bool Quiescent() const override { return !in_frame && !waiting; }
+  bool Quiescent() const override { return !in_frame && !dropping; }
 
  protected:
   void Step() override {
     payload_driven = false;
-    // 上一笔 Descriptor 还没被 Commit 收下就原地保持，同时对 Router 反压：
-    // Header Commit 成功之前不许 Payload Fire。
-    if (waiting) {
-      if (to_commit->Accepted()) {
-        waiting = false;
-        // 纯包头任务的 Header beat 自己带 TLAST，整帧就这一拍，后面没有 Payload。
-        // 这时不能进 in_frame，否则下一帧的 Header 会被当成 Payload 收下去。
-        in_frame = !header_only;
-        header_only = false;
-        ++parse_pending;
-      } else {
-        from_router->DriveReady(false);
-        if (!payload_driven) payload->Idle();
-        Commit();
-        return;
-      }
-    }
-    to_commit->Idle();
     Handle();
     if (!payload_driven) payload->Idle();
     Commit();
@@ -164,69 +125,20 @@ class HeaderParser : public BachModule {
       return;
     }
 
-    auto desc = std::make_shared<Descriptor>();
-    desc->valid = true;
-    desc->route = inbound;
-    desc->user_id = d.msg->user_id;
-    desc->path_id = d.msg->path_id;
-    // stream_id 取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，
-    // 各 core 分出来的号一致。task_id 按 path_id 查本地的 path_task_map：
-    // 那一笔是任务链上的第几步由收方的链定，包头里带的是发方的编号。
-    desc->stream_id = d.msg->stream_id;
-    desc->task_id = path_task ? path_task(d.msg->path_id) : d.msg->task_id;
-    desc->frame_seq = ++frame_cnt;
+    // 存包头上下文进 Header Table：硬件改的 core_mask 与 Hardware Used，加上 DPU
+    // 写的那一对自定义包头 gpu_id / token_id（进核那一笔记在这里，出核造包时原样
+    // 带回）。软件包头 sw_header 由 RV core 通过配置改，这里不碰。
+    HmemEntry& h = hmem.Entry(d.msg->stream_id);
+    h.core_mask = d.msg->path_core_mask;
+    h.hardware_used = 1;
+    h.gpu_id = d.msg->gpu_id;
+    h.token_id = d.msg->token_id;
 
-    // 4 段位：段 0 包头 → header_table，段 1 数据，段 2 scale 旁带，段 3 topK
-    // 旁带。进核这一笔落 Core Mem 还是 Matrix Mem 由 inbound route 定；数据落点
-    // 由包头 dst_addr 给，落 Core Mem 时叠 stream 偏移、落 Matrix Mem 时直接用。
-    SegEndpoint data_kind = (inbound == Route::kRouterToMm)
-                                ? SegEndpoint::kMmem
-                                : SegEndpoint::kCmem;
-    uint64_t data_dst =
-        agcu.InboundAddr(desc->stream_id, data_kind, d.msg->dst_addr);
-
-    desc->seg[0].valid = true;
-    desc->seg[0].dst_kind = SegEndpoint::kHeader;
-    desc->seg[0].dst = desc->stream_id;  // header_table 按 stream_id 索引
-    desc->seg[0].len = kDteHeaderBytes;  // 进核由 Commit 记 gpu_id/token_id
-
-    desc->seg[1].valid = true;
-    desc->seg[1].dst_kind = data_kind;
-    desc->seg[1].dst = d.msg->dst_addr;
-    desc->seg[1].dst_addr = data_dst;
-    desc->seg[1].len = d.msg->DataBytes();
-
-    if (d.msg->scale_valid != 0) {
-      // 包尾那一段 scale 落同一数据地址的 scale 旁带。
-      desc->seg[2].valid = true;
-      desc->seg[2].dst_kind = SegEndpoint::kScale;
-      desc->seg[2].dst_addr = data_dst;
-      desc->seg[2].len = d.msg->size - d.msg->DataBytes();
-    }
-
-    if (d.msg->topk_valid != 0) {
-      desc->seg[3].valid = true;
-      desc->seg[3].dst_kind = SegEndpoint::kTopk;
-      desc->seg[3].dst = desc->stream_id;  // topK_ep_table 按 stream_id 索引
-      desc->seg[3].len = 0;                 // 旁带，不占 payload
-    }
-
-    if (entry_bytes_of_slot != 0) {
-      desc->wr_sharemem_flag = true;
-      desc->smem_addr = flag_base + d.msg->dst_addr / entry_bytes_of_slot * 4;
-      desc->smem_data = 1;
-    }
-    desc->msg = d.msg;
-    desc->ack_ts_en = true;
-    desc->no_ack = inbound_no_ack;
+    ++parse_pending;
     byte_count = d.msg->size;
     keep_sum = d.bytes;
-
-    cur_frame = desc->frame_seq;
-    to_commit->Drive(desc);
-    waiting = true;
-    // byte_count 为 0 的纯包头任务，Header 这一拍就是整帧。
-    header_only = d.last;
+    cur_frame = ++frame_cnt;
+    in_frame = !d.last;
     if (d.bytes != 0 || d.last) {
       // Header 这一拍带的数据也是包的开头，从 0 起。整包只有这一拍时，边界
       // 标记跟着它走。
@@ -234,30 +146,23 @@ class HeaderParser : public BachModule {
       payload_driven = true;
       if (d.last) keep_sum = 0;
     }
-    from_router->DriveReady(false);
+    from_router->DriveReady(true);
   }
 
   // 检查 F2 列的那几项。这一轮只建结构性的几条，位域细节等包格式定死后补。
+  // 落点改由配置给（CFG_ADDRx_DST），包头 dst_addr 不再参与，也不做对齐检查。
   bool Legal(CoreDataView const& d) const {
     if (!d.msg) return false;
-    // 长度：最短 16 B 的纯包头包，最长实际支持到 (16 K + 32) B。
+    // 长度：最长实际支持到 32 KB。
     if (d.msg->size > kMaxTaskBytes) return false;
-    // 目的地址要在范围内且对齐。
-    if (d.msg->dst_addr % 128 != 0) return false;
     return true;
   }
 
+  Hmem& hmem;
   std::shared_ptr<CoreDataPort> from_router;
-  std::shared_ptr<DescPort> to_commit;
   std::shared_ptr<PayloadPort> payload;
 
-  Agcu agcu;
-  Route inbound = Route::kRouterToCm;
-  uint64_t flag_base = 0, entry_bytes_of_slot = 0;
-  bool inbound_no_ack = false;
-  std::function<uint64_t(uint64_t)> path_task;
-  bool in_frame = false, dropping = false, waiting = false;
-  bool header_only = false;
+  bool in_frame = false, dropping = false;
   uint64_t byte_count = 0, keep_sum = 0, cur_frame = 0, frame_cnt = 0;
   uint64_t last_seq = 0;
   bool payload_driven = false;
