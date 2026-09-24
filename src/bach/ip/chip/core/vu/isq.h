@@ -55,10 +55,14 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
   }
   uint64_t Retired() const { return retire_cnt; }
   // 被 ISQ 收下的宏指令笔数。收下这一拍就是它过门槛、真正开始算的那一拍 ——
-  // 写 trigger 只是把它放进 held，还要等静态配置释放、上一条被取走。Core 层发
-  // 波形要用：这一层自己的信号在 chip 级被 TraceOffScope 关掉了。
-  uint64_t Started() const { return accept_cnt; }
-  // 刚收下那一条的身份。三项都是写 trigger 那一拍从身份直连线上采的。
+  // 写 trigger 只是把它放进 held，还要等静态配置释放、上一条被取走。
+  uint64_t Accepted() const { return accept_cnt; }
+  // 开始的 task 笔数，Core 层发波形要用（这一层自己的信号在 chip 级被
+  // TraceOffScope 关掉了）。完成只在置了 EVENT_EN 的那一条退休时报，一个 task
+  // 只在最后一条置位，所以起点也按 task 数：收下一条时前面没有未收尾的 task
+  // （还没收过，或上一条置了 EVENT_EN），这一条就是一个 task 的开头。
+  uint64_t Started() const { return task_start_cnt; }
+  // 最近开始的那个 task 的身份。三项都是写 trigger 那一拍从身份直连线上采的。
   uint64_t StartStream() const { return start_stream; }
   uint64_t StartTask() const { return start_task; }
   uint64_t StartUser() const { return start_user; }
@@ -150,9 +154,13 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
     window.push_back({inst, false});
     ++macro_left;
     ++accept_cnt;
-    start_stream = inst->stream_id;
-    start_task = inst->task_id;
-    start_user = inst->user_id;
+    if (!task_open) {
+      ++task_start_cnt;
+      start_stream = inst->stream_id;
+      start_task = inst->task_id;
+      start_user = inst->user_id;
+    }
+    task_open = !inst->event_en;
     // 压进来就算引用了这一组静态配置，配置写从这一刻起被阻塞。
     cfg_reg.HoldCfg(inst->cfg_idx);
   }
@@ -176,8 +184,11 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
   bool holding = false;
   uint64_t out_seq = 0, last_seq = 0;
   uint64_t macro_left = 0, inflight = 0, retire_cnt = 0;
-  // 收下的笔数与刚收下那一条的身份，供 Core 层发波形。
-  uint64_t accept_cnt = 0, start_stream = 0, start_task = 0, start_user = 0;
+  // 收下的宏指令笔数、开始的 task 笔数与最近开始那个 task 的身份，供 Core 层
+  // 发波形。task_open：上一条收下的没有置 EVENT_EN，它所在的 task 还没收尾。
+  uint64_t accept_cnt = 0, task_start_cnt = 0;
+  uint64_t start_stream = 0, start_task = 0, start_user = 0;
+  bool task_open = false;
 
   Logic64 depth, left;
 };

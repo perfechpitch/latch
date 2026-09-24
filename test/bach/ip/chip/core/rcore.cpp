@@ -317,6 +317,34 @@ TEST(BachRcore, TwoPartsAreSummedAndSentOn) {
   }
 }
 
+// 第 0 个槽的前一半落在 Matrix Mem 0 号地址，它的标志是标志表第 0 项、Share Mem
+// 偏移 0。进核那一笔照样要把这一项置上：前面先来一包别的用户，DTE 的标志地址
+// 寄存器里留着它那一项，0 号那一项要是没配进去，就会改写到别人的标志上。
+TEST(BachRcore, SlotZeroFrontHalfSetsItsFlag) {
+  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  constexpr uint64_t kOther = 5;
+  constexpr uint64_t kUser = 16;  // 16 % 16 == 0，落第 0 个槽
+  ASSERT_EQ(Land(kUser, 0), 0u);
+  std::vector<float> a = Ramp(1.0f, 1.0f);
+  std::vector<float> b = Ramp(1000.0f, 16.0f);
+
+  std::vector<MessagePtr> got;
+  {
+    RCORE_SETUP();
+    RcoreHarness h(clk, core,
+                   Jobs({Parts(2, kOther, 1, b), Parts(200, kUser, 0, a),
+                         Parts(400, kUser, 1, b)}));
+    clk->Continue(20000 * kPeriod);
+    RT::JoinAll();
+    got = h.out_msgs;
+  }
+  RT::Reset();
+
+  ASSERT_EQ(got.size(), 1u) << "第 0 个槽两半到齐后送出一包，只来了一半的那个用户接着等";
+  EXPECT_EQ(got[0]->user_id, kUser);
+  EXPECT_EQ(got[0]->dst_addr, Land(kUser, 1));
+}
+
 // 用户之间乱序：谁先集齐谁先走，不按到达顺序。三个用户交叉着来，第二个先集
 // 齐，它就先算完出去。三个都要走完。
 TEST(BachRcore, WhoeverIsCompleteFirstGoesFirst) {

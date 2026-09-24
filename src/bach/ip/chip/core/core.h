@@ -343,11 +343,11 @@ class Core : public BachModule {
   //
   // 起点取的是「过门槛」那一拍，不是写 trigger 那一拍。写 trigger 只是把任务收
   // 进各自的寄存器，真正开始还要过一道闸，而且三个单元的闸门各不相同：
-  //   DTE  过 Commit 准入，Lane 与 Completion RS 三样资源都拿得到。之前还要在
-  //        PendingTaskQ 里等 VC credit。只算 RV core 那一路，Router 入站那一路
-  //        不算一笔 DTE task。
+  //   DTE  被 Commit 从中央 TaskQueue dispatch，Lane 读写两侧与 Completion RS
+  //        三样资源都拿得到；出核任务还要等 VC credit。进核、出核都由 RV core
+  //        配置起，都算。
   //   MU   进 issue_q，drain 走完且队列有空位。
-  //   VU   被 ISQ 收下，静态配置已释放、上一条已被取走。
+  //   VU   一个 task 的第一条宏指令被 ISQ 收下，静态配置已释放、上一条已被取走。
   // 这三个闸门等多久都可能，所以「收下任务」与「开始算」不能混为一谈。
   //
   // 终点是各家把完成报回来的那一拍：
@@ -574,7 +574,7 @@ class Core : public BachModule {
     if (u == 1) {
       return {mu->DoneCnt(), mu->DoneTask(), mu->DoneUser()};
     }
-    // VU 每条宏指令退休报一次，与它发给 TS 的是同一拍。
+    // VU 只在置了 EVENT_EN 的宏指令退休时报，与它发给 TS 的是同一拍。
     return {vu->Retire().MacroDoneCnt(), vu->Retire().MacroDoneTask(),
             vu->Retire().MacroDoneUser()};
   }

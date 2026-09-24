@@ -113,26 +113,36 @@ class Commit : public BachModule {
   }
 
   // 从队头往后扫，dispatch 第一个目标通道就绪的任务。不同通道的任务可乱序下发：
-  // 队头那个出核任务还堵在 VC credit 上时，后面别的通道的任务可以先行。三样一起
-  // 拿——读侧 TaskQueue、写侧 TaskQueue、Completion RS；出核任务再查 VC credit。
+  // 队头那个出核任务还堵在 VC credit 上时，后面别的通道的任务可以先行。同一通道
+  // 内按序（F18）：一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都
+  // 不发。三样一起拿：读侧 TaskQueue、写侧 TaskQueue、Completion RS；出核任务再
+  // 查 VC credit。
   void TryDispatch() {
     if (holding) return;
     if (central_q.empty()) return;
+    uint64_t blocked = 0;  // 这一拍已经有任务没发出去的通道，按位记
     for (auto it = central_q.begin(); it != central_q.end(); ++it) {
       Descriptor const& d = *it;
+      uint64_t lane = d.Lane();
+      if (lane >= to_lane.size()) continue;
+      if (blocked & (1ull << lane)) continue;
 
       // 出核任务 dispatch 之前实时检查这条 VC 通路上的 flit credit。下游 Stream
       // 资源与本级 Rmem 资源不在这里查，TS 下发之前已经申请到；Reduce 包也一样。
       // 进核任务不走这条通路，不查。
       if (!IsInbound(d.route)) {
         RouteEntry const& e = hmem.Rtab(d.path_id);
-        if (!VcOk(d, e)) continue;
+        if (!VcOk(d, e)) {
+          blocked |= 1ull << lane;
+          continue;
+        }
       }
 
-      uint64_t lane = d.Lane();
-      if (lane >= to_lane.size()) continue;
       // Lane 的 ready 已经把读写两侧的 TaskQueue 都算进去了。
-      if (!to_lane[lane]->Ready() || !to_rs->Ready()) continue;
+      if (!to_lane[lane]->Ready() || !to_rs->Ready()) {
+        blocked |= 1ull << lane;
+        continue;
+      }
 
       // 三样齐了才真正 dispatch：地址展开已在 Regfile 的 Fire 里算好。
       held = std::make_shared<Descriptor>(d);

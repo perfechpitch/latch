@@ -125,11 +125,11 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1422" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
 <rect x="1104" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（八个模块）</text>
-<text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头 Drop Frame）· Commit（双 Bank，Bank0 优先）</text>
+<text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头断言）· Commit（双 Bank，Bank0 优先）</text>
 <text x="1116.0" y="581.5" font-size="8.5" fill="#475569">5 通道（进核 1 + 出核 4）· 每通道 RD/WR 两侧各一个 TaskQueue（含 AGCU）</text>
 <text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
 <text x="1116.0" y="608.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
-<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 288 B（16 项 × {core_mask, sw_header}）· Fast LUT 64 项</text>
+<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 288 B（16 项 × {core_mask, sw_header}）· Fast LUT 待评估</text>
 <text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · PendingTaskQ</text>
 <text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
 <rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>

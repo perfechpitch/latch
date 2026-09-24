@@ -162,9 +162,11 @@ void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
 }
 
 // 一个专家那三条：fc1 与 fc3 从 red 那一包的数据段读，act 写 FC2 输入那一处。
-// 三条之间是 VRF 上的先后，VU 只查 Core Mem 的地址重叠，所以逐条置 fence。
+// 与 kernel_vu.c 的 task_vu_gate 同一种写法：三条之间是 VRF 上的先后，由记分板
+// 串起来，不置 fence；last 为真（本 task 最后一个专家）时只在第三条置 EVENT_EN，
+// 整个门控 task 报一次完成。
 void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red,
-              uint64_t e) {
+              uint64_t e, bool last) {
   uint64_t fc1 = red + e * kn::kPartStride;
   uint64_t fc3 = red + (kn::kExperts + e) * kn::kPartStride;
   uint64_t act = kn::kActOff + e * kn::kActStride;
@@ -173,9 +175,10 @@ void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red,
     uint64_t g = i + 1;   // 与 kernel_vu.c 的 gate_setup 同组：1 / 2 / 3
     q.push_back({kVuLdAddr, rd[i]});
     q.push_back({kVuStAddr, act});
+    bool event = last && i == 2;
     q.push_back({kVuMacroInstTrigger, kVuMaskLdAddr | kVuMaskStAddr |
                                           (g << kVuTrigCfgIdxShift) |
-                                          kVuTrigFence | kVuTrigEventEn});
+                                          (event ? kVuTrigEventEn : 0)});
   }
 }
 
@@ -269,13 +272,14 @@ class MoeRig : public BachModule {
     }
     if (stage == 2 && dones >= 2) {
       // 这里没有归约：门控直接读本 core 自己的部分和。
-      for (uint64_t e = 0; e < kn::kExperts; ++e) GateFire(vq, kn::kFc1Off, e);
+      for (uint64_t e = 0; e < kn::kExperts; ++e) {
+        GateFire(vq, kn::kFc1Off, e, e + 1 == kn::kExperts);
+      }
       stage = 3;
       return;
     }
-    // 每个专家三条宏指令各报一次完成。真实链路里只最后一条置 EVENT_EN；
-    // 这一份 C++ 直写 trigger，每条都带 EVENT_EN，所以按条数。
-    if (stage == 3 && vdones >= 3 * kn::kExperts) {
+    // 门控只在最后一条置 EVENT_EN，整个 task 报一次完成。
+    if (stage == 3 && vdones >= 1) {
       Submit(q, {kFc2Mode, kn::kSegInter / kn::kFc2K,
                  kn::kSegEmbed / kn::kFc2N, kn::kActOff, kn::kMmW2,
                  kn::ConcatOf(s), kn::kActStride, true});
@@ -350,7 +354,7 @@ TEST(BachMoe, OneCoreMatchesReference) {
   RT::Reset();
 
   EXPECT_EQ(dones, 3u) << "三笔 MU 任务应当各报一次完成";
-  EXPECT_EQ(vdones, 3u * kn::kExperts) << "门控每条宏指令各报一次完成";
+  EXPECT_EQ(vdones, 1u) << "门控只在最后一条置 EVENT_EN，整个 task 报一次完成";
   EXPECT_TRUE(finished);
   EXPECT_EQ(part, want.part) << "FC1、FC3 部分和";
   for (uint64_t e = 0; e < kn::kExperts; ++e) {
@@ -419,7 +423,9 @@ TEST(BachMoe, VuGateMatchesReference) {
 
     GateRig rig(clk, vu, cmem, cfg_port);
     GateSetup(rig.q);
-    for (uint64_t e = 0; e < kn::kExperts; ++e) GateFire(rig.q, red, e);
+    for (uint64_t e = 0; e < kn::kExperts; ++e) {
+      GateFire(rig.q, red, e, e + 1 == kn::kExperts);
+    }
     clk->Continue(40000 * kPeriod);
     RT::JoinAll();
     dones = rig.dones;
@@ -432,7 +438,7 @@ TEST(BachMoe, VuGateMatchesReference) {
   RT::FlushRecorder();
   RT::Reset();
 
-  EXPECT_EQ(dones, 3u * kn::kExperts) << "每条宏指令各报一次完成";
+  EXPECT_EQ(dones, 1u) << "门控只在最后一条置 EVENT_EN，整个 task 报一次完成";
   for (uint64_t e = 0; e < kn::kExperts; ++e) {
     EXPECT_EQ(act[e], want.act[e]) << "第 " << e << " 个专家";
     EXPECT_EQ(act_scale[e], want.act_scale[e]) << "第 " << e << " 个专家的 scale";

@@ -234,7 +234,7 @@ class TsSide : public BachModule {
 
   uint64_t dones = 0;
   std::vector<uint64_t> tasks;
-  uint64_t parsed = 0, dropped = 0, admitted = 0, stalled = 0, joined = 0;
+  uint64_t parsed = 0, admitted = 0, stalled = 0, joined = 0;
   uint64_t trigs = 0, done_stream = 0, done_task = 0;
 
  protected:
@@ -247,7 +247,6 @@ class TsSide : public BachModule {
     }
     trigs = dte.Regfile().Triggers();
     parsed = dte.Parser().Parsed();
-    dropped = dte.Parser().Dropped();
     admitted = dte.Committer().Admitted();
     stalled = dte.Committer().Stalled();
     joined = dte.Completion().Joined();
@@ -394,29 +393,25 @@ TEST(BachDte, HeaderOnlyTask) {
   EXPECT_EQ(dones, 1u);
 }
 
-// 非法 Header 进 Drop Frame：不存包头、不发存储请求，只消费到 TLAST。
-TEST(BachDte, IllegalHeaderDropsFrame) {
-  uint64_t parsed = 0, dropped = 0, writes = 0;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
-    std::vector<std::shared_ptr<MemPort>> mem;
-    AttachDummyMem(dte, clk, mem);
-    // 超过单任务上限 32 KB，这一帧要被丢掉
-    FrameFeeder feed(clk, dte, {{2, MakeMsg(13, 0, 64 * 1024)}});
-    MemSide m(clk, mem);
-    TsSide ts(clk, dte);
-    clk->Continue(400 * kPeriod);
-    RT::JoinAll();
-    parsed = ts.parsed;
-    dropped = ts.dropped;
-    writes = m.writes;
-  }
+// 非法 Header 直接断言：整个 DTE 装起来，超长的包一进来就停。
+static void FeedOversizedFrame() {
+  EnsureSlots();
+  ClockPtr clk = MakeClock(0, kPeriod);
+  Dte dte(clk, "dte", DteCfg{});
+  std::vector<std::shared_ptr<MemPort>> mem;
+  AttachDummyMem(dte, clk, mem);
+  // 超过单任务上限 32 KB
+  FrameFeeder feed(clk, dte, {{2, MakeMsg(13, 0, 64 * 1024)}});
+  MemSide m(clk, mem);
+  TsSide ts(clk, dte);
+  clk->Continue(400 * kPeriod);
+  RT::JoinAll();
   RT::Reset();
-  EXPECT_EQ(parsed, 0u);
-  EXPECT_EQ(dropped, 1u);
-  EXPECT_EQ(writes, 0u);   // 丢的帧不发存储请求
+}
+
+TEST(BachDte, IllegalHeaderIsFatal) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(FeedOversizedFrame(), "HeaderParser");
 }
 
 // Commit 三样一起拿：Completion RS 占满之后不再 dispatch，挡住半任务。

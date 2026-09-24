@@ -126,7 +126,7 @@
   <rect x="676" y="284" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="304" font-size="11.5" fill="#111827">DTE DSA</text>
   <text x="688" y="320" font-size="9" fill="#475569">Header Parser · Commit · TaskQueue ×4</text>
-  <text x="688" y="334" font-size="9" fill="#475569">5 个物理通道（AGCU）· 中间 Buffer · Completion RS · Hmem 与 Fast LUT</text>
+  <text x="688" y="334" font-size="9" fill="#475569">5 个物理通道（AGCU）· 中间 Buffer · Completion RS · Hmem 与 Fast LUT（待评估）</text>
   <text x="688" y="348" font-size="9" fill="#475569">topK 与 shareMem 写</text>
   <text x="1124" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
   <text x="1124" y="347" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/dte.md</text>

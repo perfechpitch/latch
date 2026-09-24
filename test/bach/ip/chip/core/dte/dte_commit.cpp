@@ -223,6 +223,32 @@ TEST(BachDteCommit, VcBlockedHeadDoesNotBlockLaterInbound) {
   EXPECT_EQ(users[0], 41u) << "进核任务不受队头出核任务的 VC 阻塞，乱序先走";
 }
 
+// 同一通道内按序（F18）：队头那笔堵在 VC credit 上时，后面落同一通道的任务即使
+// 自己的 VC 通路发得出也不越过它；别的通道的任务照样先行。
+TEST(BachDteCommit, VcBlockedHeadHoldsItsOwnLane) {
+  std::vector<uint64_t> users;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.hmem->PreloadRtab(9, Forward(kFlowRight));
+    b.hmem->PreloadRtab(10, Forward(0));  // 不往任何方向发，VC 这一关总能过
+    auto level = std::make_shared<CreditLevelPort>(clk);
+    b.commit->AttachVcLevel(level);
+    CommitHarness h(clk, *b.commit, b.lanes, b.rs);
+    // vc 0 与 vc 4 落同一个出核通道，vc 1 落另一个。
+    h.jobs = {{2, Outbound(52, 9, 256, 0)},
+              {4, Outbound(53, 10, 256, 4)},
+              {6, Outbound(54, 10, 256, 1)}};
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    for (auto const& a : h.admits) users.push_back(a.user);
+  }
+  RT::Reset();
+  ASSERT_EQ(users.size(), 1u) << "同一通道的那笔要等队头，只有别的通道那笔能走";
+  EXPECT_EQ(users[0], 54u);
+}
+
 // Reduce 包与其他出核包一样只看 VC credit：本级 Rmem 资源由 TS 在下发前申请，
 // DTE 这一侧不另记 credit。
 TEST(BachDteCommit, ReducePacketNeedsOnlyVcCredit) {

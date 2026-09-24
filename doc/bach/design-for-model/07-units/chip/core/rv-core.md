@@ -719,7 +719,7 @@ custom-0 字段布局   见下一节
 * **为什么栈顶与全局指针在复位时仍直接赋值**
   * 装完镜像后从 `_start` 跑 firmware，`la sp` / `la gp` 会设这两个寄存器
   * 部分用例只往 ITCM 塞几条指令、不装 kernel（custom-0、SCP boot 的 nop），没有 firmware 可跑，仍要给初值，kernel 一用栈才不会落到 0 号地址附近
-  * 取值照链接脚本给的 DTCM 栈顶与全局指针，与 firmware 设的那两个相同
+  * `gp` 取链接脚本的 `global_pointer`，与 firmware 设的相同；`sp` 取 DTCM 顶端，firmware 跑起来后改设成链接脚本的 `stack_top`（紧接 `.bss` 之后 1 KB，随 kernel 尺寸变）
 * **firmware 何时启动**
   * `LoadImage` 把 hex 装进 ITCM 后从地址 0 解复位跑 `_start`；`PokeItcm` 只写字节，不启动，避免 SCP 往 ITCM 塞 nop 时当成 firmware
   * firmware 末尾那条不通知 TS 的 `task_done`（F14）只停取指进 wait，不脉冲 `task_queue` 的 finish、不报 `rv_done`

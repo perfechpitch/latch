@@ -13,8 +13,9 @@
 // Start-of-Frame 信号。一帧一任务，不允许任务间交织。TLAST 标识最后一个 Payload
 // beat；byte_count 为 0 时可由 Header beat 同时携带 TLAST。
 //
-// 非法 Header 进 Drop Frame：只消费到 TLAST 以恢复帧边界。丢的是这一帧，不是把
-// 通道卡死。
+// 非法 Header 在模型里直接断言。进核任务与数据包按到达顺序一一配对，CoreStation
+// 每收一个包头就起一笔 datain，kernel 为它配一笔进核任务；丢掉一帧，之后的配对
+// 就整体错开一位。
 
 #include <memory>
 #include <string>
@@ -37,7 +38,6 @@ class HeaderParser : public BachModule {
         from_router(std::make_shared<CoreDataPort>(clock)),
         payload(std::make_shared<PayloadPort>(clock)),
         parsed(clock),
-        dropped(clock),
         beats(clock) {}
 
   CoreDataPort& FromRouter() { return *from_router; }
@@ -50,10 +50,9 @@ class HeaderParser : public BachModule {
   std::shared_ptr<PayloadPort> PayloadPtr() const { return payload; }
 
   uint64_t Parsed() const { return parsed.Get(); }
-  uint64_t Dropped() const { return dropped.Get(); }
   uint64_t Beats() const { return beats.Get(); }
 
-  bool Quiescent() const override { return !in_frame && !dropping; }
+  bool Quiescent() const override { return !in_frame; }
 
  protected:
   void Step() override {
@@ -66,7 +65,6 @@ class HeaderParser : public BachModule {
  private:
   void Commit() {
     parsed = parse_pending;
-    dropped = drop_pending;
     beats = beat_pending;
     TracePerCycle("parsed", parse_pending);
   }
@@ -94,13 +92,6 @@ class HeaderParser : public BachModule {
     last_seq = d.seq;
     ++beat_pending;
 
-    if (dropping) {
-      // Drop Frame：只消费到 TLAST 以恢复帧边界。
-      if (d.last) dropping = false;
-      from_router->DriveReady(true);
-      return;
-    }
-
     if (in_frame) {
       // Payload beat：累计 TKEEP 的有效字节，TLAST 时与 byte_count 比较。
       payload->Drive(cur_frame, d.bytes, keep_sum, d.last, d.msg);
@@ -117,13 +108,7 @@ class HeaderParser : public BachModule {
     }
 
     // 首拍是 Header。
-    if (!Legal(d)) {
-      ++drop_pending;
-      // byte_count 为 0 时 Header beat 可以同时带 TLAST，那就没有要丢的了。
-      dropping = !d.last;
-      from_router->DriveReady(true);
-      return;
-    }
+    LOGCHECK(Legal(d), "HeaderParser: 非法包头（没带 Message 或长度超过 32 KB）。");
 
     // 存包头上下文进 Header Table：硬件改的 core_mask 与 Hardware Used，加上 DPU
     // 写的那一对自定义包头 gpu_id / token_id（进核那一笔记在这里，出核造包时原样
@@ -162,13 +147,13 @@ class HeaderParser : public BachModule {
   std::shared_ptr<CoreDataPort> from_router;
   std::shared_ptr<PayloadPort> payload;
 
-  bool in_frame = false, dropping = false;
+  bool in_frame = false;
   uint64_t byte_count = 0, keep_sum = 0, cur_frame = 0, frame_cnt = 0;
   uint64_t last_seq = 0;
   bool payload_driven = false;
-  uint64_t parse_pending = 0, drop_pending = 0, beat_pending = 0;
+  uint64_t parse_pending = 0, beat_pending = 0;
 
-  Logic64 parsed, dropped, beats;
+  Logic64 parsed, beats;
 };
 
 }  // namespace bach

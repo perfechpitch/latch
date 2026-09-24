@@ -27,11 +27,24 @@ static void vu_launch(u32 config_idx, u32 ld, u32 st, u32 fence) {
                 | (fence ? VU_MACRO_INST_FENCE : 0u));
 }
 
+/* 交还之前等本 task 最后那条 trigger 被 VU 的配置通路收下。
+ *
+ * VU 在收下 trigger 的那一拍才采 stream_id / task_id，而 RV 发出 dsaw 不等它被
+ * 收下：ISQ 满时 trigger 压在通路上，这时交还，下一笔 task 一起来，身份就换成
+ * 了下一笔的，dsa_done 报给了别人。DSA 读写同走一条通路、按序收，所以读一次
+ * 并用掉读回的值（mv zero 读这个寄存器，值没回来就停在这条上），就说明前面的
+ * trigger 都已收下。 */
+static inline __attribute__((always_inline)) void vu_wait_trigger_taken(void) {
+  u32 v = dsa_read(VU_MACRO_INST_LEFT);
+  __asm__ volatile("mv zero, %0" : : "r"(v));
+}
+
 /* 单 core 用例的 VU 那一步：MU 算出来的 BF16 逐元素算一遍，仍按 BF16 写回。
  * 算什么由第 0 组静态配置定。置 EVENT_EN，VU 退休才把 dsa_done 打给 TS。 */
 TASK void task_vu_compute(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   vu_launch(0, base + CMEM_FC1_OFF, base + CMEM_ACT_OFF, 0);
+  vu_wait_trigger_taken();
   task_done(1);
 }
 
@@ -107,8 +120,9 @@ static void vu_fire(u32 group, u32 ld, u32 st, u32 event_en, u32 fence) {
 
 /* 每个专家一份：silu(FC1)·FC3，量化成 MXFP8 作为 FC2 输入。
  *
- * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA：RV 立刻 task_done(1)，TS
- * 等最后一条退休的 dsa_done。VRF 依赖把整串钉在最后一条后面，fence 传 0。 */
+ * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA：最后一条被收下后 RV 就
+ * task_done(1)，TS 等最后一条退休的 dsa_done。执行链按序退休，最后一条退休时
+ * 前面的都已退休；一个 task 内各条写的 Core Mem 不重叠，fence 传 0。 */
 TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
@@ -122,6 +136,7 @@ TASK void task_vu_gate(void) {
     vu_fire(2, fc1, act, 0, 0);
     vu_fire(3, fc3, act, last, 0);
   }
+  vu_wait_trigger_taken();
   task_done(1);
 }
 
@@ -165,6 +180,7 @@ TASK void task_vu_add(void) {
   u32 at = MOE_SW_HEAD_BYTES;
   vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at, 0, 0);
   vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at, 1, 0);
+  vu_wait_trigger_taken();
   task_done(1);
 }
 

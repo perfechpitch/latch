@@ -94,7 +94,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 <text x="750" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">DTE DSA</text>
 <text x="750" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">2 ch / 4 lane</text>
 <text x="750" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">Header Parser · TaskQueue ×4</text>
-<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">AGCU · Hmem 与 Fast LUT</text>
+<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">AGCU · Hmem 与 Fast LUT（待评估）</text>
 <rect x="260" y="478" width="340" height="80" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="270" y="495" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Matrix Mem</text>
 <text x="270" y="510" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">32 MB + 4 MB scale · 64 bank</text>

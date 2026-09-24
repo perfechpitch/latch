@@ -2,10 +2,10 @@
 //
 // 对齐飞书《DTE DSA》后，进核是配置驱动，Header Parser 不再生成 Descriptor，只做
 // 三件事：把包头上下文（core_mask / Hardware Used / gpu_id / token_id）存进 Header
-// Table、逐拍转发 payload、按帧边界判定与合法性检查丢掉非法帧。
+// Table、逐拍转发 payload、按帧边界判定与合法性检查（非法包头直接断言）。
 //
 // 覆盖：包头落 Header Table、payload 一个字节不剥、靠上一帧 TLAST 认帧边界、纯
-// 包头帧、非法 Header 只丢那一帧、连续几帧各得一个帧号。
+// 包头帧、非法 Header 断言、连续几帧各得一个帧号。
 
 #include <gtest/gtest.h>
 
@@ -63,7 +63,7 @@ class ParserHarness : public BachModule {
     MessagePtr msg;
   };
   std::vector<Got> payloads;
-  uint64_t parsed = 0, dropped = 0, beats_seen = 0;
+  uint64_t parsed = 0, beats_seen = 0;
 
  protected:
   void Step() override {
@@ -84,7 +84,6 @@ class ParserHarness : public BachModule {
     hp.RunStep();
 
     parsed = hp.Parsed();
-    dropped = hp.Dropped();
     beats_seen = hp.Beats();
   }
 
@@ -239,29 +238,25 @@ TEST(BachHeaderParser, HeaderOnlyFrameIsOneBeat) {
   EXPECT_EQ(parsed, 2u) << "纯包头那一帧收完，下一帧照样认得出";
 }
 
-// 非法 Header 丢整帧：不存包头，只消费到 TLAST 恢复帧边界，下一帧照常。
-TEST(BachHeaderParser, IllegalHeaderDropsOnlyThatFrame) {
-  uint64_t parsed = 0, dropped = 0;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
-    // 第一帧长度超过上限，要被丢掉。
-    auto bad = MakeMsg(41, 7, 64, 0, 0);
-    bad->size = kMaxTaskBytes + 1;
-    h.beats = {{2, 256, false, bad}, {3, 256, true, bad}};
-    auto good = Frame(10, MakeMsg(42, 7, 256, 1, 0));
-    h.beats.insert(h.beats.end(), good.begin(), good.end());
-    clk->Continue(60 * kPeriod);
-    RT::JoinAll();
-    parsed = h.parsed;
-    dropped = h.dropped;
-  }
+// 非法 Header 直接断言：进核任务与包按到达顺序配对，丢一帧会让之后的配对整体
+// 错开，模型不做 Drop Frame。
+static void FeedOversizedFrame() {
+  EnsureSlots();
+  ClockPtr clk = MakeClock(0, kPeriod);
+  Hmem hmem(clk, "hmem", 0, false);
+  HeaderParser hp(clk, "hp", hmem, 0, false);
+  ParserHarness h(clk, hp, hmem);
+  auto bad = MakeMsg(41, 7, 64, 0, 0);
+  bad->size = kMaxTaskBytes + 1;   // 长度超过上限
+  h.beats = {{2, 256, false, bad}, {3, 256, true, bad}};
+  clk->Continue(60 * kPeriod);
+  RT::JoinAll();
   RT::Reset();
-  EXPECT_EQ(parsed, 1u) << "只丢那一帧，通道不卡死";
-  EXPECT_EQ(dropped, 1u);
+}
+
+TEST(BachHeaderParser, IllegalHeaderIsFatal) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  EXPECT_DEATH(FeedOversizedFrame(), "HeaderParser");
 }
 
 // Router 送过来的东西一个字节都不剥：交下去的还是同一个 Message。

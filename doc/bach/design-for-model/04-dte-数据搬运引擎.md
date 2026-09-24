@@ -80,7 +80,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <text x="223" y="169" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">ADDR · TD · PACK</text>
 <text x="223" y="181" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Trigger 启动</text>
 <rect x="215" y="246" width="90" height="46" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="223" y="261" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Fast LUT</text>
+<text x="223" y="261" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Fast LUT 待评估</text>
 <text x="223" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">{valid, length,</text>
 <text x="223" y="287" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">ctrl_flags} 64 项</text>
 <path d="M330 150 L352 162 L352 282 L330 294 Z" fill="#ffffff" stroke="#3f4451" stroke-width="1.2"/>
@@ -441,7 +441,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 ### Inbound：Router → MM / CM
 
 1. 任务由 DTE RV core 配寄存器 + 写 `CFG_TRIGGER` 起：Regfile 快照 Descriptor（落点由软件配 `CFG_ADDRx_DST`），送进 Commit 的中央 TaskQueue。
-2. Router 以 AXI-Stream 发送 Header，Header Parser 在首拍锁存并检查长度、身份字段和帧格式，把包头上下文存进 Header Table；它不生成 Descriptor。
+2. Router 以 AXI-Stream 发送 Header，Header Parser 在首拍锁存并检查长度和帧格式，把包头上下文存进 Header Table；它不生成 Descriptor。
 3. Commit 从中央 TaskQueue dispatch：目标通道 RD_CH0 / WR_CH0 的 TaskQueue 项与 Completion RS 项都可用时才原子成功，RD_CH0 建立 Router 接收上下文，WR_CH0 建立 MM / CM 写入上下文。进核任务与到达的数据包按顺序 FIFO 配对。
 4. Payload 由 Header Parser 逐拍转发，RD_CH0 控制写入 inbound buffer，附带 `task_id`、有效字节与任务边界信息；buffer 满时通过 TREADY 向 Router 反压。
 5. WR_CH0 从 inbound buffer 按任务边界取数，经 DMA_XBAR 写入目标 MM / CM。
@@ -663,7 +663,9 @@ DTE 只有一个任务入口：所有任务（进核 + 出核）都由 RV core �
 
 这一节讲 RV core 这一侧：写哪些寄存器、每个参数管什么、地址怎么算出来、五个方向各自怎么配。
 
-### Fast LUT：把配置延迟压到 10T 以内
+### Fast LUT（待评估）：把配置延迟压到 10T 以内
+
+Fast LUT 是否保留待评估：《DTE DSA》v0.3 只留了一节“LUT 评估”，结论未出。模型里所有任务都走上面这条 RV core 配寄存器的路径。本节是候选方案。
 
 从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 **DTE Setup Time**，目标是压到 10T 以内。
 
@@ -1006,7 +1008,7 @@ void data_inner_config() {
 
 1. SCP 复位 DTE
 2. 配全局静态寄存器
-3. 配 Fast LUT 与 User Base Register
+3. 配 Fast LUT（待评估）与 User Base Register
 4. 配 stream 相关表
 5. 配 header 与 topK 参数
 6. 使能 TS 直接触发模式
@@ -1038,27 +1040,18 @@ Commit 提供两个配置 Bank，**Bank0 优先于 Bank1**：
 * **一帧一任务**：同一个 AXI-Stream Frame 只属于一个 Router→MM 或 Router→CM 任务，不允许任务间交织
 * **首拍固定为 Header**：DTE 靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号；
   建议 Header 限定在一个 256 B beat 内
-* Header Commit 成功后才允许 Payload Fire，TLAST 标识最后一个 Payload beat；
+* TLAST 标识最后一个 Payload beat；
   `byte_count` 为 0 时可由 Header beat 同时携带 TLAST
 * TKEEP 按字节粒度生效，每个 Payload Fire 累计 TKEEP 有效字节，TLAST 时与 `byte_count` 比较
-* **非法 Header 进入 Drop Frame 流程**：不生成 Descriptor、不发存储器请求，只消费到 TLAST 以恢复帧边界
+* **非法 Header 进入 Drop Frame 流程**：不发存储器请求，只消费到 TLAST 以恢复帧边界。进核任务与数据包按到达顺序配对，丢掉的那一帧对应的进核任务怎么结束未定，模型遇到非法 Header 直接断言
 
-DTE 解析 Header 时用到的逻辑字段与各自的检查：
+Header 里与进核搬运有关的字段，以及 Header Parser 对它们的检查：
 
 | 逻辑字段 | 用途 | 检查 |
 | - | - | - |
-| `version` / `header_len` | Header 格式版本与有效长度 | 版本受支持，`header_len` 不超过首拍有效字节 |
-| `packet_type` / `route` | 标识这是 DTE 搬入任务 | 其他 Route 在 Header Parser 阶段拒绝，不产生外部请求 |
-| `dst_addr` | 目的存储的基地址（配置驱动后落点由软件配 `CFG_ADDRx_DST`，此字段不再参与选址） | 在目的端地址范围内 |
-| `byte_count` | Payload 总有效字节数 | 与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
-| `task_id` / `stream_id` | 建立任务身份与完成归属 | 未完成上下文中不得重复占用 |
-| `attributes` / `reserved` | 后续控制属性与格式扩展 | 未定义位为约定默认值，当前不据此改变基线 Route 行为 |
-
-这张表与 MSG 包的字节布局是同一个 Header 的两种写法，字段对不上：
-
-* 这里有 `version` / `header_len` / `packet_type` / `attributes`
-* MSG 包结构里有 `path_id` / `path_core_mask`
-* DTE MAS 声明具体位域以 Router 接口规范为准，最终以那一份为准
+| `dst_addr` | 发方算好的落点，收方的 datain 任务从 Router I/O reg 读出来配进 `CFG_ADDRx_DST` | — |
+| `byte_count` | Payload 总有效字节数 | 不超过单任务上限 32 KB，与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
+| `task_id` / `stream_id` | 发方带的身份，软件可从 Router I/O reg 读；进核任务的身份由 RV core 经 STUPV 直连送来 | — |
 
 ### core 侧承担的桥接职责
 
@@ -1088,8 +1081,8 @@ Router 与 core 之间**不做独立的桥接模块**，按耦合关系把逻辑
 | 与 router 接口宽度 | 256 B | Data（看不到 scale），双向 |
 | Hmem | 288 B | 16 项 × {`core_mask` 2 B, 软件包头 16 B}，按 `stream_id` 索引；B core / R core 改存 Core Mem |
 | `stream_cache` | 3 × 16 项 | × {`valid`, `user_id`}，Router 那张 stream 表的只读副本 |
-| Fast LUT | 64 项 | × {`valid`, `length`, `ctrl_flags`}，按 `task_id` 索引 |
-| DTE Setup Time | < 10T | Fast LUT 命中 4T，未命中 Core Latency + 4T |
+| Fast LUT | 64 项（待评估） | × {`valid`, `length`, `ctrl_flags`}，按 `task_id` 索引 |
+| DTE Setup Time | < 10T（随 Fast LUT 待评估） | Fast LUT 命中 4T，未命中 Core Latency + 4T；模型不走 Fast LUT，按 85T |
 | 单任务最大搬运量 | 32 KB | 256 B × 128 拍 |
 
 ### 性能剖析口径

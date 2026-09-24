@@ -229,9 +229,13 @@ TEST(BachRvCore, DsaTaskStillReportsItsOwnDone) {
 }
 
 // 每条指令 1 拍：跑完一个 task 花的拍数不少于它的指令数。
+//
+// 装完镜像 firmware 先从 _start 跑到 wait，这一段没有停拍。task 等 firmware
+// 收尾之后才发，拍数与指令数都只数 task 自己那一段。
 TEST(BachRvCore, OneInstructionPerCycle) {
   if (!KernelBuilt("mu")) GTEST_SKIP() << "kernel 还没编";
-  uint64_t insts = 0, done_at = 0;
+  constexpr uint64_t kSendAt = 200;  // firmware 早已收在 wait
+  uint64_t insts = 0, fw_insts = 0, done_at = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -246,13 +250,14 @@ TEST(BachRvCore, OneInstructionPerCycle) {
      public:
       Watch(ClockPtr c, RvCore& core, uint64_t entry)
           : BachModule(c, "w"), rv(core), pc(entry) {}
-      uint64_t insts = 0, done_at = 0;
+      uint64_t insts = 0, fw_insts = 0, done_at = 0;
       bool sent = false;
 
      protected:
       void Step() override {
         uint64_t now = CycleNow();
-        if (!sent && now >= 2) {
+        if (now == kSendAt) fw_insts = rv.Exec().Insts();
+        if (!sent && now >= kSendAt) {
           rv.Cmd().Drive(pc, 1, 2, 88, 3, true, 1);
           if (rv.Cmd().Ready()) sent = true;
         } else {
@@ -273,13 +278,14 @@ TEST(BachRvCore, OneInstructionPerCycle) {
     clk->Continue(2000 * kPeriod);
     RT::JoinAll();
     insts = w.insts;
+    fw_insts = w.fw_insts;
     done_at = w.done_at;
   }
   RT::Reset();
-  ASSERT_GT(done_at, 0u);
-  ASSERT_GT(insts, 0u);
+  ASSERT_GT(done_at, kSendAt);
+  ASSERT_GT(insts, fw_insts);
   // 每条 1 拍，另加访存与 DSA 读的停拍，所以拍数不少于指令数
-  EXPECT_GE(done_at, insts);
+  EXPECT_GE(done_at - kSendAt, insts - fw_insts);
 }
 
 // task_queue 提前收下一个 task，前一个完成后立刻接上，不留 bubble。

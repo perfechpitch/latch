@@ -159,17 +159,15 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="572.0" y="1106.0" font-size="8.5" fill="#475569">业务层 credit 分方向，先查 routing table 定方向再取 credit</text>
 <text x="572.0" y="1119.5" font-size="8.5" fill="#475569">解析本级 Router 各方向传进来的 core credit release，按 action 决定</text>
 <text x="572.0" y="1133.0" font-size="8.5" fill="#475569">　是否同步更新 core 内的 stream 表状态</text>
-<rect x="1000" y="960" width="320" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
+<rect x="1000" y="960" width="320" height="140.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1012" y="981" font-size="11" fill="#111827" font-weight="600">Header Parser</text>
-<text x="1012.0" y="998.0" font-size="8.5" fill="#475569">首拍锁存 Header，检查 opcode / route、长度、身份字段与帧格式</text>
-<text x="1012.0" y="1011.5" font-size="8.5" fill="#475569">逻辑字段与检查：version / header_len · packet_type / route</text>
-<text x="1012.0" y="1025.0" font-size="8.5" fill="#475569">　dst_addr（在目的端范围内、满足对齐）· byte_count</text>
-<text x="1012.0" y="1038.5" font-size="8.5" fill="#475569">　task_id / stream_id（未完成上下文中不得重复占用）· attributes</text>
-<text x="1012.0" y="1052.0" font-size="8.5" fill="#475569">把包头上下文存进 Header Table，不生成 Descriptor</text>
-<text x="1012.0" y="1065.5" font-size="8.5" fill="#475569">一帧一任务：同一 Frame 只属于一个进核任务，按到达顺序 FIFO 配对</text>
-<text x="1012.0" y="1079.0" font-size="8.5" fill="#475569">首拍固定为 Header：靠“上一帧 TLAST 已接受”判断下一拍是新 Header</text>
-<text x="1012.0" y="1092.5" font-size="8.5" fill="#475569">非法 Header 进 Drop Frame：不生成 Descriptor、不发存储器请求，</text>
-<text x="1012.0" y="1106.0" font-size="8.5" fill="#475569">　只消费到 TLAST 以恢复帧边界</text>
+<text x="1012.0" y="998.0" font-size="8.5" fill="#475569">首拍锁存 Header，检查长度与帧格式</text>
+<text x="1012.0" y="1011.5" font-size="8.5" fill="#475569">byte_count ≤ 32 KB，与 TKEEP 累计值、TLAST 位置一致</text>
+<text x="1012.0" y="1025.0" font-size="8.5" fill="#475569">把包头上下文存进 Header Table，不生成 Descriptor</text>
+<text x="1012.0" y="1038.5" font-size="8.5" fill="#475569">一帧一任务：同一 Frame 只属于一个进核任务，按到达顺序 FIFO 配对</text>
+<text x="1012.0" y="1052.0" font-size="8.5" fill="#475569">首拍固定为 Header：靠“上一帧 TLAST 已接受”判断下一拍是新 Header</text>
+<text x="1012.0" y="1065.5" font-size="8.5" fill="#475569">非法 Header 直接断言：丢一帧会让之后的进核任务与包</text>
+<text x="1012.0" y="1079.0" font-size="8.5" fill="#475569">　配对整体错开，Drop Frame 下那一笔怎么结束未定</text>
 <rect x="1360" y="960" width="350" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1372" y="981" font-size="11" fill="#111827" font-weight="600">Hmem</text>
 <text x="1372.0" y="998.0" font-size="8.5" fill="#475569">Hmem = 16 项 × {core_mask 2 B, hardware_used 1 B, sw_header 16 B}：</text>
@@ -257,8 +255,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 | 编号 | 功能 |
 | - | - |
-| F1 | 首拍锁存 Header，检查 opcode / route、长度、身份字段和帧格式 |
-| F2 | 解析的逻辑字段与各自的检查：`version` / `header_len`（版本受支持、长度不超过首拍有效字节）；`packet_type` / `route`（标识这是 DTE 搬入任务并选 Router → MM 还是 Router → CM，其他 Route 在这里拒绝）；`dst_addr`（在目的端地址范围内、满足对齐）；`byte_count`（与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致）；`task_id` / `stream_id`（未完成上下文中不得重复占用）；`attributes` / `reserved`（未定义位为约定默认值） |
+| F1 | 首拍锁存 Header，检查长度和帧格式 |
+| F2 | 检查 `byte_count`：不超过单任务上限 32 KB，与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
 | F3 | 把包头上下文（core_mask / hardware_used / gpu_id / token_id）存进 Header Table，逐拍转发 payload；不生成 Descriptor——任务由 RV core 配置驱动 |
 | F3a | Descriptor 的 `stream_id` / `task_id` / `user_id` / `path_id` / `vcid` 由 RV core 经 STUPV 直连送来（F14a），不取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致 |
 | F3c | Descriptor 的 `dst_addr` 由软件配 `CFG_ADDRx_DST` + `stream_id × stride` 展开（F46/F47），落哪块存储由 `CFG_TRANS_MODE` 的 route 编码决定。回不回 Ack（F3d）是本 core 的进核配置，由 SCP 逐 core 写（`InboundCfg.no_ack`），对应 bundle 的 `DTEIN` 记录：业务模式下计算 core 落 Core Mem、回 Ack，B core 与 R core 落 Matrix Mem、不回 Ack；weights 加载阶段进来的都是权重，落 Matrix Mem、不回 Ack。坏 core 与不派角色的 core 不配这一项 |
@@ -268,7 +266,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F5 | 首拍固定为 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号 |
 | F6 | Payload Fire 由 inbound buffer 是否有空决定（payload 口 ready，满则 TREADY 反压）；TLAST 标识最后一个 Payload beat；`byte_count` 为 0 时可由 Header beat 同时携带 TLAST |
 | F7 | TKEEP 按字节粒度生效，每个 Payload Fire 累计 TKEEP 有效字节，TLAST 时与 `byte_count` 比较 |
-| F8 | 非法 Header 进 Drop Frame 流程：不生成 Descriptor、不发存储器请求，只消费到 TLAST 以恢复帧边界 |
+| F8 | 非法 Header 直接断言。进核任务与数据包按到达顺序一一配对，CoreStation 每收一个包头就起一笔 datain，kernel 为它配一笔进核任务；丢掉一帧，之后的配对整体错开。源文档的 Drop Frame（只消费到 TLAST 以恢复帧边界）下这一笔进核任务怎么结束未定 |
 
 ### Commit
 
@@ -283,7 +281,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F14a | 写 Trigger 那一拍把 19 项配置（`temp_valid` 时以模板为底、显式写过的字段覆盖模板，否则全取 Cfg Reg File）与五个直连身份信号一起采下来拼成 4 段位 Descriptor。五个身份不由软件写：`streamID` / `taskID` / `userID` / `pathID` / `vcid` 从 RV core 直连过来，前四项取自 CSR，`vcid` 是 TS 随任务下发的 |
 | F14b | 一笔配置写在被收下之前一直保持同一个序号。每拍换号的话 DSA 按序号去重就把同一笔认成好几笔，写一次执行一次的 Trigger 会被执行好几遍 |
 
-**Fast LUT**：从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE Setup Time，目标是压到 10T 以内。办法是常规任务不走 RV core 的配置 kernel：TS 给的 `task_id` 命中 Fast LUT 后，硬件拿表项内容（`length`、控制位）与 `user_id` 索引到的 User Base Register 拼出 task descriptor，直接推进对应通道的 TaskQueue，命中路径 4T；未命中才转发信息、重设 PC、启动 RV core 的 kernel，代价是 Core Latency + 4T。Fast LUT 只加速任务配置，不改路由定义、数据通路和完成条件。
+**Fast LUT（待评估）**：是否保留待评估，模型里所有任务都由 RV core 配寄存器起。候选方案如下。从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE Setup Time，目标是压到 10T 以内。办法是常规任务不走 RV core 的配置 kernel：TS 给的 `task_id` 命中 Fast LUT 后，硬件拿表项内容（`length`、控制位）与 `user_id` 索引到的 User Base Register 拼出 task descriptor，直接推进对应通道的 TaskQueue，命中路径 4T；未命中才转发信息、重设 PC、启动 RV core 的 kernel，代价是 Core Latency + 4T。Fast LUT 只加速任务配置，不改路由定义、数据通路和完成条件。
 
 ### 五个物理通道与各自的 TaskQueue
 
@@ -436,7 +434,7 @@ port smem_wr (master, valid/ready, clk)               // shareMem 表项写，�
   in  req_ready
 port mu_topk (master, 脉冲, clk)                      // → MU：进核包里的 topK 经旁带写 topK_ep_table[stream_id]
   out valid · stream_id[3:0] · data[2047:0]           // 256 B 一拍，fire-and-forget，无 ready
-port cfg (slave, ctrl_noc 写事务, clk)                // 静态寄存器、Hmem、Fast LUT、RouterTable 副本
+port cfg (slave, ctrl_noc 写事务, clk)                // 静态寄存器、Hmem、Fast LUT（待评估）、RouterTable 副本
   in  cfg_valid · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0]
   out cfg_rdata[31:0]
 ```
@@ -576,16 +574,15 @@ stall_cycles  = cycles(valid && !ready)
   <text x="779" y="114" font-size="10" fill="#334155" text-anchor="middle">dst_addr[24:0]</text>
   <text x="779" y="136" font-size="10" fill="#334155" text-anchor="middle">byte_count[15:0]</text>
   <text x="779" y="158" font-size="10" fill="#334155" text-anchor="middle">task_id · stream_id</text>
-  <rect x="232" y="20" width="415" height="178" fill="#f8fafc" stroke="#374151" rx="4"/>
+  <rect x="232" y="20" width="415" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M1</text>
   <text x="633" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="56" font-size="12" fill="#111827">Header Parser · 首拍锁存并检查</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 上一帧 tlast 已接受 → 本拍的 beat 判为新 Header</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. f = Parse(tdata)；ok = 版本受支持 &amp;&amp; header_len ≤ 首拍有效字节</text>
-  <text x="262" y="118" font-size="10.5" fill="#475569">&amp;&amp; dst_addr 在范围内且对齐 &amp;&amp; task_id/stream_id 未被在飞上下文占用</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">3. ok → desc = {route, dst_addr, byte_count, task_id, stream_id}</text>
-  <text x="250" y="158" font-size="10.5" fill="#475569">4. !ok → Drop Frame：不生成 Descriptor、不发存储请求，只消费到 tlast</text>
-  <text x="250" y="182" font-size="10" fill="#9ca3af">TKEEP 逐 beat 累计，tlast 时与 byte_count 比对</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. ok = byte_count ≤ 32 KB</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. ok → 包头上下文存进 Header Table，编帧号，逐拍转发 payload</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. !ok → 断言：丢一帧会让之后的进核任务与包配对整体错开</text>
+  <text x="250" y="162" font-size="10" fill="#9ca3af">TKEEP 逐 beat 累计，tlast 时与 byte_count 比对</text>
   <path d="M188 81 L231 81" stroke="#475569" marker-end="url(#are1)" fill="none"/>
   <path d="M188 152 L231 152" stroke="#475569" marker-end="url(#are1)" fill="none"/>
   <path d="M647 109 L690 109" stroke="#475569" marker-end="url(#are1)" fill="none"/>
@@ -924,8 +921,8 @@ Completion RS      16 项（待定）；Done Pending 16 项（待定）
 Hmem               288 B = 16 项 × {core_mask 2 B, sw_header 16 B}，按 stream_id 索引
 寄存器地址空间     16 KB：Config 0x0000~0x03FF（CFG_TRIGGER + 19 项配置）、Ctrl/Status 0x0400、Profile 0x0800、Debug 0x0C00（后三段不落地）、Template 0x1000（8×128 B）、TaskQ 0x2000（只读回读）、Header Table 0x3000（16×128 B）
 stream_cache       3 方向 × 16 项 × {valid, user_id}，Router 那张 stream 表的只读副本
-Fast LUT           64 项 × {valid, length, ctrl_flags}，按 task_id 索引；配合 User Base Register 直接拼出 task descriptor
-DTE Setup Time     目标 < 10T：Fast LUT 命中 4T，未命中 Core Latency + 4T
+Fast LUT           待评估；候选为 64 项 × {valid, length, ctrl_flags}，按 task_id 索引，配合 User Base Register 直接拼出 task descriptor
+DTE Setup Time     随 Fast LUT 待评估：候选目标 < 10T（命中 4T，未命中 Core Latency + 4T）；模型不走 Fast LUT，按下一行的 85T
 单任务最大搬运量    32 KB（256 B × 128 拍）
 内部启动延迟        85T（流水启动 5T + 50 条指令算地址 75T + core 发射 5T）
 MSG 包结构          包头标记 2 B + Router 信息 4 B（path_id 1 B + path_core_mask 2 B + rsv 1 B）+ 包长度 2 B + 软件辅助信息 0～16 B + 业务数据 0～(64 K − 24) B
@@ -941,11 +938,11 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 
 | 机制 | 功能 | 用例 |
 | - | - | - |
-| Header 首拍锁存与六类字段检查 | F1、F2 | `header_check` |
+| Header 首拍锁存与长度检查 | F1、F2 | `header_check` |
 | 一帧一任务，不允许任务间交织 | F4 | `one_frame_one_task` |
 | 靠上一帧 TLAST 判断下一拍是新 Header | F5 | `frame_boundary` |
 | TKEEP 累计与 byte_count 比较 | F7 | `tkeep_count` |
-| 非法 Header 进 Drop Frame，只消费到 TLAST | F8 | `drop_frame` |
+| 非法 Header 直接断言 | F8 | `illegal_header` |
 | Commit dispatch 三样一起拿：Lane 读/写槽 + Completion RS 都齐才下发 | F9、F10 | `dispatch_all_three` |
 | 进核任务的 stream_id / task_id 由软件配 CFG 表达，Header Parser 只按到达顺序存包头 | F3a | `inbound_ids` |
 | 进核任务 ↔ 数据包按到达顺序 FIFO 配对，同 path 的几个包不串 | F3b | `fifo_pairing` |

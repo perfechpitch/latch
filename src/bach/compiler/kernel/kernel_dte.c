@@ -42,7 +42,8 @@ static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
     dsa_write(DTE_ADDR2_SRC, dte_ep(DTE_EP_SCALE, src & 0x0FFFFFFFu));
     dsa_write(DTE_ADDR2_DST, dte_ep(DTE_EP_SCALE, dst & 0x0FFFFFFFu));
     dsa_write(DTE_STRIDE2, stride);
-    dsa_write(DTE_DATA_LEN2, len / 32u);
+    /* 每 32 B 数据一个 scale，不足 32 B 的末段也算一个 */
+    dsa_write(DTE_DATA_LEN2, (len + 31u) / 32u);
   }
 
   u32 trans = tmode | (addr_valid << DTE_ADDR_VALID_SHIFT)
@@ -59,9 +60,10 @@ static void send_seg(u32 off, u32 bytes) {
 }
 
 /* 进核那一笔的配置：数据从 Router 的包来（没有源地址），落 dst。带 scale 时包尾
- * 那一段进 scale 旁带；flag_addr 非 0 时搬完往 Share Mem 写 4 B 的 1（置到齐/占用
- * 标志）。落 Core Mem 叠 stream 偏移，落 Matrix Mem 是物理地址不叠。完成后带
- * ack_ts_en：普通 core 的 recv_unit=kDsa 等 DSA 这一路；B/R core 的 no_ack 由 SCP
+ * 那一段进 scale 旁带；mode 带 DTE_WR_SHAREMEM_FLAG 时搬完往 Share Mem 的
+ * flag_addr 写 4 B 的 1（置到齐/占用标志）。flag_addr 可以是 0（标志表第 0 项），
+ * 所以写不写看 mode，不看地址。落 Core Mem 叠 stream 偏移，落 Matrix Mem 是物理
+ * 地址不叠。完成后带 ack_ts_en：普通 core 的 recv_unit=kDsa 等 DSA 这一路；B/R core 的 no_ack 由 SCP
  * 切模式时配，Fire 时压掉这一档。 */
 static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
                                                                u32 mode,
@@ -76,9 +78,10 @@ static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
     addr_valid |= (1u << 2);
     dsa_write(DTE_ADDR2_DST, dte_ep(DTE_EP_SCALE, dst & 0x0FFFFFFFu));
     dsa_write(DTE_STRIDE2, stride);
-    dsa_write(DTE_DATA_LEN2, len / 32u);
+    /* 每 32 B 数据一个 scale，不足 32 B 的末段也算一个 */
+    dsa_write(DTE_DATA_LEN2, (len + 31u) / 32u);
   }
-  if (flag_addr != 0u) {
+  if (mode & DTE_WR_SHAREMEM_FLAG) {
     dsa_write(DTE_SM_W_ADDR, flag_addr);
     dsa_write(DTE_SM_W_DATA, 1u);
   }
