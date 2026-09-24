@@ -206,15 +206,9 @@ class RvExec : public BachModule {
   void AttachDsaWb(std::shared_ptr<GprWbPort> p) { dsa_wb = std::move(p); }
   void AttachLsqWb(std::shared_ptr<GprWbPort> p) { lsq_wb = std::move(p); }
 
-  // boot 期由 ctrl_noc 装载 ITCM 与 DTCM。装完从地址 0 解复位跑 `_start`；
-  // PokeItcm 只写字节，不启动，避免 SCP 往 ITCM 塞 nop 时当成 firmware。
-  void LoadImage(std::string const& path) {
-    sys->LoadProgramFile(path);
-    sys->SetPC(kItcmBase, 0);
-    sys->SetHaltState(false, 0);
-    running = true;
-    in_task = false;
-  }
+  // boot 期由 ctrl_noc 装载 ITCM 与 DTCM。只写镜像，核保持复位停机；
+  // TS 下发任务时再跳到那一笔的 task_pc。PokeItcm 同样只写字节。
+  void LoadImage(std::string const& path) { sys->LoadProgramFile(path); }
   void PokeItcm(uint64_t addr, std::vector<uint8_t> const& bytes) {
     local->Write(const_cast<uint8_t*>(bytes.data()), addr, bytes.size());
   }
@@ -295,9 +289,9 @@ class RvExec : public BachModule {
     ResetAbi();
   }
 
-  // firmware 的 _start 头两条做的事：栈顶与全局指针。装完镜像后会从 `_start`
-  // 跑过这两条；没有装 kernel 的用例（custom-0、SCP boot 的 nop）没有 firmware
-  // 可跑，仍要在这里给初值，否则一用栈就落到 0 号地址附近。
+  // firmware 的 _start 头两条做的事：栈顶与全局指针。模型里 RV core 不跑
+  // firmware（TS 下发任务时直接跳到那一笔的 task_pc），所以这两个寄存器在
+  // 这里给初值。不给的话 kernel 里但凡用一次栈，地址就落到 0 减去帧长那里。
   //
   // 栈顶取 DTCM 的顶，往下长；全局指针取链接脚本里 .data 起点加 0x800，与
   // compiler/kernel/link.ld 的 global_pointer 同一个地址。
@@ -345,7 +339,6 @@ class RvExec : public BachModule {
     sys->SetPC(cur.task_pc, 0);
     sys->SetHaltState(false, 0);
     running = true;
-    in_task = true;
   }
 
   void RunOne() {
@@ -461,17 +454,12 @@ class RvExec : public BachModule {
       return;
     }
     if (at == kRegTaskDone) {
-      // 业务 task：交还自己；带 TS 标志时另外通知 TS。
-      // firmware 收尾那条不通知 TS 的 task_done（F14）只停取指进 wait，
-      // 不是一笔业务 task，不能脉冲 task_queue、也不能报 rv_done。
+      // 交还自己。带 TS 标志时另外通知 TS。
       bool to_ts = r.data != 0;
-      if (in_task) {
-        finish->Drive(to_ts, ++finish_seq);
-        if (to_ts) {
-          done->Drive(cur.stream_id, cur.task_id, cur.user_id, cur.path_id);
-        }
+      finish->Drive(to_ts, ++finish_seq);
+      if (to_ts) {
+        done->Drive(cur.stream_id, cur.task_id, cur.user_id, cur.path_id);
       }
-      in_task = false;
       sys->SetHaltState(true, 0);
       running = false;
     }
@@ -503,7 +491,7 @@ class RvExec : public BachModule {
   // gpr 就绪表：32 位，复位全 1。
   std::array<bool, 32> ready{};
   RvTask cur;
-  bool running = false, in_task = false, dsa_used = false, lsq_used = false;
+  bool running = false, dsa_used = false, lsq_used = false;
   uint64_t last_start_seq = 0, last_dsa_wb = 0, last_lsq_wb = 0;
   uint64_t dsa_seq = 0, lsq_seq = 0, finish_seq = 0;
   uint64_t inst_cnt = 0, wait_cnt = 0;

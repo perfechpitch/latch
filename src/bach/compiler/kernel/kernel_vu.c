@@ -76,8 +76,8 @@ static u32 op_word(u32 opcode, u32 src1, u32 src2) {
   return opcode | (src1 << VU_SRC1_SHIFT) | (src2 << VU_SRC2_SHIFT);
 }
 
-/* 三组静态配置，几个专家共用：地址每条走动态副本。boot 时写进 kernel_init，
- * 任务里不再重配。 */
+/* 三组静态配置，几个专家共用：地址每条走动态副本。firmware 不跑，每次
+ * task_vu_gate 开头写一遍。 */
 static void gate_setup(void) {
   u32 type_vl = MOE_SEG_INTER;   /* FP32、RNE 都是 0 */
 
@@ -127,6 +127,7 @@ TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
   u32 e;
+  gate_setup();
   for (e = 0; e < MOE_EXPERTS; ++e) {
     u32 fc1 = red + e * MOE_PART_STRIDE;
     u32 fc3 = red + (MOE_EXPERTS + e) * MOE_PART_STRIDE;
@@ -148,7 +149,7 @@ TASK void task_vu_gate(void) {
  *   组 5  LU 读后一半（BF16）→ VALU0 与 VRF 相加 → SU 按 BF16 写回 Core Mem
  *
  * 向量长度是 MOE_EMBED，与门控那三条的 MOE_SEG_INTER 不同，所以另占两组静态配置。
- * 与 gate_setup 一样，boot 时写进 kernel_init。 */
+ * firmware 不跑，每次 task_vu_add 开头写一遍。 */
 static void add_setup(void) {
   /* 读写与中间一律 BF16，RNE。向量通路的一拍吃多少个 element 由 DATA_TYPE 定：
      BF16 一拍 64 个，正好是 CM 一拍 128 B 装的个数，一个块一段流过去；配成 FP32
@@ -178,6 +179,7 @@ static void add_setup(void) {
 TASK void task_vu_add(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 at = MOE_SW_HEAD_BYTES;
+  add_setup();
   vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at, 0, 0);
   vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at, 1, 0);
   vu_wait_trigger_taken();
@@ -185,8 +187,5 @@ TASK void task_vu_add(void) {
 }
 
 void kernel_init(void) {
-  /* 静态组在 firmware 里配一次：组 0 留给 compute，1/2/3 门控，4/5 求和。
-   * TYPE_VL 走各组静态副本，不写动态寄存器。 */
-  gate_setup();
-  add_setup();
+  /* firmware 不跑。组 1/2/3 由 task_vu_gate 写，组 4/5 由 task_vu_add 写。 */
 }

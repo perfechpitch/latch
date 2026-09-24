@@ -685,7 +685,7 @@ custom-0 字段布局   见下一节
 | 写 DSA 寄存器两种寻址各就位 | F13 | `custom0` · `WritesDsaRegisterBothAddressModes` |
 | 16 bit 立即数拆进三个字段后仍拼得回来 | F13 | `custom0` · `ImmediateAddressLandsInWindow`、`DecodeMapsEachEncoding` |
 | 读 DSA 寄存器经 dsa_rq 异步写回目的寄存器 | F12、F23 | `custom0` · `ReadsDsaRegisterAndValueReachesConsumer` |
-| task_done 的两种行为：交还自己 / 另外通知 TS | F14 | `custom0` · `TaskDoneNotifyFlagPicksThePath`；firmware 收尾不报 TS：`FirmwareRunsStartThenWaits` |
+| task_done 的两种行为：交还自己 / 另外通知 TS | F14 | `custom0` · `TaskDoneNotifyFlagPicksThePath` |
 | loop 按 rs1 / rs2 比较退出，退出后不跳 | F17 | `custom0` · `LoopBranchesUntilCurrentReachesMax`、`LoopFallsThroughWhenAlreadyDone` |
 | 任务启动靠写 trigger 寄存器，last 标志在 trigger 里 | F19 | `dsa_trigger` |
 | dsa_iss 每拍最多一条，按反压判断是否下发成功 | F21、F22 | `dsa_iss_rate` |
@@ -700,7 +700,7 @@ custom-0 字段布局   见下一节
 | DTE core 读 Core Mem 固定 1056 bit，不 burst，32 bit / 拍 | F35 | `rv_cm_read` |
 | ITCM / DTCM 由 ctrl_noc 装载，拍数按字节数 / 4 B | F38 | `tcm_load` |
 | Matrix Mem 对三个 RV core 都不可见 | F40 | `no_mmem_visibility` |
-| 复位取 boot_pc，收 task 取 task_pc | F11 | `FirmwareRunsStartThenWaits`；业务 task 仍取 `task_pc`：`RunsOneTaskAndReportsDone` |
+| 复位取 boot_pc，收 task 取 task_pc | F11 | `RunsOneTaskAndReportsDone` |
 
 ***
 
@@ -716,10 +716,7 @@ custom-0 字段布局   见下一节
 * **为什么 DSA 读寄存器不阻塞而配置写会阻塞**
   * 配置写要占 DSA 的配置通路，通路满了只能等
   * 读只是取一个状态，用 dsa_rq 记下目的寄存器就能异步返回，不必占住发射口
-* **为什么栈顶与全局指针在复位时仍直接赋值**
-  * 装完镜像后从 `_start` 跑 firmware，`la sp` / `la gp` 会设这两个寄存器
-  * 部分用例只往 ITCM 塞几条指令、不装 kernel（custom-0、SCP boot 的 nop），没有 firmware 可跑，仍要给初值，kernel 一用栈才不会落到 0 号地址附近
-  * `gp` 取链接脚本的 `global_pointer`，与 firmware 设的相同；`sp` 取 DTCM 顶端，firmware 跑起来后改设成链接脚本的 `stack_top`（紧接 `.bss` 之后 1 KB，随 kernel 尺寸变）
-* **firmware 何时启动**
-  * `LoadImage` 把 hex 装进 ITCM 后从地址 0 解复位跑 `_start`；`PokeItcm` 只写字节，不启动，避免 SCP 往 ITCM 塞 nop 时当成 firmware
-  * firmware 末尾那条不通知 TS 的 `task_done`（F14）只停取指进 wait，不脉冲 `task_queue` 的 finish、不报 `rv_done`
+* **为什么栈顶与全局指针在复位时直接赋值**
+  * 模型只跑业务流那一段：TS 下发 task 时取 `task_pc` 起始执行，firmware 从 `boot_pc` 跑到那条不通知 TS 的 `task_done` 为止的那一段没有执行的时机
+  * `sp` 与 `gp` 是 firmware 起始那两条指令设的，不设就是 0，kernel 一用栈就访问 0 号地址附近
+  * 取值照链接脚本给的 DTCM 栈顶与全局指针，与 firmware 设的那两个相同
