@@ -25,6 +25,7 @@
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/common/flit.h"
 #include "bach/ip/chip/core/dte/hmem.h"
+#include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -51,6 +52,10 @@ class Commit : public BachModule {
   void AttachVcLevel(std::shared_ptr<CreditLevelPort> p) {
     vc_level = std::move(p);
   }
+
+  // 出核造包时从 MU 的 topK_ep_table 把 topK 读出来附回要发的包。装配层把 MU 的
+  // GenEpInfo 指过来。
+  void AttachMuTopkEp(GenEpInfo* ep) { mu_topk_ep = ep; }
 
   // dispatch 一笔后往这几个口上发：每个 Lane 一个，Completion RS 一个。
   void AddLanePort(std::shared_ptr<AdmitPort> p) {
@@ -193,6 +198,12 @@ class Commit : public BachModule {
     // 带 scale 的包：数据后面接 scale，包长把 payload 各段都算上。
     m->size = d.PayloadBytes();
     m->scale_valid = d.HasScale() ? 1 : 0;
+    // 带 topK 的包（B core 广播那一笔）：从 MU 的 topK_ep_table 按段内偏移取这一
+    // 份原样附回，收方 DTE 再按 stream_id 写进它的 MU。
+    if (d.HasTopk() && mu_topk_ep) {
+      m->topk_valid = 1;
+      m->topk = mu_topk_ep->TopkBytes(d.TopkIndex());
+    }
     m->vc = d.vc;
     m->stream_id = d.stream_id;
     m->task_id = d.task_id;
@@ -231,6 +242,7 @@ class Commit : public BachModule {
   }
 
   Hmem& hmem;
+  GenEpInfo* mu_topk_ep = nullptr;
   std::shared_ptr<CreditLevelPort> vc_level;
   std::shared_ptr<DescPort> from_rv;
   std::vector<std::shared_ptr<AdmitPort>> to_lane;

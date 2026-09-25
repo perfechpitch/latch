@@ -536,8 +536,9 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
   EXPECT_GT(reads, 1u) << "但确实比「一笔一等」快";
 }
 
-// 进核那一笔带 topK 旁带：落地时按 stream_id 把包里的 topK 写进 MU 端口，整笔
-// 只写一次。只有进核通道挂着这条数据线。
+// 进核那一笔带 topK 旁带：落地时按 topK 段的端内偏移（表下标）把包里的 topK 写进
+// MU 端口，整笔只写一次。只有进核通道挂着这条数据线。topK 随包走，进核 Descriptor
+// 的 msg 是空，得从 Header Parser 转过来的 payload 那一拍的 msg 里读。
 TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
   std::vector<uint8_t> topk(256, 0);
   for (uint64_t i = 0; i < topk.size(); ++i) topk[i] = uint8_t(i * 3 + 7);
@@ -554,10 +555,13 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
     auto topk_port = std::make_shared<MuTopkPort>(clk);
     ln.AttachMuTopk(topk_port);
+    auto payload_port = std::make_shared<PayloadPort>(clk);
+    ln.AttachPayload(payload_port);
 
     auto d = Task(1, Route::kRouterToCm, /*stream=*/3, kFlitBytes, 0, 0x40);
     d->seg[3].valid = true;
     d->seg[3].dst_kind = SegEndpoint::kTopk;
+    d->seg[3].dst = 3;  // 表下标：计算 core 是 stream_id，B core 是环形槽号
     d->msg->topk = topk;
 
     // 每拍读一次端口：valid 且序号没见过就算一次（端口同一拍值会连着出现两拍）。
@@ -580,7 +584,29 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     };
     PortSink sink(clk, topk_port);
 
-    RealMemHarness h(clk, ln, d);
+    // 扮演 Header Parser：同拍准入这笔任务、把整包（带 topK）从 payload 口推进来。
+    // 帧号与 Lane 给进核任务编的号对齐（第一笔 = 1）。
+    struct InboundHarness : public BachModule {
+      InboundHarness(ClockPtr c, Lane& target, std::shared_ptr<Descriptor> job,
+                     std::shared_ptr<PayloadPort> p)
+          : BachModule(c, "harness"), ln(target), d(std::move(job)),
+            payload(std::move(p)) {}
+      void Step() override {
+        if (CycleNow() == 2) {
+          ln.AdmitPtr()->Drive(d, 1);
+          payload->Drive(/*frame=*/1, d->msg->payload.size(), /*off=*/0,
+                         /*last=*/true, d->msg);
+        } else {
+          ln.AdmitPtr()->Idle();
+          payload->Idle();
+        }
+        ln.RunStep();
+      }
+      Lane& ln;
+      std::shared_ptr<Descriptor> d;
+      std::shared_ptr<PayloadPort> payload;
+    };
+    InboundHarness h(clk, ln, d, payload_port);
     clk->Continue(300 * kPeriod);
     RT::JoinAll();
     drives = sink.drives;
@@ -589,6 +615,6 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
   }
   RT::Reset();
   EXPECT_EQ(drives, 1u) << "整笔只写一次";
-  EXPECT_EQ(got_stream, 3u) << "按 stream_id 写";
+  EXPECT_EQ(got_stream, 3u) << "按 topK 段的端内偏移（表下标）写";
   EXPECT_EQ(got_topk, topk) << "写的是包里的那一份";
 }

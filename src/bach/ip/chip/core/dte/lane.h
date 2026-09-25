@@ -178,17 +178,6 @@ class Lane : public BachModule {
     return false;
   }
 
-  // 有 topK 段（按地址译码命中 topK_table）的任务。
-  static bool HasTopk(Descriptor const& d) {
-    for (auto const& s : d.seg) {
-      if (s.valid && (s.src_kind == SegEndpoint::kTopk ||
-                      s.dst_kind == SegEndpoint::kTopk)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   // 读回来的一块填进要发出去的那个包，按已填字节数排在后面。
   static void FillOut(ActiveCtx& c, ByteBlockPtr const& blk) {
     if (!c.desc.msg || !blk) return;
@@ -396,16 +385,6 @@ class Lane : public BachModule {
 
   void StepWr() {
     ActiveCtx& c = ctx[kWr];
-    // topK 旁带：进核那一笔落地时把包里的 topK 写进 MU 的 topK_ep_table，整笔
-    // 只写一次。只有进核通道挂着这条数据线，出核通道 mu_topk 为空走不进来。
-    if (c.busy && HasTopk(c.desc) && !c.topk_sent && mu_topk) {
-      std::vector<uint8_t> topk =
-          c.desc.msg ? c.desc.msg->topk : std::vector<uint8_t>();
-      mu_topk->Drive(c.desc.stream_id,
-                     std::make_shared<ByteBlock>(std::move(topk)));
-      c.topk_sent = true;
-      topk_driven = true;
-    }
     if (!c.busy) {
       if (!wr_reported) wr_done->Idle();
       return;
@@ -420,6 +399,19 @@ class Lane : public BachModule {
 
     if (buffer.Empty(idx) || buffer.Front(idx).tag != TagOf(c.desc)) return;
     BufBeat const& b = buffer.Front(idx);
+
+    // topK 旁带：进核那一笔落地时把包里的 topK 写进 MU 的 topK_ep_table，整笔
+    // 只写一次。topK 随包走，得从这一拍 buffer 里的 msg 读（进核 Descriptor 的
+    // msg 是空，出核那一笔才在 Commit 造 msg）；只有进核通道挂着这条数据线，
+    // 出核通道 mu_topk 为空走不进来。写进哪一项由 topK 段的端内偏移给：计算 core
+    // 是 stream_id，B core 是环形槽号。
+    if (c.desc.HasTopk() && !c.topk_sent && mu_topk) {
+      std::vector<uint8_t> topk = b.msg ? b.msg->topk : std::vector<uint8_t>();
+      mu_topk->Drive(c.desc.TopkIndex(),
+                     std::make_shared<ByteBlock>(std::move(topk)));
+      c.topk_sent = true;
+      topk_driven = true;
+    }
 
     if (Outbound() && c.desc.route != Route::kMmToCm) {
       // 出核：发给 Router。这一档的出口是 Router TX。

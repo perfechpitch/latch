@@ -54,7 +54,8 @@ static inline __attribute__((always_inline)) u32 dsa_read(u32 off) {
 #define DTE_EP_CMEM  0x0u  /* CoreMem 数据 */
 #define DTE_EP_MMEM  0x1u  /* MatrixMem 数据 */
 #define DTE_EP_SCALE 0x2u  /* scale 旁带，低位给对应数据地址 */
-#define DTE_EP_TOPK  0x3u  /* MU topK_table，低位给 stream_id */
+#define DTE_EP_TOPK  0x3u  /* MU topK_table，低位给表下标（计算 core 是 stream_id，
+                              B core 是环形槽号） */
 #define DTE_EP_HDR   0x4u  /* header_table，低位给 stream_id */
 static inline u32 dte_ep(u32 ep, u32 off) { return (ep << DTE_EP_SHIFT) | off; }
 
@@ -98,9 +99,13 @@ static inline u32 dte_ep(u32 ep, u32 off) { return (ep << DTE_EP_SHIFT) | off; }
 #define DTE_WR_SHAREMEM_FLAG (1u << 8)
 #define DTE_ACK_TS_EN        (1u << 9)
 
-/* dte_move 的调用方标志：带 scale 时置位。硬件上是段 2，不占 TRANS_MODE 位，所以
- * 取在硬件位之外的高位。 */
+/* dte_move / dte_inbound 的调用方标志：带 scale 时置位。硬件上是段 2，不占
+ * TRANS_MODE 位，所以取在硬件位之外的高位。 */
 #define DTE_SCALE_VALID (1u << 16)
+/* 带 topK 旁带时置位：进核那一笔把包里的 topK 按段内偏移（表下标）写进 MU 的
+ * topK_ep_table，出核那一笔把 MU 里的 topK 附回要发的包。硬件上是段 3，同样取在
+ * 硬件位之外的高位。 */
+#define DTE_TOPK_VALID (1u << 17)
 
 /* ===== Core Mem 上一个 stream 的分区 =====
  *
@@ -157,6 +162,7 @@ static inline u32 dte_ep(u32 ep, u32 off) { return (ep << DTE_EP_SHIFT) | off; }
  * 16 B 对齐。 */
 #define MOE_TOKEN_OFF   0x0000u   /* token：6144 B MXFP8 */
 #define MOE_TOPK_OFF    0x1800u
+#define MOE_TOPK_BYTES  256u      /* 一份 token 的 topK 表，进 MU topK_table */
 /* 部分和那一包：16 B 头，后面依次是两个专家的 FC1、两个专家的 FC3，一份 256 个
  * BF16。chip 内 8 个 core 沿归约链逐跳加，链尾那一份交回 dot core */
 #define MOE_PART_OFF    0x2000u

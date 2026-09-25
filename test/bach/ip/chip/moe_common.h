@@ -158,20 +158,17 @@ inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
 // topK 里第 0 个是组内第 1 个专家，第 1 个是组内第 0 个；topK 直接存组内序号。
 constexpr uint64_t kLocal[kn::kExperts] = {1, 0};
 
-// boot 期铺进一个计算 core 的数据：topK 表与本 core 分到的那一片权重。group 是
-// EP 组号，chip 是这颗 chip 在组里的序号，slot 是这个 core 的逻辑槽位。
-//
-// MU 按 stream_id 读那一片里的 topK 表，连续发的几个 token 各占一个 stream，所以
-// 每个 stream 各铺一份。各 token 选的是同两个专家，每份都一样。
+// 一份 token 自带的 topK 表（选同两个专家，每份一样），随包走、DTE 搬运时按
+// stream_id 直接写进 MU 的 topK_ep_table。
+inline std::vector<uint8_t> TokenTopk() {
+  return TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
+}
+
+// boot 期铺进一个计算 core 的数据：本 core 分到的那一片权重。group 是 EP 组号，
+// chip 是这颗 chip 在组里的序号，slot 是这个 core 的逻辑槽位。topK 表随 token 走，
+// 不在这里铺。
 inline void SetUpCoreData(Core& core, uint64_t group, uint64_t chip,
                           uint64_t slot) {
-  // topK 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table，
-  // 直接存组内序号；每个 stream 各占一份。多 token 各自落在自己的 stream 上，得有
-  // 各有一份，否则只有 0 号 stream 有专家、别的 stream 算出全 0。
-  auto topk = TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
-  for (uint64_t s = 0; s < kn::kStreamNum; ++s) {
-    core.GetMu().EpInfo().WriteTopk(s, topk);
-  }
   kn::PokeCoreWeights(core.Mmem(), group, chip, slot, kLocal);
 }
 
@@ -214,8 +211,8 @@ inline uint64_t BcoreLand(uint64_t seq) {
   return (seq % kBcSlots) * kn::kBcTokenBytes;
 }
 
-// 第 k 个 token：6144 个 MXFP8，192 个 scale 接在后面。path 与落点由调用方给：
-// 从 B core 进来的落它的 Matrix Mem，直接进计算 core 的落 Core Mem。
+// 第 k 个 token：6144 个 MXFP8，192 个 scale 接在后面，topK 表随包走。path 与落点
+// 由调用方给：从 B core 进来的落它的 Matrix Mem，直接进计算 core 的落 Core Mem。
 inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId,
                             uint64_t k = 0) {
   auto m = std::make_shared<Message>();
@@ -231,6 +228,8 @@ inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId
   std::vector<uint8_t> scale = kn::TokenScale(k);
   m->payload.insert(m->payload.end(), scale.begin(), scale.end());
   m->size = m->payload.size();
+  m->topk_valid = 1;
+  m->topk = TokenTopk();
   return m;
 }
 

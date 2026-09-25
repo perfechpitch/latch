@@ -17,7 +17,7 @@
  * ack_ts_en：一个 task 拆成几笔搬运时
  * 只有最后一笔带，DTE 做完它才通知 TS。前一笔还没交出去时寄存器接口顶住写，
  * 所以几笔可以接着配 */
-static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
+static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last, u32 topk_idx) {
   u32 tmode = mode & 0x7u;
   /* stride：Mmem 一侧软件给物理地址，不叠 stream 偏移；Cmem 一侧叠。MM→CM 那
    * 一档源是 Mmem 目标 Cmem，CFG_STRIDE 只作用在目标端（源端硬件强制 0），所以
@@ -46,6 +46,16 @@ static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
     dsa_write(DTE_DATA_LEN2, (len + 31u) / 32u);
   }
 
+  if (mode & DTE_TOPK_VALID) {
+    /* topK 旁带：从 MU 的 topK_ep_table 按段内偏移取一份附回要发的包，不读存储。
+     * 源端地址打 TOPK tag，低位就是表里的下标（B core 广播是环形槽号）。 */
+    addr_valid |= (1u << 3);
+    dsa_write(DTE_ADDR3_SRC, dte_ep(DTE_EP_TOPK, topk_idx));
+    dsa_write(DTE_ADDR3_DST, 0);
+    dsa_write(DTE_STRIDE3, 0);
+    dsa_write(DTE_DATA_LEN3, MOE_TOPK_BYTES);
+  }
+
   u32 trans = tmode | (addr_valid << DTE_ADDR_VALID_SHIFT)
                     | (mode & (DTE_HW_HEADER_OP | DTE_WR_SHAREMEM_FLAG))
                     | (last ? DTE_ACK_TS_EN : 0u);
@@ -56,7 +66,7 @@ static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
 /* 把 Core Mem 上某一段搬到 Router 发出去。段的起点与长度由 shape 定。
  * 配的是段内偏移，落在哪一片由硬件按 stream_id 叠 */
 static void send_seg(u32 off, u32 bytes) {
-  dte_move(off, 0, bytes, DTE_MODE_CMEM_TO_ROUTER, 1);
+  dte_move(off, 0, bytes, DTE_MODE_CMEM_TO_ROUTER, 1, 0);
 }
 
 /* 进核那一笔的配置：数据从 Router 的包来（没有源地址），落 dst。带 scale 时包尾
@@ -67,7 +77,8 @@ static void send_seg(u32 off, u32 bytes) {
  * 切模式时配，Fire 时压掉这一档。 */
 static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
                                                                u32 mode,
-                                                               u32 flag_addr) {
+                                                               u32 flag_addr,
+                                                               u32 topk_idx) {
   u32 tmode = mode & 0x7u;
   u32 stride = (tmode == DTE_MODE_ROUTER_TO_CMEM) ? CMEM_STREAM_STRIDE : 0u;
   u32 addr_valid = (1u << 1);  /* 段 1 = 数据 */
@@ -80,6 +91,15 @@ static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
     dsa_write(DTE_STRIDE2, stride);
     /* 每 32 B 数据一个 scale，不足 32 B 的末段也算一个 */
     dsa_write(DTE_DATA_LEN2, (len + 31u) / 32u);
+  }
+  if (mode & DTE_TOPK_VALID) {
+    /* topK 旁带：不落 Core Mem，DTE 按段内偏移把包里的 topK 写进 MU 的
+     * topK_ep_table。地址打 TOPK tag，低位就是表里的下标：计算 core 是 stream_id，
+     * B core 是环形槽号。 */
+    addr_valid |= (1u << 3);
+    dsa_write(DTE_ADDR3_DST, dte_ep(DTE_EP_TOPK, topk_idx));
+    dsa_write(DTE_STRIDE3, 0);
+    dsa_write(DTE_DATA_LEN3, MOE_TOPK_BYTES);
   }
   if (mode & DTE_WR_SHAREMEM_FLAG) {
     dsa_write(DTE_SM_W_ADDR, flag_addr);
@@ -106,10 +126,12 @@ static u32 data_bytes(u32 size, u32 scale_valid) {
  * 相同，不再共用一个「从包头读」的通用 datain。与 bc_datain 的 BC_TOKEN_BYTES
  * 常量同一套口径。 */
 
-/* token 进核（IN_PATH）：整份 token 落到 MOE_TOKEN_OFF，MOE_EMBED B MXFP8，scale 随它 */
+/* token 进核（IN_PATH）：整份 token 落到 MOE_TOKEN_OFF，MOE_EMBED B MXFP8，scale 与
+ * topK 随它走；topK 经专用数据线按 stream_id 写进 MU 的 topK_ep_table */
 TASK void task_dte_token_datain(void) {
   dte_inbound(MOE_TOKEN_OFF, MOE_EMBED,
-              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0);
+              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID | DTE_TOPK_VALID, 0,
+              stream_id());
   hdr_pop();
   task_done(1);
 }
@@ -118,7 +140,7 @@ TASK void task_dte_token_datain(void) {
  * 同一处 MOE_ACT_OFF，一包 MOE_ACT_BYTES，scale 随它 */
 TASK void task_dte_fc2in_datain(void) {
   dte_inbound(MOE_ACT_OFF, MOE_ACT_BYTES,
-              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0);
+              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0, 0);
   hdr_pop();
   task_done(1);
 }
@@ -126,7 +148,7 @@ TASK void task_dte_fc2in_datain(void) {
 /* 归约结果进核（CHIP_RED_PATH）：dot core 收 chip 内归约结果，落在 MOE_RED_OFF，
  * 一包 MOE_PART_BYTES，不带 scale */
 TASK void task_dte_red_datain(void) {
-  dte_inbound(MOE_RED_OFF, MOE_PART_BYTES, DTE_MODE_ROUTER_TO_CMEM, 0);
+  dte_inbound(MOE_RED_OFF, MOE_PART_BYTES, DTE_MODE_ROUTER_TO_CMEM, 0, 0);
   hdr_pop();
   task_done(1);
 }
@@ -135,7 +157,7 @@ TASK void task_dte_red_datain(void) {
  * 第 s 段，一包 MOE_FC2_BYTES，不带 scale。与 task_dte_send_concat_s* 一进一出
  * 同一套落点规则 */
 static void concat_datain(u32 s) {
-  dte_inbound(moe_concat(s), MOE_FC2_BYTES, DTE_MODE_ROUTER_TO_CMEM, 0);
+  dte_inbound(moe_concat(s), MOE_FC2_BYTES, DTE_MODE_ROUTER_TO_CMEM, 0, 0);
   hdr_pop();
   task_done(1);
 }
@@ -156,7 +178,7 @@ TASK void task_dte_user_init(void) {
   u32 scale = hdr_scale_valid();
   u32 data = data_bytes(size, scale);
   dte_inbound(hdr_dst_addr(), data,
-              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0);
+              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0);
   hdr_pop();
   task_done(1);
 }
@@ -164,7 +186,7 @@ TASK void task_dte_user_init(void) {
 /* token 从 Core Mem 搬到 Router，往下游发，scale 随它走 */
 TASK void task_dte_move(void) {
   dte_move(CMEM_TOKEN_OFF, 0, E2E_TOKEN_BYTES,
-           DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
+           DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1, 0);
   task_done(1);
 }
 
@@ -187,14 +209,14 @@ TASK void task_dte_send_act(void) {
  * dot core 的那一份就落在那里。这笔任务由 Router 报完成 */
 TASK void task_dte_send_part(void) {
   dte_move(MOE_PART_OFF, MOE_RED_OFF, MOE_PART_BYTES, DTE_MODE_CMEM_TO_ROUTER,
-           1);
+           1, 0);
   task_done(1);
 }
 
 /* dot core：FC2 输入广播给本 chip 另外 7 个计算 core，scale 随它走，落在各自同一处 */
 TASK void task_dte_send_fc2in(void) {
   dte_move(MOE_ACT_OFF, MOE_ACT_OFF, MOE_ACT_BYTES,
-           DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
+           DTE_MODE_CMEM_TO_ROUTER | DTE_SCALE_VALID, 1, 0);
   task_done(1);
 }
 
@@ -202,7 +224,7 @@ TASK void task_dte_send_fc2in(void) {
  * 每个槽位一个入口 */
 static void send_concat(u32 s) {
   dte_move(moe_concat(s), moe_concat(s), MOE_FC2_BYTES, DTE_MODE_CMEM_TO_ROUTER,
-           1);
+           1, 0);
   task_done(1);
 }
 TASK void task_dte_send_concat_s0(void) { send_concat(0); }
@@ -222,7 +244,7 @@ TASK void task_dte_send_concat_s6(void) { send_concat(6); }
  * 分量的包头。这笔任务由 Router 报完成 */
 TASK void task_dte_send_row(void) {
   dte_move(MOE_ROW_OFF, rc_land(user_id(), 0), MOE_ROW_BYTES,
-           DTE_MODE_CMEM_TO_ROUTER, 1);
+           DTE_MODE_CMEM_TO_ROUTER, 1, 0);
   task_done(1);
 }
 
@@ -237,7 +259,7 @@ TASK void task_dte_rc_datain(void) {
   u32 landing = hdr_dst_addr();
   dte_inbound(landing, MOE_ROW_BYTES,
               DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
-              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u);
+              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u, 0);
   hdr_pop();
   task_yield();
 }
@@ -247,7 +269,7 @@ TASK void task_dte_rc_datain(void) {
 TASK void task_dte_rc_load(void) {
   u32 slot = smem_read(RC_SLOT_OFF + stream_id() * 4);
   dte_move(RC_MM_BASE + slot * RC_SLOT_BYTES, RC_A_OFF, RC_SLOT_BYTES,
-           DTE_MODE_MMEM_TO_CMEM, 1);
+           DTE_MODE_MMEM_TO_CMEM, 1, 0);
   task_done(1);
 }
 
@@ -255,13 +277,13 @@ TASK void task_dte_rc_load(void) {
  * 边哪个槽的哪一半，按同一条规则算：上一行的累加结果落后一半 */
 TASK void task_dte_rc_send(void) {
   dte_move(RC_SUM_OFF, rc_land(user_id(), 1), MOE_ROW_BYTES,
-           DTE_MODE_CMEM_TO_ROUTER, 1);
+           DTE_MODE_CMEM_TO_ROUTER, 1, 0);
   task_done(1);
 }
 
 /* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点按自己收下的笔数取模算，
- * scale 随它进 scale 旁带，搬完置那一格的 valid。这里把这一格是哪个用户记下来，
- * 链二发的时候要按它认人。
+ * scale 随它进 scale 旁带，topK 随它进 MU topK 表（表下标就是这一格的槽号），搬完
+ * 置那一格的 valid。这里把这一格是哪个用户记下来，链二发的时候要按它认人。
  *
  * 记在第几格按自己收下的笔数算，与发方算落点用的是同一条规则 */
 TASK void task_dte_bc_datain(void) {
@@ -270,8 +292,9 @@ TASK void task_dte_bc_datain(void) {
   smem_write(BC_RECV_OFF, n + 1);
   u32 landing = bc_land(n);
   dte_inbound(landing, BC_TOKEN_BYTES,
-              DTE_MODE_ROUTER_TO_MMEM | DTE_SCALE_VALID | DTE_WR_SHAREMEM_FLAG,
-              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u);
+              DTE_MODE_ROUTER_TO_MMEM | DTE_SCALE_VALID | DTE_WR_SHAREMEM_FLAG |
+                  DTE_TOPK_VALID,
+              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u, n % BC_SLOTS);
   hdr_pop();
   task_yield();
 }
@@ -280,7 +303,7 @@ TASK void task_dte_bc_datain(void) {
 TASK void task_dte_bc_send(void) {
   u32 slot = smem_read(BC_SLOT_OFF + stream_id() * 4);
   dte_move(bc_land(slot), MOE_TOKEN_OFF, BC_TOKEN_BYTES,
-           DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
+           DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID | DTE_TOPK_VALID, 1, slot);
   task_done(1);
 }
 
@@ -292,7 +315,7 @@ TASK void task_dte_bc_relay(void) {
   u32 n = smem_read(BC_SENT_OFF);
   smem_write(BC_SENT_OFF, n + 1);
   dte_move(bc_land(slot), bc_land(n), BC_TOKEN_BYTES,
-           DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID, 1);
+           DTE_MODE_MMEM_TO_ROUTER | DTE_SCALE_VALID | DTE_TOPK_VALID, 1, slot);
   task_done(1);
 }
 
@@ -313,7 +336,7 @@ TASK void task_dte_weights_loader(void) {
   u32 scale = hdr_scale_valid();
   u32 data = data_bytes(size, scale);
   dte_inbound(hdr_dst_addr(), data,
-              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0);
+              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0);
   hdr_pop();
   task_yield();
 }

@@ -628,11 +628,9 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
     WriteDotChain(core, want.slot);
 
-    // boot 期装进去的那几样：权重按专家在本组内的序号摆，topK 表直接存组内序号。
-    // topK 由 DTE 搬运时经专用数据线写进 MU 的 topK_ep_table，这里直接注入同一份
-    // （本 core 的 MU 任务走 stream 0）。token 由 Router 送进来。
-    core.GetMu().EpInfo().WriteTopk(
-        0, TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}}));
+    // boot 期装进去的那几样：权重按专家在本组内的序号摆。topK 表随 token 走，由
+    // DTE 搬运时经专用数据线写进 MU 的 topK_ep_table（本 core 的 MU 任务走
+    // stream 0）。token 由 Router 送进来。
     kn::PokeCoreWeights(core.Mmem(), want.group, want.chip, want.slot, kLocal);
 
     auto token = std::make_shared<Message>();
@@ -644,6 +642,8 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
                           want.token_scale.end());
     token->size = token->payload.size();
     token->dst_addr = kn::kTokenOff;
+    token->topk_valid = 1;
+    token->topk = TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
 
     ChainHarness harness(clk, core, /*at=*/2, token);
     clk->Continue(200000 * kPeriod);

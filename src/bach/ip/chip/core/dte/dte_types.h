@@ -176,6 +176,32 @@ struct Descriptor {
     return false;
   }
 
+  // 是否有 topK 段（进核按 dst 写 MU、出核按 src 读 MU，两边都算）。
+  bool HasTopk() const {
+    for (auto const& s : seg) {
+      if (s.valid && (s.src_kind == SegEndpoint::kTopk ||
+                      s.dst_kind == SegEndpoint::kTopk)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // topK 段落在 MU topK_ep_table 的哪一项：取该段地址的端内偏移（低位）。进核取
+  // dst 段、出核取 src 段——同一段只有一端打 TOPK tag。计算 core 写 stream_id，
+  // B core 写环形槽号，都只是 16 项里的一个下标。
+  uint64_t TopkIndex() const {
+    for (auto const& s : seg) {
+      if (s.valid && s.dst_kind == SegEndpoint::kTopk) {
+        return s.dst & kEpDataMask;
+      }
+      if (s.valid && s.src_kind == SegEndpoint::kTopk) {
+        return s.src & kEpDataMask;
+      }
+    }
+    return 0;
+  }
+
   // 出核包要带的目的地址：数据段（Cmem/Mmem）的 CFG_ADDRi_DST，收方据此落点。
   // dst 存的是带端点 tag 的软件值，剥掉 tag 才是收方认识的落点（收方按包头的
   // dst_addr 当纯偏移用，tag 是本地存储译码的约定，不进包）。
