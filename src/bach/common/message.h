@@ -48,7 +48,7 @@ struct Message {
   uint64_t path_id = 0;
   // 2 B 位图，最多给 16 个核分位（F100）。core 在自己的表项里指定看哪一位。
   uint64_t path_core_mask = 0;
-  uint64_t size = 0;           // payload 字节数，收齐判定按它（F29）
+  uint64_t size = 0;           // 数据通道上的字节数（含 topK），收齐判定按它（F29）
   uint64_t vc = 0;             // 每一跳被改写（F92）
   uint64_t reduce_seq = 0;     // TS 按它给 reduce task 配对（F48）
   uint64_t reissue = 0;        // 这一笔是不是 Core Mem 重发出来的
@@ -79,8 +79,8 @@ struct Message {
   uint64_t scale_valid = 0;
 
   // MoE 进核包自带的 topK 表（256 B）。topk_valid 置位时收方 DTE 不落 Core Mem，
-  // 而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。与 scale 一样是包里的
-  // 旁带段，不计入 size / payload 的字节换算。
+  // 而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。与数据/scale 同一条
+  // 数据通道，算进 size 的 flit 换算；字节不走 payload 正文，单独放在 topk 字段里。
   uint64_t topk_valid = 0;
   std::vector<uint8_t> topk;
 

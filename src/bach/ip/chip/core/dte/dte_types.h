@@ -152,8 +152,26 @@ struct Descriptor {
   // 进核任务带着原包，出核任务带着要发出去的包。
   MessagePtr msg;
 
-  // 出核包里接进 payload 的段长之和：数据段（Cmem/Mmem）+ scale 段。
+  // 出核包里接进 size 的段长之和：数据段（Cmem/Mmem）+ scale 段 + topK 段。
+  // topK 也走数据通道（飞书《DTE DSA》里它是包里的 k 数据段，与数据/scale 同一条
+  // 256B/T 通道），所以算进 size 的 flit 换算；但它的字节不走 payload 正文，随包的
+  // topk 字段走，由 DTE 经专用数据线写进 MU 的 topK_ep_table。
   uint64_t PayloadBytes() const {
+    uint64_t n = 0;
+    for (auto const& s : seg) {
+      if (!s.valid) continue;
+      if (s.src_kind == SegEndpoint::kCmem ||
+          s.src_kind == SegEndpoint::kMmem ||
+          s.src_kind == SegEndpoint::kScale ||
+          s.src_kind == SegEndpoint::kTopk) {
+        n += s.len;
+      }
+    }
+    return n;
+  }
+  // 出核包 payload 正文的字节数：数据段（Cmem/Mmem）+ scale 段，不含 topK。topK 的
+  // 字节随包的 topk 字段走，不占 payload 正文，但仍算进 PayloadBytes()（size）。
+  uint64_t PayloadDataBytes() const {
     uint64_t n = 0;
     for (auto const& s : seg) {
       if (!s.valid) continue;
@@ -164,6 +182,16 @@ struct Descriptor {
       }
     }
     return n;
+  }
+  // topK 段的字节数：进核按 dst、出核按 src 取，同一段只有一端打 TOPK tag。
+  uint64_t TopkBytes() const {
+    for (auto const& s : seg) {
+      if (s.valid && (s.src_kind == SegEndpoint::kTopk ||
+                      s.dst_kind == SegEndpoint::kTopk)) {
+        return s.len;
+      }
+    }
+    return 0;
   }
   // 是否有 scale 段（出核造包据此打 scale_valid）。
   bool HasScale() const {

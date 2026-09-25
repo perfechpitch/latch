@@ -536,9 +536,10 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
   EXPECT_GT(reads, 1u) << "但确实比「一笔一等」快";
 }
 
-// 进核那一笔带 topK 旁带：落地时按 topK 段的端内偏移（表下标）把包里的 topK 写进
-// MU 端口，整笔只写一次。只有进核通道挂着这条数据线。topK 随包走，进核 Descriptor
-// 的 msg 是空，得从 Header Parser 转过来的 payload 那一拍的 msg 里读。
+// 进核那一笔带 topK 段：topK 与数据/scale 同一条数据通道，作为数据之后的一拍进
+// 来，落地时按 topK 段的端内偏移（表下标）把包里的 topK 写进 MU 端口，整笔只写
+// 一次。只有进核通道挂着这条数据线。topK 随包走，进核 Descriptor 的 msg 是空，
+// 得从 Header Parser 转过来的 payload 那一拍的 msg 里读。
 TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
   std::vector<uint8_t> topk(256, 0);
   for (uint64_t i = 0; i < topk.size(); ++i) topk[i] = uint8_t(i * 3 + 7);
@@ -562,6 +563,7 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     d->seg[3].valid = true;
     d->seg[3].dst_kind = SegEndpoint::kTopk;
     d->seg[3].dst = 3;  // 表下标：计算 core 是 stream_id，B core 是环形槽号
+    d->seg[3].len = topk.size();  // topK 段长 256 B
     d->msg->topk = topk;
 
     // 每拍读一次端口：valid 且序号没见过就算一次（端口同一拍值会连着出现两拍）。
@@ -584,17 +586,24 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     };
     PortSink sink(clk, topk_port);
 
-    // 扮演 Header Parser：同拍准入这笔任务、把整包（带 topK）从 payload 口推进来。
-    // 帧号与 Lane 给进核任务编的号对齐（第一笔 = 1）。
+    // 扮演 Header Parser：同拍准入这笔任务、把整包从 payload 口推进来。topK 与
+    // 数据同一条数据通道，作为数据之后的一拍进来。帧号与 Lane 给进核任务编的号
+    // 对齐（第一笔 = 1）。
     struct InboundHarness : public BachModule {
       InboundHarness(ClockPtr c, Lane& target, std::shared_ptr<Descriptor> job,
-                     std::shared_ptr<PayloadPort> p)
+                     std::shared_ptr<PayloadPort> p, uint64_t topk_bytes)
           : BachModule(c, "harness"), ln(target), d(std::move(job)),
-            payload(std::move(p)) {}
+            payload(std::move(p)), tk(topk_bytes) {}
       void Step() override {
         if (CycleNow() == 2) {
           ln.AdmitPtr()->Drive(d, 1);
+          // 数据拍：只到数据段长，不是最后一拍。
           payload->Drive(/*frame=*/1, d->msg->payload.size(), /*off=*/0,
+                         /*last=*/false, d->msg);
+        } else if (CycleNow() == 3) {
+          ln.AdmitPtr()->Idle();
+          // topK 拍：从数据之后起，最后一拍。
+          payload->Drive(/*frame=*/1, tk, /*off=*/d->msg->payload.size(),
                          /*last=*/true, d->msg);
         } else {
           ln.AdmitPtr()->Idle();
@@ -605,8 +614,9 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
       Lane& ln;
       std::shared_ptr<Descriptor> d;
       std::shared_ptr<PayloadPort> payload;
+      uint64_t tk;
     };
-    InboundHarness h(clk, ln, d, payload_port);
+    InboundHarness h(clk, ln, d, payload_port, topk.size());
     clk->Continue(300 * kPeriod);
     RT::JoinAll();
     drives = sink.drives;

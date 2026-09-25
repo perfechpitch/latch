@@ -640,10 +640,11 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     token->payload = want.token;
     token->payload.insert(token->payload.end(), want.token_scale.begin(),
                           want.token_scale.end());
-    token->size = token->payload.size();
     token->dst_addr = kn::kTokenOff;
     token->topk_valid = 1;
     token->topk = TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
+    // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放 payload。
+    token->size = token->payload.size() + token->topk.size();
 
     ChainHarness harness(clk, core, /*at=*/2, token);
     clk->Continue(200000 * kPeriod);

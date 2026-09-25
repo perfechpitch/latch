@@ -65,6 +65,14 @@ inline bool PayloadSeg(SegEndpoint k) {
          k == SegEndpoint::kScale;
 }
 
+// 写这一侧：这一段的字节落在收到的 payload 流里。数据 / scale / topK 都算（topK
+// 与数据/scale 同一条数据通道），只有 header 段走 Hmem 不在这里。读那一侧 topK 不
+// 占（topK 从 MU 的 topK_ep_table 读，不走存储），所以读用 PayloadSeg、写用这个。
+inline bool WrSeg(SegEndpoint k) {
+  return k == SegEndpoint::kCmem || k == SegEndpoint::kMmem ||
+         k == SegEndpoint::kScale || k == SegEndpoint::kTopk;
+}
+
 class Lane : public BachModule {
  public:
   Lane(ClockPtr clock, const std::string& name, uint64_t lane_idx,
@@ -282,7 +290,7 @@ class Lane : public BachModule {
       ctx[h].drained = false;
       ctx[h].filled = 0;
       ctx[h].sent_first = false;
-      ctx[h].topk_sent = false;
+      ctx[h].topk_pending = false;
       q[h].Pop();
     }
   }
@@ -397,31 +405,39 @@ class Lane : public BachModule {
     }
     if (!wr_reported) wr_done->Idle();
 
+    // 出核：最后一拍 payload 发完还欠一笔 topK 拍。它不走 buffer（发完最后一拍
+    // buffer 可能已经空了，且 topK 不占读回来的那一份 Credit），直接从这一拍发，
+    // 发出去才置 issue_done。
+    if (Outbound() && c.topk_pending) {
+      if (!to_router->Ready()) return;
+      uint64_t n = c.desc.TopkBytes();
+      to_router->Drive(n, /*last=*/true, /*head=*/false, c.desc.vc, c.desc.msg);
+      c.topk_pending = false;
+      router_used = true;
+      ++move_pending;
+      c.issue_done = true;
+      return;
+    }
+
     if (buffer.Empty(idx) || buffer.Front(idx).tag != TagOf(c.desc)) return;
     BufBeat const& b = buffer.Front(idx);
 
-    // topK 旁带：进核那一笔落地时把包里的 topK 写进 MU 的 topK_ep_table，整笔
-    // 只写一次。topK 随包走，得从这一拍 buffer 里的 msg 读（进核 Descriptor 的
-    // msg 是空，出核那一笔才在 Commit 造 msg）；只有进核通道挂着这条数据线，
-    // 出核通道 mu_topk 为空走不进来。写进哪一项由 topK 段的端内偏移给：计算 core
-    // 是 stream_id，B core 是环形槽号。
-    if (c.desc.HasTopk() && !c.topk_sent && mu_topk) {
-      std::vector<uint8_t> topk = b.msg ? b.msg->topk : std::vector<uint8_t>();
-      mu_topk->Drive(c.desc.TopkIndex(),
-                     std::make_shared<ByteBlock>(std::move(topk)));
-      c.topk_sent = true;
-      topk_driven = true;
-    }
-
     if (Outbound() && c.desc.route != Route::kMmToCm) {
-      // 出核：发给 Router。这一档的出口是 Router TX。
+      // 出核：发给 Router。这一档的出口是 Router TX。带 topK 的包，最后一拍 payload
+      // 之后还要补一笔 256 B 的 topK 拍，所以最后一拍 payload 不打 last，留着给
+      // topK 拍。
       if (!to_router->Ready()) return;
-      to_router->Drive(b.bytes, b.last, !c.sent_first, c.desc.vc, b.msg);
+      bool has_topk = c.desc.TopkBytes() != 0;
+      to_router->Drive(b.bytes, b.last && !has_topk, !c.sent_first, c.desc.vc,
+                       b.msg);
       c.sent_first = true;
       router_used = true;
       buffer.Pop(idx);
       ++move_pending;
-      if (b.last) c.issue_done = true;
+      if (b.last) {
+        if (has_topk) c.topk_pending = true;
+        else c.issue_done = true;
+      }
       return;
     }
 
@@ -429,15 +445,15 @@ class Lane : public BachModule {
     // 长顺序分到各个目的段。
     bool to_cm = ToCm(c.desc.route);
     MemPort& port = to_cm ? *cmem : *mmem;
-    if (!port.Ready()) return;
     ByteBlockPtr data = b.data ? b.data : std::make_shared<ByteBlock>(b.bytes, 0);
     uint64_t n = b.bytes;
     uint64_t pos = c.off + c.part;           // 这一拍从整包的第几个字节起
-    // 找到这个字节落在哪个 payload 段，以及段内偏移。
+    // 找到这个字节落在哪个 payload 段，以及段内偏移。topK 也占 payload 流的一拍，
+    // 一并走这个循环（写这一侧用 WrSeg，读那一侧才用 PayloadSeg）。
     uint64_t seg = 0, seg_off = 0;
     while (seg < 4) {
       Segment const& s = c.desc.seg[seg];
-      if (s.valid && PayloadSeg(s.dst_kind)) {
+      if (s.valid && WrSeg(s.dst_kind)) {
         if (pos < seg_off + s.len) break;
         seg_off += s.len;
       }
@@ -448,18 +464,30 @@ class Lane : public BachModule {
     uint64_t seg_left = s.len - (pos - seg_off);
     if (take > seg_left) take = seg_left;    // 一拍跨进下一段
     bool whole = c.part == 0 && take == n;
-    if (s.dst_kind == SegEndpoint::kScale) {
-      // scale 段：dst_addr 是对应数据地址，整包里第 k 个 scale 管数据地址
-      // dst_addr + k × 32 那一组。
-      uint64_t k = pos - seg_off;
-      port.WriteScale(s.dst_addr + k * kScaleGroupBytes,
-                      whole ? data : SliceBlock(data, c.part, take),
-                      take * kScaleGroupBytes);
+    if (s.dst_kind == SegEndpoint::kTopk) {
+      // topK 段：不落存储，随包的 topk 字段走，经专用数据线写进 MU 的 topK_ep_table。
+      // 写进哪一项由 topK 段的端内偏移给：计算 core 是 stream_id，B core 是环形槽号。
+      std::vector<uint8_t> topk = b.msg ? b.msg->topk : std::vector<uint8_t>();
+      if (mu_topk) {
+        mu_topk->Drive(c.desc.TopkIndex(),
+                       std::make_shared<ByteBlock>(std::move(topk)));
+        topk_driven = true;
+      }
     } else {
-      port.Write(s.dst_addr + (pos - seg_off),
-                 whole ? data : SliceBlock(data, c.part, take));
+      if (!port.Ready()) return;
+      if (s.dst_kind == SegEndpoint::kScale) {
+        // scale 段：dst_addr 是对应数据地址，整包里第 k 个 scale 管数据地址
+        // dst_addr + k × 32 那一组。
+        uint64_t k = pos - seg_off;
+        port.WriteScale(s.dst_addr + k * kScaleGroupBytes,
+                        whole ? data : SliceBlock(data, c.part, take),
+                        take * kScaleGroupBytes);
+      } else {
+        port.Write(s.dst_addr + (pos - seg_off),
+                   whole ? data : SliceBlock(data, c.part, take));
+      }
+      (to_cm ? cmem_used : mmem_used) = true;
     }
-    (to_cm ? cmem_used : mmem_used) = true;
     c.part += take;
     if (c.part < n) return;
     bool last = b.last;

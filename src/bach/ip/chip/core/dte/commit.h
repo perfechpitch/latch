@@ -195,7 +195,9 @@ class Commit : public BachModule {
     HmemEntry const& h = hmem.Entry(d.stream_id);
     m->gpu_id = h.gpu_id;
     m->token_id = h.token_id;
-    // 带 scale 的包：数据后面接 scale，包长把 payload 各段都算上。
+    // 带 scale 的包：数据后面接 scale。包长把 payload 各段都算上，topK 也算进去
+    // （它走同一数据通道，占 size 的 flit 换算）；但 payload 正文只放数据 + scale，
+    // topK 字节随包的 topk 字段走。
     m->size = d.PayloadBytes();
     m->scale_valid = d.HasScale() ? 1 : 0;
     // 带 topK 的包（B core 广播那一笔）：从 MU 的 topK_ep_table 按段内偏移取这一
@@ -208,7 +210,7 @@ class Commit : public BachModule {
     m->stream_id = d.stream_id;
     m->task_id = d.task_id;
     m->reduce_seq = d.reduce_seq;
-    m->payload.assign(m->size, 0);
+    m->payload.assign(d.PayloadDataBytes(), 0);
     d.msg = m;
   }
 

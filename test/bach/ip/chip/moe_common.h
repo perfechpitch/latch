@@ -227,9 +227,11 @@ inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId
   m->payload = kn::TokenData(k);
   std::vector<uint8_t> scale = kn::TokenScale(k);
   m->payload.insert(m->payload.end(), scale.begin(), scale.end());
-  m->size = m->payload.size();
   m->topk_valid = 1;
   m->topk = TokenTopk();
+  // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放 payload，
+  // 单独在 topk 字段里。
+  m->size = m->payload.size() + m->topk.size();
   return m;
 }
 
