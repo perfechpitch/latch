@@ -473,8 +473,9 @@ static inline void smem_write(u32 off, u32 v) { mmio_write(SMEM_BASE, off, v); }
 #define ROUTER_HDR_SCALE  28u
 #define ROUTER_HDR_POP    32u
 static inline void hdr_pop(void) { mmio_write(ROUTER_IO_BASE, ROUTER_HDR_POP, 1); }
-/* 队头那个包的三个包头字段：落点、总长、带不带 scale。配置驱动下 datain 任务照着
- * 它们配一笔进核搬运。 */
+/* 队头那个包的三个包头字段：落点、总长、带不带 scale。进核那几种 MoE datain 是
+ * 配置驱动、不读 size / scale；R core 的 datain 落哪一半由发方算好，只读落点。
+ * 三个都读的只剩 weights 加载与单 core 用例那两处。 */
 static inline u32 hdr_size(void) { return mmio_read(ROUTER_IO_BASE, ROUTER_HDR_SIZE); }
 static inline u32 hdr_dst_addr(void) { return mmio_read(ROUTER_IO_BASE, ROUTER_HDR_DST); }
 static inline u32 hdr_scale_valid(void) { return mmio_read(ROUTER_IO_BASE, ROUTER_HDR_SCALE); }

@@ -98,9 +98,59 @@ static u32 data_bytes(u32 size, u32 scale_valid) {
   return scale_valid ? size - (size + 32u) / 33u : size;
 }
 
-/* datain：配置驱动下由这里照包头配一笔进核搬运，再把包头弹掉。落点与 scale 都
- * 从包头读来，DTE 按配置搬。一个计算 core 上几项搬入任务（token、FC2 输入、归约
- * 结果、concat）都走它。 */
+/* ===== 进核 datain：配置驱动 =====
+ *
+ * 飞书《DTE DSA》进核是配置驱动：收方 kernel 知道自己要收什么，size、落点、带
+ * 不带 scale 都是编译期定值，照它配 CFG 就行，不读包头字段，包头只在 hdr_pop()
+ * 里弹掉。一个计算 core / dot core 上几种搬入任务各是一个入口，size 与落点各不
+ * 相同，不再共用一个「从包头读」的通用 datain。与 bc_datain 的 BC_TOKEN_BYTES
+ * 常量同一套口径。 */
+
+/* token 进核（IN_PATH）：整份 token 落到 MOE_TOKEN_OFF，MOE_EMBED B MXFP8，scale 随它 */
+TASK void task_dte_token_datain(void) {
+  dte_inbound(MOE_TOKEN_OFF, MOE_EMBED,
+              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0);
+  hdr_pop();
+  task_done(1);
+}
+
+/* FC2 输入进核（FC2_BCAST_PATH）：dot core 广播给本 chip 各计算 core，落在各自
+ * 同一处 MOE_ACT_OFF，一包 MOE_ACT_BYTES，scale 随它 */
+TASK void task_dte_fc2in_datain(void) {
+  dte_inbound(MOE_ACT_OFF, MOE_ACT_BYTES,
+              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0);
+  hdr_pop();
+  task_done(1);
+}
+
+/* 归约结果进核（CHIP_RED_PATH）：dot core 收 chip 内归约结果，落在 MOE_RED_OFF，
+ * 一包 MOE_PART_BYTES，不带 scale */
+TASK void task_dte_red_datain(void) {
+  dte_inbound(MOE_RED_OFF, MOE_PART_BYTES, DTE_MODE_ROUTER_TO_CMEM, 0);
+  hdr_pop();
+  task_done(1);
+}
+
+/* concat 第 s 段进核（CONCAT_PATH[s]）：dot core 收槽位 s 的 FC2，落在 concat 区
+ * 第 s 段，一包 MOE_FC2_BYTES，不带 scale。与 task_dte_send_concat_s* 一进一出
+ * 同一套落点规则 */
+static void concat_datain(u32 s) {
+  dte_inbound(moe_concat(s), MOE_FC2_BYTES, DTE_MODE_ROUTER_TO_CMEM, 0);
+  hdr_pop();
+  task_done(1);
+}
+TASK void task_dte_concat_datain_s0(void) { concat_datain(0); }
+TASK void task_dte_concat_datain_s1(void) { concat_datain(1); }
+TASK void task_dte_concat_datain_s2(void) { concat_datain(2); }
+TASK void task_dte_concat_datain_s3(void) { concat_datain(3); }
+TASK void task_dte_concat_datain_s4(void) { concat_datain(4); }
+TASK void task_dte_concat_datain_s5(void) { concat_datain(5); }
+TASK void task_dte_concat_datain_s6(void) { concat_datain(6); }
+
+/* ===== 单 core 用例的几笔 ===== */
+
+/* 单 core 用例的进核：这里没有编译期定死的 size / 落点，照包头配一笔（上面 MoE
+ * 的几种进核已经拆成各带常量的独立入口，这个通用的一档留给单 core 用例）。 */
 TASK void task_dte_user_init(void) {
   u32 size = hdr_size();
   u32 scale = hdr_scale_valid();
@@ -110,8 +160,6 @@ TASK void task_dte_user_init(void) {
   hdr_pop();
   task_done(1);
 }
-
-/* ===== 单 core 用例的几笔 ===== */
 
 /* token 从 Core Mem 搬到 Router，往下游发，scale 随它走 */
 TASK void task_dte_move(void) {
@@ -181,13 +229,14 @@ TASK void task_dte_send_row(void) {
 /* ===== R core 的两段 =====
  *
  * 进核那一笔的落点由包头 dst_addr 给（落哪一半是发方算好的），这一笔照它配进核
- * 搬运，搬完由 Completion RS 往标志表写这一半的 valid。这里另把这个槽是哪个用户
- * 记下来，链二找到齐了的槽之后要按它认人；再弹掉这个包的包头。 */
+ * 搬运；size 是定值 MOE_ROW_BYTES，不再读包头。搬完由 Completion RS 往标志表写
+ * 这一半的 valid。这里另把这个槽是哪个用户记下来，链二找到齐了的槽之后要按它认
+ * 人；再弹掉这个包的包头。 */
 TASK void task_dte_rc_datain(void) {
   smem_write(RC_USER_OFF + (user_id() % RC_SLOTS) * 4, user_id());
   u32 landing = hdr_dst_addr();
-  u32 data = hdr_size();  /* BF16，不带 scale */
-  dte_inbound(landing, data, DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
+  dte_inbound(landing, MOE_ROW_BYTES,
+              DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
               RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u);
   hdr_pop();
   task_yield();

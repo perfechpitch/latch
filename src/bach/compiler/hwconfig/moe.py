@@ -633,12 +633,12 @@ def compute_chain(slot):
     TS 收 RV core 与 DSA 两路。部分和出核是逐级 reduce 任务，由 Router 报完成。"""
     s = str(slot)
     return [
-        ChainItem(0, "DTE", "DSA", ("dte", "task_dte_user_init"),
+        ChainItem(0, "DTE", "DSA", ("dte", "task_dte_token_datain"),
                   path_id=IN_PATH, wait_wake=True),
         ChainItem(1, "MU", "DSA", ("mu", "task_mu_part_s" + s)),
         ChainItem(2, "DTE", "DSA", ("dte", "task_dte_send_part"),
                   path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
-        ChainItem(3, "DTE", "DSA", ("dte", "task_dte_user_init"),
+        ChainItem(3, "DTE", "DSA", ("dte", "task_dte_fc2in_datain"),
                   path_id=FC2_BCAST_PATH, wait_wake=True),
         ChainItem(4, "MU", "DSA", ("mu", "task_mu_fc2_s" + s)),
         ChainItem(5, "DTE", "DSA", ("dte", "task_dte_send_concat_s" + s),
@@ -657,12 +657,12 @@ def dot_chain():
     项，各对一个 PID。行链出核是逐级 reduce 任务，由 Router 报完成。"""
     s = str(DOT_SLOT)
     items = [
-        ChainItem(0, "DTE", "DSA", ("dte", "task_dte_user_init"),
+        ChainItem(0, "DTE", "DSA", ("dte", "task_dte_token_datain"),
                   path_id=IN_PATH, wait_wake=True),
         ChainItem(1, "MU", "DSA", ("mu", "task_mu_part_s" + s)),
         ChainItem(2, "DTE", "DSA", ("dte", "task_dte_send_part"),
                   path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
-        ChainItem(3, "DTE", "DSA", ("dte", "task_dte_user_init"),
+        ChainItem(3, "DTE", "DSA", ("dte", "task_dte_red_datain"),
                   path_id=CHIP_RED_PATH, wait_wake=True),
         ChainItem(4, "VU", "DSA", ("vu", "task_vu_gate")),
         ChainItem(5, "DTE", "DSA", ("dte", "task_dte_send_fc2in"),
@@ -671,7 +671,7 @@ def dot_chain():
     ]
     for k in range(DOT_SLOT):
         items.append(ChainItem(DOT_CONCAT_TASK + k, "DTE", "DSA",
-                               ("dte", "task_dte_user_init"),
+                               ("dte", f"task_dte_concat_datain_s{k}"),
                                path_id=CONCAT_PATH[k], wait_wake=True))
     items.append(ChainItem(DOT_CONCAT_TASK + DOT_SLOT, "DTE", "DSA",
                            ("dte", "task_dte_send_row"), path_id=ROW_PATH,

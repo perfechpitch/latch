@@ -485,7 +485,7 @@ TaskEntry Task(SendUnit unit, RecvUnit recv, char const* name, char const* kind)
 // 要广播给的、也没有要收的。
 void WriteDotChain(Core& core, uint64_t slot) {
   std::string s = std::to_string(slot);
-  TaskEntry in = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_user_init", "dte");
+  TaskEntry in = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_token_datain", "dte");
   in.path_id = kTokenPath;
   in.wait_wake = true;
   core.GetTs().Cfg().WriteTask(0, in);
@@ -500,7 +500,7 @@ void WriteDotChain(Core& core, uint64_t slot) {
   part.credit_en = true;
   core.GetTs().Cfg().WriteTask(2, part);
 
-  TaskEntry red = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_user_init", "dte");
+  TaskEntry red = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_red_datain", "dte");
   red.path_id = kChipReducePath;
   red.wait_wake = true;
   core.GetTs().Cfg().WriteTask(3, red);
