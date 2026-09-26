@@ -55,7 +55,7 @@ class DteBuffer : public BachModule {
         pushed(clock),
         popped(clock) {}
 
-  // 读那一半问还能不能往里放。这就是 F20 说的可用 Credit。
+  // 读那一半问还能不能往里放。这就是可用 Credit。
   bool HasRoom(uint64_t lane) const { return q[lane].size() < depth; }
   uint64_t Credit(uint64_t lane) const {
     return depth > q[lane].size() ? depth - q[lane].size() : 0;

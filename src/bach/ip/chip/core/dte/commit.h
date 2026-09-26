@@ -119,7 +119,7 @@ class Commit : public BachModule {
 
   // 从队头往后扫，dispatch 第一个目标通道就绪的任务。不同通道的任务可乱序下发：
   // 队头那个出核任务还堵在 VC credit 上时，后面别的通道的任务可以先行。同一通道
-  // 内按序（F18）：一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都
+  // 内按序：一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都
   // 不发。三样一起拿：读侧 TaskQueue、写侧 TaskQueue、Completion RS；出核任务再
   // 查 VC credit。
   void TryDispatch() {
@@ -170,7 +170,7 @@ class Commit : public BachModule {
     ++stall_pending;
   }
 
-  // 走归约路径出核的包标成 reduce 包（F74），包头的 reduce_seq 打上发方的
+  // 走归约路径出核的包标成 reduce 包，包头的 reduce_seq 打上发方的
   // task_id：ReduceModule 靠它分开同一个用户前后两笔 reduce 任务。一条归约链上
   // 各 core 的任务链一样，同一笔任务的 task_id 也一样。
   void MarkReducePkt(Descriptor& d) {
@@ -181,9 +181,9 @@ class Commit : public BachModule {
   }
 
   // 出核任务要发出去的那个包在这里造好，读回来的数据往它的 payload 里填。
-  // 出核改写的三个包头字段（F44）：path_id 用 TS 送来的那个，size 用 RV core
-  // 配的寄存器，core_mask 只在做 MoE Route 时改。片外那一段的目的标识跟着
-  // path_id 的表项走。
+  // 出核按文档「重组包头」改写 path_id、user_id、loopback[3:2](vc)、pkt_length
+  // 四个字段（详细设计 3.15/66），size 由各使能数据段长度算出。片外那一段的
+  // 目的标识（dst）跟着 path_id 的表项走。
   void MakeOutboundMsg(Descriptor& d) const {
     auto m = std::make_shared<Message>();
     m->user_id = d.user_id;
