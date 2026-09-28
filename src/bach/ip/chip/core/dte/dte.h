@@ -41,7 +41,7 @@ namespace bach {
 // 对齐飞书《DTE DSA》后，进核改成配置驱动：落点与 shareMem 标志表都由 kernel 配
 // CFG 寄存器表达（route 走 CFG_TRANS_MODE，flag 走 CFG_SM_W_ADDR/DATA +
 // wr_sharemem_flag），这里只留 no_ack 一档——“进核不回 Ack”是 SCP 配的档位，
-// 与 kernel 的 CFG 无关。
+// 与 kernel 的 CFG 无关。落到 Descriptor 上就是 Fire 时把进核任务的 ack_ts_en 清 0。
 struct InboundCfg {
   bool no_ack = false;  // 进核不回 Ack 的档位
 };
@@ -81,8 +81,9 @@ class Dte {
 
   // ── 对外 ──
   // SCP 写进核那一笔的配置，切模式时重写一遍。进核不回 Ack 的档位由 Regfile 在
-  // Fire 时落进 Descriptor；route 与 flag 是配置驱动（route 由 kernel 配 TRANS_MODE，
-  // flag 由 kernel 配 CFG_SM_W_ADDR/DATA），InboundCfg 里只剩 no_ack 一档。
+  // Fire 时把进核任务的 ack_ts_en 清 0；route 与 flag 是配置驱动（route 由 kernel
+  // 配 TRANS_MODE，flag 由 kernel 配 CFG_SM_W_ADDR/DATA），InboundCfg 里只剩 no_ack
+  // 一档。
   void SetInbound(InboundCfg const& in) { reg->SetInboundNoAck(in.no_ack); }
 
   CoreDataPort& FromRouter() { return parser->FromRouter(); }

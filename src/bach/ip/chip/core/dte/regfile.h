@@ -150,7 +150,7 @@ class DteRegfile : public BachModule {
   std::shared_ptr<DescPort> OutPtr() const { return out; }
 
   // B core、R core 与 weights 加载阶段进核的包不建 stream 表项，进核那一笔的完成
-  // 没有可报的对象，不回 Ack。SCP 切模式时配，Fire 时落进进核任务的 no_ack。
+  // 没有可报的对象，不回 Ack。SCP 切模式时配，Fire 时把进核任务的 ack_ts_en 清 0。
   void SetInboundNoAck(bool on) { inbound_no_ack = on; }
 
   // ── 观测 ──
@@ -283,12 +283,13 @@ class DteRegfile : public BachModule {
     d->path_id = ids.path;
     d->vc = ids.vc;
     d->route = Route(merged.trans_mode & kDteModeMask);
-    // 进核任务不回 Ack 的档位（B/R core 与 weights 加载阶段），由 SCP 切模式时配。
-    d->no_ack = IsInbound(d->route) && inbound_no_ack;
     uint64_t addr_valid = (merged.trans_mode >> kDteAddrValidShift) &
                           kDteAddrValidMask;
     d->wr_sharemem_flag = (merged.trans_mode & kDteWrSharememFlag) != 0;
-    d->ack_ts_en = (merged.trans_mode & kDteAckTsEn) != 0;
+    // 进核任务不回 Ack 的档位（B/R core 与 weights 加载阶段），由 SCP 切模式时配。
+    // 源文档只有一个「是否通知 TS」的位（ack_ts_en），不通知就把它清 0。
+    d->ack_ts_en = (merged.trans_mode & kDteAckTsEn) != 0 &&
+                   !(IsInbound(d->route) && inbound_no_ack);
     d->smem_addr = merged.smem_addr;
     d->smem_data = merged.smem_data;
 

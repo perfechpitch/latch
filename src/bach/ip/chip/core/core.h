@@ -102,7 +102,7 @@ class Core : public BachModule {
   }
   // 切进 weights 加载模式：这一阶段进来的是权重，落 Matrix Mem；这一阶段不建
   // stream 表项，进核那一笔没有可报的对象，不回 Ack，也不置标志。落点由 kernel
-  // 配的 TRANS_MODE 表达，这里只切 no_ack。
+  // 配的 TRANS_MODE 表达，这里只切不回 Ack 的档位。
   void SetWeightsInbound() {
     InboundCfg in;
     in.no_ack = true;
@@ -348,7 +348,7 @@ class Core : public BachModule {
   // 这三个闸门等多久都可能，所以“收下任务”与“开始算”不能混为一谈。
   //
   // 终点是各家把完成报回来的那一拍：
-  //   DTE  两侧完成条件配齐、且带 task_last 的那一笔报到 TS，no_ack 的不报。
+  //   DTE  两侧完成条件配齐、且带 task_last 的那一笔报到 TS。
   //   MU   整个 task 的 tile 都写回、写回落地后再空两拍。
   //   VU   只有 EVENT_EN 置位的宏指令退休才报，与发给 TS 的是同一拍同一笔。
   //        未置位的照常退休、不打完成口。多宏任务只在最后一条置位，TS 配

@@ -123,11 +123,10 @@ struct Descriptor {
 
   uint64_t vc = 0;           // 出核走哪个 VC，决定落在哪个 out_ch
 
-  // ack_ts_en 对应 CFG_TRANS_MODE[9]，即旧命名里的 task_last：标记一个 task 拆成
-  // 几笔搬运时的最后一笔，只有带这个标记的那一笔完成后才通知 TS；no_ack 置位的
-  // 任务不回 Ack。
+  // ack_ts_en 对应 CFG_TRANS_MODE[9]，飞书《DTE DSA》详细设计里就叫 ack_ts_en
+  // （MAS 旧命名 task_last）：标记一个 task 拆成几笔搬运时的最后一笔，只有带这个
+  // 标记的那一笔完成后才通知 TS；不通知 TS 的任务把这一位清 0。
   bool ack_ts_en = true;
-  bool no_ack = false;
   // reduce 包的任务边界：发方的 task_id，ReduceModule 靠它分开同一个用户前后
   // 两笔 reduce 任务。
   uint64_t reduce_seq = 0;

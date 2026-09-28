@@ -1,8 +1,7 @@
 // Completion RS 与 Done Pending：把劈开的两半合回来。
 //
 // 只在同一笔的 RD 与 WR 两侧都 drained 时才 Join；同一拍多个 Join 全部进 Done
-// Pending，由它串行化；向 TS 的报告是 exactly-once；ack_ts_en 与 no_ack 决定
-// 报不报。
+// Pending，由它串行化；向 TS 的报告是 exactly-once；ack_ts_en 决定报不报。
 
 #include <gtest/gtest.h>
 
@@ -24,15 +23,13 @@ constexpr Time kPeriod = 1;
 void EnsureSlots() { RT::Reset(8, 8); }
 
 std::shared_ptr<Descriptor> Task(uint64_t commit_seq, uint64_t stream,
-                                 uint64_t task, bool task_last = true,
-                                 bool no_ack = false) {
+                                 uint64_t task, bool task_last = true) {
   auto d = std::make_shared<Descriptor>();
   d->valid = true;
   d->commit_seq = commit_seq;
   d->stream_id = stream;
   d->task_id = task;
   d->ack_ts_en = task_last;
-  d->no_ack = no_ack;
   return d;
 }
 
@@ -274,17 +271,17 @@ TEST(BachCompletionRs, ReportsExactlyOnce) {
   EXPECT_EQ(num, 1u) << "重复上报不该变成两笔完成";
 }
 
-// ack_ts_en 与 no_ack 决定报不报：拆成几笔时只有最后一笔通知 TS。
-TEST(BachCompletionRs, TaskLastAndNoAckDecideTheReport) {
-  uint64_t not_last = 0, no_ack = 0, normal = 0;
-  auto run = [](bool task_last, bool ack_off) {
+// ack_ts_en 决定报不报：拆成几笔时只有最后一笔通知 TS。
+TEST(BachCompletionRs, TaskLastDecidesTheReport) {
+  uint64_t not_last = 0, normal = 0;
+  auto run = [](bool task_last) {
     uint64_t n = 0;
     {
       EnsureSlots();
       ClockPtr clk = MakeClock(0, kPeriod);
       CompletionRs rs(clk, "rs", 0, false);
       CompHarness h(clk, rs);
-      h.admits = {{2, Task(1, 5, 3, task_last, ack_off)}};
+      h.admits = {{2, Task(1, 5, 3, task_last)}};
       h.halves = {{6, 1, true, true}, {8, 1, false, true}};
       clk->Continue(30 * kPeriod);
       RT::JoinAll();
@@ -293,11 +290,9 @@ TEST(BachCompletionRs, TaskLastAndNoAckDecideTheReport) {
     RT::Reset();
     return n;
   };
-  not_last = run(/*task_last=*/false, false);
-  no_ack = run(true, /*ack_off=*/true);
-  normal = run(true, false);
+  not_last = run(/*task_last=*/false);
+  normal = run(/*task_last=*/true);
   EXPECT_EQ(not_last, 0u) << "不是最后一笔就不通知 TS";
-  EXPECT_EQ(no_ack, 0u) << "no_ack 的任务不回 Ack";
   EXPECT_EQ(normal, 1u);
 }
 
