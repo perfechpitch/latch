@@ -113,16 +113,10 @@ void PokeCoreData(Cmem& cm, Mmem& mm, Mu& mu, MoeCase const& want) {
 
 // ── VU 那一段：silu·dot·量化 ──
 //
-// 三条宏指令，经 VRF 中转：VU 的执行链是 VALU 在 VSFU 前面，一条里做不完「先取
-// sigmoid 再乘回去」；而且一条宏指令只有一路 LU，fc1 与 fc3 两个向量也进不来。
-//
-//   一  LU 读 fc1（BF16）→ VSFU 出 sigmoid → 写 VRF 第 0 项
-//   二  LU 读 fc1（BF16）→ VALU0 乘 VRF 第 0 项 → 写 VRF 第 8 项（silu）
-//   三  LU 读 fc3（BF16）→ VALU0 乘 VRF 第 8 项 → SU 量化成 MXFP8 写回
-//
-// 第 8 项不是第 1 项：一条 VL=256 的 FP32 向量占 8 个 entry，索引是 entry 号。
-constexpr uint64_t kVrfSig = 0;
-constexpr uint64_t kVrfGate = 8;
+// 与 kernel_vu.c 的 task_vu_gate 同一张图，两条宏指令。
+// VL=256 的 FP32 占 8 个 entry：x 在 0，sigmoid(x) 在 8。
+constexpr uint64_t kVrfX = 0;
+constexpr uint64_t kVrfSig = 8;
 
 uint64_t OpWord(uint64_t opcode, uint64_t src1 = 0, uint64_t src2 = 0) {
   return opcode | (src1 << 8) | (src2 << 16);
@@ -133,54 +127,46 @@ uint64_t TypeVlWord(uint64_t vl) {
                              << kVuRoundModeShift);
 }
 
-// 三组静态配置写进一个队列。几个专家共用，地址每条走动态副本。
+// 两组静态配置写进一个队列。几个专家共用，地址每条走动态副本。
 void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
   auto st = [&](uint64_t group, uint64_t off, uint64_t data) {
     q.push_back({kVuStaticBase + group * kVuStaticStride + off, data});
   };
   uint64_t vl = kn::kSegInter;
+  uint64_t vrf_wt = (kVrfSig << 16) | kVrfX;
+  uint64_t vrf_rd = kVrfSig;
   st(1, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
   st(1, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
-  st(1, kVuSuOp, OpWord(uint64_t(SuOp::kNop)));
-  st(1, kVuPrfOp, kSrcVsfu0);
-  st(1, kVuStaticDupOffset + kVuVrfWtIndex, kVrfSig);
+  st(1, kVuPrfOp, kSrcLu | (kSrcVsfu0 << 8));
+  st(1, kVuStaticDupOffset + kVuVrfWtIndex, vrf_wt);
+  st(1, kVuStaticDupOffset + kVuVrfRdIndex, vrf_rd);
   st(1, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
 
   st(2, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
-  st(2, kVuValu0Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
-  st(2, kVuSuOp, OpWord(uint64_t(SuOp::kNop)));
-  st(2, kVuPrfOp, kSrcValu0);
-  st(2, kVuStaticDupOffset + kVuVrfRdIndex, kVrfSig);
-  st(2, kVuStaticDupOffset + kVuVrfWtIndex, kVrfGate);
+  st(2, kVuValu0Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcVrfP0, kSrcVrfP1));
+  st(2, kVuValu1Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcValu0, kSrcLu));
+  st(2, kVuSuOp, OpWord(uint64_t(SuOp::kStMxfp8), kSrcValu1));
+  st(2, kVuPrfOp, 0);
+  st(2, kVuStaticDupOffset + kVuVrfWtIndex, vrf_wt);
+  st(2, kVuStaticDupOffset + kVuVrfRdIndex, vrf_rd);
   st(2, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
-
-  st(3, kVuLuOp, OpWord(uint64_t(LuOp::kLdBf16)));
-  st(3, kVuValu0Op, OpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
-  st(3, kVuSuOp, OpWord(uint64_t(SuOp::kStMxfp8), kSrcValu0));
-  st(3, kVuPrfOp, 0);
-  st(3, kVuStaticDupOffset + kVuVrfRdIndex, kVrfGate);
-  st(3, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
 }
 
-// 一个专家那三条：fc1 与 fc3 从 red 那一包的数据段读，act 写 FC2 输入那一处。
-// 与 kernel_vu.c 的 task_vu_gate 同一种写法：三条之间是 VRF 上的先后，由记分板
-// 串起来，不置 fence；last 为真（本 task 最后一个专家）时只在第三条置 EVENT_EN，
-// 整个门控 task 报一次完成。
+// 一个专家两条：组 1 只读 fc1，组 2 读 fc3、写出 act。last 时只在第二条置
+// EVENT_EN。与 kernel_vu.c 的 task_vu_gate 同一种写法。
 void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red,
               uint64_t e, bool last) {
   uint64_t fc1 = red + e * kn::kPartStride;
   uint64_t fc3 = red + (kn::kExperts + e) * kn::kPartStride;
   uint64_t act = kn::kActOff + e * kn::kActStride;
-  uint64_t const rd[3] = {fc1, fc1, fc3};
-  for (uint64_t i = 0; i < 3; ++i) {
-    uint64_t g = i + 1;   // 与 kernel_vu.c 的 gate_setup 同组：1 / 2 / 3
-    q.push_back({kVuLdAddr, rd[i]});
-    q.push_back({kVuStAddr, act});
-    bool event = last && i == 2;
-    q.push_back({kVuMacroInstTrigger, kVuMaskLdAddr | kVuMaskStAddr |
-                                          (g << kVuTrigCfgIdxShift) |
-                                          (event ? kVuTrigEventEn : 0)});
-  }
+  q.push_back({kVuLdAddr, fc1});
+  q.push_back({kVuMacroInstTrigger,
+               kVuMaskLdAddr | (1u << kVuTrigCfgIdxShift)});
+  q.push_back({kVuLdAddr, fc3});
+  q.push_back({kVuStAddr, act});
+  q.push_back({kVuMacroInstTrigger,
+               kVuMaskLdAddr | kVuMaskStAddr | (2u << kVuTrigCfgIdxShift) |
+                   (last ? kVuTrigEventEn : 0)});
 }
 
 // 按序把配置写发进去，看见 ready 才换下一笔。

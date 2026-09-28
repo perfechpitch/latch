@@ -414,8 +414,10 @@ static inline u32 dte_template(u32 idx) {
 /* 源选择：高 4 位是来源类别 */
 #define VU_SRC_LU      0x01
 #define VU_SRC_VALU0   0x02
+#define VU_SRC_VALU1   0x03
 #define VU_SRC_VSFU    0x05
 #define VU_SRC_VRF_P0  0x30
+#define VU_SRC_VRF_P1  0x31
 
 /* 用到的 opcode */
 #define VU_LU_LD_MXFP8  0x02

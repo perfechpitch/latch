@@ -11,6 +11,7 @@ VU_STATIC_DUP = 0x2C
 VU_LU_OP = 0x00
 VU_SU_OP = 0x04
 VU_VALU0_OP = 0x08
+VU_VALU1_OP = 0x0C
 VU_VSFU_OP = 0x14
 VU_PRF_OP = 0x2C
 VU_TYPE_VL = 0x04
@@ -26,15 +27,17 @@ VU_VALU_FADD_VV = 0x01
 VU_VSFU_SIGMOID = 0x04
 VU_SRC_LU = 0x01
 VU_SRC_VALU0 = 0x02
+VU_SRC_VALU1 = 0x03
 VU_SRC_VSFU = 0x05
 VU_SRC_VRF_P0 = 0x30
+VU_SRC_VRF_P1 = 0x31
 
 MOE_SEG_INTER = 256
 MOE_EMBED = 6144
 RC_VRF = 16
 VU_DATA_TYPE_SHIFT = 16
-VRF_SIG = 0
-VRF_GATE = 8
+VRF_X = 0
+VRF_SIG = 8          # ⌈MOE_SEG_INTER / 32⌉
 
 
 def op_word(opcode, src1=0, src2=0):
@@ -46,8 +49,10 @@ def group_off(group, off):
 
 
 def gate_writes():
-    """组 1/2/3：silu·dot·量化。"""
+    """组 1/2：组 1 写 x 与 sigmoid，组 2 两次乘后量化。"""
     type_vl = MOE_SEG_INTER
+    vrf_wt = (VRF_SIG << 16) | VRF_X
+    vrf_rd = (VRF_X << 16) | VRF_SIG
     w = []
 
     def st(group, off, data):
@@ -55,25 +60,19 @@ def gate_writes():
 
     st(1, VU_LU_OP, op_word(VU_LU_LD_BF16))
     st(1, VU_VSFU_OP, op_word(VU_VSFU_SIGMOID, VU_SRC_LU))
-    st(1, VU_SU_OP, op_word(VU_SU_NOP))
-    st(1, VU_PRF_OP, VU_SRC_VSFU)
-    st(1, VU_STATIC_DUP + VU_VRF_WT_INDEX, VRF_SIG)
+    st(1, VU_PRF_OP, VU_SRC_LU | (VU_SRC_VSFU << 8))
+    st(1, VU_STATIC_DUP + VU_VRF_WT_INDEX, vrf_wt)
+    st(1, VU_STATIC_DUP + VU_VRF_RD_INDEX, vrf_rd)
     st(1, VU_STATIC_DUP + VU_TYPE_VL, type_vl)
 
     st(2, VU_LU_OP, op_word(VU_LU_LD_BF16))
-    st(2, VU_VALU0_OP, op_word(VU_VALU_FMUL_VV, VU_SRC_LU, VU_SRC_VRF_P0))
-    st(2, VU_SU_OP, op_word(VU_SU_NOP))
-    st(2, VU_PRF_OP, VU_SRC_VALU0)
-    st(2, VU_STATIC_DUP + VU_VRF_RD_INDEX, VRF_SIG)
-    st(2, VU_STATIC_DUP + VU_VRF_WT_INDEX, VRF_GATE)
+    st(2, VU_VALU0_OP, op_word(VU_VALU_FMUL_VV, VU_SRC_VRF_P0, VU_SRC_VRF_P1))
+    st(2, VU_VALU1_OP, op_word(VU_VALU_FMUL_VV, VU_SRC_VALU0, VU_SRC_LU))
+    st(2, VU_SU_OP, op_word(VU_SU_ST_MXFP8, VU_SRC_VALU1))
+    st(2, VU_PRF_OP, 0)
+    st(2, VU_STATIC_DUP + VU_VRF_WT_INDEX, vrf_wt)
+    st(2, VU_STATIC_DUP + VU_VRF_RD_INDEX, vrf_rd)
     st(2, VU_STATIC_DUP + VU_TYPE_VL, type_vl)
-
-    st(3, VU_LU_OP, op_word(VU_LU_LD_BF16))
-    st(3, VU_VALU0_OP, op_word(VU_VALU_FMUL_VV, VU_SRC_LU, VU_SRC_VRF_P0))
-    st(3, VU_SU_OP, op_word(VU_SU_ST_MXFP8, VU_SRC_VALU0))
-    st(3, VU_PRF_OP, 0)
-    st(3, VU_STATIC_DUP + VU_VRF_RD_INDEX, VRF_GATE)
-    st(3, VU_STATIC_DUP + VU_TYPE_VL, type_vl)
     return w
 
 

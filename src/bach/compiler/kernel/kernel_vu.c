@@ -50,25 +50,25 @@ TASK void task_vu_compute(void) {
 
 /* ===== dot core：silu·dot·量化 =====
  *
- * 三条宏指令，经 VRF 中转：VU 的执行链是 VALU 排在 VSFU 前面，一条里做不完
- * 「先取 sigmoid 再乘回去」；一条宏指令也只有一路 LU，fc1 与 fc3 两个向量进
- * 不来。
+ * 收成两条宏指令。组 0 留给
+ * task_vu_compute，这里用组 1 / 组 2。VL = MOE_SEG_INTER（256）个 FP32，
+ * 一个 VRF entry 装 32 个，x 占 entry 0，sigmoid(x) 占 entry 8。
  *
- *   组 1  LU 读 fc1（BF16）→ VSFU 出 sigmoid → 写 VRF 第 0 项
- *   组 2  LU 读 fc1（BF16）→ VALU0 乘 VRF 第 0 项 → 写 VRF 第 8 项，这就是 silu
- *   组 3  LU 读 fc3（BF16）→ VALU0 乘 VRF 第 8 项 → SU 量化成 MXFP8 写回
+ *   组 1  LU 读 fc1（x）→ 写入 VRF_WT_P0，同时 bypass 进 VSFU 出 sigmoid
+ *         → 写入 VRF_WT_P1。一条里 LU 同时供两处，模型没有 DATA_BROADCAST 位，
+ *         旁路本身就分得开。
+ *   组 2  VALU0 = sigmoid(x) * x（两源都读 VRF）；
+ *         LU 读 fc3（y）bypass 进 VALU1，VALU1 = silu(x) * y；
+ *         SU 从 VALU1 量化成 MXFP8 写回，不落 VRF。
  *
- * 组 0 留给 task_vu_compute。
- *
- * 读的是 chip 内归约出来的两份部分和，按 FP32 算，写回的是 FC2 输入，scale 随
- * 数据写进 scale 旁带。第 8 项不是第 1 项：一条 VL=256 的 FP32 向量占 8 个 entry，
- * VRF 索引是 entry 号。三条之间是 VRF 上的 RAW / WAW，记分板会串起来，
- * 不必再置 MACRO_INST_FENCE。 */
+ * MXFP8_SCALE_ROUND 保持 0（向下取整），与参考向量一致。参考那份把自己的
+ * 黄金比对配成向上取整，这里不对齐那一位。
+ * 两条之间是 VRF 上的 RAW，记分板会串起来，不必再置 MACRO_INST_FENCE。 */
 
 #if 0
-/* 组 1/2/3 改由 bundle VUSTATIC 在装载时写，不再每个 token 重配。 */
-#define VRF_SIG  0u
-#define VRF_GATE 8u
+/* 组 1/2 改由 bundle VUSTATIC 在装载时写，不再每个 token 重配。 */
+#define VRF_X    0u
+#define VRF_SIG  8u   /* ⌈VL / 32⌉，VL = MOE_SEG_INTER */
 
 static void vu_static(u32 group, u32 off, u32 data) {
   dsa_write(vu_static_group(group) + off, data);
@@ -78,54 +78,48 @@ static u32 op_word(u32 opcode, u32 src1, u32 src2) {
   return opcode | (src1 << VU_SRC1_SHIFT) | (src2 << VU_SRC2_SHIFT);
 }
 
-/* 三组静态配置，几个专家共用：地址每条走动态副本。firmware 不跑，每次
- * task_vu_gate 开头写一遍。 */
 static void gate_setup(void) {
   u32 type_vl = MOE_SEG_INTER;   /* FP32、RNE 都是 0 */
+  u32 vrf_wt = (VRF_SIG << 16) | VRF_X;
+  u32 vrf_rd = (VRF_X << 16) | VRF_SIG;
 
   vu_static(1, VU_LU_OP, op_word(VU_LU_LD_BF16, 0, 0));
   vu_static(1, VU_VSFU_OP, op_word(VU_VSFU_SIGMOID, VU_SRC_LU, 0));
-  vu_static(1, VU_SU_OP, op_word(VU_SU_NOP, 0, 0));
-  vu_static(1, VU_PRF_OP, VU_SRC_VSFU);
-  vu_static(1, VU_STATIC_DUP + VU_VRF_WT_INDEX, VRF_SIG);
+  vu_static(1, VU_PRF_OP, VU_SRC_LU | (VU_SRC_VSFU << VU_SRC1_SHIFT));
+  vu_static(1, VU_STATIC_DUP + VU_VRF_WT_INDEX, vrf_wt);
+  vu_static(1, VU_STATIC_DUP + VU_VRF_RD_INDEX, vrf_rd);
   vu_static(1, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
 
   vu_static(2, VU_LU_OP, op_word(VU_LU_LD_BF16, 0, 0));
   vu_static(2, VU_VALU0_OP,
-            op_word(VU_VALU_FMUL_VV, VU_SRC_LU, VU_SRC_VRF_P0));
-  vu_static(2, VU_SU_OP, op_word(VU_SU_NOP, 0, 0));
-  vu_static(2, VU_PRF_OP, VU_SRC_VALU0);
-  vu_static(2, VU_STATIC_DUP + VU_VRF_RD_INDEX, VRF_SIG);
-  vu_static(2, VU_STATIC_DUP + VU_VRF_WT_INDEX, VRF_GATE);
+            op_word(VU_VALU_FMUL_VV, VU_SRC_VRF_P0, VU_SRC_VRF_P1));
+  vu_static(2, VU_VALU1_OP,
+            op_word(VU_VALU_FMUL_VV, VU_SRC_VALU0, VU_SRC_LU));
+  vu_static(2, VU_SU_OP, op_word(VU_SU_ST_MXFP8, VU_SRC_VALU1, 0));
+  vu_static(2, VU_PRF_OP, 0);
+  vu_static(2, VU_STATIC_DUP + VU_VRF_WT_INDEX, vrf_wt);
+  vu_static(2, VU_STATIC_DUP + VU_VRF_RD_INDEX, vrf_rd);
   vu_static(2, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
-
-  vu_static(3, VU_LU_OP, op_word(VU_LU_LD_BF16, 0, 0));
-  vu_static(3, VU_VALU0_OP,
-            op_word(VU_VALU_FMUL_VV, VU_SRC_LU, VU_SRC_VRF_P0));
-  vu_static(3, VU_SU_OP, op_word(VU_SU_ST_MXFP8, VU_SRC_VALU0, 0));
-  vu_static(3, VU_PRF_OP, 0);
-  vu_static(3, VU_STATIC_DUP + VU_VRF_RD_INDEX, VRF_GATE);
-  vu_static(3, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
 }
 #endif
 
-/* 发一条宏指令：地址走动态副本。event_en 只给本 task 最后一条，前面的条不报
- * TS，避免一 task 多条 dsa_done 把链推过头。fence 等此前全部宏做完再派发。 */
-static void vu_fire(u32 group, u32 ld, u32 st, u32 event_en, u32 fence) {
-  dsa_write(VU_LD_ADDR, ld);
-  dsa_write(VU_ST_ADDR, st);
+/* 发一条宏指令。mask 里置位的地址走动态副本。event_en 只给本 task 最后一条。
+ * fence 等此前全部宏做完再派发。 */
+static void vu_fire(u32 group, u32 ld, u32 st, u32 mask, u32 event_en,
+                    u32 fence) {
+  if (mask & VU_MASK_LD_ADDR) dsa_write(VU_LD_ADDR, ld);
+  if (mask & VU_MASK_ST_ADDR) dsa_write(VU_ST_ADDR, st);
   dsa_write(VU_MACRO_INST_TRIGGER,
-            VU_MASK_LD_ADDR | VU_MASK_ST_ADDR
-                | (group << VU_CONFIG_IDX_SHIFT)
+            mask | (group << VU_CONFIG_IDX_SHIFT)
                 | (event_en ? VU_EVENT_EN : 0u)
                 | (fence ? VU_MACRO_INST_FENCE : 0u));
 }
 
-/* 每个专家一份：silu(FC1)·FC3，量化成 MXFP8 作为 FC2 输入。
+/* 每个专家一份：silu(fc1)·fc3，量化成 MXFP8 作为 FC2 输入。
  *
- * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA：最后一条被收下后 RV 就
- * task_done(1)，TS 等最后一条退休的 dsa_done。执行链按序退休，最后一条退休时
- * 前面的都已退休；一个 task 内各条写的 Core Mem 不重叠，fence 传 0。 */
+ * 组 1 只动态化 LD（fc1）；组 2 动态化 LD（fc3）与 ST（act）。只在本 task
+ * 最后一个专家的组 2 置 EVENT_EN。TASK_RECV_UNIT 配 DSA，所以仍 task_done(1)：
+ * TS 要收齐 rv_done 与这一笔 dsa_done。 */
 TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
@@ -136,9 +130,8 @@ TASK void task_vu_gate(void) {
     u32 fc3 = red + (MOE_EXPERTS + e) * MOE_PART_STRIDE;
     u32 act = base + MOE_ACT_OFF + e * MOE_ACT_STRIDE;
     u32 last = (e + 1u == MOE_EXPERTS);
-    vu_fire(1, fc1, act, 0, 0);
-    vu_fire(2, fc1, act, 0, 0);
-    vu_fire(3, fc3, act, last, 0);
+    vu_fire(1, fc1, 0, VU_MASK_LD_ADDR, 0, 0);
+    vu_fire(2, fc3, act, VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, last, 0);
   }
   vu_wait_trigger_taken();
   task_done(1);
@@ -151,7 +144,7 @@ TASK void task_vu_gate(void) {
  *   组 4  LU 读前一半（BF16）→ 写 VRF
  *   组 5  LU 读后一半（BF16）→ VALU0 与 VRF 相加 → SU 按 BF16 写回 Core Mem
  *
- * 向量长度是 MOE_EMBED，与门控那三条的 MOE_SEG_INTER 不同，所以另占两组静态配置。
+ * 向量长度是 MOE_EMBED，与门控那两条的 MOE_SEG_INTER 不同，所以另占两组静态配置。
  * 组 4/5 由 bundle VUSTATIC / PreloadVuAdd 在装载时写。 */
 #if 0
 static void add_setup(void) {
@@ -185,12 +178,14 @@ TASK void task_vu_add(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 at = MOE_SW_HEAD_BYTES;
   /* add_setup(); 静态组由 bundle VUSTATIC / PreloadVuAdd 写 */
-  vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at, 0, 0);
-  vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at, 1, 0);
+  vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at,
+          VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, 0, 0);
+  vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at,
+          VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, 1, 0);
   vu_wait_trigger_taken();
   task_done(1);
 }
 
 void kernel_init(void) {
-  /* firmware 不跑。组 1/2/3、4/5 由 bundle VUSTATIC 在装载时写。 */
+  /* firmware 不跑。组 1/2、4/5 由 bundle VUSTATIC 在装载时写。 */
 }

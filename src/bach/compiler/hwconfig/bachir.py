@@ -13,7 +13,7 @@ TSRTAB（TS 的 ROUTER_TABLE）。PATHTASK 只给 DTE 那一份。版本 9 的 c
 CHIP 的第二个字段从形状换成 core_bad_mask，CORE 覆盖每颗 chip 的 10 个 core，加
 DTEIN（业务模式下进核那一笔的配置）。版本 10 去掉 RTAB 末尾的 reduceNeedMask：
 业务级资源只剩 Stream 一种，reduce 那一路不单独记账。
-VUSTATIC 是开机写一次的 VU 静态组（门控组 1/2/3、求和组 4/5），与
+VUSTATIC 是开机写一次的 VU 静态组（门控组 1/2、求和组 4/5），与
 kernel_vu.c 的 gate_setup / add_setup 同一份数。
 """
 

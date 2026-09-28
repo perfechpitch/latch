@@ -20,34 +20,31 @@ inline void PreloadVuGroup(Vu& vu, uint64_t group, uint64_t off,
   vu.Preload(kVuStaticBase + group * kVuStaticStride + off, data);
 }
 
-// 组 1/2/3：silu·dot·量化。VL = 256，FP32。
+// 组 1/2：VL = 256 FP32，x 在 entry 0，
+// sigmoid 在 entry 8。MXFP8 scale 向下取整。
 inline void PreloadVuGate(Vu& vu) {
   uint64_t const type_vl = 256;
+  uint64_t const vrf_wt = (8u << 16) | 0u;
+  uint64_t const vrf_rd = 8u;
   PreloadVuGroup(vu, 1, kVuLuOp, VuMoeOpWord(uint64_t(LuOp::kLdBf16)));
   PreloadVuGroup(vu, 1, kVuVsfuOp,
                  VuMoeOpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
-  PreloadVuGroup(vu, 1, kVuSuOp, VuMoeOpWord(uint64_t(SuOp::kNop)));
-  PreloadVuGroup(vu, 1, kVuPrfOp, kSrcVsfu0);
-  PreloadVuGroup(vu, 1, kVuStaticDupOffset + kVuVrfWtIndex, 0);
+  PreloadVuGroup(vu, 1, kVuPrfOp, kSrcLu | (kSrcVsfu0 << 8));
+  PreloadVuGroup(vu, 1, kVuStaticDupOffset + kVuVrfWtIndex, vrf_wt);
+  PreloadVuGroup(vu, 1, kVuStaticDupOffset + kVuVrfRdIndex, vrf_rd);
   PreloadVuGroup(vu, 1, kVuStaticDupOffset + kVuTypeVl, type_vl);
 
   PreloadVuGroup(vu, 2, kVuLuOp, VuMoeOpWord(uint64_t(LuOp::kLdBf16)));
   PreloadVuGroup(vu, 2, kVuValu0Op,
-                 VuMoeOpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
-  PreloadVuGroup(vu, 2, kVuSuOp, VuMoeOpWord(uint64_t(SuOp::kNop)));
-  PreloadVuGroup(vu, 2, kVuPrfOp, kSrcValu0);
-  PreloadVuGroup(vu, 2, kVuStaticDupOffset + kVuVrfRdIndex, 0);
-  PreloadVuGroup(vu, 2, kVuStaticDupOffset + kVuVrfWtIndex, 8);
+                 VuMoeOpWord(uint64_t(ValuOp::kFmulVv), kSrcVrfP0, kSrcVrfP1));
+  PreloadVuGroup(vu, 2, kVuValu1Op,
+                 VuMoeOpWord(uint64_t(ValuOp::kFmulVv), kSrcValu0, kSrcLu));
+  PreloadVuGroup(vu, 2, kVuSuOp,
+                 VuMoeOpWord(uint64_t(SuOp::kStMxfp8), kSrcValu1));
+  PreloadVuGroup(vu, 2, kVuPrfOp, 0);
+  PreloadVuGroup(vu, 2, kVuStaticDupOffset + kVuVrfWtIndex, vrf_wt);
+  PreloadVuGroup(vu, 2, kVuStaticDupOffset + kVuVrfRdIndex, vrf_rd);
   PreloadVuGroup(vu, 2, kVuStaticDupOffset + kVuTypeVl, type_vl);
-
-  PreloadVuGroup(vu, 3, kVuLuOp, VuMoeOpWord(uint64_t(LuOp::kLdBf16)));
-  PreloadVuGroup(vu, 3, kVuValu0Op,
-                 VuMoeOpWord(uint64_t(ValuOp::kFmulVv), kSrcLu, kSrcVrfP0));
-  PreloadVuGroup(vu, 3, kVuSuOp,
-                 VuMoeOpWord(uint64_t(SuOp::kStMxfp8), kSrcValu0));
-  PreloadVuGroup(vu, 3, kVuPrfOp, 0);
-  PreloadVuGroup(vu, 3, kVuStaticDupOffset + kVuVrfRdIndex, 8);
-  PreloadVuGroup(vu, 3, kVuStaticDupOffset + kVuTypeVl, type_vl);
 }
 
 // 组 4/5：R core 两半求和。VL = 6144，BF16。VRF 第 16 项。
