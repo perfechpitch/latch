@@ -533,6 +533,9 @@ class Core : public BachModule {
     auto topk_port = std::make_shared<MuTopkPort>(clk);
     dte->AttachMuTopk(topk_port);
     mu->AttachMuTopk(topk_port);
+    // DTE 出核造包那一路要从 MU 的 topK_ep_table 读 topK（B core 广播：bc_datain
+    // 写进去、bc_send 读出来附回要发的包），把 MU 的 GenEpInfo 指给 DTE。
+    dte->AttachMuTopkEp(&mu->EpInfo());
     // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
     // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
     rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));

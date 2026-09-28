@@ -31,6 +31,7 @@
 #include "bach/ip/chip/core/dte/lane.h"
 #include "bach/ip/chip/core/dte/out_arb.h"
 #include "bach/ip/chip/core/dte/regfile.h"
+#include "bach/ip/chip/core/mu/gen_ep_info.h"
 
 namespace latch {
 namespace bach {
@@ -114,8 +115,18 @@ class Dte {
   void AttachSmemWr(std::shared_ptr<MemPort> p) {
     comp->AttachSmemWr(std::move(p));
   }
-  // topK 旁带写进 MU 的那条数据线。只接给进核通道。
-  void AttachMuTopk(std::shared_ptr<MuTopkPort> p) { mu_topk = std::move(p); }
+  // topK 旁带写进 MU 的那条数据线。只接给进核通道。装配层在 Dte 构造之后才把这条
+  // 线接过来，所以这里要直接穿给进核 Lane（Wire() 里那次只覆盖构造前就有线的情形）。
+  void AttachMuTopk(std::shared_ptr<MuTopkPort> p) {
+    mu_topk = p;
+    lanes[kInCh]->AttachMuTopk(std::move(p));
+  }
+  // 出核造包时从 MU 的 topK_ep_table 读 topK 的入口。装配层把 MU 的 GenEpInfo
+  // 指过来，转给 Commit 用。
+  void AttachMuTopkEp(GenEpInfo* ep) {
+    mu_topk_ep = ep;
+    commit->AttachMuTopkEp(ep);
+  }
   // 对每块存储的读与写各一个口，五个通道在 DMA_XBAR 里仲裁。
   void AttachCmemRd(std::shared_ptr<MemPort> p) {
     xbar->AttachCmemRd(std::move(p));
@@ -219,6 +230,7 @@ class Dte {
   std::unique_ptr<CompletionRs> comp;
   std::vector<std::unique_ptr<Lane>> lanes;
   std::shared_ptr<MuTopkPort> mu_topk;
+  GenEpInfo* mu_topk_ep = nullptr;
 };
 
 }  // namespace bach

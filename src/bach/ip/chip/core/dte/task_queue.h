@@ -39,8 +39,8 @@ struct ActiveCtx {
   // 次写。
   uint64_t off = 0;
   uint64_t part = 0;
-  // topK 段：这一笔的 topK 写进 MU 了没有。整笔只写一次。
-  bool topk_sent = false;
+  // 出核：最后一拍 payload 发完、还欠一笔 topK 拍没发。发完才置 issue_done。
+  bool topk_pending = false;
 };
 
 class TaskQueue {

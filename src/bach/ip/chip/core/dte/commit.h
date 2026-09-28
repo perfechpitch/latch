@@ -25,6 +25,7 @@
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/common/flit.h"
 #include "bach/ip/chip/core/dte/hmem.h"
+#include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -51,6 +52,10 @@ class Commit : public BachModule {
   void AttachVcLevel(std::shared_ptr<CreditLevelPort> p) {
     vc_level = std::move(p);
   }
+
+  // 出核造包时从 MU 的 topK_ep_table 把 topK 读出来附回要发的包。装配层把 MU 的
+  // GenEpInfo 指过来。
+  void AttachMuTopkEp(GenEpInfo* ep) { mu_topk_ep = ep; }
 
   // dispatch 一笔后往这几个口上发：每个 Lane 一个，Completion RS 一个。
   void AddLanePort(std::shared_ptr<AdmitPort> p) {
@@ -114,7 +119,7 @@ class Commit : public BachModule {
 
   // 从队头往后扫，dispatch 第一个目标通道就绪的任务。不同通道的任务可乱序下发：
   // 队头那个出核任务还堵在 VC credit 上时，后面别的通道的任务可以先行。同一通道
-  // 内按序（F18）：一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都
+  // 内按序：一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都
   // 不发。三样一起拿：读侧 TaskQueue、写侧 TaskQueue、Completion RS；出核任务再
   // 查 VC credit。
   void TryDispatch() {
@@ -165,7 +170,7 @@ class Commit : public BachModule {
     ++stall_pending;
   }
 
-  // 走归约路径出核的包标成 reduce 包（F74），包头的 reduce_seq 打上发方的
+  // 走归约路径出核的包标成 reduce 包，包头的 reduce_seq 打上发方的
   // task_id：ReduceModule 靠它分开同一个用户前后两笔 reduce 任务。一条归约链上
   // 各 core 的任务链一样，同一笔任务的 task_id 也一样。
   void MarkReducePkt(Descriptor& d) {
@@ -176,9 +181,9 @@ class Commit : public BachModule {
   }
 
   // 出核任务要发出去的那个包在这里造好，读回来的数据往它的 payload 里填。
-  // 出核改写的三个包头字段（F44）：path_id 用 TS 送来的那个，size 用 RV core
-  // 配的寄存器，core_mask 只在做 MoE Route 时改。片外那一段的目的标识跟着
-  // path_id 的表项走。
+  // 出核按文档「重组包头」改写 path_id、user_id、loopback[3:2](vc)、pkt_length
+  // 四个字段（详细设计 3.15/66），size 由各使能数据段长度算出。片外那一段的
+  // 目的标识（dst）跟着 path_id 的表项走。
   void MakeOutboundMsg(Descriptor& d) const {
     auto m = std::make_shared<Message>();
     m->user_id = d.user_id;
@@ -190,14 +195,22 @@ class Commit : public BachModule {
     HmemEntry const& h = hmem.Entry(d.stream_id);
     m->gpu_id = h.gpu_id;
     m->token_id = h.token_id;
-    // 带 scale 的包：数据后面接 scale，包长把 payload 各段都算上。
+    // 带 scale 的包：数据后面接 scale。包长把 payload 各段都算上，topK 也算进去
+    // （它走同一数据通道，占 size 的 flit 换算）；但 payload 正文只放数据 + scale，
+    // topK 字节随包的 topk 字段走。
     m->size = d.PayloadBytes();
     m->scale_valid = d.HasScale() ? 1 : 0;
+    // 带 topK 的包（B core 广播那一笔）：从 MU 的 topK_ep_table 按段内偏移取这一
+    // 份原样附回，收方 DTE 再按 stream_id 写进它的 MU。
+    if (d.HasTopk() && mu_topk_ep) {
+      m->topk_valid = 1;
+      m->topk = mu_topk_ep->TopkBytes(d.TopkIndex());
+    }
     m->vc = d.vc;
     m->stream_id = d.stream_id;
     m->task_id = d.task_id;
     m->reduce_seq = d.reduce_seq;
-    m->payload.assign(m->size, 0);
+    m->payload.assign(d.PayloadDataBytes(), 0);
     d.msg = m;
   }
 
@@ -231,6 +244,7 @@ class Commit : public BachModule {
   }
 
   Hmem& hmem;
+  GenEpInfo* mu_topk_ep = nullptr;
   std::shared_ptr<CreditLevelPort> vc_level;
   std::shared_ptr<DescPort> from_rv;
   std::vector<std::shared_ptr<AdmitPort>> to_lane;

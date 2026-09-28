@@ -134,7 +134,7 @@ class HeaderParser : public BachModule {
     from_router->DriveReady(true);
   }
 
-  // 检查 F2 列的那几项。这一轮只建结构性的几条，位域细节等包格式定死后补。
+  // 入站包头合法性检查。这一轮只建结构性的几条，位域细节等包格式定死后补。
   // 落点改由配置给（CFG_ADDRx_DST），包头 dst_addr 不再参与，也不做对齐检查。
   bool Legal(CoreDataView const& d) const {
     if (!d.msg) return false;

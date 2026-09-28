@@ -486,7 +486,7 @@ TaskEntry Task(SendUnit unit, RecvUnit recv, char const* name, char const* kind)
 // 要广播给的、也没有要收的。
 void WriteDotChain(Core& core, uint64_t slot) {
   std::string s = std::to_string(slot);
-  TaskEntry in = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_user_init", "dte");
+  TaskEntry in = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_token_datain", "dte");
   in.path_id = kTokenPath;
   in.wait_wake = true;
   core.GetTs().Cfg().WriteTask(0, in);
@@ -501,7 +501,7 @@ void WriteDotChain(Core& core, uint64_t slot) {
   part.credit_en = true;
   core.GetTs().Cfg().WriteTask(2, part);
 
-  TaskEntry red = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_user_init", "dte");
+  TaskEntry red = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_red_datain", "dte");
   red.path_id = kChipReducePath;
   red.wait_wake = true;
   core.GetTs().Cfg().WriteTask(3, red);
@@ -630,11 +630,9 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     PreloadVuGate(core.GetVu());
     WriteDotChain(core, want.slot);
 
-    // boot 期装进去的那几样：权重按专家在本组内的序号摆，topK 表直接存组内序号。
-    // topK 由 DTE 搬运时经专用数据线写进 MU 的 topK_ep_table，这里直接注入同一份
-    // （本 core 的 MU 任务走 stream 0）。token 由 Router 送进来。
-    core.GetMu().EpInfo().WriteTopk(
-        0, TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}}));
+    // boot 期装进去的那几样：权重按专家在本组内的序号摆。topK 表随 token 走，由
+    // DTE 搬运时经专用数据线写进 MU 的 topK_ep_table（本 core 的 MU 任务走
+    // stream 0）。token 由 Router 送进来。
     kn::PokeCoreWeights(core.Mmem(), want.group, want.chip, want.slot, kLocal);
 
     auto token = std::make_shared<Message>();
@@ -644,8 +642,11 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     token->payload = want.token;
     token->payload.insert(token->payload.end(), want.token_scale.begin(),
                           want.token_scale.end());
-    token->size = token->payload.size();
     token->dst_addr = kn::kTokenOff;
+    token->topk_valid = 1;
+    token->topk = TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
+    // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放 payload。
+    token->size = token->payload.size() + token->topk.size();
 
     ChainHarness harness(clk, core, /*at=*/2, token);
     clk->Continue(200000 * kPeriod);

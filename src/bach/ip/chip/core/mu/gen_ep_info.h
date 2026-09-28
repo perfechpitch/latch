@@ -48,6 +48,14 @@ class GenEpInfo : public BachModule {
     dirty[stream_id] = true;
   }
 
+  // 出核那一笔把这份原始字节读出来、附回要发的包（B core 广播时把 token 的 topK
+  // 原样转出去）。不解析，直接给表里存的字节。索引由调用方按 topK 段的端内偏移给：
+  // 计算 core 是 stream_id，B core 是环形槽号。
+  std::vector<uint8_t> const& TopkBytes(uint64_t stream_id) const {
+    LOGCHECK(stream_id < kStreamNum, "GenEpInfo: stream_id 越界。");
+    return table[stream_id];
+  }
+
   // MU 计算时读这一份：dirty 时用 Parse 解一次，之后走缓存。
   std::vector<TopkEntry> const& Topk(uint64_t stream_id, uint64_t count) {
     LOGCHECK(stream_id < kStreamNum, "GenEpInfo: stream_id 越界。");
