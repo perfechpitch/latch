@@ -28,6 +28,7 @@
 #include "bach/ip/chip/core/memory/matrix_mem.h"
 #include "bach/ip/chip/core/mu/mu.h"
 #include "bach/ip/chip/core/vu/vu.h"
+#include "bach/ip/chip/core/vu/vu_moe_static.h"
 #include "test/bach/ip/chip/kn_data.h"
 
 using namespace latch;
@@ -626,6 +627,7 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
     core.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
     core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
     core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
+    PreloadVuGate(core.GetVu());
     WriteDotChain(core, want.slot);
 
     // boot 期装进去的那几样：权重按专家在本组内的序号摆，topK 表直接存组内序号。

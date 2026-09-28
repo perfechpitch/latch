@@ -27,6 +27,7 @@
 #include "base/runtime.h"
 #include "bach/common/numeric/formats.h"
 #include "bach/ip/chip/core/core.h"
+#include "bach/ip/chip/core/vu/vu_moe_static.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -256,6 +257,7 @@ void LoadKernels(Core& core) {
   core.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
   core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
   core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
+  PreloadVuAdd(core.GetVu());
 }
 
 std::vector<float> Ramp(float base, float step) {

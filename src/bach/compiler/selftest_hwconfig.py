@@ -17,7 +17,7 @@ TOPO = HERE / "topo"
 
 # 每份产物至少要有的记录，缺一样就说明那一层没产出来
 REQUIRED = ("CHIP", "CORE", "CFGMISC", "TCHAIN", "TSRTAB", "DATAIN", "DTEIN",
-            "RTAB", "RTABDTE", "PATHTASK", "KERNEL")
+            "RTAB", "RTABDTE", "PATHTASK", "KERNEL", "VUSTATIC")
 
 
 def kinds_of(lines):

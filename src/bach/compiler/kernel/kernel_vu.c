@@ -65,6 +65,8 @@ TASK void task_vu_compute(void) {
  * VRF 索引是 entry 号。三条之间是 VRF 上的 RAW / WAW，记分板会串起来，
  * 不必再置 MACRO_INST_FENCE。 */
 
+#if 0
+/* 组 1/2/3 改由 bundle VUSTATIC 在装载时写，不再每个 token 重配。 */
 #define VRF_SIG  0u
 #define VRF_GATE 8u
 
@@ -105,6 +107,7 @@ static void gate_setup(void) {
   vu_static(3, VU_STATIC_DUP + VU_VRF_RD_INDEX, VRF_GATE);
   vu_static(3, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
 }
+#endif
 
 /* 发一条宏指令：地址走动态副本。event_en 只给本 task 最后一条，前面的条不报
  * TS，避免一 task 多条 dsa_done 把链推过头。fence 等此前全部宏做完再派发。 */
@@ -127,7 +130,7 @@ TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
   u32 e;
-  gate_setup();
+  /* gate_setup(); 静态组由 bundle VUSTATIC / PreloadVuGate 写 */
   for (e = 0; e < MOE_EXPERTS; ++e) {
     u32 fc1 = red + e * MOE_PART_STRIDE;
     u32 fc3 = red + (MOE_EXPERTS + e) * MOE_PART_STRIDE;
@@ -149,7 +152,8 @@ TASK void task_vu_gate(void) {
  *   组 5  LU 读后一半（BF16）→ VALU0 与 VRF 相加 → SU 按 BF16 写回 Core Mem
  *
  * 向量长度是 MOE_EMBED，与门控那三条的 MOE_SEG_INTER 不同，所以另占两组静态配置。
- * firmware 不跑，每次 task_vu_add 开头写一遍。 */
+ * 组 4/5 由 bundle VUSTATIC / PreloadVuAdd 在装载时写。 */
+#if 0
 static void add_setup(void) {
   /* 读写与中间一律 BF16，RNE。向量通路的一拍吃多少个 element 由 DATA_TYPE 定：
      BF16 一拍 64 个，正好是 CM 一拍 128 B 装的个数，一个块一段流过去；配成 FP32
@@ -171,6 +175,7 @@ static void add_setup(void) {
   vu_static(5, VU_STATIC_DUP + VU_VRF_RD_INDEX, RC_VRF);
   vu_static(5, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
 }
+#endif
 
 /* R core 链二的求和那一步：本行结果与上一行送来的那一份逐元素相加。
  *
@@ -179,7 +184,7 @@ static void add_setup(void) {
 TASK void task_vu_add(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 at = MOE_SW_HEAD_BYTES;
-  add_setup();
+  /* add_setup(); 静态组由 bundle VUSTATIC / PreloadVuAdd 写 */
   vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at, 0, 0);
   vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at, 1, 0);
   vu_wait_trigger_taken();
@@ -187,5 +192,5 @@ TASK void task_vu_add(void) {
 }
 
 void kernel_init(void) {
-  /* firmware 不跑。组 1/2/3 由 task_vu_gate 写，组 4/5 由 task_vu_add 写。 */
+  /* firmware 不跑。组 1/2/3、4/5 由 bundle VUSTATIC 在装载时写。 */
 }

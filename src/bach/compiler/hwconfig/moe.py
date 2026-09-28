@@ -776,6 +776,7 @@ class Plan:
         self.datain = {}          # {(chip, core): (镜像, 函数名)}
         self.datain_pc = {}       # {(chip, core): 入口地址}，由上层查符号表填
         self.dtein = {}           # {(chip, core): (route, no_ack, 基址, 槽位大小)}
+        self.vu_static = {}       # {(chip, core): [(vu_off, data), ...]}
         self.bcast_dirs = {}
         self.stream_num = 1
         self.name = ""
@@ -915,6 +916,12 @@ def build_plan(desc):
                 continue
             plan.datain[(chip, core)] = DATAIN_SYM[role]
             plan.dtein[(chip, core)] = DTEIN_OF_ROLE[role]
+
+    from . import vu_static
+    for key, items in plan.chains.items():
+        writes = vu_static.writes_for_chain(items)
+        if writes:
+            plan.vu_static[key] = writes
 
     fill_stream_need(plan, rows, cols)
     fill_credit_en(plan)

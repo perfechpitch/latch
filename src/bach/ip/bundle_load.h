@@ -68,6 +68,7 @@ struct CorePlan {
   InboundCfg dtein;                              // 业务模式下进核那一笔
   Route dtein_route = Route::kRouterToCm;        // DTEIN 声明的落点，只用于角色校验
   bool has_dtein = false;
+  std::vector<std::pair<uint64_t, uint64_t>> vu_static;  // (vu_off, data)
 };
 
 inline uint64_t Num(std::string const& s) {
@@ -99,7 +100,8 @@ inline void CheckBadMask(uint64_t chip, uint64_t mask) {
 inline void CheckBadCore(CoreKey const& key, CorePlan const& c) {
   Require(c.role == CoreRole::kSpare, key, "坏 core 的角色要是不派角色");
   Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
-              c.ts_route.empty() && c.dte_rtab.empty() && c.path_task.empty(),
+              c.ts_route.empty() && c.dte_rtab.empty() && c.path_task.empty() &&
+              c.vu_static.empty(),
           key, "坏 core 上只能有 RTAB 与 RELROUTE");
   for (auto const& one : c.rtab) {
     RouteEntry const& e = one.second;
@@ -130,8 +132,10 @@ inline void CheckRole(CoreKey const& key, CorePlan const& c) {
                 : "B core 的 DTEIN 要落 Matrix Mem");
       break;
     case CoreRole::kSpare:
-      Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein,
-              key, "不派角色的 core 不能有 CFGMISC、TCHAIN、DATAIN、DTEIN");
+      Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
+                  c.vu_static.empty(),
+              key, "不派角色的 core 不能有 CFGMISC、TCHAIN、DATAIN、DTEIN、"
+                   "VUSTATIC");
       break;
   }
 }
@@ -257,6 +261,9 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     } else if (tag == "RTABDTE") {
       LOGCHECK(tok.size() == 4, "LoadBundle: RTABDTE 记录要三个字段。");
       c.dte_rtab.push_back(Num(tok[3]));
+    } else if (tag == "VUSTATIC") {
+      LOGCHECK(tok.size() == 5, "LoadBundle: VUSTATIC 记录要四个字段。");
+      c.vu_static.push_back({Num(tok[3]), Num(tok[4])});
     } else if (tag == "RTAB") {
       LOGCHECK(tok.size() == 31, "LoadBundle: RTAB 记录要三十个字段。");
       RouteEntry e;
@@ -346,6 +353,9 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       core.GetDte().Tables().PreloadPathTask(one.first, one.second);
     }
     if (c.has_dtein) core.SetBusinessInboundCfg(c.dtein);
+    for (auto const& one : c.vu_static) {
+      core.GetVu().Preload(one.first, one.second);
+    }
     for (auto const& one : c.ts_route) {
       core.GetTs().Cfg().WriteRouterTable(one.first, one.second.first,
                                           one.second.second);
