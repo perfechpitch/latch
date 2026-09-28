@@ -30,7 +30,7 @@
 1. **逐拍 cycle 模型**：功能与时序一起建，每个仲裁点、每条通路都有拍数。
 2. **机制全覆盖**：第 2 至 4 章定义的每一条机制都落到一个单元的一个函数，并有一个用例；覆盖关系在各单元文档的“机制覆盖”表里逐条登记。
 3. **bit 级数值**：MU 的累加顺序、MXFP8 的 scale block、VU 的三处舍入、Router reduce 的 FP32 中间精度都按硬件规则实现；参考实现按同样的顺序计算，逐元素比对不留容差。
-4. **RV core 跑真实 RV32 程序，不建流水线**：kernel 编译成 RV32 程序，由 `src/rv32` 的功能模型逐条执行，每条指令 1 拍，访存与 DSA 读的延迟另计；task_queue、dsa_iss、CSR、task_done 这些与 TS 和 DSA 交互的机制照建。
+4. **RV core 跑真实 RV32 程序，不建流水线**：kernel 编译成 RV32 程序，由 `src/rv32` 的功能模型逐条执行，双发射顺序执行、一拍最多两条，访存与 DSA 读的延迟另计；task_queue、dsa_iss、CSR、task_done 这些与 TS 和 DSA 交互的机制照建。
 
 ### 对象清单
 
@@ -162,7 +162,7 @@
 * Host CPU、Node CPU、tray CPU（源文档叫 Board CPU）的业务流控与退出、动态专家调度（第 2 章“业务流控与退出”）。LPU Dispatch 的派遣规则（所有 R core 有余量才派遣）放在入口桩里。
 * Debug Module、DTM、GDB。
 * 异常、ECC、看门狗、功耗类机制（RV core 九类异常、MU Drain & Trap、VU error_code、TS Except_Check、DTE 首错保留、DIDT 分级、零输入门控、MU 与 VU 错峰）。各单元给这些机制留出状态位与接口名，本轮不实现其行为。
-* RV core 的流水线细节：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突。它们折算成每条指令 1 拍。
+* RV core 的流水线细节：pc_gen、loop_bp、decode、dispatch、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突。它们折算进发射那一拍，一拍最多双发射两条。
 
 ***
 
@@ -202,7 +202,7 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 | Router | 等 VC credit、等 Stream 坑、等 Reduce credit、多播原子准入、Reduce 累加、AbsorbReissue | Message 状态机：Idle → Lookup → DeliverLocal / Forward / ReduceAccum / AbsorbReissue |
 | 存储 | bank 冲突 | 仲裁器每拍 `TryGrant` 一次，被拒的请求下一拍再来 |
 
-每个 Core 的状态机数量有界：stream 表项 16、DTE TaskQueue 4 × 16、VU 在飞宏指令 2、MU issue_q 16、Router 每方向 4 个 VC 各一个队首上下文。
+每个 Core 的状态机数量有界：stream 表项 16、DTE 中央 TaskQueue 16 与每通道每侧 TaskQueue 4、VU 在飞宏指令 2、MU issue_q 16、Router 每方向 4 个 VC 各一个队首上下文。
 
 排队分四种语义，各模块在自己那一处实现（存储的 `bank_arbiter.h`、TS 的 `dte_arb.h` 与 `mu_vu_arb.h`、DTE 的 `out_arb.h`、Router 的三类 credit）：
 
@@ -281,7 +281,7 @@ src/bach/
         ts/
           cfg_reg.h                task_chain 64 项、datain_task、ROUTER_TABLE、配置检查、按 PID 找搬入任务
           user_match.h             判用户、找搬入任务、定跳过，含 DataIn_task_table
-          stream_table.h           16 项 FIFO、task_fsm、八个写口
+          stream_table.h           16 项 FIFO、task_fsm、十四个写口
           task_ctrl.h              按完成位图一拍找后继、原子安装
           dte_arb.h  mu_vu_arb.h
           credit_monitor.h         credit 申请与唤醒、Rmem credit、Head-only 退休
@@ -471,7 +471,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | 类 | reason |
 | - | - |
-| 依赖 | 等前序 task 完成、等 datain 数据到达、等 Router `reduce_done`、等 DSA 读寄存器返回、等 Completion RS 的 Join、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的 arrive_num == 2 |
+| 依赖 | 等前序 task 完成、等 datain 数据到达、等 Router `reduce_done`、等 DSA 读寄存器返回、等 Completion RS 的 Join、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的用户 FIFO 头尾不等 |
 | 资源 | 等 stream 坑、等 VC credit、等 Reduce credit、等入口桩的 grant、等 TaskQueue / ISQ / issue_q 项、等 Lane、等 bank 端口、等 RV core 空闲、等 dsa_iss 通道、等 DTE Buffer credit、等 Xbar 出口、等 ReduceModule 上下文 |
 
 瓶颈由此能定位到具体资源而不只是慢，而且只有资源那一半是改参数动得了的。
@@ -505,7 +505,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 3 | 三块存储与它们的 bank 仲裁器 | 各 master 端口的端到端拍数等于参数表；同 bank 冲突按优先级授予 |
 | 4 | Router 的八个模块 | Router 单测跑 A2、A5、A15、A16、A17 五个场景；credit 守恒 |
 | 5 | RV core（接 `src/rv32`）与三块存储、Router I/O reg 的连接 | 一个只做标量活的 kernel 跑完并向 TS 报完成 |
-| 6 | TS 的九个模块 | 单 stream 单 task 从 trigger 到 retire 走完；六个写口的冲突用例 |
+| 6 | TS 的九个模块 | 单 stream 单 task 从 trigger 到 retire 走完；各写口的冲突用例 |
 | 7 | DTE 的八个模块 | 五个搬运方向各一个用例；Commit 配对接纳与 Join 的用例 |
 | 8 | MU 与 VU | 逐条计算原语与参考实现逐 bit 比对 |
 | 9 | Core 装配、Chip 装配（含 SCP 桩、ctrl_noc 端点、C2C Bridge） | 单 chip 上 boot 走完六步，`ready` 全高 |
@@ -552,7 +552,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 1. **资源的持有与等待不成环**：任何一个模块在等某个资源时，不得同时持有该资源的上游还要用的资源。Commit 的配对接纳与 PendingTaskQ 排在 Commit 之前，是这一条在 DTE 上的两个落点
 2. **每个等待都有唤醒源**：`unit_waits` 里的每条等待区间都能配上一个把它唤醒的事件。等待归因表里的 reason 分依赖与资源两类，资源类的唤醒源是对应的 release 或 grant，依赖类的唤醒源是对应的完成事件
-3. **没有任何一路请求被无限期饿死**：同优先级按先到先得排队，stream_table 的六个写口把回收类排在生成类之前，Xbar 每拍重新 RoundRobin
+3. **没有任何一路请求被无限期饿死**：同优先级按先到先得排队，stream_table 的六类写口把回收类排在生成类之前，Xbar 每拍重新 RoundRobin
 
 ### 怎么查
 
@@ -627,7 +627,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 
 ### 简化
 
-* **RV core 不建流水线**：kernel 是真实 RV32 程序，每条指令 1 拍，访存与 DSA 读的延迟记在 gpr 就绪表上；双发射、分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争不体现。
+* **RV core 不建流水线**：kernel 是真实 RV32 程序，双发射顺序执行、一拍最多两条，访存与 DSA 读的延迟记在 gpr 就绪表上；分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争不体现。
 * **异常、ECC、看门狗、功耗类机制不建**：各单元留状态位与接口名。
 * **TS 直接启动 DTE、DTE 的 3 Lane 方案、DSA-RF 调试通路不建**。
 * **Router 的输出移位拼接不建**：flit 定长 256 B，尾 flit 带有效字节数。
@@ -648,11 +648,11 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
 | ReduceModule bank 数、RMW 拍数、每路输入缓冲深度 | 4、2、32 flit（每路输入缓冲取 DATA_NOC HAS 面积预算的每口 32 flit，与同一份 HAS ASM-07 的 128 flit 没对齐） |
 | CoreStation HeaderFIFO、OutputBuffer 深度 | 16、60 flit（OutputBuffer 取 DATA_NOC HAS 的 DTE-local 桥接 Router→DTE 60 flits；HeaderFIFO 无出处，16 这个值与 60 flit 装得下的包数不匹配）|
-| DTE TaskQueue、Buffer、Completion RS、Done Pending 深度 | 16、16 × 256 B × 2、16、16 |
+| DTE Buffer、Completion RS、Done Pending 深度 | 16 × 256 B × 2、16、16 |
 | VU ISQ 深度 | 8 |
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度、dsa_iss 收请求的队列深度 | 2、3（执行器按上一拍的 req_ready 决定发不发，req_ready 拉高后路上最多还有两笔，队列留出这两笔的位置） |
-| TS stream_table 六个写口的优先级 | retire > done > install > issue > wake > create |
+| TS stream_table 各写口的优先级 | retire > done × 7 > install > issue × 3 > wake > create |
 | `reduce_in_mask` 的逐核取值 | 按 path 图推导；中间列 chip 坏 core 那个例子里的逐核取值还没回填 |
 | Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
 | `dsar` 与 `dsari` 的区分位 | 《ISA 描述表》给了九条自定义指令的完整编码，逐条见 RV core 那一份文档。只有这两条的编码在表里完全相同，模型按其余四条的规律用 bit31 区分 |

@@ -23,7 +23,7 @@ HEADER = "BACHIR 10"
 # 一层 MoE 那套拓扑的产物。core 一律按 (chip 号, 片内 core 号) 定位，与模型里
 # 的编号同一套；装载那一侧按记录名分发。
 UNIT_NAME = {"DTE": 0, "MU": 1, "VU": 2}
-RECV_NAME = {"RV_ONLY": 0, "DSA": 1}
+RECV_NAME = {"RV_ONLY": 0, "DSA": 1, "RV_DSA": 2}
 TASK_TYPE_NAME = {"NORMAL": 0, "REISSUE_OUT": 1, "B_REISSUE_IN": 2,
                   "P2P_REISSUE_IN": 3, "REDUCE": 4, "PID_UPDATE": 5}
 ROLE_NAME = {"NORMAL": 0, "BROADCAST": 1, "REDUCTION": 2, "SPARE": 3}

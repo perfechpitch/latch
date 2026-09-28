@@ -191,7 +191,7 @@ class VuDmux : public BachModule {
   }
 
   // PRF_op 描述一条宏指令的全部写回行为：VRF 两个写端口与 MRF 唯一写端口用
-  // 「0x00 不写回、非零指定来源」的编码，SRF 六个虚拟写口与产生方硬绑定、
+  // “0x00 不写回、非零指定来源”的编码，SRF 六个虚拟写口与产生方硬绑定、
   // 只需逐口使能。
   void Writeback(VuFlow& f) {
     VuStaticCfg const& c = f.uops.cfg;

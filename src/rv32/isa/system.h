@@ -195,7 +195,7 @@ class System {
   void MarkMemoryDeclared() { memoryDeclared = true; }
   void AppendMemRegion(uint32_t id, MemRegion r) { memRegion[id] = r; }
 
-  // virtual:派生类可以把它接到「本条命令的输入锁存」上 —— 引擎的功能 body 要读的是
+  // virtual:派生类可以把它接到“本条命令的输入锁存”上 —— 引擎的功能 body 要读的是
   //   数据离开存储那一刻的值,不是 body 真跑那一刻内存里的值(gmp 侧 `SystemGmp::ReadMemory`)。
   virtual void ReadMemory(uint64_t deviceAddr, uint64_t length, void* dst) {
     memorySystem->Read((uint8_t*)(dst), deviceAddr, length);

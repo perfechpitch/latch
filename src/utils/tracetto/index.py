@@ -13,7 +13,7 @@ moe_lpu.tracetto-index/
 - `gap = t0 - prev_t1`（空档不存 —— 段与段之间没有东西就是空档），首个段的 `prev_t1`
   取它所在块的 `t_base`；
 - `dur = t1 - t0`，恒 ≥ 1；
-- 标签内联定长 3 字节 `u16 user + u8 task`，`(0xFFFF, 0xFF)` 表示「认不出配对」。
+- 标签内联定长 3 字节 `u16 user + u8 task`，`(0xFFFF, 0xFF)` 表示“认不出配对”。
   单元名由行号推出来、拍数就是 `dur`，都不用存 —— 于是建索引没有全局状态，
   并行到什么程度结果都一样。
 
@@ -64,7 +64,7 @@ TAG_NONE = (0xFFFF, 0xFF)
 def head_fp(path: Path) -> str:
     """头尾各 64 KB + 大小的 sha1。
 
-    只看 size/mtime 挡不住「同大小同 mtime 被覆盖」；多读这 128 KB 换一个几乎不漏的判据。
+    只看 size/mtime 挡不住“同大小同 mtime 被覆盖”；多读这 128 KB 换一个几乎不漏的判据。
     """
     size = path.stat().st_size
     h = hashlib.sha1()
@@ -78,7 +78,7 @@ def head_fp(path: Path) -> str:
 
 
 def source_identity(trace: Path) -> Dict:
-    """波形身份。realpath + dev/ino 是为了「同一份波形从两个路径进」也能复用同一份索引。"""
+    """波形身份。realpath + dev/ino 是为了“同一份波形从两个路径进”也能复用同一份索引。"""
     st = os.stat(trace)
     return {
         "realpath": os.path.realpath(trace),
@@ -364,7 +364,7 @@ class CoreFile:
                 end = blks[b1 + 1][2]
                 n = (b1 - b0 + 1) * lane.blk_span      # 都是满块
             else:
-                # 最后一块可能不满：段数按「这条行一共几段」倒着算，不能拿块跨度乘。
+                # 最后一块可能不满：段数按“这条行一共几段”倒着算，不能拿块跨度乘。
                 end = lane.seg_end
                 n = lane.seg_cnt - b0 * lane.blk_span
             return {"mode": "exact", "t_base": blks[b0][0], "off": blks[b0][2],

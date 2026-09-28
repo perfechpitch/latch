@@ -19,7 +19,7 @@
 //
 // 快速配置（Template）：CFG_TRIGGER[0] temp_valid 置位时，以 temp_index 选中的
 // 模板为底，被显式写过的 Cfg Reg File 字段覆盖模板字段；temp_valid 清 0 时全部取
-// Cfg Reg File（普通配置）。为此维护一个 19 项「已显式写」dirty 掩码，Trigger Fire
+// Cfg Reg File（普通配置）。为此维护一个 19 项“已显式写”dirty 掩码，Trigger Fire
 // 时清零。
 //
 // 反压：Commit 的中央 TaskQueue 满时它不收这一笔 Descriptor，本模块保持着重发，

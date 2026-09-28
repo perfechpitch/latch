@@ -4,7 +4,7 @@
 // 一个整包。链路上按 flit 传，同一个 Message 的多个 flit 共享这一份，flit 里挂
 // 的是 LogicPtr<Message>，Push 只搬 shared_ptr，不深拷 payload 字节。
 //
-// 片内包头字段照 Router《DATA_NOC_DE_HAS》「消息格式 (Header field)」节（DTE 详
+// 片内包头字段照 Router《DATA_NOC_DE_HAS》“消息格式 (Header field)”节（DTE 详
 // 细设计的 3.14 包头格式同）：path_id(Byte0)、core_mask(Byte2-3)、loopback(Byte5,
 // [3:2]=vcid)、pkt_length(Byte6-7)、user_id(Byte8-9)、sw_aux(Byte16-31)。Header
 // Parser 取 path_id、path_core_mask、user_id、size、vc，按 path_id 查 RouterTable。

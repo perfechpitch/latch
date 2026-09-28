@@ -6,8 +6,8 @@
 // 六个 Block：动态参数 0x0000（12 个）、静态配置组 N×0x100 + 0x1000（8 组各
 // 23 个）、全局静态 0x1F00（2 个）、DSA-RF 后门 0x2000（2 个）、状态 0x3000
 // （12 个）、Profile 0x4000（65 个）。macro_inst_trigger 是唯一的启动寄存器，
-// 写一次执行一次：两次写之间没有其他配置也启动两次，所以不能按「值变了才算
-// 一次」去认，得按写事务本身认。
+// 写一次执行一次：两次写之间没有其他配置也启动两次，所以不能按“值变了才算
+// 一次”去认，得按写事务本身认。
 //
 // 静态配置的改写规则：目标组正被未完成的宏指令引用时，把这次配置写阻塞在配置
 // 通路上（req_ready 拉低），等引用它的宏指令退休后写入生效。引用计数在这里
@@ -114,7 +114,7 @@ class VuConfigRegister : public BachModule {
   void SetStatus(uint64_t v) { status = v; }
   void SetMacroInstLeft(uint64_t v) { macro_inst_left = v; }
   // 被调度阶段拦下的那几条（CFG_ERROR）：它们出了 ISQ 但没进执行单元，快照窗口
-  // 里按「仍在排队」算。条数极少，退休时由 ISQ 摘掉。
+  // 里按“仍在排队”算。条数极少，退休时由 ISQ 摘掉。
   void MarkNotDispatched(uint64_t seq) { not_dispatched.insert(seq); }
   void ClearNotDispatched(uint64_t seq) { not_dispatched.erase(seq); }
   bool NotDispatched(uint64_t seq) const {
@@ -218,7 +218,7 @@ class VuConfigRegister : public BachModule {
     if (!rdata_used) rdata->Idle();
     // 端口的驱动集中在这里。Serve 里写 trigger 的那一拍才刚把 pending 立起来，
     // 若在 Drain 那一步驱动，这一条就一拍也没出现在端口上，下一拍的 Drain 又会
-    // 把它当成「已发出且被收走」清掉，宏指令会静默丢掉。
+    // 把它当成“已发出且被收走”清掉，宏指令会静默丢掉。
     Publish();
 
     triggers = trigger_cnt;

@@ -16,7 +16,7 @@
 // 优先后者，阻塞 DTCM，因为那两条路的延迟长得多，让它们先走总时间更短。
 //
 // 本级只管时序。数据在功能模型执行那一条指令时就已经落进 gpr 了，这里发的是
-// 请求、收的是「什么时候算数」，写回口只带寄存器编号。
+// 请求、收的是“什么时候算数”，写回口只带寄存器编号。
 
 #include <deque>
 #include <memory>
@@ -182,7 +182,7 @@ class RvLsq : public BachModule {
   }
 
   void Accept() {
-    // ready 是「下一拍一定收得下」：往这几个队列里放东西的只有指令执行器。
+    // ready 是“下一拍一定收得下”：往这几个队列里放东西的只有指令执行器。
     bool room = sm_q.size() < kSmLsqDepth &&
                 (!cm_enabled || cm_q.size() < kCmLsqDepth);
     req->DriveReady(room);

@@ -18,7 +18,8 @@ ARCH := -march=rv32im_zicsr -mabi=ilp32
 # 取出来的是 0，栈指针成了 0，一用栈就访问到 0xFFFFFFFC。
 CFLAGS := $(ARCH) -Os -g0 -nostdlib -nostartfiles -ffreestanding \
           -fno-builtin -fno-pic -Wall -Wextra -I.
-LDFLAGS := -T link.ld
+# -no-pie：链接时同样按固定地址，DTCM 里的全局变量才能直接寻址。
+LDFLAGS := -T link.ld -no-pie
 
 # 四样都产在 build 里。装进硬件的那一样（hex）由 gen_hwconfig 拷进 bundle 下各
 # 套配置的目录：kernel 是 bundle 的一部分，一套 bundle 要自己带着它。

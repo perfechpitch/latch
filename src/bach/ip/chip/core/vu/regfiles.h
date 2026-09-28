@@ -125,8 +125,8 @@ class VuRegfiles {
   // RF 不被在飞的宏指令读写，硬件不查。reg_file_addr.RF_SEL 选三块中的哪一块，
   // RF_ADDR 是这一块内的字节地址，低 2 位被硬件忽略。
   //
-  // 每块容量都是 2 的幂，所以越界回绕就是按容量取模，与硬件「地址在该 RF 容量
-  // 内回绕」等价；置不置 RF_IDX_ERROR 由调用方判。
+  // 每块容量都是 2 的幂，所以越界回绕就是按容量取模，与硬件“地址在该 RF 容量
+  // 内回绕”等价；置不置 RF_IDX_ERROR 由调用方判。
   static uint64_t RfBytes(uint64_t sel) {
     switch (sel) {
       case kVuRfSelVrf: return kVuVrfBytes;

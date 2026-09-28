@@ -15,6 +15,9 @@
 // 向量的两端可能落在块中间，那两个块要先读回来再改中间那一段。本级不读，改
 // 成按整块写并把两端补零，Core Mem 侧按 bytes 只取有效那一段。跨 128 B 边界的
 // 拆分由本级完成。地址不满足访问格式的对齐要求时置位 CM_ADDR_ERROR。
+//
+// 一段的写请求都发出去以后，要等这些写的响应全部回来才交给下游退休。写响应按
+// 发出的先后回来，所以各段按进来的顺序记账；等响应的那几段不挡下一段进来。
 
 #include <deque>
 #include <memory>
@@ -52,7 +55,8 @@ class VuSu : public BachModule {
   // CM 端口反压住本级的拍数。
   uint64_t StallCycles() const { return stall_cnt; }
   bool Quiescent() const override {
-    return !busy && !holding && done_q.empty() && wr_q.empty();
+    return !busy && !holding && done_q.empty() && wr_q.empty() &&
+           wait_q.empty();
   }
 
  protected:
@@ -60,6 +64,7 @@ class VuSu : public BachModule {
   // 出口只在 Emit 里写一次，一拍一个端口只能写一次。
   void Step() override {
     mem_used = false;
+    TakeRsp();
     Accept();
     Issue();
     Emit();
@@ -70,6 +75,7 @@ class VuSu : public BachModule {
     TracePerCycle("busy", busy ? 1 : 0);
     TracePerCycle("wrq", wr_q.size());
     TracePerCycle("doneq", done_q.size());
+    TracePerCycle("waitq", wait_q.size());
   }
 
  private:
@@ -106,7 +112,7 @@ class VuSu : public BachModule {
                                         numeric::ElemBitsOf(CmType(op)) / 8;
     // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。不合规置 CM_ADDR_ERROR，
     // 硬件到这一步就把这笔 Store 丢弃、请求不发出；模型照发不误（见 vu.md 的
-    // 「取舍」一节），只把异常位记下来。
+    // “取舍”一节），只把异常位记下来。
     uint64_t grain = op == SuOp::kStSFp32 ? kVuScalarAlign : kVuCmAlign;
     if (addr % grain != 0) {
       flow->error |= kVuErrCmAddr;
@@ -218,16 +224,46 @@ class VuSu : public BachModule {
     mem_used = true;
     wr_q.pop_front();
     ++beat_cnt;
+    ++wr_open;
     if (wr_q.empty()) {
       busy = false;
       Finish();
     }
   }
 
-  // 这一段的块都发完了，排队交给下游。
+  // 这一段的块都发完了，记下还有几笔写没回响应，等齐了再交给下游。
   void Finish() {
-    done_q.push_back({flow, seq});
+    wait_q.push_back({flow, seq, wr_open});
+    wr_open = 0;
     flow = VuFlowPtr();
+    Settle();
+  }
+
+  // 收一笔写响应：记到最早那段还在等的上面。
+  void TakeRsp() {
+    if (cmem->RspValid()) {
+      bool found = false;
+      for (Wait& w : wait_q) {
+        if (w.left == 0) continue;
+        --w.left;
+        found = true;
+        break;
+      }
+      // 当前这一段的写已经发出、段还没收尾时，响应记在 wr_open 上。
+      if (!found) {
+        LOGCHECK(wr_open > 0, "VuSu: 收到写响应，却没有在等的写。");
+        --wr_open;
+      }
+    }
+    Settle();
+  }
+
+  // 队头那几段的写都回来了，交给下游。
+  void Settle() {
+    while (!wait_q.empty() && wait_q.front().left == 0) {
+      done_q.push_back({wait_q.front().f, wait_q.front().seq});
+      wait_q.pop_front();
+    }
   }
 
   void Emit() {
@@ -265,6 +301,13 @@ class VuSu : public BachModule {
     uint64_t seq = 0;
   };
 
+  // 块都发完了、还在等写响应的那几段。left 是还差几笔响应。
+  struct Wait {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+    uint64_t left = 0;
+  };
+
   // 攒好、等着发的一块：落在哪、块内哪一段是本条向量的。
   struct Blk {
     uint64_t at = 0;
@@ -276,7 +319,10 @@ class VuSu : public BachModule {
   std::shared_ptr<VuFlowPort> in, out;
   std::shared_ptr<MemPort> cmem;
   std::deque<Done> done_q;
+  std::deque<Wait> wait_q;
   std::deque<Blk> wr_q;
+  // 当前这一段已经发出、还没回响应的写。
+  uint64_t wr_open = 0;
 
   VuFlowPtr flow, held;
   bool busy = false, holding = false, mem_used = false;

@@ -94,6 +94,7 @@ class LaneHarness : public BachModule {
   std::vector<MemOp> ops;
   uint64_t router_beats = 0;
   uint64_t peak_outstanding = 0;
+  uint64_t next_job = 0;
 
  protected:
   void Step() override {
@@ -104,12 +105,13 @@ class LaneHarness : public BachModule {
     if (ln.ToRouter().Valid()) ++router_beats;
     ln.ToRouter().DriveReady(router_ready);
 
+    // 扮演 Commit：到点的任务按序送进来，通道报满就等着，有空位了再送。
     bool drove = false;
-    for (auto const& j : jobs) {
-      if (j.at != now) continue;
-      ln.AdmitPtr()->Drive(j.d, ++admit_seq);
+    if (next_job < jobs.size() && jobs[next_job].at <= now &&
+        ln.AdmitPtr()->Ready()) {
+      ln.AdmitPtr()->Drive(jobs[next_job].d, ++admit_seq);
+      ++next_job;
       drove = true;
-      break;
     }
     if (!drove) ln.AdmitPtr()->Idle();
 
@@ -508,7 +510,7 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
   RT::Reset();
   // 一笔在发、kDrainSlots 笔在等，再多就不激活了。
   EXPECT_LE(reads, kDrainSlots + 1) << "领先量卡在可保留的任务边界数上";
-  EXPECT_GT(reads, 1u) << "但确实比「一笔一等」快";
+  EXPECT_GT(reads, 1u) << "但确实比“一笔一等”快";
 }
 
 // 进核那一笔带 topK 段：topK 与数据/scale 同一条数据通道，作为数据之后的一拍进
@@ -536,7 +538,7 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     auto d = Task(1, Route::kRouterToCm, /*stream=*/3, kFlitBytes, 0, 0x40);
     d->seg[3].valid = true;
     d->seg[3].dst_kind = SegEndpoint::kTopk;
-    d->seg[3].dst = 3;  // 表下标：计算 core 是 stream_id，B core 是环形槽号
+    d->seg[3].dst = 3;  // 表下标：计算 core 是 stream_id，B core 是 user_id
     d->seg[3].len = topk.size();  // topK 段长 256 B
     d->msg->topk = topk;
 

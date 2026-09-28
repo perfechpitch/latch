@@ -61,8 +61,8 @@ TEST(BachMuIssueQ, ThreeStagesOverlap) {
   // 这一笔是一列切成四段，所以只写回一次。
   EXPECT_EQ(f->OutTotal(), 1u);
 
-  // 一开始只有「要发读」的那一笔，算那一段没得做。写回那一段问的是「结果该记
-  // 给哪一笔」，这一笔的那一列还没写过，所以是它。真的有没有结果由计算那一
+  // 一开始只有“要发读”的那一笔，算那一段没得做。写回那一段问的是“结果该记
+  // 给哪一笔”，这一笔的那一列还没写过，所以是它。真的有没有结果由计算那一
   // 级说了算。
   EXPECT_EQ(q.FirstToLoad(), f);
   EXPECT_EQ(q.FirstToCompute(), nullptr);

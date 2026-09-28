@@ -54,9 +54,11 @@ enum LaneHalf : uint64_t {
   kHalfNum = 2,
 };
 
-// TaskQueue 深度不少于 16，与 TS 的 16 个 stream 对齐。
-constexpr uint64_t kTaskQueueDepth = 16;
-// 中央 TaskQueue 16 项，排在 Commit 之前：保存「已快照、尚未 dispatch」的完整
+// 每个通道读写两半各一个 TaskQueue，深度 4（《DTE DSA》：WR Lane TaskQ 深度 4，
+// 允许 Read Lane 先执行 4 个任务）。一笔任务进通道时两半同时入队，所以两半取同一
+// 深度。
+constexpr uint64_t kTaskQueueDepth = 4;
+// 中央 TaskQueue 16 项，排在 Commit 之前：保存“已快照、尚未 dispatch”的完整
 // TaskDesc，不同通道的任务可乱序下发（对齐飞书《DTE DSA》）。
 constexpr uint64_t kCentralTaskQDepth = 16;
 // Completion RS 与 Done Pending 各 16 项。
@@ -78,7 +80,7 @@ enum class SegEndpoint : uint32_t {
 };
 
 // 端点地址范围译码的位约定：地址高 4 bit 作端点 tag，低位为端内偏移。飞书文档只
-// 说「由地址范围译码」未给具体数值，这里是建模约定（见 04-dte 建模文档）。段地址
+// 说“由地址范围译码”未给具体数值，这里是建模约定（见 04-dte 建模文档）。段地址
 // 存在 Segment::src / dst 里时可能带 tag，展开成实际地址时用 kEpDataMask 剥掉。
 constexpr uint64_t kEpShift = 28;
 constexpr uint64_t kEpMask = 0xF;
@@ -108,7 +110,7 @@ struct Descriptor {
   uint64_t commit_seq = 0;
   // 进核任务按到达顺序编的帧号：配置驱动的第 N 个进核任务对应第 N 个到达的数据包
   // （FIFO），Lane 在准入时给进核任务编这个号，与 Header Parser 给每帧编的号对齐，
-  // 进核那一路用它认「这几拍属于哪一帧」。出核任务不用（走 commit_seq）。
+  // 进核那一路用它认“这几拍属于哪一帧”。出核任务不用（走 commit_seq）。
   uint64_t frame_seq = 0;
   uint64_t task_id = 0;
   uint64_t stream_id = 0;
@@ -203,8 +205,8 @@ struct Descriptor {
   }
 
   // topK 段落在 MU topK_ep_table 的哪一项：取该段地址的端内偏移（低位）。进核取
-  // dst 段、出核取 src 段——同一段只有一端打 TOPK tag。计算 core 写 stream_id，
-  // B core 写环形槽号，都只是 16 项里的一个下标。
+  // dst 段、出核取 src 段，同一段只有一端打 TOPK tag。计算 core 写 stream_id，
+  // B core 写 user_id，都是表里 1024 份中的一个下标。
   uint64_t TopkIndex() const {
     for (auto const& s : seg) {
       if (s.valid && s.dst_kind == SegEndpoint::kTopk) {

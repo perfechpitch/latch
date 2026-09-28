@@ -49,7 +49,7 @@ class TaskCtrl : public BachModule {
   uint64_t Installed() const { return installed.Get(); }
   uint64_t Skipped() const { return skipped.Get(); }
 
-  // 刚装进去的那一步的身份。Core 层拿 Installed() 认「本拍装了一笔后继」，与
+  // 刚装进去的那一步的身份。Core 层拿 Installed() 认“本拍装了一笔后继”，与
   // 它下发那一拍对起来就是这一步在 TS 里等的时间。
   uint64_t NextTask() const { return next_task; }
   uint64_t NextUser() const { return next_user; }

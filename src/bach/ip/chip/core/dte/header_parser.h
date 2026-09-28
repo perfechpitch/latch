@@ -9,7 +9,7 @@
 // token_id）存进 Header Table，再逐拍转发 payload 给进核通道的读侧。它不再生成
 // Descriptor。
 //
-// 首拍固定是 Header，靠「上一帧 TLAST 已接受」判断下一拍是新 Header，不依赖
+// 首拍固定是 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖
 // Start-of-Frame 信号。一帧一任务，不允许任务间交织。TLAST 标识最后一个 Payload
 // beat；byte_count 为 0 时可由 Header beat 同时携带 TLAST。
 //
@@ -82,7 +82,7 @@ class HeaderParser : public BachModule {
     }
 
     // Buffer 满时通过 TREADY 向 Router 反压，本拍不收。这一步要排在
-    // 「记下已见过这一笔」之前，否则这一笔会被当成收过了，上游换下一笔，
+    // “记下已见过这一笔”之前，否则这一笔会被当成收过了，上游换下一笔，
     // 数据就丢了。下游收不下由 payload 口的 ready 反映。
     if (in_frame && !payload->Ready()) {
       from_router->DriveReady(false);

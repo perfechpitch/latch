@@ -65,16 +65,35 @@ constexpr uint64_t kMmW1 = 0x000000;
 constexpr uint64_t kMmW3 = 0x100000;
 constexpr uint64_t kMmW2 = 0x200000;
 constexpr uint64_t kMmStride = 0x030000;
+// 与 matrix_mem.h / share_mem.h / kernel bach.h 同源。
+constexpr uint64_t kMatrixMemBytes = 36ull * 1024 * 1024;
+constexpr uint64_t kShareMemBytes = 32ull * 1024;
 
 // ── R core 与 B core ──
-constexpr uint64_t kRcSlots = 16;
+// 槽数按 Matrix Mem 能放下多少格来；B core 还受 Share Mem 标志表大小限制。
 constexpr uint64_t kRcHalfBytes = 0x3080;
 constexpr uint64_t kRcSlotBytes = 2 * kRcHalfBytes;
-constexpr uint64_t kRcFlagOff = 0x0000;
-constexpr uint64_t kRcHeadOff = 0x0380;
+constexpr uint64_t kRcSlots = kMatrixMemBytes / kRcSlotBytes;
+constexpr uint64_t kRcFlagOff = 0;
+constexpr uint64_t kRcMapOff = kRcFlagOff + kRcSlots * 2 * 4;
+constexpr uint64_t kRcSlotOff = kRcMapOff + kRcSlots * 4;
+constexpr uint64_t kRcHeadOff = kRcSlotOff + kStreamNum * 4;
 constexpr uint64_t kBcTokenBytes = kEmbed;
+constexpr uint64_t kBcSmemOverhead = 4 + 4 + kStreamNum * 4 + 4 + 4 + 4;
+constexpr uint64_t kBcSlotsMm = kMatrixMemBytes / kBcTokenBytes;
+constexpr uint64_t kBcSlotsSm = (kShareMemBytes - kBcSmemOverhead) / 8;
+constexpr uint64_t kBcSlots =
+    kBcSlotsMm < kBcSlotsSm ? kBcSlotsMm : kBcSlotsSm;
+constexpr uint64_t kBcFlagOff = 0;
+constexpr uint64_t kBcUserOff = kBcFlagOff + kBcSlots * 4;
+constexpr uint64_t kBcHeadOff = kBcUserOff + kBcSlots * 4;
+constexpr uint64_t kBcTailOff = kBcHeadOff + 4;
+constexpr uint64_t kBcSlotOff = kBcTailOff + 4;
+constexpr uint64_t kBcRecvOff = kBcSlotOff + kStreamNum * 4;
+constexpr uint64_t kBcSentOff = kBcRecvOff + 4;
+constexpr uint64_t kWeightsCntOff = kBcSentOff + 4;
 inline uint64_t RcLand(uint64_t user, uint64_t half) {
-  return (user % kRcSlots) * kRcSlotBytes + half * kRcHalfBytes;
+  return user * kRcSlotBytes + half * kRcHalfBytes;
 }
 
 // ── 生成 ──

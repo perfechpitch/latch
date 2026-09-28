@@ -398,6 +398,7 @@
 | F28 | 简化 Router：RC / VA / SA 完整流水线，与 core 内 Router 同一套逻辑 |
 | F29 | TX Engine 拆包：按 4 KB 边界拆分，加 4-bit `seq_id` 与 tail 标记；位宽 2048 转 1024 |
 | F30 | RX Engine 拼包：按 `seq_id` 缓存，一个 flit 拆出来的段到齐就还原这个 flit 交给 core；位宽 1024 转 2048。攒的是 flit 不是整个包：Flit 仲裁无需整包存储，core 侧的 Router 也按 flit 收发 |
+| F30a | RX Engine 往边界 core 交 flit 按那个口入口的 VC credit 记账：每 VC 一份 private 20，四个 VC 共用一份 shared 20，与 RouterStation 的两级深度一致；没有位置时 flit 压在 RX，边界 core 入口腾出位置时经它的 `up_back` 线还回来。各 VC 分开：按到达先后交第一笔交得出去的，一个 VC 没有位置只压住这个 VC，别的 VC 的 flit 与 release 照交；同一个 VC 内按到达先后交 |
 | F31 | AXI Bridge 做 credit 与 AXI4 的协议转换 |
 | F31a | AXI Bridge 的延迟按发送侧计：出方向记这一段物理链路的延迟，入方向只做协议转换、不计拍。两座桥对接时一段线的时间因此只算一次 |
 | F32 | 同向的数据与 credit release 之间做仲裁，小包优先；反向按类型 demux 分流 |
@@ -405,8 +406,8 @@
 | F34 | RX 方向的 AXI 需要响应，由 AXI Bridge 返回 dummy response，释放 PCIe 的 outstanding 资源 |
 | F35 | VC Buffer 按方向分档：TX 是 private 20 flit/VC × 4 = 80 加 shared 约 20，合计 100 flit ≈ 28.8 KB，覆盖本级 R2R 往返约 20 cycle；RX 是 private 20 flit/VC × 4 = 80 加 shared 约 300，合计 380 flit ≈ 109.4 KB，覆盖 PCIe 往返 600 ns @1024-bit。两向合计约 138.7 KB |
 | F35a | 与本片 core 之间照 VC credit 那一套：一个 flit 离开桥的输入缓冲、交给下一级时，才把那个 VC 的位置还给 core。收下就还是不行的，那时它还占着位置，core 拿回额度又发，本级已经没地方收，那些 flit 只能丢，而 credit 已经扣掉了。收不收得下只看这个缓冲，容量与 Router 给这个方向的 VC credit 总量一致；对侧还有没有位置是往线上发那一步的事，两件事不能混 |
-| F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发 |
-| F36a | 链路层 credit 的归还跨片走：收方收下一段之后发一笔回给发方，发方收到才恢复额度。这一笔到对侧的桥为止，不往 core 送，与三类业务 release 的透传是两回事。单向流量下尤其要走这条路，否则发方的额度用完就再也回不来 |
+| F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发。往线上发按进来的先后取第一笔有额度的，一个 VC 没额度只压住这个 VC；同一个 VC 内按进来的先后发 |
+| F36a | 链路层 credit 的归还跨片走：收方把一段所在的那个 flit 交给本片 core 之后，发一笔回给发方，发方收到才恢复额度。core 那一侧堵住时 RX 不还，反压就沿链路传回发方。这一笔到对侧的桥为止，不往 core 送，与三类业务 release 的透传是两回事。单向流量下尤其要走这条路，否则发方的额度用完就再也回不来 |
 | F37 | release 与数据反向走，桥两侧照原样透传；VC credit 的粒度是 flit，在 C2C 上压缩包数量后再传 |
 | F38 | 三类 credit 的 release 一律透传，Bridge 自身不建 stream credit 表，也不参与 Reduce 累加 |
 | F39 | 三类 credit 可以共享同一个 AXI 传输包同步组包以提高效率，接收侧按分段还原。VC credit 在 Router 上是 flit 粒度，跨 C2C 要先转换成包粒度；业务层的两类本身就是包或 stream 粒度，不转换 |
@@ -693,11 +694,12 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="41" font-size="8.5" fill="#6b7280">M5</text>
   <text x="608" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="61" font-size="12" fill="#111827">RX Engine · 按 seq_id 还原 flit</text>
-  <text x="250" y="83" font-size="10.5" fill="#475569">1. rx_reasm[seq_id] 缓存收到的段</text>
-  <text x="250" y="103" font-size="10.5" fill="#475569">2. 一个 flit 的段到齐 → 按 seq_id 顺序拼回这个 flit</text>
-  <text x="250" y="123" font-size="10.5" fill="#475569">3. 位宽 1024 转 2048</text>
-  <text x="250" y="143" font-size="10.5" fill="#475569">4. AXI Bridge 回 dummy response，释放 PCIe 的 outstanding 资源</text>
-  <text x="250" y="167" font-size="10" fill="#9ca3af">RX private 80 加 shared 约 300 flit，覆盖 PCIe 往返 600 ns</text>
+  <text x="250" y="79" font-size="10.5" fill="#475569">1. rx_reasm[seq_id] 缓存收到的段</text>
+  <text x="250" y="97" font-size="10.5" fill="#475569">2. 一个 flit 的段到齐 → 按 seq_id 顺序拼回这个 flit</text>
+  <text x="250" y="115" font-size="10.5" fill="#475569">3. 位宽 1024 转 2048</text>
+  <text x="250" y="133" font-size="10.5" fill="#475569">4. 查边界 core 入口该 VC 的 credit，没有就压着，release 照发</text>
+  <text x="250" y="151" font-size="10.5" fill="#475569">5. flit 交给 core 才还对侧链路 credit；AXI 回 dummy response</text>
+  <text x="250" y="171" font-size="10" fill="#9ca3af">RX private 80 加 shared 约 300 flit，覆盖 PCIe 往返 600 ns</text>
   <path d="M188 49 L231 49" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
   <path d="M188 111 L231 111" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
   <path d="M188 165 L231 165" stroke="#475569" marker-end="url(#arc5)" fill="none"/>
@@ -781,6 +783,8 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
 | C2C 拆包：4 KB 边界 + seq_id + tail | F29 | `c2c_split` |
 | 一段线的时间只算一次：出方向记延迟，入方向计 0 | F31a | `c2c_latency_once` |
 | C2C 拼包：按 seq_id 缓存，一个 flit 的段到齐还原 | F30 | `c2c_reassemble` |
+| RX 往边界 core 交 flit 查那个口入口的 VC credit，core 腾出位置再交；链路层 credit 在交出之后才还 | F30a、F36a | `c2c_rx_core_credit` |
+| 一个 VC 没有位置或没有额度只压住这个 VC，TX 往线上发与 RX 往 core 交都越过它发别的 VC | F30a、F36 | `c2c_vc_not_blocking` |
 | 同向数据与 credit release 仲裁，小包优先 | F32 | `c2c_arb_small_first` |
 | TX posted write 丢响应，RX 返回 dummy response | F33、F34 | `c2c_axi_response` |
 | release 照原样透传，VC credit 按 flit 压缩后再传 | F37 | `c2c_release_pass` |
@@ -799,6 +803,10 @@ C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB�
 * **C2C Bridge 为什么归 chip 而不是归 core**
   * 全 chip 只有 4 个，长在 mesh 两侧，不是每 core 一个
   * 它做的拆包、拼包、协议转换与 core 内的 Router 无关
+* **RX 往 core 交 flit 为什么要单独记一本账**
+  * RX 的缓冲按 PCIe 往返定，共享 300 flit，远大于边界 core 入口每个方向的 20 + 20
+  * core 入口堵住时（比如 R core 的 datain 还在等上一笔搬完），不记账的话 RX 会把 core 入口灌爆
+  * 链路层 credit 拖到交给 core 之后才还，堵住的反压才能传回发方那颗 chip
 * **ctrl_noc 端点为什么每 core 一个**
   * 让配置事务与每个模块的 `cfg` 口一一对应
 * **装载拍数为什么按字节数计而不是同拍写入**

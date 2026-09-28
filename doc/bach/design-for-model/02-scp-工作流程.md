@@ -434,7 +434,7 @@
   * SCP 经 `ctrl_noc` 写标量缓存：代码段进 ITCM，数据段进 DTCM，按地址区分 `.insn` 与 `.data`；Share Mem 也可写
   * 每类 core 一个 RV32 ELF，配套 `task_pc` 表，把 `task_chain` 每一项的 `TASK_PC` 指到 kernel 的入口
   * 内容：三个 RV core 的固件，计算 core 的搬运与计算 task，B core 的 `bcore_datain`、`check_flag`、`broadcast`，R core 的映射表维护与求和，weights loader
-    * dot core 是每颗 chip 的逻辑 core7：chip 内 FC1/FC3 的部分和归约到它，它另有 silu·dot·量化、FC2 输入广播、concat 搬入与行链出核这几个 task
+    * dot core 是每颗 chip 的逻辑 core7：chip 内 FC1/FC3 的部分和归约到它，它另有 silu·dot·量化、FC2 输入广播、concat 搬入、上一颗 chip 行链那一包的搬入（行首那颗没有）与行链出核这几个 task
   * 坏 core 不装 kernel
 * 装 weights（MB 级，每 core 不同，不经 SCP）
   * ① SCP 先配 weights 加载模式（三处配置见下表），再通知上位 CPU 可以下发

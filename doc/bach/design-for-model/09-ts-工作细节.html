@@ -95,7 +95,7 @@ label.spd input{width:76px}
 </head>
 <body>
 <header>
-  <h1>Bach 硬件工作过程 · 动画讲解<small>tp_nk 下 dot core 一个用户的 15 步任务链 · 拓扑 → 步骤 → 每步传的信息 → 每个模块的运行逻辑</small></h1>
+  <h1>Bach 硬件工作过程 · 动画讲解<small>tp_nk 下 dot core 一个用户的 16 步任务链 · 拓扑 → 步骤 → 每步传的信息 → 每个模块的运行逻辑</small></h1>
   <nav id="nav"></nav>
 </header>
 <main>
@@ -308,7 +308,7 @@ function chipEdges(){
 }
 
 /* ---- 平面二：core 内 ----
-   布局照 03-core-内硬件.md 的「Bach Core 顶层结构」，也就是 MAS TOP 的画法：
+   布局照 03-core-内硬件.md 的“Bach Core 顶层结构”，也就是 MAS TOP 的画法：
    TS 在最上、Share Mem 与它同一行，中间两行是三个 RV core 加三个 DSA（列的次序 MU · VU · DTE），
    再下是两块存储，DTE Xbar 夹在存储与 Router 之间，Router 在最下
    ---- */
@@ -510,7 +510,8 @@ const S_TOPO={id:'topo',name:'① 硬件拓扑',vb:[1040,640],
 ]};
 
 /* ===================== ② 场景与任务 ===================== */
-// dot core 的 15 项任务链：task 7～13 是 7 项 concat 搬入，各对一个 PID，画成一排窄框
+// 中间列 chip 上 dot core 的 16 项任务链：task 7～13 是 7 项 concat 搬入，各对一个 PID，画成一排窄框；
+// task 14 收上一颗 chip 送来的行链那一包，task 15 是行链出核
 const TASKS=[
  {n:0, u:'DTE',t:'搬 token 进 Core Mem',  s:'datain · 建链',          x:60, y:150,w:145},
  {n:1, u:'MU', t:'FC1 / FC3 部分和',      s:'槽位 7 · 每个激活专家',  x:223,y:150,w:145},
@@ -519,8 +520,9 @@ const TASKS=[
  {n:4, u:'VU', t:'SiLU dot 并量化',       s:'BF16 读 · MXFP8 写',     x:712,y:150,w:145},
  {n:5, u:'DTE',t:'FC2 输入广播',          s:'credit · 另外 7 个 core', x:875,y:150,w:145},
  {n:6, u:'MU', t:'FC2 第 7 段',           s:'直接写进 concat 区',     x:60, y:300,w:145}]
- .concat([7,8,9,10,11,12,13].map((n,i)=>({n:n,u:'DTE',t:'concat 搬入',s:'',x:223+i*78,y:300,w:72})))
- .concat([{n:14,u:'DTE',t:'行链出核',     s:'逐级 reduce · END',      x:781,y:300,w:145}]);
+ .concat([7,8,9,10,11,12,13].map((n,i)=>({n:n,u:'DTE',t:'concat 搬入',s:'',x:223+i*72,y:300,w:66})))
+ .concat([{n:14,u:'DTE',t:'行链那一包搬入', s:'datain · 落 Core Mem',  x:739,y:300,w:140},
+          {n:15,u:'DTE',t:'行链出核',       s:'两包进 Rmem · END',     x:895,y:300,w:140}]);
 function taskNodes(){
   const ns=[];
   TASKS.forEach(t=>{
@@ -528,15 +530,16 @@ function taskNodes(){
     else ns.push({id:'t'+t.n,x:t.x,y:t.y,w:t.w,h:62,fs:10.5,t:'task '+t.n+' · '+t.u,s:[t.t,t.s]});});
   ns.push({id:'srcb', x:60, y:56, w:145,h:48,fs:10,t:'B core 广播',s:['token 逐跳复制']});
   ns.push({id:'rmem', x:386,y:56, w:308,h:48,fs:10,t:'Router ReduceModule（本 core 这一份）',s:['chip 内归约链的链尾 · BF16 进出，中间 FP32 累加']});
-  ns.push({id:'srcc', x:223,y:404,w:250,h:48,fs:10,t:'本 chip 另外 7 个计算 core',s:['FC2 段 1 × 768 BF16 · 经 left / mid 进来']});
-  ns.push({id:'rrow', x:520,y:404,w:240,h:48,fs:10,t:'Router ReduceModule（行链）',s:['本 chip 结果 + 上游 chip 的行结果']});
-  ns.push({id:'dstd', x:800,y:404,w:200,h:48,fs:10,t:'下一颗 chip',s:['mid → core4 → E 口，行尾进 R core']});
+  ns.push({id:'srcc', x:160,y:404,w:250,h:48,fs:10,t:'本 chip 另外 7 个计算 core',s:['FC2 段 1 × 768 BF16 · 经 left / mid 进来']});
+  ns.push({id:'srcr', x:640,y:404,w:210,h:48,fs:10,t:'上一颗 chip 的 dot core',s:['行链那一包 · 从 W 口进来']});
+  ns.push({id:'rrow', x:880,y:404,w:155,h:48,fs:10,t:'ReduceModule（行链）',s:['本 core 两个操作数相加']});
+  ns.push({id:'dstd', x:880,y:490,w:155,h:48,fs:10,t:'下一颗 chip',s:['mid → core4 → E 口']});
   return ns;
 }
 function taskEdges(){
   const es=[], T={};
   TASKS.forEach(t=>T[t.n]=t);
-  for(let n=0;n<14;n++){
+  for(let n=0;n<15;n++){
     if(n===5)continue;
     const a=T[n], b=T[n+1];
     es.push({id:'f'+n,pts:[[a.x+a.w,a.y+31],[b.x,b.y+31]]});
@@ -545,14 +548,15 @@ function taskEdges(){
   es.push({id:'fb', pts:[[132,104],[132,150]],label:'trigger',lx:160,ly:126});
   es.push({id:'fr1',pts:[[460,150],[460,104]],label:'task 2 送出',lx:420,ly:126});
   es.push({id:'fr2',pts:[[620,104],[620,150]],label:'task 3 收回',lx:660,ly:126});
-  es.push({id:'fc', pts:[[348,404],[348,362]],label:'trigger',lx:378,ly:390});
-  es.push({id:'fr3',pts:[[853,362],[853,386],[640,386],[640,404]],label:'task 14 送出',lx:900,ly:378});
-  es.push({id:'fd', pts:[[760,428],[800,428]]});
+  es.push({id:'fc', pts:[[300,404],[300,362]],label:'trigger',lx:330,ly:390});
+  es.push({id:'fw', pts:[[809,404],[809,362]],label:'trigger',lx:780,ly:390});
+  es.push({id:'fr3',pts:[[965,362],[965,404]],label:'task 15 送出',lx:925,ly:390});
+  es.push({id:'fd', pts:[[957,452],[957,490]]});
   return es;
 }
 
 const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,620],
- groups:[{x:40,y:130,w:1000,h:250,label:'dot core 的 task_chain：15 项，全序链，链尾 TASK_END'}],
+ groups:[{x:40,y:130,w:1000,h:250,label:'dot core 的 task_chain：16 项（行首那颗 chip 15 项），全序链，链尾 TASK_END'}],
  nodes:taskNodes(),edges:taskEdges(),
  table:{label:'task_chain 的关键位域（pc 与 path_id 由 kernel 定）',
   cols:['task','SEND_UNIT','WAIT_WAKE','RECV_UNIT','CREDIT_EN','TASK_TYPE','END'],
@@ -564,7 +568,8 @@ const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,620],
         ['5','DTE','0','01 DSA','1','0','0'],
         ['6','MU','0','01 DSA','0','0','0'],
         ['7～13','DTE','1','01 DSA','0','0','0'],
-        ['14','DTE','0','01 DSA','1','4','1']]},
+        ['14','DTE','1','01 DSA','0','0','0'],
+        ['15','DTE','0','01 DSA','1','4','1']]},
  steps:[
  {t:'切分模式 tp_nk',
   d:['一次 GEMV 是 <code>y[1,N] = x[1,K] × W[K,N]</code>，权重按哪一维切决定结果怎么合。',
@@ -572,7 +577,7 @@ const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,620],
      '<b>切 K</b>：每个 core 出完整长度的部分和，合起来靠 <b>reduce</b>，在 ReduceModule 里逐跳加。',
      'tp_nk 是 FC1 / FC3 chip 间切 N、chip 内切 K，FC2 chip 间切 K、chip 内切 N：chip 内 FC1 / FC3 靠 reduce、FC2 靠 concat，各 chip 的 FC2 结果沿行链 reduce。'],
   act:['rmem','rrow'],
-  ref:'02-系统与部署.md「四种 core 级切分模式」'},
+  ref:'02-系统与部署.md“四种 core 级切分模式”'},
 
  {t:'本 core 是 dot core，工作在普通模式',
   d:['<b>dot core</b> 是每颗 chip 的逻辑 core7：chip 内 FC1 / FC3 部分和的归约落点，也是做 SiLU dot 与量化、广播 FC2 输入、收 concat、发行链的那个 core。',
@@ -583,7 +588,7 @@ const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,620],
   lt:LT,
   logic:[
           ['SCP→TS', 'cfg', 'STREAM_NUM 16 · SELF_START 0，读回核对'],
-          ['SCP→TS', 'cfg', 'task_chain[0..14]，每项先 PC 后 ATTR，写 ATTR 自动置 TASK_VALID'],
+          ['SCP→TS', 'cfg', 'task_chain[0..15]，每项先 PC 后 ATTR，写 ATTR 自动置 TASK_VALID'],
           ['SCP→TS', 'cfg', 'ROUTER_TABLE，按 PID 存方向与 VCID'],
           ['SCP→TS', 'cfg', 'TS_INIT_FINISH，最后写这一笔'],
           ['TS→SCP', 'cfg', 'TS_STATE，配置检查的结论']],
@@ -602,27 +607,28 @@ const S_TASK={id:'task',name:'② 场景与任务',vb:[1040,620],
   d:['<b>task 4</b> 做 SiLU dot 并量化成 MXFP8，生成 FC2 输入；<b>task 5</b> 把它广播给本 chip 另外 7 个计算 core。',
      '<b>task 6</b> 算 FC2 的第 7 段，直接写进 concat 区。',
      '<b>task 7～13</b> 收另外 7 个计算 core 的 FC2 段：每个上游 core 一项，槽位 k 那一段走 PID 20 + k、对 task 7 + k，都配 <code>WAIT_WAKE = 1</code>。<b>谁先到取决于数据什么时候到 Router，跟链序无关</b>。',
-     '<b>task 14</b> 是链尾：拼好的 6144 维结果出核，在 Router 里与上游 chip 的行结果逐级 reduce，经 E 口送往下一颗 chip。'],
-  act:['t4','t5','t6','t7','t8','t9','t10','t11','t12','t13','t14','srcc','rrow','dstd'],
-  eact:['f3','f4','f5','f6','f7','f8','f9','f10','f11','f12','f13','fc','fr3','fd'],
-  tok:[{ed:'fc',lbl:'concat 段',c:'var(--warn)'},{ed:'fr3',lbl:'本 chip 结果',c:'var(--violet)',delay:2},
-       {ed:'fd',lbl:'行结果',c:'var(--violet)',delay:3}],
-  ref:'03-ts-任务调度器.md「数据不按链序到达」'},
+     '<b>task 14</b> 收上一颗 chip 送来的行链那一包，也配 <code>WAIT_WAKE = 1</code>，落进 Core Mem；行首那颗 chip 没有这一项，链是 15 项。',
+     '<b>task 15</b> 是链尾：把上一颗送来的那一包与拼好的 6144 维结果作为本 core 的两个操作数送进本级 ReduceModule 相加，结果经 E 口送往下一颗 chip。'],
+  act:['t4','t5','t6','t7','t8','t9','t10','t11','t12','t13','t14','t15','srcc','srcr','rrow','dstd'],
+  eact:['f3','f4','f5','f6','f7','f8','f9','f10','f11','f12','f13','f14','fc','fw','fr3','fd'],
+  tok:[{ed:'fc',lbl:'concat 段',c:'var(--warn)'},{ed:'fw',lbl:'上一颗的行结果',c:'var(--warn)',delay:1},
+       {ed:'fr3',lbl:'两个操作数',c:'var(--violet)',delay:2},{ed:'fd',lbl:'行结果',c:'var(--violet)',delay:3}],
+  ref:'03-ts-任务调度器.md“数据不按链序到达”'},
 
  {t:'起点：stream_table 全空',
   d:['写完 <code>TS_INIT_FINISH</code>，TS 就按固定逻辑跑了，<b>运行期不接受软件干预</b>。',
      '硬件查完配置，派生一张 64 位掩码，是 <code>task_chain</code> 的纯函数，配完不再变：',
-     '<code>THROUGH_END_MASK</code> = bit 0～14，找后继与判退休都只看这个范围。',
+     '<code>THROUGH_END_MASK</code> = bit 0～15，找后继与判退休都只看这个范围。',
      '此刻 <code>stream_table</code> 16 项全空，<code>head_ptr = tail_ptr = 0</code>。'],
   act:['srcb'],
   ref:'ts.md F9、F10'}
 ]};
 
-/* ===================== ③ 逐步执行：task 0 ～ 14 ===================== */
+/* ===================== ③ 逐步执行：task 0 ～ 15 ===================== */
 const ST_COLS=['slot','user_id','当前 task','fsm','done_bitmap'];
 const ST_ROWS=[['0','—','—','IDLE','—'],['1','—','—','IDLE','—'],
                ['2','—','—','IDLE','—'],['3','—','—','IDLE','—']];
-const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[1040,472],vbY:190,
+const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 16 步',vb:[1040,472],vbY:190,
  groups:[{x:44,y:214,w:960,h:400,label:'dot core（中间列 chip 的 core9）· user_id = 0x0007 · stream_id = 0'}],
  nodes:coreNodes(),edges:coreEdges(),
  counters:[{id:'hp',x:60,y:646,label:'head_ptr',val:'0'},
@@ -667,7 +673,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
  {t:'task 0 ③　同一笔 trigger 登记 DataIn_task_table',
   d:['建表只记下“这个用户来了”，真正要搬的那一包还得有人去搬。',
      '按 PID 找搬入任务：<code>WAIT_WAKE</code> 的项里 <code>TASK_PATH_ID = 3</code>、这个用户还没做完的最低一项是 <code>t = 0</code>，PC 取 <code>TASK_CHAIN_0_PC</code>。',
-     '一条链上的 datain 是 task 0、3、7～13，靠这一步分开：7～13 各对一个 PID。',
+     '一条链上的 datain 是 task 0、3、7～14，靠这一步分开：7～14 各对一个 PID。',
      '这张表<b>只有 1 项</b>，被占住就直接拉低 trigger 的 ready。'],
   act:['ts'],
   lt:LT,
@@ -697,8 +703,8 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
  {t:'task 0 ⑤　RV Core 读包头、配 DSA，报一次完成',
   d:['RV Core 从 <code>task_pc</code> 取指跑 kernel，先读包头。',
      '<code>cm_lsq</code> 按地址范围分流，落到 Router 的 <code>hdr_rd</code> 上，<b>包头只有这一条读取通路</b>。',
-     '拿到包头里的 <code>(gpu_id, token_id)</code> 算出 Core Mem 地址，写进 DSA 配置寄存器。',
-     '随后<b>向 TS 报一次完成</b>，不等 DSA 搬完；这一项配 <code>TASK_RECV_UNIT = 01</code>，TS 要等 DSA 那一路也到。'],
+     '读出包头里的落点 <code>dst_addr</code>、长度与带不带 scale，写进 DSA 配置寄存器；落 Core Mem 时 DTE 按 <code>stream_id</code> 叠上这个 stream 的偏移。',
+     '随后以 <code>task_done(0)</code> 交还，<b>不向 TS 报完成</b>；这一项配 <code>TASK_RECV_UNIT = 01</code>，TS 只等 DSA 那一路。'],
   act:['drv','rt','dte'],eact:['e_hdr','e_cfg_dte'],
   tok:[{ed:'e_hdr',lbl:'包头',c:'var(--dim)'},{ed:'e_cfg_dte',lbl:'dsa_cfg',delay:1}],
   lt:LT,
@@ -821,7 +827,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
  {t:'task 2 ②　credit 在，置成 READY',
   d:['这个用户的本级 Rmem credit 没被占。',
      'Credit 用 <code>credit_wake</code> 写口把 <code>task_fsm</code> 置成 READY。',
-     '八个写口优先级由高到低：retirement、completion、install、三个 issue、credit_wake、create。',
+     '十四个写口优先级由高到低：retirement、七个 completion、install、三个 issue、credit_wake、create。',
      '依据是<b>让表项先腾空再填新的</b>，create 排最后，队头卡住时新用户不会插队。'],
   act:['ts'],eact:[],
   tok:[],
@@ -1008,7 +1014,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
 
  {t:'task 6 做完，一拍把 task 7、8 跳过去',
   d:['task 6 是 MU 算 FC2 的第 7 段并做专家间累加，直接写进 concat 区，本 core 自己那一段不走搬入。',
-     '<code>THROUGH_END_MASK</code> = bit 0～14；<code>done_bitmap</code> = bit 0～5, 7, 8。',
+     '<code>THROUGH_END_MASK</code> = bit 0～15；<code>done_bitmap</code> = bit 0～5, 7, 8。',
      '<code>search = after(task 6) &amp; THROUGH_END_MASK &amp; ~done_bitmap</code>，task 7、8 的位已亮，不在里面，最低一位是 task 9。<b>连续跳过不增加周期</b>。',
      '搜索不越过 End；End 以前都做完了就不生成后继，交给退休。'],
   act:['mu','ts'],eact:['e_ack_mu'],
@@ -1060,7 +1066,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
   d:['余下 4 段陆续到达，槽位 3～6 各走 PID 23～26，对的依次是 t = 10、11、12、13：槽位 3 那一段经 mid 进来，槽位 4～6 经 left 进来。',
      '主线停在哪一项，到的那一段正好补上就置 FINISH、生成下一项；早到的只点亮对应位，主线走到时一拍跳过。',
      'task 13 做完，concat 区的 8 段拼成 6144 维：7 段来自另外 7 个计算 core，第 7 段是 task 6 直接写的。',
-     'task_ctrl 生成链尾 task 14。'],
+     'task_ctrl 生成 task 14。'],
   act:['rt','ts','dte','cm'],eact:['e_left','e_mid','e_rt_ts','e_data_in','e_ack_dte'],
   tok:[{ed:'e_left',lbl:'concat 段',c:'var(--warn)'},{ed:'e_mid',lbl:'concat 段',c:'var(--warn)',delay:1},
        {ed:'e_data_in',lbl:'搬入',c:'var(--violet)',delay:2}],
@@ -1075,38 +1081,57 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
   ref:'ts.md F34、F37、F53'},
 
 /* ---------- task 14 ---------- */
- {t:'task 14 ①　行链出核，又是一次逐级 reduce',
-  d:['task 14 配了 <code>TASK_TYPE = 4</code>、<code>CREDIT_EN = 1</code> 与 <code>TASK_END = 1</code>，是链尾。',
+ {t:'task 14　上一颗 chip 的行链那一包到了，搬进 Core Mem',
+  d:['上一颗 chip 的 dot core 送来的行结果沿 W 口 → core5 → core6 →（core7 透传）→ core8 进来，从 core8 经 left 进本核。',
+     'core8 往本核发之前查过本核的 stream 资源：这个用户在本核已有一项，直接放行。',
+     '到了就 trigger TS，按 PID 在 <code>WAIT_WAKE</code> 的项里找到 task 14，DTE 把这一包搬进 Core Mem 的 <code>MOE_ROW_IN_OFF</code>，与 concat 区那一包摆法相同。',
+     '主线正停在 task 14，搬完置 FINISH，task_ctrl 生成链尾 task 15。这一包也可能早到，那就只点亮 bit 14，主线走到时一拍跳过。'],
+  act:['rt','ts','dte','cm'],eact:['e_left','e_rt_ts','e_data_in','e_ack_dte'],
+  tok:[{ed:'e_left',lbl:'上一颗的行结果',c:'var(--warn)'},{ed:'e_rt_ts',lbl:'trigger',c:'var(--warn)',delay:1},
+       {ed:'e_data_in',lbl:'搬入',c:'var(--violet)',delay:2}],
+  lt:LT,
+  logic:[
+          ['core8→Router', 'link[left]', '上一颗 chip 的行结果  16 B 软件信息 + 6144 维 BF16'],
+          ['Router→TS', 'trigger_ch', 'user_id 0x0007 · path_id 上一颗 chip 的行链号'],
+          ['DTE DSA→Core Mem', 'cmem_wr', '落 MOE_ROW_IN_OFF'],
+          ['DTE DSA→TS', 'dsa_done', 'task_id 14'],
+          ['TS.task_ctrl→TS.Stream_table', 'install', 'task_id 15 · unit DTE · fsm WAIT']],
+  rows:[[0,['0','0x0007','task 15 · DTE','WAIT','bit0～14']]],
+  set:{ct:'task 15 · DTE',db:'bit0～14'},
+  ref:'ts.md F34、F37、F53'},
+
+/* ---------- task 15 ---------- */
+ {t:'task 15 ①　行链出核，两包作为本 core 的两个操作数',
+  d:['task 15 配了 <code>TASK_TYPE = 4</code>、<code>CREDIT_EN = 1</code> 与 <code>TASK_END = 1</code>，是链尾。',
      'task 2 的 Reduce Done 已把本级 Rmem 的 credit 还回来，credit 在，<code>credit_wake</code> 置成 READY。',
-     'DTE DSA 读出 concat 区的 6144 维 BF16，一包是 16 B 软件信息加 12288 B，送进 Router 的 ReduceModule。',
+     'DTE DSA 先读出 <code>MOE_ROW_IN_OFF</code> 那一包（上一颗 chip 的行结果），再读出 concat 区那一包（本 chip 结果），各是 16 B 软件信息加 12288 B，先后送进 Router；只有后一笔带 <code>ack_ts_en</code>。',
      'RV core 收下这一笔时，TS 再占掉这个用户的本级 Rmem credit。'],
   act:['ts','drv','dte','cm','rt'],eact:['e_cmd_dte','e_cfg_dte','e_data_out'],
-  tok:[{ed:'e_cmd_dte',lbl:'task_cmd'},{ed:'e_data_out',lbl:'本 chip 结果',c:'var(--violet)',delay:2}],
+  tok:[{ed:'e_cmd_dte',lbl:'task_cmd'},{ed:'e_data_out',lbl:'两个操作数',c:'var(--violet)',delay:2}],
   lt:LT,
   logic:[
           ['TS.credit→TS.Stream_table', 'credit_wake', 'fsm = READY'],
-          ['TS→DTE RV Core', 'task_cmd', 'task_id 14 · stream_id 0 · path_id · vcid'],
-          ['DTE DSA→Core Mem', 'cmem_rd', '读出 concat 区  6144 维 BF16'],
-          ['DTE DSA→Router', 'out_core_data_ch', '包头  operation reduce · 行链那条 path']],
-  rows:[[0,['0','0x0007','task 14 · DTE','INFLY','bit0～13']]],
+          ['TS→DTE RV Core', 'task_cmd', 'task_id 15 · stream_id 0 · path_id · vcid'],
+          ['DTE DSA→Core Mem', 'cmem_rd', '先读 MOE_ROW_IN_OFF，再读 concat 区，各 6144 维 BF16'],
+          ['DTE DSA→Router', 'out_core_data_ch', '两包  operation reduce · 本 chip 的行链 path']],
+  rows:[[0,['0','0x0007','task 15 · DTE','INFLY','bit0～14']]],
   ref:'ts.md F45、F59'},
 
- {t:'task 14 ②　加上上游 chip 的行结果，经 E 口送出',
-  d:['中间列 chip 上行链走 W 口 → core5 → core6 →（core7 透传）→ core8 → core9，上游 chip 送来的行结果从 core8 经 left 进来。',
-     '本 core 的 ReduceModule 把它与本 chip 结果相加，中间累加固定 FP32，按 BF16 输出，经 mid → core4 → E 口送往下一颗 chip，行尾落进本行 R core。',
-     '归约完这个整包，Reduce Done 把 task 14 置成 FINISH，并还回本级 Rmem 的 credit。',
+ {t:'task 15 ②　两包在本级 ReduceModule 里相加，经 E 口送出',
+  d:['这条 path 在本核的表项 reduce1、reduce2 两位都置，Router 把本核发出的两包依次分到 reduce_in_mask 的 bit0、bit1 两路（Core 多操作数）。',
+     '本 core 的 ReduceModule 把两包相加，中间累加固定 FP32，按 BF16 输出，经 mid → core4 → E 口送往下一颗 chip，落进它的 dot core 的 Core Mem；行尾那颗落进本行 R core。',
+     '归约完这个整包，Reduce Done 把 task 15 置成 FINISH，并还回本级 Rmem 的 credit。',
      '搜索不越过 End：链上到这一项为止，<b>不会再生成后继任务</b>。'],
-  act:['rt','ts'],eact:['e_left','e_mid','e_rt_ts'],
-  tok:[{ed:'e_left',lbl:'上游行结果',c:'var(--warn)'},{ed:'e_mid',lbl:'出核',c:'var(--violet)',delay:1},
-       {ed:'e_rt_ts',lbl:'reduce_done',c:'var(--ok)',delay:2}],
+  act:['rt','ts'],eact:['e_mid','e_rt_ts'],
+  tok:[{ed:'e_mid',lbl:'出核',c:'var(--violet)'},{ed:'e_rt_ts',lbl:'reduce_done',c:'var(--ok)',delay:1}],
   lt:LT,
   logic:[
-          ['core8→Router', 'link[left]', '上游 chip 的行结果  6144 维 BF16'],
+          ['Router.CoreStation→ReduceModule', '', '两包依次进 bit0、bit1 两路'],
           ['Router.ReduceModule→core4', 'link[mid]', '相加后的结果，经 core4 → E 口'],
           ['Router→TS', 'rmem_done_ch', 'user_id 0x0007 · path_id'],
-          ['TS.task_done→TS.Stream_table', 'completion', 'done_bitmap[14] = 1 · fsm FINISH · rmem_busy = 0']],
-  rows:[[0,['0','0x0007','task 14 · DTE','FINISH','bit0～14']]],
-  set:{db:'bit0～14'},
+          ['TS.task_done→TS.Stream_table', 'completion', 'done_bitmap[15] = 1 · fsm FINISH · rmem_busy = 0']],
+  rows:[[0,['0','0x0007','task 15 · DTE','FINISH','bit0～15']]],
+  set:{db:'bit0～15'},
   ref:'ts.md F37、F52、F68'},
 
  {t:'退休 ①　只有队头能退，而且先还 credit',
@@ -1118,7 +1143,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
   tok:[{ed:'e_ts_rt',lbl:'retire',c:'var(--warn)'}],
   lt:LT,
   logic:[
-          ['→TS.Stream_table', '', 'slot 0：valid 1 · done_bitmap 覆盖 bit0～14，且是 head_ptr'],
+          ['→TS.Stream_table', '', 'slot 0：valid 1 · done_bitmap 覆盖 bit0～15，且是 head_ptr'],
           ['TS→Router', 'retire', 'user_id 0x0007'],
           ['Router→TS', 'accepted', '接收后 TS 才清 valid 并推 head_ptr']],
   ref:'ts.md F68、F69'},
@@ -1142,7 +1167,7 @@ const S_RUN1={id:'run1',name:'③ 逐步执行 · 一个用户的 15 步',vb:[10
 
 
 /* ===================== ④ 每个模块的运行逻辑 =====================
-   TS 内部照 03-ts-任务调度器.md 的「TS 的模块组成与对外通道」，也就是 MAS 的 Block Diagram：
+   TS 内部照 03-ts-任务调度器.md 的“TS 的模块组成与对外通道”，也就是 MAS 的 Block Diagram：
    CFG_REG 横条在上，User_Match 贴 TS 框左边缘，User_table 居中（DataIn_task_table 横条 +
    Stream_table 大框），Task_iss 的三个 Arb 竖排在右。Stream_table 内部按 MAS 的展开图画出
    ptr_ctrl · stream_id_map · task_rdy_check · retire · except_check ·
@@ -1273,9 +1298,9 @@ const S_MODS={id:'mods',name:'④ 每个模块的运行逻辑',vb:[1040,640],
         [2,['—','—','—']],[3,['—','—','—']]],
   ref:'ts.md F21～F24'},
 
- {t:'Stream_table　被动的存储，八个写口固定优先级',
+ {t:'Stream_table　被动的存储，十四个写口固定优先级',
   d:['16 项顺序 FIFO，每项对应一条完整用户业务流。',
-     '<b>它自己不判断</b>，写逻辑留在各模块里，只有八个写口在这里仲裁。',
+     '<b>它自己不判断</b>，写逻辑留在各模块里，只有十四个写口在这里仲裁。',
      '每口一拍一笔，请求保持到 <code>accepted</code> 才算生效。',
      '优先级的依据是<b>让表项先腾空再填新的</b>：create 排最后，队头卡住时新用户不会插队。'],
   act:['ptr','smap','trdy','sret'],eact:['m_um_st','m_tc_st','m_td_st','m_cr_st','m_sret_st','m_arb_st'],

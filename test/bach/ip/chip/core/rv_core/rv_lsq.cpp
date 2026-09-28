@@ -207,7 +207,7 @@ TEST(BachRvLsq, QueueIssuesInOrderOneEachCycle) {
 
 // DTCM 在核内，读出来的数据三拍后写回。
 //
-// 「同 bank 冲突阻塞第二条」这一条在这一层看不到：访存请求口一拍只收一笔，
+// “同 bank 冲突阻塞第二条”这一条在这一层看不到：访存请求口一拍只收一笔，
 // 而每拍最多执行一条指令，两笔请求本来就落在相邻的两拍上，撞不到一起。
 TEST(BachRvLsq, DtcmTakesThreeCycles) {
   std::vector<uint64_t> at;

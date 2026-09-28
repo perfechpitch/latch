@@ -54,7 +54,7 @@ uint32_t EncR(uint32_t funct3, uint32_t funct7, uint32_t rd, uint32_t rs1,
 }
 
 // 立即数寻址那两条：imm[4:0] 占 rd 字段，imm[9:5] 占 rs2 字段，
-// imm[15:10] 与「这是立即数寻址」的标志位一起进 funct7。
+// imm[15:10] 与“这是立即数寻址”的标志位一起进 funct7。
 uint32_t ImmFunct7(uint32_t imm16) { return 0x40u | ((imm16 >> 10) & 0x3Fu); }
 uint32_t ImmRd(uint32_t imm16) { return imm16 & 0x1Fu; }
 uint32_t ImmRs2(uint32_t imm16) { return (imm16 >> 5) & 0x1Fu; }
@@ -315,7 +315,7 @@ TEST(BachCustom0, ReadsDsaRegisterAndValueReachesConsumer) {
 }
 
 // task_done 的 TS 位：置位时通知 TS，完成口带着下发时的身份；不置位时只交还
-// 自己，完成口不响，核停在等下一个 task 上。两条路的「交还」都要发生。
+// 自己，完成口不响，核停在等下一个 task 上。两条路的“交还”都要发生。
 TEST(BachCustom0, TaskDoneNotifyFlagPicksThePath) {
   std::vector<uint32_t> notified = {EncTaskDone(1)};
   Case c = RunProgram(notified, {});
@@ -355,7 +355,7 @@ TEST(BachCustom0, LoopBranchesUntilCurrentReachesMax) {
   EXPECT_EQ(c.dones, 1u);
 }
 
-// cur 一开始就够大时 loop 不跳，循环体一次都不进——顺带把「顺序执行」那一支
+// cur 一开始就够大时 loop 不跳，循环体一次都不进——顺带把“顺序执行”那一支
 // 也走上：偏移字段全 0 时不能当成回跳。
 TEST(BachCustom0, LoopFallsThroughWhenAlreadyDone) {
   std::vector<uint32_t> words = {
@@ -373,7 +373,7 @@ TEST(BachCustom0, LoopFallsThroughWhenAlreadyDone) {
   EXPECT_EQ(c.dones, 1u);
 }
 
-// 译码本身：6 条各落成哪一类，以及那个「同 funct3 靠 bits[29:25] 分开」的
+// 译码本身：6 条各落成哪一类，以及那个“同 funct3 靠 bits[29:25] 分开”的
 // task_done。flag_check（bits[29:25] = 00001）不在这一版的 6 条里，不接。
 TEST(BachCustom0, DecodeMapsEachEncoding) {
   auto isa = std::make_shared<rv32::Rv32>();

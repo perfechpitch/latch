@@ -37,7 +37,7 @@ class VuSexe : public VuExeStage {
 
   void Compute(VuFlow& f) override {
     // 三次迭代依次算，第 k 次算完 f.sexe[k] 才有值，第 k+1 次按 src_sel 取的
-    // SEXE(k) 就取得到，这就是「至少一个操作数须取自前一次迭代」那条约束
+    // SEXE(k) 就取得到，这就是“至少一个操作数须取自前一次迭代”那条约束
     // 在建模上的落点。
     for (uint64_t k = 0; k < 3; ++k) {
       VuOpReg const& r = f.uops.cfg.sexe[k];

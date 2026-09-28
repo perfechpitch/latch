@@ -108,7 +108,7 @@ class UnitSide : public BachModule {
     Serve(ts.MuCmd(), 1, mu_cmds, now, nullptr);
     Serve(ts.VuCmd(), 2, vu_cmds, now, nullptr);
     for (uint64_t u = 0; u < 3; ++u) {
-      // 注入一笔「这个 task 已经完成」：datain 任务的完成与主线走到哪无关，
+      // 注入一笔“这个 task 已经完成”：datain 任务的完成与主线走到哪无关，
       // 数据到了就报，所以它可以在主线还没走到那一项时先回来。
       if (u == 0 && inject_at != 0 && now == inject_at) {
         ts.RvDone(0).Drive(0, inject_task);
@@ -545,9 +545,10 @@ class SelfStartUnits : public BachModule {
 
 }  // namespace
 
-// 自启动 core：上电建满 stream_num 条链，Task 0 一次只下发一笔。taskchain0 的
-// Task 0 做完才发 taskchain1 的，这时 taskchain0 已经在做第 2 个任务，两条链并行。
-TEST(BachTs, SelfStartIssuesOneTask0AtATime) {
+// 自启动 core：上电建满 stream_num 条链，各条链的 Task 0 按链的次序连续下发，
+// 不等上一条链的 Task 0 做完（《Task Scheduler》：同时激活16个用户的自启动任务，
+// 进行task仲裁，进行发射）。
+TEST(BachTs, SelfStartIssuesTask0sBackToBack) {
   std::vector<SelfStartUnits::Got> issued, done;
   {
     EnsureSlots();
@@ -564,27 +565,19 @@ TEST(BachTs, SelfStartIssuesOneTask0AtATime) {
   }
   RT::Reset();
   std::vector<SelfStartUnits::Got> t0_issue, t0_done;
-  uint64_t chain0_second_done = 0;
   for (auto const& g : issued) {
     if (g.task == 0) t0_issue.push_back(g);
   }
   for (auto const& g : done) {
     if (g.task == 0) t0_done.push_back(g);
-    if (g.stream == 0 && g.task == 1 && chain0_second_done == 0) {
-      chain0_second_done = g.at;
-    }
   }
   ASSERT_GE(t0_issue.size(), 4u);
+  ASSERT_GE(t0_done.size(), 1u);
   for (uint64_t k = 0; k < 4; ++k) {
     EXPECT_EQ(t0_issue[k].stream, k) << "按链的次序下发";
   }
-  for (uint64_t k = 0; k + 1 < t0_issue.size(); ++k) {
-    ASSERT_LT(k, t0_done.size());
-    EXPECT_GT(t0_issue[k + 1].at, t0_done[k].at)
-        << "第 " << k + 1 << " 笔 Task 0 要等上一笔做完";
-  }
-  EXPECT_LT(t0_issue[1].at, chain0_second_done)
-      << "taskchain0 的第 2 个任务还在做时 taskchain1 的 Task 0 已经下发";
+  EXPECT_LT(t0_issue[1].at, t0_done[0].at)
+      << "第 2 条链的 Task 0 不等第 1 条链的 Task 0 做完就下发";
 }
 
 // 自启动 core：一条链的全部任务做完，照常向 Router 退休；Router 收下之后这条链

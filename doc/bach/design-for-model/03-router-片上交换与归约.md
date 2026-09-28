@@ -1152,6 +1152,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | Downstream Reduce Credit Map | 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：一笔任务每个方向准入一次，按 release 放开 |
 | 循环队列 | ReduceBuffer 本质是一个循环队列：算完的数据从队头搬走，待算的从队尾进；多个用户的数据可以在传输与计算过程中同时存在 |
 | 两种 action | ReduceBuffer ⇒ ReduceBuffer，以及 Core ⇒ 本级 ReduceBuffer |
+| Core 多操作数 | 一笔任务的几份操作数都从本 core 送来时，core 方向按先后把它们分到几路输入，RouterTable 要配这一档特殊模式（线上版《Router》：“Rmem支持一个方向来的多个操作数（需要配置特殊模式），但是不支持操作数精度不一致”）。R core 把在 Matrix Mem 里等齐的两笔送进本级 ReduceModule 相加就走这一档 |
 | 分段传输 | ReduceBuffer 之间把 packet 拆成更小的 segment，一个 segment 下一跳 VC 收得下就能发，用来掩盖 R2R 延迟。**Core 到 ReduceBuffer 相反，要等整包备齐再发**，因为这一段延迟本来就小 |
 | release 时机 | ReduceBuffer 发出一笔就向上游返回一笔 credit release |
 | 输出 VC | Rmem 允许改写输出的 `vc_id`。改写的落点是包头里那个“下一跳 VC”字段，下一跳 Router 解包直接取，不再查表 |
@@ -1178,12 +1179,13 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 
 | | 逐级 | 非逐级 |
 | - | - | - |
-| 在哪算 | Router 里 | 必须进 core，在 Core Mem 里算 |
+| 在哪等齐 | 不等，流经就加 | 必须进 core，在 Core Mem 或 Matrix Mem 里等其他来源到齐 |
+| 在哪算 | Router 里 | 等齐之后在 core 内算，或由 DTE 送进本级 ReduceModule 算（R core 走后者） |
 | 次序 | 按序执行 | 允许不同用户之间乱序到达 |
-| 缓冲 | 只缓存最老那个用户的数据 | 每个用户在 Core Mem 里等其他来源到齐 |
+| 缓冲 | 只缓存最老那个用户的数据 | 每个用户在 core 内等其他来源到齐 |
 | 源的数量 | 最多 3 个：两个上游 core 的分量加一个本 core 的分量 | 不限于 3 个 |
 
-非逐级必须进 core，原因是汇聚过程中用户之间会乱序：chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到两个 chip 的汇聚点。Router 里只有一个最老用户的上下文，接不住这种乱序。
+非逐级必须先进 core 等齐，原因是汇聚过程中用户之间会乱序：chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到两个 chip 的汇聚点。Router 里只有一个最老用户的上下文，接不住这种乱序。
 
 ### 用户退休
 

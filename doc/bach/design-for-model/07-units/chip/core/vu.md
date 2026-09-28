@@ -269,7 +269,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F13 | 队列深度 8（待定） |
 | F14 | `status` 寄存器实时回传 `BUSY`、`ISQ_FULL`、`ISQ_EMPTY`、`ERROR_FLAG`；判断全部宏指令是否完成用 `macro_inst_left` 或 `BUSY` |
 | F15 | 读 `error_code` 时其全部异常位清零，同时清 `status.ERROR_FLAG`、`error_info`、sticky 快照与 6 个错误上下文寄存器；Profile 计数器只能用 `profile_ctrl.CLEAR` 清零 |
-| F15c | 异常上下文一律首错锁存：`error_info` 给出首个置位异常的 `USER_ID` / `STREAM_ID` / `CONFIG_IDX` / `ERR_UNIT` / `FIRST_ERR` / `VALID`，sticky 快照（`snapshot_addr.SNAP_SEL=0xFF`）给出那一条宏指令的 12 个动态参数。定位顺序恒为「先读上下文、最后读 `error_code`」 |
+| F15c | 异常上下文一律首错锁存：`error_info` 给出首个置位异常的 `USER_ID` / `STREAM_ID` / `CONFIG_IDX` / `ERR_UNIT` / `FIRST_ERR` / `VALID`，sticky 快照（`snapshot_addr.SNAP_SEL=0xFF`）给出那一条宏指令的 12 个动态参数。定位顺序恒为“先读上下文、最后读 `error_code`” |
 
 ### pipe_ctrl 与 Scoreboard
 
@@ -297,6 +297,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F27 | CM 接口读写各一条独立通路，一次请求固定 1024 bit，不支持 burst；地址 32 bit 按 128 B 对齐，向量与掩码按 32 B 对齐、标量按 4 B 对齐。违反访问格式的对齐要求置 `CM_ADDR_ERROR` |
 | F28 | 跨 128 B 边界的拆分与重组由 LU / SU 完成 |
 | F29 | CM 数据信号 1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 有效 |
+| F29a | 相邻两条宏指令的 LU 读接着发，用后一条的取数段掩盖前一条的尾段：前一条的读请求都发出去就收下一条，不等它的响应回来，最多两条同时在读。本条不读 CM 的要等前面的读都收完再往下走，不越过前面那条 |
+| F29b | 写响应齐后才退休：一段的写请求都发出后，等这些写的响应全部从 CM 返回才交给退休，软件在宏指令退休后读 CM 一定看到新数据。写响应按发出的先后返回；在等响应的段不挡下一段进 SU |
 
 ### SMUX / DMUX
 
@@ -320,6 +322,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。源不能取自身的输出；自定义拟合函数暂定不实现 |
 | F40a | VSFU 有 `VSFU0` 与 `VSFU1` 两个功能一致的单元，`VSFU_op` 低 16-bit 配 VSFU0、高 16-bit 配 VSFU1，`src_sel` 的 `0x05` / `0x06` 分别是两者的输出。FP32 精度下两者独立工作，BF16 精度下两者拼接成一个逻辑单元、共同处理 64 element/cycle，此时 VSFU1 的两个字段被忽略、`0x06` 也不可再作为来源 |
 | F40b | 除 SEXE 外，每个执行单元在单条宏指令里只能被调用 1 次 |
+| F40c | 四个 VEXE（VALU0 / VALU1 / VALU2 / VSFU）之间不限定先后顺序，任意一个都可以取另一个的输出作为源，数据流不可回环。计算次序按取源关系定：被取的在前，互不相干的按 VALU0、VALU1、VALU2、VSFU 排。两个 VEXE 互取对方输出置 `CFG_ERROR`。一条宏指令在 VEXE 这一段的拍数是用到的单元各自级数之和，与次序无关 |
 | F41 | MEXE（15 条）：Mask 逻辑运算（and / nand / andn / xor / or / nor / orn / xnor）、`vcpop.m`、`vfirst.m`、`vmsbf/vmsif/vmsof.m`、`vmiuset.mv` / `vmiset.mv`（掩码走 src1、16 个 INT16 索引走 src2，按索引清 / 置 Mask 位，配合 Top-K 做迭代查找） |
 | F42 | SEXE（7 条）：fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）。物理上只有一组，SEXE0/1/2 是同一物理单元在一条宏指令内的 3 次串行迭代 |
 | F43 | SEXE 迭代之间天然链式依赖：SEXE1 的操作数可来自 SEXE0，SEXE2 可来自 SEXE1，因此第 2、3 次迭代只需 1 个额外的 SRF 读端口 |
@@ -616,7 +619,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M4</text>
   <text x="684" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D14</text>
   <text x="250" y="56" font-size="12" fill="#111827">LU · 取向量、Mask 与标量并扩宽</text>
-  <text x="250" y="78" font-size="10.5" fill="#475569">1. cmem_ld.req = {addr}，一次固定 1024 bit，不 burst</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. cmem_ld.req = {addr}，固定 1024 bit，不 burst；前一条发完接着发下一条</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 跨 128 B 边界的访问由本级拆分再重组（对齐不合规置 CM_ADDR_ERROR）</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. v = Widen(rsp_rdata, FP8_e4m3 / MXFP8 / BF16 → BF16 / FP32)，精确扩宽</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. ld.fp32.v 且 DATA_TYPE=BF16 → 按 ROUND_MODE 窄化，Inf / NaN 原样透传</text>
@@ -771,7 +774,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="78" font-size="10.5" fill="#475569">1. o = Narrow(v, BF16/FP32 → FP8_e4m3 / MXFP8 / BF16 / FP32)</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 高转低按 TYPE_VL.ROUND_MODE 舍入</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. cmem_st.req = {addr, wdata 1024 b, scale 32 b}，一次固定 1024 bit</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. 跨 128 B 边界的写由本级拆分</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 跨 128 B 边界的写由本级拆分；写响应全部返回才交给退休</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">MXFP8 的 scale 地址由硬件按一一映射推断，不参与软件编址</text>
   <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arq8)" fill="none"/>
   <path d="M188 129 L231 129" stroke="#475569" marker-end="url(#arq8)" fill="none"/>
@@ -903,6 +906,9 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | RF 后门通路与宏指令异步，由软件保证不冲突 | F11 | `rf_backdoor` |
 | Scoreboard 检测 RAW / WAR / WAW | F17 | `scoreboard_dep` |
 | 最多两条相邻宏指令重叠 | F18 | `macro_overlap_two` |
+| 相邻两条的 LU 读接着发，最多两条同时在读 | F29a | `lu_read_overlap` |
+| 写响应齐后才退休 | F29b | `su_wait_write_rsp` |
+| VEXE 计算次序按取源关系排，互取成环置 CFG_ERROR | F40c | `vexe_order` |
 | CM 访存冲突硬件不追踪，靠 MACRO_INST_FENCE | F19 | `macro_inst_fence` |
 | 含 Vector 数据广播的宏指令必须置 MACRO_INST_FENCE，硬件不检测广播 | F20 | `macro_inst_fence` |
 | CM_FENCE 只等前序的 CM 访问，纯计算的前序不等待 | F19 | `cm_fence` |
@@ -948,14 +954,17 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
   * 只提供 bypass 与广播，配平交给软件：级数差一级用 `vmv.v.v` 对齐，差得多就拆成多条宏指令
 * **CM 地址不合规只置位、不丢弃那次访存**
   * 硬件在发起访问前自检对齐，不合规就把这笔 Load / Store 丢掉、请求不发出，只置 `CM_ADDR_ERROR`
-  * 模型照发不误：现网 kernel 的向量访存按 16 B 偏移落在 CM 上（`MOE_SW_HEAD_BYTES` 那一段软件头），按硬件语义这笔会被丢弃，而模型的地址是比较级、不是字节精确的。建模这一处取「照发并记录异常」，等 kernel 的访存地址改到 32 B 对齐再收紧
-  * 影响面：对齐不合规时模型会算出一个硬件不会算出的结果。用例 `MisalignedAddrRaisesCmAddrError` 只验异常位与「不挡住这一条宏指令」
-* **CM_FENCE 的等待条件按「带 CM 访问的前序宏指令退休」近似**
-  * 硬件等的是前序那条的「LU 读数据已取回、SU 写已写响应齐」，不等它整条做完
+  * 模型照发不误：现网 kernel 的向量访存按 16 B 偏移落在 CM 上（`MOE_SW_HEAD_BYTES` 那一段软件头），按硬件语义这笔会被丢弃，而模型的地址是比较级、不是字节精确的。建模这一处取“照发并记录异常”，等 kernel 的访存地址改到 32 B 对齐再收紧
+  * 影响面：对齐不合规时模型会算出一个硬件不会算出的结果。用例 `MisalignedAddrRaisesCmAddrError` 只验异常位与“不挡住这一条宏指令”
+* **LU 出口排队取 4 段**
+  * 设计给了重叠深度上限 2，没给 LU 交给下游之前能攒几段
+  * 模型取 4 段，攒满就先不收下一条宏指令，免得后一条的读数把出口堆满、挡住前一条的尾段
+* **CM_FENCE 的等待条件按“带 CM 访问的前序宏指令退休”近似**
+  * 硬件等的是前序那条的“LU 读数据已取回、SU 写已写响应齐”，不等它整条做完
   * 模型没有 CM 访问完成的逐条记录，只能等那条退休。比硬件严格一点，介于 `CM_FENCE` 与 `MACRO_INST_FENCE` 之间，两者仍可区分（纯计算的前序不等）
-* **RF 端口的 busy 计数器按「派发一次记一拍」**
+* **RF 端口的 busy 计数器按“派发一次记一拍”**
   * 硬件记的是端口被占用的周期数
-  * 模型里端口沿用整条宏指令，逐拍统计要跨级拉线，取的是派发那一拍加一。要看「谁占得多」够用，要看绝对占用率会偏小
+  * 模型里端口沿用整条宏指令，逐拍统计要跨级拉线，取的是派发那一拍加一。要看“谁占得多”够用，要看绝对占用率会偏小
 * **ECC 异常没有产生源**
   * `error_code` 的四位 ECC 异常与 `vrf_err_info` / `mrf_err_info` / `srf_err_info` / `cm_err_info` / `cm_err_addr` 五个上下文寄存器都在、字段与清零时机都照文档实现
   * 但模型没有 ECC 注入通路，也没有 `RaiseError` 的调用方：这几个位恒为 0、寄存器恒为空。等真机 / 注入用例进来时再接
@@ -966,12 +975,12 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
   * MAS：派发前合法性检查失败即置 `CFG_ERROR` 并放弃派发；入队时加上的全局 / 静态组 in-flight 计数在退休时减一
   * 模型发一条空配置微指令（各单元按无操作）走完 LU→…→M9，这样 `macro_inst_left`、`HoldCfg` 与快照窗口都按退休回收。sticky 仍标未派发
 * **异常不停止后续发射**
-  * MAS 写「上报异常后停止派发新的宏指令」
+  * MAS 写“上报异常后停止派发新的宏指令”
   * 现网 kernel 的向量地址带 16 B 软件头，模型会持续置 `CM_ADDR_ERROR`；若因此停发，MoE 整条链都会挂。模型维持 F23a：置位异常不中断后续宏指令
-* **快照窗口的 `SNAP_DISPATCHED` 指「已出 ISQ 交给 pipe_ctrl」**
-  * 硬件指的是「已派发到执行单元」
-  * 被 `CFG_ERROR` 拦下的那几条没进执行单元，模型另记一笔把它们算成「仍在排队」，与 sticky 那一份的口径一致
+* **快照窗口的 `SNAP_DISPATCHED` 指“已出 ISQ 交给 pipe_ctrl”**
+  * 硬件指的是“已派发到执行单元”
+  * 被 `CFG_ERROR` 拦下的那几条没进执行单元，模型另记一笔把它们算成“仍在排队”，与 sticky 那一份的口径一致
 * **模型把向量通路的 element 一律按 FP32 存，`DATA_TYPE` 因此只改吞吐不改数**
   * 硬件上 `DATA_TYPE` 定的是向量通路内部的精度：置 BF16 时一拍吃 64 个 element，中间的加乘也是 BF16 的
   * 模型只取了前一半：`VuOperand.vec` 是一串 `float`，`DATA_TYPE` 影响 LANES（一段几个 element）与 F47 那三处窄化点，通路内部的加乘仍按 FP32 算
-  * **这一处的差看不出来**：把一条链改成 BF16 通路，模型上只体现为拍数减半，中间累加掉的精度一位都不显。逐字节比对照样过，因为参考值与模型走的是同一套算法。R core 那条 12 行的累加链是全流水里对中间精度最敏感的地方，它现在配的就是 BF16 通路，真实精度要另找办法核
+  * **这一处的差看不出来**：把一条链改成 BF16 通路，模型上只体现为拍数减半，中间累加掉的精度一位都不显。逐字节比对照样过，因为参考值与模型走的是同一套算法

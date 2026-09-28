@@ -235,7 +235,7 @@ ROUTER_SIGS = [
 ]
 # 打包的那几个，与 Core::EmitIssue() / EmitDsa() / EmitRv() 同源。每个时刻三个：
 # 位掩码 bit0 DTE、bit1 MU、bit2 VU，task 号三路各占 8 bit，user_id 三路各占 16 bit。
-# 不画成波形，解成「哪一拍哪一路哪一笔」：下发那三个给 core 那一级分步，其余四个
+# 不画成波形，解成“哪一拍哪一路哪一笔”：下发那三个给 core 那一级分步，其余四个
 # 时刻把每一笔在 RV core 与 DSA 上的时间段配出来，画甘特图。
 PACKED_SIGS = [
     "ts_unit", "ts_task", "ts_user",
@@ -254,8 +254,8 @@ WAVE_SIGS = [s for s in CORE_SIGS if s not in PACKED_SIGS]
 # 判定一个 core 是不是只有 Router 在用：那种 core 没有这个信号。
 ROLE_SIG = "ts_inflight"
 
-# 这几个在模型里是只加不清零的累计计数器，画面上要取相邻两拍的差才是「本拍
-# 发生了多少」。其余那几个本身就是水位（队列长度、缓冲占用），直接取值。
+# 这几个在模型里是只加不清零的累计计数器，画面上要取相邻两拍的差才是“本拍
+# 发生了多少”。其余那几个本身就是水位（队列长度、缓冲占用），直接取值。
 CUM_SIGS = ["fwd_mid", "fwd_left", "fwd_right", "fwd_core",
             "out_mid", "out_left", "out_right", "out_core", "out_rdc",
             "xbar_stall", "cs_trig", "retire", "ts_issue", "ts_done"]
@@ -1266,7 +1266,7 @@ function panel(){
   const list = (co.role ? SIGS : SIGS.filter(s => !s.startsWith('ts_') && s !== 'core_out'))
     .filter(s => !RSIG.has(s));
   rows(list.map(s => [s, st[s], CUM.has(s) ? st.tot[s] : undefined]));
-  hint.innerHTML = '这一级的「步」是 TS 每下发一笔 task。'
+  hint.innerHTML = '这一级的“步”是 TS 每下发一笔 task。'
     + '‹ 上一步 / 下一步 › 按笔走；在甘特图上按住拖动逐拍走，点一段跳到它下发的那一拍。'
     + '下发序列可以直接和 bundle 里的 <code>TCHAIN</code> 逐项对。'
     + 'Router 那一组信号点方框图里的 Router 进去看。';
@@ -1312,9 +1312,9 @@ function render(){
   document.getElementById('thumb').style.left = pct;
 }
 
-// 播放按「有事件的那些拍」走，中间没有任何信号变化的拍直接跳过。
+// 播放按“有事件的那些拍”走，中间没有任何信号变化的拍直接跳过。
 let fi = 0;
-// 让「单帧」的位置跟上 T：取不晚于 T 的最后一个有事件的拍。
+// 让“单帧”的位置跟上 T：取不晚于 T 的最后一个有事件的拍。
 function syncFi(){
   fi = 0; let lo = 0, hi = D.frames.length - 1;
   while(lo <= hi){ const m = (lo+hi)>>1;

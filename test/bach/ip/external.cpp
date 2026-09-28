@@ -240,7 +240,7 @@ TEST(BachExternal, EndToEndThroughSwitch) {
   //   拍 3315  pcie 出到 w4
   //   拍 3316  出口桩收到尾 flit（单 flit 包，头即尾）
   //
-  // 每过一个模块多一拍，是「上拍写、下拍读」的必然结果，与 RTL 的寄存器语义
+  // 每过一个模块多一拍，是“上拍写、下拍读”的必然结果，与 RTL 的寄存器语义
   // 一致。链路那两段的传输与延迟拍数与 link.md 的参数逐项对得上。
   EXPECT_EQ(last, 3316u);
 }
@@ -253,7 +253,7 @@ TEST(BachSeq, WrapAroundComparison) {
   EXPECT_EQ(SeqDiff(kSeqMod - 2, 1), 3u);
   EXPECT_TRUE(SeqAfter(kSeqMod - 2, 1)) << "绕过去的那一个更新";
   EXPECT_FALSE(SeqAfter(1, kSeqMod - 2)) << "反过来就不是";
-  // 相等不算「在之后」。
+  // 相等不算“在之后”。
   EXPECT_FALSE(SeqAfter(5, 5));
   // 差值超过半个模时算落在过去。
   EXPECT_FALSE(SeqAfter(0, kSeqHalf + 1));

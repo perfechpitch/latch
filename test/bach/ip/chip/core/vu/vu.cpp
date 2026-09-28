@@ -33,8 +33,9 @@ constexpr Time kPeriod = 1;
 // VU 十四个模块由装配统一驱动，只占一个协程；驱动台自己另外几个。
 void EnsureSlots() { RT::Reset(8, 8); }
 
-// 扮演 Core Mem：一块字节数组，收得下、隔 14 拍回响应。scale 与数据地址一一
-// 映射，每 32 B 一组，与 BankedMem 的 scale 旁带同一个口径。
+// 扮演 Core Mem：一块字节数组，收得下、隔 14 拍回响应，读写都回（写回的响应不
+// 带数据），与 BankedMem 一样。scale 与数据地址一一映射，每 32 B 一组，与
+// BankedMem 的 scale 旁带同一个口径。
 class MemStub : public BachModule {
  public:
   MemStub(ClockPtr c, const std::string& name, MemPort& p, uint64_t bytes)
@@ -93,6 +94,7 @@ class MemStub : public BachModule {
         }
       }
       ++writes;
+      pipe.push_back({now + kVuCmLatency, ByteBlockPtr()});
       return;
     }
     auto data = std::make_shared<ByteBlock>(Peek(addr, n));
@@ -258,7 +260,7 @@ uint64_t OpWord(uint64_t opcode, uint64_t src1 = 0, uint64_t src2 = 0,
   return opcode | (src1 << 8) | (src2 << 16) | (src3 << 24);
 }
 
-// PRF_op：VRF 两个写端口与 MRF 写端口用「0 不写回、非零指定来源」，SRF 六个
+// PRF_op：VRF 两个写端口与 MRF 写端口用“0 不写回、非零指定来源”，SRF 六个
 // 虚拟写口是位图。
 uint64_t PrfWord(uint64_t vrf_p0, uint64_t vrf_p1, uint64_t mrf,
                  uint64_t srf_en) {
@@ -348,7 +350,7 @@ void SetupComputeOnly(Rig& rig, uint64_t group) {
   rig.WriteStatic(group, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(40));
 }
 
-// 配一条「LU 读 FP32 → 一个执行单元算 → SU 写回 FP32」的宏指令。各执行单元的
+// 配一条“LU 读 FP32 → 一个执行单元算 → SU 写回 FP32”的宏指令。各执行单元的
 // 用例都在它上面换 op 与源。静态副本区放地址与 VL，动态区不用。
 void SetupChain(Rig& rig, uint64_t op_reg, uint64_t op_word, uint64_t su_src,
                 uint64_t vl = kVl) {
@@ -1273,7 +1275,7 @@ class CfgReader : public BachModule {
   uint64_t seq = 0, last = 0;
 };
 
-// 一条「LU 读 → VALU2 → SU 写」的链，各执行单元的用例都用它。
+// 一条“LU 读 → VALU2 → SU 写”的链，各执行单元的用例都用它。
 void SetupValu2(Rig& rig, uint64_t op_word, uint64_t srf_idx3 = 0) {
   rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
   rig.WriteStatic(0, kVuValu2Op, op_word);

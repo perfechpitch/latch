@@ -28,7 +28,7 @@
  * 只有 task_done 挂得住这个校验: 它的参数按定义就是一个字面常量 (0 / 1), 不存在
  * 误报。dsawi / dsari / loop 的立即数不能用同样办法校验——__builtin_constant_p
  * 在 gimplify 阶段折叠, 比 gas 的 "i" / "n" 约束早得多, 像
- * dte_template(0) + DTE_SRC_ADDR 这种「static inline 函数 + 常量」的写法 gas 收
+ * dte_template(0) + DTE_SRC_ADDR 这种“static inline 函数 + 常量”的写法 gas 收
  * 得下 (约束在 RTL 展开时才折叠), 这个校验却会误报。所以那两个只留注释说明:
  * 立即数要写成编译器 fold 得动的常量, 运行期地址改用 dsaw / dsar。
  *

@@ -465,6 +465,71 @@ TEST(BachC2c, TwoBridgesPassThroughUnchanged) {
   EXPECT_EQ(sink.user, 314u) << "包本身透传，内容不变";
 }
 
+// 各 VC 分开记账，一个 VC 堵住不挡别的 VC。收方的 core 一侧每 VC 只留 1 格、
+// 从不腾位置；发方往线上的额度每 VC 1 格。连发三个 VC0 再发一个 VC3：第一个
+// VC0 交给 core，第二个 VC0 压在收方 RX（core 没位置），它占着链路额度不还，
+// 第三个 VC0 就压在发方。排在后面的 VC3 在发方越过第三个 VC0 上线，在收方越过
+// 第二个 VC0 交给 core。
+TEST(BachC2c, BlockedVcDoesNotHoldOthers) {
+  std::vector<uint64_t> vcs;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    C2cCfg tx_cfg;
+    tx_cfg.tx_private = 1;
+    tx_cfg.tx_shared = 0;
+    C2cBridge a(clk, "a", tx_cfg);
+    C2cBridge b(clk, "b", C2cCfg());
+    b.EnableCoreCredit(std::make_shared<LinkEnd>(clk), 1, 0);
+    BridgePair pair(clk, a, b);
+
+    class VcFeeder : public BachModule {
+     public:
+      VcFeeder(ClockPtr c, LinkEndPtr w) : BachModule(c, "feed"), wire(std::move(w)) {}
+
+     protected:
+      void Step() override {
+        static const uint64_t kOrder[] = {0, 0, 0, 3};
+        if (sent == 4) {
+          wire->Idle();
+          return;
+        }
+        auto m = std::make_shared<Message>();
+        m->size = 256;
+        wire->flit.Drive(kOrder[sent], true, true, 256, m);
+        wire->release.Idle();
+        ++sent;
+      }
+
+     private:
+      LinkEndPtr wire;
+      uint64_t sent = 0;
+    };
+    class VcSink : public BachModule {
+     public:
+      VcSink(ClockPtr c, LinkEndPtr w, std::vector<uint64_t>& out)
+          : BachModule(c, "sink"), wire(std::move(w)), got(out) {}
+
+     protected:
+      void Step() override {
+        FlitView f = ReadFlit(wire->flit);
+        if (f.valid) got.push_back(f.vc);
+      }
+
+     private:
+      LinkEndPtr wire;
+      std::vector<uint64_t>& got;
+    };
+    VcFeeder feed(clk, a.FromCore());
+    VcSink sink(clk, b.ToCore(), vcs);
+    clk->Continue(2000 * kPeriod);
+    RT::JoinAll();
+  }
+  RT::Reset();
+  EXPECT_EQ(vcs, (std::vector<uint64_t>{0, 3}))
+      << "VC0 堵住之后 VC3 照样交到 core";
+}
+
 TEST(BachC2c, LinkLatencyCountsOnce) {
   // 一段线的时间只算一次：出方向那座桥记这一段的延迟，入方向那座只做协议转换。
   // 两侧都记的话，Router 到 Router 就成了 600T，超过规格书给的 400T。

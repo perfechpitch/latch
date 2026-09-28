@@ -62,8 +62,8 @@ class DescPort : public Logic {
 // 容器，单线程下看着能跑，多线程下就是段错误。一切跨模块的搬运都走端口。
 class PayloadPort : public Logic {
  public:
-  // frame 是 Header Parser 给这一帧编的号，进核那一路按它认「这几拍属于哪一
-  // 帧」。off 是这一拍的数据在整包 payload 里的起点：一包拆成几拍进来，写存储
+  // frame 是 Header Parser 给这一帧编的号，进核那一路按它认“这几拍属于哪一
+  // 帧”。off 是这一拍的数据在整包 payload 里的起点：一包拆成几拍进来，写存储
   // 时要按这个起点切出本拍那一段。
   Logic64 valid, frame, bytes, off, last, ready, seq;
   LogicPtr<Message> msg;
@@ -159,8 +159,8 @@ class DsaRdataPort : public Logic {
 // 一个模块的容器：单线程下看着能跑，多线程下几百轮里会段错误一次。跨模块的
 // 搬运一律走端口。
 //
-// ready 是「下一拍一定收得下」的承诺：接收方按当前空位算，而往它队列里放东西的
-// 只有 Commit 一家，所以承诺在下一拍仍然成立。「三样一起拿」因此还是原样：
+// ready 是“下一拍一定收得下”的承诺：接收方按当前空位算，而往它队列里放东西的
+// 只有 Commit 一家，所以承诺在下一拍仍然成立。“三样一起拿”因此还是原样：
 // 三个口的 ready 都为真才发，谁没准备好就一起等。
 class AdmitPort : public Logic {
  public:

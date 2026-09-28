@@ -273,7 +273,7 @@ TEST(BachRouterAsm, CoreMaskBitDecidesEntry) {
 }
 
 
-// 一个方向每拍出一个 flit：station 那一侧按「Xbar 收得下就发」交，不等授予。
+// 一个方向每拍出一个 flit：station 那一侧按“Xbar 收得下就发”交，不等授予。
 // 等授予的话一笔要占两拍，一个方向的带宽就只剩一半。
 TEST(BachRouterAsm, OneFlitPerCycleThroughOneInput) {
   std::vector<uint64_t> at;
@@ -554,7 +554,7 @@ TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterCfg cfg;
     // 要转存 10 笔，暂存区就得配得下 10 笔。配少了 CoreMemReissue 会直接停。
-    // 那是设计要的行为：不覆盖已暂存的包，也不退回「留在当前 VC 等」，免得同一个
+    // 那是设计要的行为：不覆盖已暂存的包，也不退回“留在当前 VC 等”，免得同一个
     // stall_way 配置在两种容量下走出两种行为。
     cfg.reissue_pkts_per_vc = 16;
     Router rt(clk, "router", cfg);
@@ -752,8 +752,8 @@ TEST(BachRouterAsm, DrivenByParentMatchesSelfTicked) {
       // 这三样都是协程写、主线程读的普通成员。JoinAll 之后所有协程都退出了，
       // 主线程读它们是安全的。
       //
-      // 不能在协程里读别的模块的裸成员：两个模块同处一拍并发跑，读到的是「本拍
-      // 已跑过的给本拍末的值 + 还没跑的给上一拍末的值」的混合，同一份输入两次跑
+      // 不能在协程里读别的模块的裸成员：两个模块同处一拍并发跑，读到的是“本拍
+      // 已跑过的给本拍末的值 + 还没跑的给上一拍末的值”的混合，同一份输入两次跑
       // 会差一拍。第一版就是让探针在自己的 Step 里读 down.got，40 轮抖出 3 次。
       r.got = down.got;
       r.arrive = down.first_at;

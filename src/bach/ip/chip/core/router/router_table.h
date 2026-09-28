@@ -45,7 +45,7 @@ enum Dir : uint64_t {
 };
 
 // ReduceModule 回注那一路在 Xbar 上是第五个输入。它也走一个 RouterStation，
-// 好让结果「重新参与仲裁」这件事与其他方向走同一套代码。
+// 好让结果“重新参与仲裁”这件事与其他方向走同一套代码。
 constexpr uint64_t kDirReduceInject = 4;
 
 // R2R 三个方向，credit 与 stream 表只对它们记账。
@@ -103,7 +103,7 @@ enum XbarIn : uint64_t {
   kXbarInNum = 5,
 };
 
-// 一条 path 在本 core 上的表项。字段照 F53，含义与填法照「编译侧怎么填这三张表」。
+// 一条 path 在本 core 上的表项。字段照 F53，含义与填法照“编译侧怎么填这三张表”。
 struct RouteEntry {
   bool valid = false;
 
@@ -160,7 +160,7 @@ inline RouteEntry NoOpEntry() {
 
 class RouterTable : public BachModule {
  public:
-  // 副本数按「所有需要并行查询的位置各持一份」数出来：四个 RouterStation、
+  // 副本数按“所有需要并行查询的位置各持一份”数出来：四个 RouterStation、
   // ReduceModule（查 reduce_in_mask 与 flow_dir）、CreditMonitor（按 PathID 查
   // 需要的方向），共 6 处。每副本写入拍数是建模计划的默认值（原文未给）。
   static constexpr uint64_t kCopyNum = 6;

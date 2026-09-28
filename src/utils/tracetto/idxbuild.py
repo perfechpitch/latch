@@ -7,8 +7,8 @@
   调用线程、别的线程可能正握着锁 → 经典死锁；而这里 fork 又几乎没有好处（worker 反正要
   自己开 `TraceReader`）。代价是每个 worker 重新 import 一次（~20 ms）。
 - **原子发布**：先写进 `.building.<pid>.<xx>/`，全部写完、**再确认一次波形没被改过**、
-  最后写 manifest（它就是完成标记），然后 `os.rename` 过去。目标是「另一个进程正在建的
-  半成品永远不会被读到」，以及「两个进程同时建，只有一个赢」。
+  最后写 manifest（它就是完成标记），然后 `os.rename` 过去。目标是“另一个进程正在建的
+  半成品永远不会被读到”，以及“两个进程同时建，只有一个赢”。
 """
 
 from __future__ import annotations
@@ -207,7 +207,7 @@ def build(trace: Path, workers: Optional[int] = None, progress: bool = True,
             except OSError:
                 # 目标目录已经在。**先验它是不是这份波形的好索引**：是的话说明另一个
                 # 进程刚建好，直接用它；不是的话它是过期的（波形改过）或者坏掉的，
-                # 清掉再把我们的换上去 —— 不能因为它「读得动」就当成果收下。
+                # 清掉再把我们的换上去 —— 不能因为它“读得动”就当成果收下。
                 other = index.read_manifest(out_dir)
                 if (other is not None
                         and index.identity_matches(trace, other.get("source", {}))

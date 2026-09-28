@@ -6,7 +6,7 @@
 // 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个。用户
 // 之间的切换因此没有 bubble。队列深 2：一个在跑，一个等着。
 //
-// cmd_ready 就是「队列还有空槽」。拉低时 TS 不能释放这个 task 跳到下一个，所以
+// cmd_ready 就是“队列还有空槽”。拉低时 TS 不能释放这个 task 跳到下一个，所以
 // 这一根线是 TS 侧那条链的闸门。
 //
 // 下发信息里 stream_id、task_id、user_id 与 path_id 由硬件写进自定义 CSR 供软件
@@ -58,7 +58,7 @@ class RvTaskQueue : public BachModule {
   std::shared_ptr<TaskDonePort> FinishPtr() const { return finish; }
 
   uint64_t QueueLen() const { return q.size(); }
-  // 起/完的笔数，单调。Core 层拿它当序号认「本拍新发生的那一笔」。
+  // 起/完的笔数，单调。Core 层拿它当序号认“本拍新发生的那一笔”。
   uint64_t Started() const { return start_cnt; }
   uint64_t Finishes() const { return finish_cnt; }
   // 最近一笔起/完的身份。Core 层发波形要用：这一层自己的信号在建出来时就被
@@ -100,7 +100,7 @@ class RvTaskQueue : public BachModule {
   // 前一个做完了就把队头那个交给执行器。ready 是执行器上一拍报的。
   //
   // 握手那一支排在最前：这一笔已经从队列里取出来放在 held 上了，队列这时是空的。
-  // 若先按「队列空就 Idle」判，正在握手的那一笔会被覆盖成 Idle，执行器再也
+  // 若先按“队列空就 Idle”判，正在握手的那一笔会被覆盖成 Idle，执行器再也
   // 收不到它。
   void Launch() {
     if (driving) {
@@ -158,7 +158,7 @@ class RvTaskQueue : public BachModule {
   RvTask held;
   bool running = false, driving = false;
   // 正在跑的那一笔与刚交还的那一笔。只有 running 那一笔在执行，而 Step() 里
-  // TakeFinish() 排在 Launch() 前面，所以同一拍「一笔结束、下一笔开始」时两边
+  // TakeFinish() 排在 Launch() 前面，所以同一拍“一笔结束、下一笔开始”时两边
   // 各记各的，不会串。
   uint64_t run_stream = 0, run_task = 0, run_user = 0;
   uint64_t done_stream = 0, done_task = 0, done_user = 0;

@@ -17,7 +17,7 @@
 // Rmem 容量，所以 reduce 这一路不单独记账、也不单独还，业务级资源只有 Stream
 // 那一套，用户任务链跑完退休时还一次。
 //
-// 「全部方向」取自 RouterTable 的 reduce_in_mask：按包头的 path_id 查表，得到
+// “全部方向”取自 RouterTable 的 reduce_in_mask：按包头的 path_id 查表，得到
 // 这条 path 在本级会有哪几个相邻方向送来分量。首份输入建上下文时把这个集合一并
 // 记进用户表，本包收齐前不再重查。
 //
@@ -61,7 +61,7 @@
 namespace latch {
 namespace bach {
 
-// reduce_data_type / reduce_outdata_type 的取值。原文只说「BF16 或 FP32」，
+// reduce_data_type / reduce_outdata_type 的取值。原文只说“BF16 或 FP32”，
 // 编码按这两档定。
 enum ReduceDtype : uint64_t {
   kReduceBf16 = 0,
@@ -126,7 +126,7 @@ class ReduceModule : public BachModule {
   LinkEnd& In(uint64_t r) { return *in_wire.at(r); }
   void AttachIn(uint64_t r, LinkEndPtr wire) { in_wire.at(r) = std::move(wire); }
   // 结果回注 Xbar 的第五路输入。方向已经由 flow_dir 算好，直接交请求，不再走
-  // 一遍 RouterStation 重查表，那样会拿同一个 path_id 判成「又要归约」。
+  // 一遍 RouterStation 重查表，那样会拿同一个 path_id 判成“又要归约”。
   std::shared_ptr<XbarReqPort> ReqPtr() const { return req; }
   ReduceDonePort& Done() { return *done; }
   std::shared_ptr<ReduceDonePort> DonePtr() const { return done; }

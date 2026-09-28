@@ -68,7 +68,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <text x="844.0" y="175.0" font-size="8.5" fill="#475569">　读出来就用来算 weight 访存地址</text>
 <text x="844.0" y="188.5" font-size="8.5" fill="#475569">组内序号是上游在把 topK 广播进本 EP Group</text>
 <text x="844.0" y="202.0" font-size="8.5" fill="#475569">　之前就压好的</text>
-<text x="844.0" y="215.5" font-size="8.5" fill="#475569">topK_ep_table：DTE 经专用数据线写入，每 stream ≤ 256 B</text>
+<text x="844.0" y="215.5" font-size="8.5" fill="#475569">topK_ep_table：DTE 经专用数据线写入，1024 份，每份 ≤ 256 B</text>
 <text x="844.0" y="229.0" font-size="8.5" fill="#475569">　FC1 / FC3 只需 ids，FC2 需 ids 与 weights</text>
 <text x="844.0" y="242.5" font-size="8.5" fill="#475569">router_expert_count = 0 时忽略 topK 相关寄存器</text>
 <polygon points="319,44 450,44 441,74 310,74" fill="#f8fafc" stroke="#374151"/>
@@ -219,7 +219,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F9 | 按任务信息索引 topK 激活专家信息 |
 | F10 | topK 直接存组内序号（local index），读出来就用来算 weight 访存地址 |
 | F11 | 组内序号由上游在把 topK 广播进本 EP Group 之前压好，MU 不做 global→local 翻译 |
-| F12 | `topK_ep_table` 由 DTE 搬运时经 DTE→MU 专用数据线按 `stream_id` 直接写入（256 B，1 拍），MU 计算时与 token、weight 同时读，不再有 task 启动时的前置串行读 |
+| F12 | `topK_ep_table` 能存 1024 份，每份 256 B，由 DTE 搬运时经 DTE→MU 专用数据线直接写入（一份 1 拍），下标取 topK 段地址的端内偏移：计算 core 按 `stream_id`，MU 计算时与 token、weight 同时读 `topK_ep_table[stream_id]`，不再有 task 启动时的前置串行读；B core 按 `user_id`，收下 token 时存、广播与转发时取出附回包里 |
 | F13 | token 数据与 topK 信息分开存放：FC1 / FC3 只需 topK ids，FC2 需 ids 与 weights |
 | F14 | `router_expert_count = 0` 时忽略 topK 相关寄存器 |
 
@@ -308,7 +308,7 @@ port cfg (slave, ctrl_noc 写事务, clk)            // 静态配置
 ```
 mem regfile         FF 阵列   静态配置组 + 动态参数寄存器                          1R1W  dsa_cfg 写            复位 0
 mem issue_q         FIFO      16 × 任务描述                                        1W1R  顺序执行              复位空
-mem topK_ep_table   FF 阵列   16 stream × 256 B，每项 {local_ep_index 2 B, weight 4 B}  1W1R  DTE 经专用数据线写入，MU 计算时读  复位空
+mem topK_ep_table   FF 阵列   1024 份 × 256 B，每项 {local_ep_index 2 B, weight 4 B}  1W1R  DTE 经专用数据线写入，MU 计算时读  复位空
 mem token_ldq       FIFO      16 × {addr[17:0], tag}                                1W1R  取决于读延时           复位空
 mem rd_outstanding  FF 阵列   16 × 256 B = 4 KB                                     1RW   掩盖 latency          复位空
 mem weight_ldq      FIFO      4 × {addr[24:0]}                                      1W1R  各 lane 地址相同       复位空
@@ -480,7 +480,7 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="104" y="82" font-size="10" fill="#334155" text-anchor="middle">task_id[5:0]</text>
   <rect x="20" y="102" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="106" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">topK_ep_table · FF 16×256 B · 1W1R（DTE 写、MU 读）</text>
+  <text x="104" y="123" font-size="10" fill="#374151" text-anchor="middle">topK_ep_table · FF 1024×256 B · 1W1R（DTE 写、MU 读）</text>
   <rect x="649" y="63" width="176" height="92" fill="#f1f5f9" stroke="#334155"/>
   <rect x="649" y="63" width="176" height="18" fill="#334155"/>
   <text x="737" y="76" font-size="10.5" fill="#ffffff" text-anchor="middle">EP_INFO</text>

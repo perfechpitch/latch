@@ -2,7 +2,7 @@
 //
 // 重发这一段验三样：存进去的包打上重发标记、放出来时改回去；同一个 VC 只放
 // 队头，别的 VC 不受影响；暂存区满了是配置错误，直接断言而不是丢包或改走
-// 「留在当前 VC 等」。
+// “留在当前 VC 等”。
 
 #include <gtest/gtest.h>
 
@@ -146,7 +146,7 @@ TEST(BachReissue, WakeReleasesOnlyTheHeadOfThatVc) {
   EXPECT_EQ(pending_vc2, 1u) << "没唤醒的 VC 一笔没动";
 }
 
-// 暂存区满了是配置错误：不覆盖已暂存的包，不丢包，也不退回「留在当前 VC 等」。
+// 暂存区满了是配置错误：不覆盖已暂存的包，不丢包，也不退回“留在当前 VC 等”。
 TEST(BachReissue, FullBufferIsAConfigurationError) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);

@@ -9,7 +9,8 @@
 // 一个 stream 内唯一，同一拍在途的两笔任务可以带同一个值：一笔是 Router 送进来
 // 的搬入，另一笔是 RV core 配的搬出。向 TS 上报时用的仍是业务身份。
 // 同一拍多个 Join 命中时全部写进 Done Pending，不允许覆盖或丢失，由 Done Pending
-// 负责串行化。向 TS 的报告是 exactly-once。
+// 负责串行化。向 TS 的报告是 exactly-once。同一通道内按下发顺序 Join，通道之间
+// 不互相等。
 //
 // 六个完成层级：
 //   queued      已进 TaskQueue 未装载
@@ -119,8 +120,12 @@ class CompletionRs : public BachModule {
 
   // 收 Commit 准入的任务，占一项。Join 排在它前面，所以这一拍腾出来的位置
   // 当拍就能用上。
+  // ready 在收下这一拍的任务之后算，Commit 读到它时已经算上了这一笔。
   void TakeAdmit() {
+    Admit();
     admit->DriveReady(HasRoom());
+  }
+  void Admit() {
     if (!admit->Valid() || admit->Seq() == last_admit_seq) return;
     auto d = admit->Desc();
     if (!d) return;
@@ -157,10 +162,17 @@ class CompletionRs : public BachModule {
   }
 
   // 两侧条件都满足才 Join。同一拍多个命中全部写进 Done Pending。
+  //
+  // 同一通道内按下发顺序反馈（《DTE DSA》“任务完成后顺序反馈TS”）：按内部序号扫，
+  // 一个通道有一笔还没齐，这一拍排在它后面、同一通道的都不 Join；别的通道照报。
   void Join() {
+    uint64_t blocked = 0;  // 这一拍已有一笔没齐的通道，按位记
     for (auto it = rs.begin(); it != rs.end();) {
       Entry const& e = it->second;
-      if (!(e.rd_ok && e.wr_ok && e.rd_drained && e.wr_drained)) {
+      uint64_t lane_bit = 1ull << e.desc.Lane();
+      if ((blocked & lane_bit) ||
+          !(e.rd_ok && e.wr_ok && e.rd_drained && e.wr_drained)) {
+        blocked |= lane_bit;
         ++it;
         continue;
       }

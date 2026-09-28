@@ -113,8 +113,8 @@ def lanes_to_signals(evs, lanes=3):
 
 
 # 一份合成波形：chip0.core0 上两笔下发（DTE 与 MU 各一笔），各带一对 RV 边沿与一对
-# DSA 边沿；外加一路 VU，只有 RV 边沿、身份是占位 —— 查「认不出配对」那一支。
-# DSA 那一行的段由起止两条边沿折出来，与真波形上「一个单元压着好几笔」的折法一致。
+# DSA 边沿；外加一路 VU，只有 RV 边沿、身份是占位 —— 查“认不出配对”那一支。
+# DSA 那一行的段由起止两条边沿折出来，与真波形上“一个单元压着好几笔”的折法一致。
 RV_EV = [(11, 0, 3, 77), (41, 1, 5, 77), (60, 2, 0xFF, 0xFFFF)]
 RV_DONE_EV = [(20, 0, 3, 77), (50, 1, 5, 77), (70, 2, 0xFF, 0xFFFF)]
 DSA_EV = [(14, 0, 3, 77), (44, 1, 5, 77)]
@@ -514,7 +514,7 @@ def check_scale(workdir):
         init = len(json.dumps({"chips": manifest["chips"], "lane_n": manifest["lane_n"]},
                               separators=(",", ":")).encode())
         # 缩到最小（整条波形铺在 200 px 上）取一次：段比像素多得多时走粗层，
-        # 传输永远不超过「这一窗的精确段」那条线。
+        # 传输永远不超过“这一窗的精确段”那条线。
         cf = index.CoreFile(d / index.CORES_DIR / "00000.bin")
         w = cf.window(0, 0, manifest["t_end"], 8)      # 一屏只放 8 像素
         nbytes = 0 if w is None else w["end"] - w["off"]
@@ -531,7 +531,7 @@ def check_scale(workdir):
     expect_true(per_seg < 24, f"每段索引字节 {per_seg:.1f} 应当有上界")
     expect_true(sizes[8][2] < sizes[1][2] * 1.5, "init 体积不该随段数涨")
     for k in (1, 8):
-        # 传输 ≤ 「这一窗的精确段」的上界（粗层只会更小）
+        # 传输 ≤ “这一窗的精确段”的上界（粗层只会更小）
         cap = max(2 * 8, sizes[k][5]) * 8 + 64
         expect_true(sizes[k][3] <= cap,
                     f"K={k} 的窗口传输 {sizes[k][3]} 超过上界 {cap}")

@@ -143,9 +143,11 @@ class Ts {
 
  private:
   void Wire() {
-    // 八个物理写口接到 Stream_table 上，顺序就是优先级。
+    // 物理写口接到 Stream_table 上，顺序就是优先级。
     Bind(kWrRetirement, credit->RetireWrPtr());
-    Bind(kWrCompletion, task_done->CompletionPtr());
+    for (uint64_t k = 0; k < kDoneLaneNum; ++k) {
+      Bind(kWrCompletion + k, task_done->CompletionPtr(k));
+    }
     Bind(kWrInstall, task_ctrl->InstallPtr());
     Bind(kWrIssueDte, dte_arb->IssuePtr());
     Bind(kWrIssueMu, mu_arb->IssuePtr());

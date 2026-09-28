@@ -4,7 +4,7 @@
 // M3 · dsa_iss 下发。
 //
 // 每拍最多下发一条配置或 trigger 指令。写 DSA 寄存器一条写一个：指令表里
-// 只有 dsaw / dsawi，与「每条最多配置 1 个 DSA 寄存器」一致。
+// 只有 dsaw / dsawi，与“每条最多配置 1 个 DSA 寄存器”一致。
 //
 // 写会被反压：DSA 的配置通路满时 req_ready 拉低，这一条阻塞在这里，执行器那边
 // pc 保持。读不会被阻塞，而且不支持同步返回：发出去就走，返回数据由 dsa_rq
@@ -97,8 +97,8 @@ class DsaIss : public BachModule {
     it.data = req->wdata.Get();
     it.ids = req->TaskIds();
     // 序号在收下这一笔时定死。等 ready 的那几拍要一直发同一个号，每拍换号
-    // 的话，接收方按序号去重就把同一笔认成好几笔，写 trigger 那种「写一次执行
-    // 一次」的寄存器会被执行好几遍。
+    // 的话，接收方按序号去重就把同一笔认成好几笔，写 trigger 那种“写一次执行
+    // 一次”的寄存器会被执行好几遍。
     it.seq = ++cfg_seq;
     q.push_back(it);
     // 读指令：把目的寄存器编号交给 dsa_rq 记着，返回时按序写回。

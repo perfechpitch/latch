@@ -1,6 +1,6 @@
 // numeric 这一层的基线：格式转换、舍入模式与两种累加顺序。
 //
-// 步 8 的判据是「逐条计算原语与参考实现逐 bit 比对」，比对的基准就是这一层。
+// 步 8 的判据是“逐条计算原语与参考实现逐 bit 比对”，比对的基准就是这一层。
 // 所以这里先把这一层自己钉住：往返转换要么精确、要么落在该格式能表示的最近一
 // 档；累加顺序换一下结果就变，那件事要能被看见，因为顺序是结果的一部分。
 
@@ -130,7 +130,7 @@ TEST(Numeric, Fp4PacksTwoPerByte) {
 
 TEST(Numeric, AccumOrderMatters) {
   // 一个大数配一串小数：顺序加会把小数吃掉，分块加不会。两个结果不同 bit。
-  // 这正是「顺序是结果的一部分」那件事，参考实现必须照抄硬件的顺序。
+  // 这正是“顺序是结果的一部分”那件事，参考实现必须照抄硬件的顺序。
   std::vector<float> v;
   v.push_back(1.0e8f);
   for (int i = 0; i < 64; ++i) v.push_back(1.0f);
@@ -142,13 +142,13 @@ TEST(Numeric, AccumOrderMatters) {
 }
 
 TEST(Numeric, AccumByScaleBlockScalesOncePerBlock) {
-  // 块内先加完再乘 scale：结果与「逐个乘 scale 再加」在一般情况下不同 bit。
+  // 块内先加完再乘 scale：结果与“逐个乘 scale 再加”在一般情况下不同 bit。
   std::vector<float> prods;
   for (int i = 0; i < 64; ++i) prods.push_back(1.0f / float(i + 3));
   std::vector<float> sc = {0.125f, 8.0f};
   float got = AccumByScaleBlock(prods, sc, 32);
 
-  // 与「块内先加再乘」逐 bit 相同。
+  // 与“块内先加再乘”逐 bit 相同。
   float want = 0.0f;
   for (int b = 0; b < 2; ++b) {
     float part = 0.0f;

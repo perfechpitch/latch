@@ -16,7 +16,7 @@ cmake --build build -j
 cd build/test && ctest --output-on-failure
 ```
 
-构建类型不给就是 `Debug`。跑三层整体那几份要给 `Release`：48 颗 chip 那两份要推 15398 拍与 41653 拍，`Debug` 下一份就要跑掉好几分钟。这台机器（16 核 32 线程）上 `ctest -j 4` 全量一遍约 4 分钟，最长的是 `moe_lpu_tokens`，单独跑约 2 分半，`moe_lpu` 约 45 秒。
+构建类型不给就是 `Debug`。跑三层整体那几份要给 `Release`：48 颗 chip 那两份要推 10529 拍与 17397 拍，`Debug` 下一份就要跑掉好几分钟。这台机器（16 核 32 线程）上 `ctest -j 4` 全量一遍约 4 分钟，最长的是 `moe_lpu_tokens`，单独跑约 2 分半，`moe_lpu` 约 45 秒。
 
 `test/bach/` 下每个 `.cpp` 自动成为一个 CTest 目标，目标名取文件名。跑单个目标：
 
@@ -66,18 +66,18 @@ cd src/bach/compiler && python3 gen_hwconfig.py --topo topo/<拓扑名>.json
 | 目标 | 用例 | 规模与拍数 |
 | - | - | - |
 | `chip_e2e` | `TokenCrossesTwoChips` | 一个 token 过 C2C 从一颗中间列 chip 到另一颗，片内经过坏 core7，中间隔一段 300 拍的 PCIe 链路 |
-| `moe_chip` | `BcoreStartsTheBroadcast` | 一颗第一列 chip 八个计算 core：B core 广播 token，chip 内归约进 dot core，FC2 输入广播回本 chip，concat 从 E 口出去，1940 拍 |
-| `moe_chip` | `OneRowOfTwoChipsLandsInTheReductionCore` | 一行两颗 chip，左边那颗带坏 core2、core7，行链两跳落进右边那颗的 R core，3045 拍 |
-| `moe_chip` | `OneEpGroupHasTwoReductionCores` | 一个 EP 组八颗 chip 六十四个计算 core，中间两列 chip 带坏 core2、core7，两行各进本行 R core，两个 R core 串链，4958 拍 |
-| `moe_chip` | `WeightsComeInBeforeTheFirstToken` | 权重与 scale 先走数据面进 Matrix Mem，切业务模式之后再发 token，8704 拍 |
+| `moe_chip` | `BcoreStartsTheBroadcast` | 一颗第一列 chip 八个计算 core：B core 广播 token，chip 内归约进 dot core，FC2 输入广播回本 chip，concat 从 E 口出去，1716 拍 |
+| `moe_chip` | `OneRowOfTwoChipsLandsInTheReductionCore` | 一行两颗 chip，左边那颗带坏 core2、core7，行链两跳落进右边那颗的 R core，2381 拍 |
+| `moe_chip` | `OneEpGroupHasTwoReductionCores` | 一个 EP 组八颗 chip 六十四个计算 core，中间两列 chip 带坏 core2、core7，两行各进本行 R core，两个 R core 串链，4303 拍 |
+| `moe_chip` | `WeightsComeInBeforeTheFirstToken` | 权重与 scale 先走数据面进 Matrix Mem，切业务模式之后再发 token，8480 拍 |
 
 ### LPU 层
 
 | 目标 | 用例 | 规模 |
 | - | - | - |
 | `lpu_e2e` | 2 | 一个 token 从入口桩进阵列、穿 15 颗 chip、从出口桩出来。走 `Lpu` 那一层的装配与 PCIe Switch，只验链路不算数 |
-| `moe_lpu` | `OneLayerAcrossFortyEightChips` | 48 颗 chip 摆成 12 层 × 4 列，每颗 2×5，共 480 个 core、三百八十四个计算 core，两层一个 EP 组共 6 组，12 个 R core 逐行串链；发一个 token，逐颗 chip、逐行核对中间量，15398 拍 |
-| `moe_lpu_tokens` | `ThirtyTwoTokensWithSixteenCredits` | 同 `moe_lpu` 的 48 颗 chip；GPU 一侧有 16 份额度，连续发 32 个 token，额度一直用满。每个 token 一个用户号，R core 上落同一个槽的两个 token 前一个的结果出来才发后一个；核对出口上的每一包，41653 拍 |
+| `moe_lpu` | `OneLayerAcrossFortyEightChips` | 48 颗 chip 摆成 12 层 × 4 列，每颗 2×5，共 480 个 core、三百八十四个计算 core，两层一个 EP 组共 6 组，12 个 R core 逐行串链；发一个 token，逐颗 chip、逐行核对中间量，10529 拍 |
+| `moe_lpu_tokens` | `ThirtyTwoTokens` | 同 `moe_lpu` 的 48 颗 chip；GPU 每 100 拍发一个 token，连续发 32 个。每个 token 一个用户号，就是它在 R core 上的槽号；核对出口上的每一包，17397 拍 |
 
 `moe_chip`、`moe_lpu` 与 `moe_lpu_tokens` 的配置不写在用例里：任务链、路由表、进核配置、TS 的全局项与
 三份 kernel 都由 `LoadBundle()` 装。一份拓扑描述编出一套 bundle，落在
@@ -164,7 +164,7 @@ core 的摆法和 `Core::EmitTrace()` 那几个信号名，换个项目不成立
 
 产出是本地单文件，事件数据内联在里面，不依赖外部资源，双击就能看。四级视图逐级点进去：
 
-| 视图 | 画什么 | 一「步」是 |
+| 视图 | 画什么 | 一“步”是 |
 | - | - | - |
 | 阵列 | 所有 chip 排成格子，方块深浅是本拍片内转发的 flit 数，线亮是 C2C 上有数据在途 | 一帧 |
 | chip | 片内 core 与它们之间的 left / right / mid 链路 | 一帧 |
@@ -232,8 +232,8 @@ Router 那一组照设计文档 `09-router-*.html` 画的方框拆，每个方�
 
 RouterTable 是静态配置，不记。
 
-累计那一类在模型里是只加不清零的计数器（`forwarded_pending` 这些），要看「这一拍发生
-了多少」得取相邻两拍的差。水位那一类是队列长度与缓冲占用，直接读。
+累计那一类在模型里是只加不清零的计数器（`forwarded_pending` 这些），要看“这一拍发生
+了多少”得取相邻两拍的差。水位那一类是队列长度与缓冲占用，直接读。
 
 #### 一笔 task 的七个时刻
 
@@ -260,7 +260,7 @@ RouterTable 是静态配置，不记。
 | `ts_task` 与 `rv_*`、`dsa_*` 的 `_task` | 三路的 task 号各占 8 bit：`dte │ mu << 8 │ vu << 16`。那一路本拍没有就填 `0xFF` |
 | `ts_user` 与 `rv_*`、`dsa_*` 的 `_user` | 三路的 user_id 各占 16 bit：`dte │ mu << 16 │ vu << 32`。那一路本拍没有就填 `0xFFFF` |
 
-认「新的一笔」看的是三条发射通路各自的 `seq`：一笔命令会在端口上连着摆几拍等 RV core
+认“新的一笔”看的是三条发射通路各自的 `seq`：一笔命令会在端口上连着摆几拍等 RV core
 收下，只看 `cmd_valid` 会把同一笔数很多遍。三条通路各管各的 stream，同一拍可以各发各的，
 所以三个信号都按路分位。其余几个时刻同样按各自的序号或笔数认，不看端口电平。
 
@@ -309,7 +309,7 @@ chip 这一级另记四座 C2C 桥各 5 个，加 `scp.state` 一个。
 算数值的那几份（`moe`、`moe_chip`、`moe_lpu`、`moe_lpu_tokens`、`e2e` 的后三个、`numeric`）不写期望值，与 `src/bach/compiler/reference/` 的 Python 参考实现逐 bit 比对。向量存在 `src/bach/compiler/reference/vectors/`，由 `vectors.py` 产出：
 
 ```shell
-python3 src/bach/compiler/reference/vectors.py     # 全部重算，约 2 小时，几乎都花在 moe_lpu_tokens.txt 上
+python3 src/bach/compiler/reference/vectors.py     # 全部重算：有 CUDA 时约 12 秒，只走纯 Python 时约 2 小时
 ```
 
 一个 core 的权重约 1.2 MiB，向量里只给种子，两侧按同一个规则逐 tile 生成。改了尺寸才需要重算。

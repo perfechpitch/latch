@@ -127,6 +127,10 @@ class CoreProbe : public BachModule {
   uint64_t triggers = 0, cs_used = 0, streams_valid = 0;
   uint64_t rv_insts = 0, dte_cmds = 0, dsa_writes = 0;
   uint64_t dte_trigs = 0, dte_regwrites = 0, dte_admits = 0, dte_dones = 0;
+  // DTE RV core 接下第一笔业务 task 那一拍的寄存器写次数：firmware 在 boot 时
+  // 配模板的那些写都在这之前，业务 task 的写是它之后的增量。
+  uint64_t boot_regwrites = 0;
+  bool task_started = false;
   uint64_t mu_dones = 0, vu_dones = 0;
   uint64_t cmem_grants = 0, head = 0, tail = 0, out_sent = 0;
 
@@ -142,7 +146,7 @@ class CoreProbe : public BachModule {
       if (core.GetTs().Table().Peek(i).valid) ++v;
     }
     streams_valid = v;
-    // 一次握手最少两拍，同一笔会连着两拍出现在端口上，按「valid 从低变高」认它。
+    // 一次握手最少两拍，同一笔会连着两拍出现在端口上，按“valid 从低变高”认它。
     Count(core.GetTs().DteCmd().Valid(), &cmd_hold, &dte_cmds);
     Count(core.Rv(0).DsaCfg().Valid(), &cfg_hold, &dsa_writes);
     Count(core.GetTs().DsaDone(0).Valid(), &done_hold, &dte_dones);
@@ -150,6 +154,10 @@ class CoreProbe : public BachModule {
     Count(core.GetTs().DsaDone(2).Valid(), &vu_hold, &vu_dones);
     dte_trigs = core.GetDte().Regfile().Triggers();
     dte_regwrites = core.GetDte().Regfile().Writes();
+    if (!task_started && core.Rv(0).TaskQueue().Started() > 0) {
+      task_started = true;
+      boot_regwrites = dte_regwrites;
+    }
     dte_admits = core.GetDte().Committer().Admitted();
     cmem_grants = core.Cmem().Granted();
     out_sent = core.GetDte().OutArb().Sent();
@@ -203,14 +211,16 @@ TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
     WriteDatainChain(core);
     ASSERT_GT(SymbolOf("task_dte_user_init"), 0u);
 
-    CoreHarness harness(clk, core, /*at=*/2, MakeToken(3, 42));
+    // token 等 firmware 跑完、模板写都落进 regfile 之后再送，datain 那几笔写
+    // 才与启动时配模板的写分得开。
+    CoreHarness harness(clk, core, /*at=*/200, MakeToken(3, 42));
     CoreProbe probe(clk, core);
-    clk->Continue(400 * kPeriod);
+    clk->Continue(600 * kPeriod);
     RT::JoinAll();
     triggers = probe.triggers;
     cmds = probe.dte_cmds;
     insts = probe.rv_insts;
-    regw = probe.dte_regwrites;
+    regw = probe.dte_regwrites - probe.boot_regwrites;
     trigs = probe.dte_trigs;
     admits = probe.dte_admits;
     dones = probe.dte_dones;
@@ -224,7 +234,9 @@ TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
   EXPECT_EQ(triggers, 1u);   // Router 收下包并通知了 TS
   EXPECT_EQ(cmds, 1u);       // TS 下发了这一笔给 DTE RV core
   EXPECT_GT(insts, 0u);      // RV core 真的跑了 kernel
-  EXPECT_EQ(regw, 8u);       // datain 写 DTE 寄存器配进核搬运（段 1 + scale 段 2）
+  // 本核第一个任务先配八套 DTE 模板（60 笔）；datain 本身照包头配一笔带 scale 的
+  // 进核搬运：段 1、段 2 各三项，TRANS_MODE，trigger（8 笔）
+  EXPECT_EQ(regw, 68u);
   EXPECT_EQ(trigs, 1u);      // datain 自己起一笔进核搬运
   EXPECT_EQ(admits, 1u);     // 搬运只起了一笔
   EXPECT_GT(grants, 0u);     // 数据真的落进了 Core Mem

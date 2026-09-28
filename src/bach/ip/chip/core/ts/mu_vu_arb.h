@@ -9,8 +9,8 @@
 // 三条发射通路各自独立打拍，同一拍可以并行下发 3 个 task。RV core 按 task_queue
 // 是否有空槽产生 task_ack；未被接收时不能释放该 task 跳到下一个。
 //
-// 自启动 core 上 Task 0 一次只放一笔：有一条链的 Task 0 下发之后、完成之前，别
-// 的链的 Task 0 不下发。
+// 自启动 core 上 16 条链的 Task 0 与别的 task 一样参加仲裁、连续下发（《Task
+// Scheduler》：同时激活16个用户的自启动任务，进行task仲裁，进行发射）。
 
 #include <memory>
 #include <string>
@@ -90,6 +90,12 @@ class UnitArb : public BachModule {
 
   void Select() {
     if (holding) return;
+    // 上一笔的 READY → INFLY 回写还没被表收下就不挑下一笔：只有一个回写槽，
+    // 接着发会把没收下的那一笔盖掉，它的 INFLY 丢了就会被再下发一次。
+    if (infly) {
+      cmd->Idle();
+      return;
+    }
     StreamSnapshotPtr s = snap->Get();
     if (!s) {
       cmd->Idle();
@@ -103,23 +109,17 @@ class UnitArb : public BachModule {
         issued_stream = kStreamNum;
       }
     }
-    // 自启动 core：Task 0 一次只放一笔。有一条链的 Task 0 发出去还没完成时，
-    // 别的链的 Task 0 都等着；刚发出、快照上还是 READY 的那两拍也算。
-    bool task0_busy = cfg.SelfStartCore() &&
-                      (s->Task0Infly() ||
-                       (issued_stream < kStreamNum && issued_task == 0));
     for (uint64_t k = 0; k < kStreamNum; ++k) {
       uint64_t i = s->AgeOrder(k);
       StreamEntry const& e = s->entry[i];
       if (!e.valid || e.task_fsm != TaskFsm::kReady || e.task_unit != unit) {
         continue;
       }
-      if (task0_busy && e.task_id == 0) continue;
       // 刚发出去的那一笔，表里的 READY → INFLY 还没落下来：写口一拍、快照一
       // 拍，这两拍里快照上它仍是 READY。不挡住的话同一个 task 会被下发两次。
       if (i == issued_stream && e.task_id == issued_task) continue;
       cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
-                 e.task_recv == RecvUnit::kDsa, ++cmd_seq);
+                 e.task_recv != RecvUnit::kRvOnly, ++cmd_seq);
       holding = true;
       hold_stream = i;
       hold_task = e.task_id;

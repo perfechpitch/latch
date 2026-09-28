@@ -4,7 +4,7 @@
 // Router 内部各模块之间的端口束。
 //
 // 资源的归属：VC credit 与出方向的 Stream Resource Table 都落在 Xbar，不落在
-// RouterStation。文档把 VA 那一级画在 station 上，但这两样管的都是「下游方向」
+// RouterStation。文档把 VA 那一级画在 station 上，但这两样管的都是“下游方向”
 // 的资源，四个 station 会同时想用；只有让唯一的发送决策点持有它们，才不会出现
 // 两个 station 同一拍各自判断够、加起来超扣。station 侧做 M1 收 flit 进 VC
 // Buffer 与 M2 查表建上下文，把队首请求交给 Xbar；M3 的资源检查、M4 的通路仲裁、
@@ -24,7 +24,7 @@ namespace bach {
 
 // RouterStation → Xbar：交出去的一笔 flit。
 //
-// 这一路不是 valid/grant 握手，是「下游有位置就发」：Xbar 每拍发布自己那个入口
+// 这一路不是 valid/grant 握手，是“下游有位置就发”：Xbar 每拍发布自己那个入口
 // 缓冲还收不收得下（room），station 读上一拍的电平，收得下就把队首交出去并当场
 // 出队。等授予的话一笔要占两拍（station 提请求、Xbar 下一拍授予、station 再
 // 下一拍才看得到），单个方向的吞吐就只有每两拍一个 flit，而 VC Buffer 队首每拍

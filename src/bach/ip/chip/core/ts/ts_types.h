@@ -34,10 +34,11 @@ enum class SendUnit : uint32_t {
   kVu = 2,
 };
 
-// TASK_RECV_UNIT：这一笔要收齐哪几路完成 ACK。
+// TASK_RECV_UNIT：这一笔等哪几路完成 ACK（《Task Scheduler》v1.1）。
 enum class RecvUnit : uint32_t {
-  kRvOnly = 0,  // 00：只调 RV core，RV core 的 ACK 到了就算完成
-  kDsa = 1,     // 01：调 RV core 与 DSA，两路 ACK 都到才算完成
+  kRvOnly = 0,    // 00：只等 RV core 的 ACK
+  kDsa = 1,       // 01：只等 DSA 的 ACK，RV core 的 ACK 不算
+  kRvAndDsa = 2,  // 10：RV core 与 DSA 两路 ACK 都到才算完成
 };
 
 // TASK_TYPE。
@@ -75,7 +76,7 @@ struct TaskEntry {
 
   bool IsDataIn() const { return wait_wake; }
   bool IsReduce() const { return task_type == TaskType::kReduce; }
-  bool UsesDsa() const { return recv_unit == RecvUnit::kDsa; }
+  bool UsesDsa() const { return recv_unit != RecvUnit::kRvOnly; }
 };
 
 // 一项任务装进 stream 时的初始状态：要等外部数据唤醒的置 WAIT；要查 credit 的
@@ -140,21 +141,29 @@ inline StreamEntry SelfStartEntry(TaskEntry const& task0) {
   return e;
 }
 
-// 八个写口，按来源命名。优先级由高到低就是这个顺序：让表项先腾空再填新的，
-// 回收类排在生成类前面，create 排最后，队头卡住时不会因为新用户不断插队
-// 而饿死。
-// issue 这一类有三个物理实例：三条发射通路各自独立打拍，同一拍可以并行下发
-// 3 个 task，各自都要回写 READY → INFLY。三个实例优先级相同，挨在一起排。
+// 完成事件的独立 lane：DTE、MU、VU 各自的 RV core ACK 与 DSA ACK 六路，加
+// Router 的 Reduce Done 一路。第 u 个执行单元的 RV core 那一路是 2u，DSA 那一路
+// 是 2u + 1（《Task Scheduler》：接收6 路的DTE、MU和VU独立Completion Lane，可并行
+// 处理完成事件）。
+constexpr uint64_t kDoneLaneNum = 7;
+constexpr uint64_t kDoneLaneRouter = 6;
+
+// Stream_table 的写口，按来源命名。优先级由高到低就是这个顺序：让表项先腾空再
+// 填新的，回收类排在生成类前面，create 排最后，队头卡住时不会因为新用户不断
+// 插队而饿死。
+// completion 这一类有七个物理实例，每个完成 lane 一个，落到不同 stream 的同一拍
+// 都能写；issue 这一类有三个：三条发射通路各自独立打拍，同一拍可以并行下发 3 个
+// task，各自都要回写 READY → INFLY。同类的几个实例挨在一起排。
 enum StreamWritePort : uint32_t {
   kWrRetirement = 0,  // 清 valid 并推 head_ptr；自启动 core 上原地重新激活
-  kWrCompletion = 1,  // 完成事件
-  kWrInstall = 2,     // Task_ctrl 生成后继，整项写
-  kWrIssueDte = 3,    // 发射通路收到 ACCEPT 后 READY → INFLY
-  kWrIssueMu = 4,
-  kWrIssueVu = 5,
-  kWrCreditWake = 6,  // credit 到了置 READY
-  kWrCreate = 7,      // User_Match 建表或补跳过位
-  kWrPortNum = 8,
+  kWrCompletion = 1,  // 完成事件，第 k 个 lane 是 kWrCompletion + k
+  kWrInstall = kWrCompletion + kDoneLaneNum,  // Task_ctrl 生成后继，整项写
+  kWrIssueDte,        // 发射通路收到 ACCEPT 后 READY → INFLY
+  kWrIssueMu,
+  kWrIssueVu,
+  kWrCreditWake,      // credit 到了置 READY
+  kWrCreate,          // User_Match 建表或补跳过位
+  kWrPortNum,
 };
 
 }  // namespace bach

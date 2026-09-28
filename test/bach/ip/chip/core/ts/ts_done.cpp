@@ -115,7 +115,9 @@ struct Bench {
     table = std::make_unique<StreamTable>(c, "table", 0, false);
     done = std::make_unique<TaskDone>(c, "done", *cfg, 0, false);
     done->AttachSnapshot(table->SnapPtr());
-    table->Rebind(kWrCompletion, done->CompletionPtr());
+    for (uint64_t k = 0; k < kDoneLaneNum; ++k) {
+      table->Rebind(kWrCompletion + k, done->CompletionPtr(k));
+    }
   }
 };
 
@@ -150,13 +152,21 @@ TEST(BachTsDone, RvOnlyTakesTheRvAck) {
   EXPECT_EQ(rv.done_bitmap, 1u);
 }
 
+// 只等 DSA 的任务：DSA 的 ack 算数，RV core 那一路不算。
+TEST(BachTsDone, DsaOnlyTakesTheDsaAck) {
+  StreamEntry dsa = RunOne(Step(RecvUnit::kDsa), {{6, 0, true, 0, 0}});
+  StreamEntry rv = RunOne(Step(RecvUnit::kDsa), {{6, 0, false, 0, 0}});
+  EXPECT_EQ(dsa.task_fsm, TaskFsm::kFinish);
+  EXPECT_EQ(rv.task_fsm, TaskFsm::kInfly) << "RV core 那一路不算数";
+}
+
 // RV core 与 DSA 两路都收的任务：两路都到才置 FINISH，先到哪一路都一样。
-TEST(BachTsDone, BothAcksAreNeededWhenRecvIsDsa) {
-  StreamEntry one = RunOne(Step(RecvUnit::kDsa), {{6, 0, true, 0, 0}});
-  StreamEntry core_first =
-      RunOne(Step(RecvUnit::kDsa), {{6, 0, false, 0, 0}, {8, 0, true, 0, 0}});
-  StreamEntry dsa_first =
-      RunOne(Step(RecvUnit::kDsa), {{6, 0, true, 0, 0}, {8, 0, false, 0, 0}});
+TEST(BachTsDone, BothAcksAreNeededWhenRecvIsRvAndDsa) {
+  StreamEntry one = RunOne(Step(RecvUnit::kRvAndDsa), {{6, 0, true, 0, 0}});
+  StreamEntry core_first = RunOne(Step(RecvUnit::kRvAndDsa),
+                                  {{6, 0, false, 0, 0}, {8, 0, true, 0, 0}});
+  StreamEntry dsa_first = RunOne(Step(RecvUnit::kRvAndDsa),
+                                 {{6, 0, true, 0, 0}, {8, 0, false, 0, 0}});
   EXPECT_EQ(one.task_fsm, TaskFsm::kInfly) << "只到一路不算完";
   EXPECT_EQ(core_first.task_fsm, TaskFsm::kFinish);
   EXPECT_EQ(dsa_first.task_fsm, TaskFsm::kFinish);
@@ -164,8 +174,8 @@ TEST(BachTsDone, BothAcksAreNeededWhenRecvIsDsa) {
 
 // 两路要来自同一个执行单元：DTE 的 RV core ACK 配 MU 的 DSA ACK 不算。
 TEST(BachTsDone, AcksOfDifferentUnitsDoNotPair) {
-  StreamEntry got =
-      RunOne(Step(RecvUnit::kDsa), {{6, 0, false, 0, 0}, {8, 1, true, 0, 0}});
+  StreamEntry got = RunOne(Step(RecvUnit::kRvAndDsa),
+                           {{6, 0, false, 0, 0}, {8, 1, true, 0, 0}});
   EXPECT_EQ(got.task_fsm, TaskFsm::kInfly);
 }
 
@@ -285,8 +295,9 @@ TEST(BachTsDone, BypassAckIsDroppedOnSelfStartCore) {
 }
 
 // PID 更新任务：RV core 的 ACK 带回新 PID，这一笔完成时写进表项，等紧邻后继继承。
+// 新 PID 只在 RV core 那一路上，用了 DSA 的 PID 更新任务要配成两路都等。
 TEST(BachTsDone, PidUpdateTakesThePidFromTheCoreAck) {
-  TaskEntry t = Step(RecvUnit::kDsa);
+  TaskEntry t = Step(RecvUnit::kRvAndDsa);
   t.task_type = TaskType::kPidUpdate;
   t.path_id = 5;
   StreamEntry got =

@@ -229,7 +229,7 @@ TEST(NumericCross, AccumOrderMatches) {
 
 namespace {
 
-// 逐 bit 比一组值。NaN 只比「是不是 NaN」。
+// 逐 bit 比一组值。NaN 只比“是不是 NaN”。
 void ExpectSame(std::vector<float> const& got, std::vector<float> const& want,
                 std::string const& what) {
   ASSERT_EQ(got.size(), want.size()) << what;

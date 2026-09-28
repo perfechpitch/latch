@@ -104,7 +104,7 @@ class VuPipeCtrl : public BachModule {
   uint64_t Dispatched() const { return dispatch_cnt; }
   bool UnitsReady() const { return !in->Valid() || in->Ready(); }
   // Profile 按成因分开记：Fence 串行化、CM_FENCE 等前序 CM 访问、Scoreboard 数据
-  // 依赖、执行分组结构冒险。四项相加即「有空位却没派发」的分解。
+  // 依赖、执行分组结构冒险。四项相加即“有空位却没派发”的分解。
   uint64_t FenceStalls() const { return fence_stall; }
   uint64_t CmFenceStalls() const { return cmfence_stall; }
   uint64_t DepStalls() const { return dep_stall; }
@@ -310,8 +310,8 @@ class VuPipeCtrl : public BachModule {
 
   // ── 静态配置的合法性 ──
   //
-  // 逐条照《VU-DSA 寄存器整理》的 error_code.CFG_ERROR 一档。判的是「本条用到的
-  // 那个单元」的那些字段：编码未分配或本单元不支持的单元按无操作处理，它的全部
+  // 逐条照《VU-DSA 寄存器整理》的 error_code.CFG_ERROR 一档。判的是“本条用到的
+  // 那个单元”的那些字段：编码未分配或本单元不支持的单元按无操作处理，它的全部
   // 字段一并忽略，不参与检查。
   static bool Legal(VuMacroInst const& inst, VuStaticCfg const& c) {
     bool bf16 = inst.Bf16();
@@ -424,6 +424,11 @@ class VuPipeCtrl : public BachModule {
       // vswap2.v 按相邻偶奇对交换，VL 为奇数时最后一个 element 没有配对者。
       if (op == ValuOp::kSwap2 && vl % 2 != 0) return false;
     }
+
+    // VEXE 之间取源成环就排不出计算次序。
+    std::array<uint64_t, kVuVexeNum> order{};
+    uint64_t n = 0;
+    if (!VuVexeOrder(c, bf16, order, n)) return false;
 
     // ── VSFU ──
     for (uint64_t which = 0; which < 2; ++which) {

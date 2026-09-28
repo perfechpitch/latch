@@ -21,7 +21,7 @@
 // task 控制区各做一笔标量读写，exec.h 的 DrainSinks 把 MmioSink 里排上的请求
 // 转成端口动作——与 kernel 现在用普通 store/load 走约定地址完全等价，gpr 就绪
 // 表、dsa_rq 写回、task_queue 交还这些机制一概不动。loop 不访存，改 LocalPc
-// 并 MarkBranched，由 Engine 的 StepContext 按「分支成立取 LocalPc」收尾。
+// 并 MarkBranched，由 Engine 的 StepContext 按“分支成立取 LocalPc”收尾。
 //
 // DSA IO 窗口基址按核不同（DTE / MU / VU），Decode 那一刻由 SystemRv32Bach
 // 注进指令对象；指令体里只拿 System 基类的标量访存原语，不回头认子类。

@@ -40,8 +40,8 @@ constexpr uint64_t kDtcmSize = 8 * 1024;
 //
 // 硬件上这几样是 custom-0 自定义指令（task_done / dsar / dsaw 那一组），模型里
 // 走 MMIO：rv32 的功能模型认的是标准 RV32IM，加一条自定义指令要动 gen/ 里
-// codegen 出来的解码表。走 MMIO 的行为等价：都是「往一个约定地址写一笔就
-// 触发」，而且 kernel 那边本来就用 store 配 DSA 寄存器。
+// codegen 出来的解码表。走 MMIO 的行为等价：都是“往一个约定地址写一笔就
+// 触发”，而且 kernel 那边本来就用 store 配 DSA 寄存器。
 constexpr uint64_t kTaskCtrlBase = 0x00030000;
 constexpr uint64_t kTaskCtrlSize = 4 * 1024;
 // task 控制区内的偏移。

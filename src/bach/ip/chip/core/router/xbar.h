@@ -11,7 +11,7 @@
 //   M4 SA  每个 output port 一个独立的 RoundRobin，每拍独立仲裁，不跨拍锁定
 //   M5 ST  发出后统一扣各目标的 credit
 //
-// 每个入口按 VC 各一个小的输入缓冲：station 那一侧按「这个 VC 收得下就发」交进
+// 每个入口按 VC 各一个小的输入缓冲：station 那一侧按“这个 VC 收得下就发”交进
 // 来，本级从各 VC 的队首仲裁。资源不够时这一笔留在缓冲里等，同一个 VC 后面的不
 // 越过它；同一个入口别的 VC 照走，与 station 里四个 VC 互不侵占是同一件事。
 //
@@ -23,7 +23,7 @@
 // 切换包，所以别的包可以占掉本包两个 flit 之间的那一拍，但本包的下一个 flit
 // 一提出来就该被授予。
 //
-// 原文在这三档之前还有一档「接口传输 priority」，接口之间怎么分优先级没有给，
+// 原文在这三档之前还有一档“接口传输 priority”，接口之间怎么分优先级没有给，
 // 这里不猜。
 //
 // VC credit 两级记账，与下游 VC Buffer 的分配规则一一对应：private[o][v] > 0 就
@@ -54,7 +54,7 @@ constexpr uint64_t kStreamTabEntries = 16;
 // 广播等于目的 core 数。
 constexpr uint64_t kCoreCreditKb = 128;
 
-// 每个入口每个 VC 的输入缓冲深度与报「收得下」的门限。
+// 每个入口每个 VC 的输入缓冲深度与报“收得下”的门限。
 //
 // station 读的是上一拍发布的 room，所以从 room 拉低到它停下来隔着一拍，那一拍
 // 它还会再交一笔进来。门限之外留两格就是给这一笔加一格余量的。
@@ -221,7 +221,7 @@ class Xbar : public BachModule {
     TakeRetire();
     ReturnCredit();
     // 先收再仲裁：本拍交进来的这一笔，没有冲突时本拍就发出去，入口缓冲上不多
-    // 占一拍。缓冲是给「资源不够、留着等」的那些用的，不是流水线的一级。
+    // 占一拍。缓冲是给“资源不够、留着等”的那些用的，不是流水线的一级。
     Collect();
     Arbitrate();
     PublishRoom();
@@ -373,7 +373,7 @@ class Xbar : public BachModule {
         //
         // 走转存这一档时这一笔就算处理完了：交给 CoreMemReissue，同时给 station
         // 发 grant 把 VC 槽腾出来，不腾的话这一笔既在暂存区里、又占着 VC，
-        // 同一份数据记了两处。Router 上的 Bypass 因此被映射成「进 core 加出 core」
+        // 同一份数据记了两处。Router 上的 Bypass 因此被映射成“进 core 加出 core”
         // 两段。每拍最多转存一笔，因为端口一拍只搬一个 flit。转存只看这个入口
         // 最早的那一笔，转存了这个入口这一拍就不再试别的 VC。
         if (k == 0 && v.stall_way && !owner_busy && !overflow_used) {
@@ -402,7 +402,7 @@ class Xbar : public BachModule {
       }
 
       ++granted_pending;
-      // 这个入口上的包发完没有。记在入口上而不是记「上一拍发的是谁」：一个包
+      // 这个入口上的包发完没有。记在入口上而不是记“上一拍发的是谁”：一个包
       // 的两个 flit 之间可能隔着一拍，那一拍会被别的入口占掉，记后者的话本包
       // 剩下的 flit 就丢了优先级，包被拆散在多拍里交织出去。
       in_packet[in] = !v.tail;
@@ -521,7 +521,7 @@ class Xbar : public BachModule {
   }
 
   void Emit(uint64_t o, XbarReqView const& v) {
-    // 本跳把包头里的 VC 改成表里的「下一跳 VC」，供下一跳直接取。
+    // 本跳把包头里的 VC 改成表里的“下一跳 VC”，供下一跳直接取。
     if (v.msg) v.msg->vc = v.vc;
     LinkEnd* dst = nullptr;
     if (o < kR2RNum) {

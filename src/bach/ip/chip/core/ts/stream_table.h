@@ -7,7 +7,7 @@
 // 是满的：退休的队头在同一个 stream 原地重新激活，两个指针同一步各推一格，按
 // stream_num 环回。
 //
-// 六个写口按固定优先级仲裁，每口一拍一笔，请求保持到 accepted 才算生效。优先级
+// 各写口按固定优先级仲裁，每口一拍一笔，请求保持到 accepted 才算生效。优先级
 // 由高到低是 retirement、completion、install、issue、credit_wake、create，让
 // 表项先腾空再填新的，回收类排在生成类前面，create 排最后，队头卡住时不会因为
 // 新用户不断插队而饿死。

@@ -81,7 +81,7 @@ class UserMatch : public BachModule {
 
   // 建表的笔数与最近建出来的那一步的身份。Created() 数的是 create 口写成功的
   // 次数，老用户那条重发/跳过的支也走同一个口，所以不能拿它当建表的序号。
-  // Core 层拿 Made() 认「本拍新建了一个表项」，与它下发那一拍对起来就是这一步
+  // Core 层拿 Made() 认“本拍新建了一个表项”，与它下发那一拍对起来就是这一步
   // 在 TS 里等的时间。
   uint64_t Made() const { return made_cnt; }
   uint64_t MadeTask() const { return made_task; }

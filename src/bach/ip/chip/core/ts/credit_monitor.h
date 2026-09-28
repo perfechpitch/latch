@@ -113,7 +113,7 @@ class TsCreditMonitor : public BachModule {
       retire_req->Idle();
       retiring = false;
       // 这一笔写要下一拍才落进表、再下一拍才进快照。这中间读到的还是旧快照，
-      // 同一项会被再判成「可以退休」。记住它，等快照里那一项不再满足退休条件
+      // 同一项会被再判成“可以退休”。记住它，等快照里那一项不再满足退休条件
       // 再放开：普通 core 上是 valid 掉下去，自启动 core 上是完成位清空。
       just_retired = retire_slot;
       just_retired_vld = true;

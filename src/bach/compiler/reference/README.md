@@ -29,14 +29,17 @@
 
 ***
 
-## 2　四份文件
+## 2　五份文件
 
 | 文件 | 管什么 |
 | - | - |
 | `numeric_ref.py` | 五种格式的编解码、MX 的分块编解码、三条累加顺序 |
 | `ffn_reference.py` | FFN 那几档算子，累加顺序取自 `numeric_ref` |
 | `vectors.py` | 产出比对向量，落进 `vectors/` |
+| `kn_gpu.py` | MoE 那几份里 KN 拆分那一段的 GPU 实现，一批 token 一起算，结果与纯 Python 逐 bit 相同 |
 | `selftest.py` | 本层自检，挂在 CTest 的 `reference` 上 |
+
+本机装了 torch 且有 CUDA 时，`vectors.py` 里 `kn_chip`、`kn_rows` 与连续跑多个 token 的那一份走 `kn_gpu.py`，其余照旧走纯 Python；没有 CUDA 或没装 torch 时全部走纯 Python。门控里的 sigmoid 要调 libm 的 `expf`，GPU 那一份算到这一步也回 CPU 调 `kn_gate`。
 
 `vectors/` 下的文本文件由 `vectors.py` 产出，改代码之后要重新产一遍，内容进版本库。
 
@@ -90,12 +93,14 @@ NaN 只比“是不是 NaN”，不比载荷：多个编码都是 NaN，载荷�
 
 改了 `numeric/`、`numeric_ref.py` 或 `ffn_reference.py` 中的任何一份：
 
-1. 跑 `python3 src/bach/compiler/reference/vectors.py` 重新产出比对向量，全部产一遍约 2 小时，几乎都花在 `moe_lpu_tokens.txt` 上
+1. 跑 `python3 src/bach/compiler/reference/vectors.py` 重新产出比对向量。有 CUDA 时全部产一遍约 12 秒；只走纯 Python 时约 2 小时，几乎都花在 `moe_lpu_tokens.txt` 上
 2. 跑 `python3 src/bach/compiler/reference/selftest.py`
 3. 跑 `ctest -R 'numeric_cross|mu|vu|e2e|moe|reference'`
 4. 把 `vectors/` 下改动的文件一并提交
 
-`selftest.py` 会把向量重新产一遍与在版本库里的那份比，忘了第 1 步的话它报错。`moe_group.txt`、`moe_lpu.txt` 一份要算一分钟到几分钟，`moe_lpu_tokens.txt` 要算约 2 小时，自检跳过这三份。
+`selftest.py` 会把向量重新产一遍与在版本库里的那份比，忘了第 1 步的话它报错。只走纯 Python 时 `moe_group.txt`、`moe_lpu.txt` 一份要算一分钟到几分钟，`moe_lpu_tokens.txt` 要算约 2 小时，自检跳过这三份。
+
+改了 `kn_gpu.py`，或 `vectors.py` 里 KN 那一段的纯 Python 代码：两条路各产一遍 MoE 那几份，逐字节相同才算改对。有 CUDA 的机器上走 GPU 产一遍，`vectors/` 下的文件不应有变化；纯 Python 那一遍至少产 `moe_chip.txt` 比一次。
 
 ***
 
@@ -108,6 +113,16 @@ NaN 只比“是不是 NaN”，不比载荷：多个编码都是 NaN，载荷�
 * **为什么向量落成文件而不是让 C++ 直接调 Python**
   * 落成文件之后，向量与产它的代码一起进版本库，改数值规则时 diff 上能看见哪些值变了
   * 跑测试不依赖 Python 环境
+
+* **为什么 GPU 那一份能与纯 Python 逐 bit 相同**
+  * 每一步是一次单精度的逐元素运算，得出的就是 IEEE 单精度舍入后的值；纯 Python 先按双精度算再截回 FP32，单精度的加减乘在双精度里算完再截只舍入一次，两边同一个值
+  * 不调矩阵乘库：它会改累加顺序，还可能走 TF32 或乘加融合；逐元素的乘、加各是一个张量运算，块内、块间、tile 间、专家间的顺序与纯 Python 一一对应
+  * MXFP8 元素与 E8M0 scale 按 `numeric_ref` 算出的 256 项表查，BF16 的编码照 `to_bf16` 用整数运算做
+  * 门控回 CPU：GPU 上的 exp 与 libm 的 `expf` 不是同一个实现，末位会差
+
+* **为什么 GPU 那一份只管 KN 那一段**
+  * 慢的只有这一段：每个 token 要把 36 个 6144 × 2048 的矩阵乘一遍，权重还按 tile 从线性同余重新生成；GPU 那一份权重只生成、解码一次留在显存里，一批 token 一起算
+  * 其余几份向量都很小，留在纯 Python 里就是规则本身，不必另写一份
 
 * **为什么 Python 这一份把中间结果截回 FP32**
   * Python 的 float 是双精度，不截就比硬件多带 29 位尾数，累加链上的每一步都会与硬件分叉

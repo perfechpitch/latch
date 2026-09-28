@@ -5,8 +5,8 @@
 //
 // 两级：
 //   M13 进 core 暂存  拿不到下游资源且 stall_way 选转存时，把整包重定向到本地
-//                     Core Mem。Router 上的 Bypass 操作因此被映射成「进 core 加
-//                     出 core」两段。存的时候改写 overflow_reinject = 1
+//                     Core Mem。Router 上的 Bypass 操作因此被映射成“进 core 加
+//                     出 core”两段。存的时候改写 overflow_reinject = 1
 //   M14 取出重发      资源回来后取出，用 PathID 重新查 RouterTable，不重复保存
 //                     VC 与路由信息；Router 把 overflow_reinject 改回 0，
 //                     Output Port 识别到这个标记才扣 credit
@@ -16,7 +16,7 @@
 //
 // 容量由软件在 Core Mem 里预留，取自 cmem_part 的 reissue_base 与
 // reissue_pkts_per_vc，每 VC 至少容得下一个整包。计数到上限说明配少了，模型
-// 直接断言失败：不覆盖已暂存的包，不丢包，也不退回「留在当前 VC 等」，因为那条路
+// 直接断言失败：不覆盖已暂存的包，不丢包，也不退回“留在当前 VC 等”，因为那条路
 // 会让同一个 stall_way 配置在两种容量下走出两种行为，把配置错误掩盖过去。
 //
 // 坏 core 不接收溢流：Router 对它不发起进 core 缓存处理，此时 coremem credit

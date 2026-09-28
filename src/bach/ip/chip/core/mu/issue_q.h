@@ -104,7 +104,7 @@ class MuIssueQ : public BachModule {
     }
     return nullptr;
   }
-  // 写回那一段找的是「还有列没写回」的那一笔。一列切成几段时，段与段之间没有
+  // 写回那一段找的是“还有列没写回”的那一笔。一列切成几段时，段与段之间没有
   // 结果产出，所以这里不按已算的段数比。
   MuInflight* FirstToStore() {
     for (auto& f : q) {

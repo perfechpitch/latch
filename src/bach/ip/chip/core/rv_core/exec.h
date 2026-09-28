@@ -3,21 +3,28 @@
 
 // M2 · 取指与执行，以及 M6 · task_done。
 //
-// 指令逐条执行，不建流水线：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、
-// SEU 的乘除多拍、DTCM 的 bank 冲突都折算进这一拍。功能由 src/rv32 的模型算，
-// 本级只管拍数与记账。
+// 双发射顺序执行（《RV Core》：双发射顺序流水执行；每拍最多派遣 2 条，ALU 2、
+// LD/ST 2、DSA 1），不建流水线：pc_gen、loop_bp、decode、gpr 端口、SEU 的乘除多
+// 拍、DTCM 的 bank 冲突都折算进这一拍。功能由 src/rv32 的模型算，本级只管拍数与
+// 记账。
+//
+// 一拍先发一条，再看紧跟着的那一条能不能同拍发，下面几种不配对：第一条跳走了；
+// 第二条读或写第一条的目的寄存器；两条都发 DSA 请求（DSA 1）；两条都访存（Share
+// Mem 与 Core Mem 各只能发一条，LSQ 的口一拍收一笔，这里从严取一条）；两条都是
+// 乘除。第二条的源寄存器没就绪、或它要用的 DSA 通路或 lsq 没空，也不发。身份
+// 在发 DSA 请求那一拍就抄进请求（Send），第二条是 task_done 也不影响第一条。
 //
 // gpr 就绪表是这一层的核心：发出访存或 DSA 读时把目的寄存器标成未就绪，指令
 // 读到未就绪的源寄存器就等，等到写回才继续。延迟因此记在这张表上而不是记在
-// 「停多少拍不取指」上，因为后者会把「读了别的寄存器可以先走」那点重叠也吃掉。
+// “停多少拍不取指”上，因为后者会把“读了别的寄存器可以先走”那点重叠也吃掉。
 //
 // 数据与时序分开：功能模型的 load 是同步返回的，指令执行那一刻数据就落进了
-// gpr；就绪表管的是「这个值从哪一拍起算数」。对顺序单发射的核，两者合起来就是
+// gpr；就绪表管的是“这个值从哪一拍起算数”。对顺序单发射的核，两者合起来就是
 // 真实行为。
 //
 // 自定义指令走 MMIO：rv32 的功能模型认标准 RV32IM，加 custom-0 那一组要动 gen/
-// 里 codegen 出来的解码表。改成往约定地址写一笔，行为等价：都是「往一个约定
-// 地址写一笔就触发」，kernel 那边本来也是用 store 配 DSA 寄存器的。
+// 里 codegen 出来的解码表。改成往约定地址写一笔，行为等价：都是“往一个约定
+// 地址写一笔就触发”，kernel 那边本来也是用 store 配 DSA 寄存器的。
 // custom-0 现在另有真实编码：SystemRv32Bach（custom0.h）覆盖 Decode 译那一组，
 // 指令体仍走这条 MMIO 通路（对 DSA IO 窗口与 task 控制区做标量读写），所以
 // kernel 两条路都认，迁移与否行为等价。
@@ -106,6 +113,27 @@ inline RvRegUse RvDecodeRegs(uint32_t inst) {
   if (u.rs2 == 0) u.has_rs2 = false;
   if (u.rd == 0) u.has_rd = false;
   return u;
+}
+
+// 双发射配对要看的几类资源。
+enum RvIssueRes : uint32_t {
+  kResDsa = 1u << 0,   // dsar / dsari / dsaw / dsawi
+  kResMem = 1u << 1,   // load / store
+  kResMul = 1u << 2,   // 乘除
+  kResCtrl = 1u << 3,  // 分支与跳转
+};
+
+inline uint32_t RvIssueResOf(uint32_t inst) {
+  switch (inst & 0x7Fu) {
+    case 0x03: case 0x23: return kResMem;
+    case 0x33: return ((inst >> 25) & 0x7Fu) == 1u ? kResMul : 0u;
+    case 0x63: case 0x67: case 0x6F: return kResCtrl;
+    case 0x0B: {
+      uint32_t funct3 = (inst >> 12) & 0x7u;
+      return (funct3 == 0 || funct3 == 1) ? kResDsa : 0u;
+    }
+    default: return 0u;
+  }
 }
 
 // 挂在地址空间上的 MMIO 设备：写它就等于对外发一笔请求。
@@ -216,6 +244,8 @@ class RvExec : public BachModule {
   // 三个 RV core 都进 wait 后 core 把 ready 拉高，SCP 据此开放业务接收。
   bool AtWait() const { return !running; }
   uint64_t Insts() const { return inst_cnt; }
+  // 与前一条同拍发出的指令数。
+  uint64_t DualIssued() const { return dual_cnt; }
   uint64_t Waits() const { return wait_cnt; }
   uint64_t Pc() const { return sys->GetPC(0); }
   bool Quiescent() const override { return !running; }
@@ -360,6 +390,11 @@ class RvExec : public BachModule {
       ++wait_cnt;
       return;
     }
+    // lsq 满了，走它的访存就等：请求发出去没人收就丢了。
+    if (ToLsq(inst) && !lsq_req->Ready()) {
+      ++wait_cnt;
+      return;
+    }
 
     engine->Cycle();
     ++inst_cnt;
@@ -367,9 +402,71 @@ class RvExec : public BachModule {
     // 这一条产生的对外请求收出来，按去处分发。
     DrainSinks(u);
 
+    if (sys->GetHaltState(0)) {
+      running = false;
+      return;
+    }
+    TrySecond(pc, inst, u);
+  }
+
+  // 双发射的第二条：紧跟在第一条后面、与它不冲突的才同拍发。
+  void TrySecond(uint64_t pc1, uint32_t inst1, RvRegUse const& u1) {
+    uint64_t pc = sys->GetPC(0);
+    if (pc != pc1 + 4) return;   // 第一条跳走了
+    uint32_t inst = sys->LoadMem<uint32_t>(pc);
+    RvRegUse u = RvDecodeRegs(inst);
+    if (u1.has_rd && ((u.has_rs1 && u.rs1 == u1.rd) ||
+                      (u.has_rs2 && u.rs2 == u1.rd) ||
+                      (u.has_rd && u.rd == u1.rd))) {
+      return;
+    }
+    uint32_t res1 = RvIssueResOf(inst1), res = RvIssueResOf(inst);
+    if ((res1 & res & (kResMem | kResMul)) != 0) return;
+    if ((u.has_rs1 && !ready[u.rs1]) || (u.has_rs2 && !ready[u.rs2])) return;
+    if (ToDsa(inst) && (dsa_used || !dsa_req->Ready())) return;
+    if (ToLsq(inst) && !lsq_req->Ready()) return;
+
+    engine->Cycle();
+    ++inst_cnt;
+    ++dual_cnt;
+    DrainSinks(u);
     if (sys->GetHaltState(0)) running = false;
   }
 
+  // load / store 的访存地址，不是访存指令返回 0。源寄存器已经就绪才调它。
+  uint64_t MemAddr(uint32_t inst) const {
+    uint32_t op = inst & 0x7Fu;
+    int32_t imm = 0;
+    if (op == 0x03) {
+      imm = int32_t(inst) >> 20;
+    } else if (op == 0x23) {
+      imm = (int32_t(inst & 0xFE000000u) >> 20) | int32_t((inst >> 7) & 0x1Fu);
+    } else {
+      return 0;
+    }
+    uint32_t rs1 = (inst >> 15) & 0x1Fu;
+    uint32_t base = 0;
+    if (rs1 != 0) {
+      base = sys->registerSystem->GetRegFile(rv32::REG_SR, 0)[rs1].U32();
+    }
+    return uint32_t(base + uint32_t(imm));
+  }
+  static bool InRange(uint64_t a, uint64_t base, uint64_t size) {
+    return a >= base && a < base + size;
+  }
+  // 这一条访存经 lsq 发出去：Share Mem、Core Mem 与 Router I/O reg。
+  bool ToLsq(uint32_t inst) const {
+    if ((RvIssueResOf(inst) & kResMem) == 0) return false;
+    uint64_t a = MemAddr(inst);
+    return InRange(a, kShareMemBase, kShareMemSize) ||
+           (unit == RvUnit::kDte && InRange(a, kCoreMemBase, kCoreMemSize));
+  }
+  // 这一条发 DSA 请求：DSA 读写指令，或访存落在本核 DSA 的 IO 窗口。
+  bool ToDsa(uint32_t inst) const {
+    uint32_t res = RvIssueResOf(inst);
+    if (res & kResDsa) return true;
+    return (res & kResMem) && InRange(MemAddr(inst), DsaIoBase(), DsaIoSize());
+  }
   // 把功能模型这一条指令产生的 MMIO 请求转成端口动作。发出去的那一笔把目的
   // 寄存器标成未就绪，写回时再立起来。
   void DrainSinks(RvRegUse const& u) {
@@ -498,7 +595,7 @@ class RvExec : public BachModule {
   bool running = false, dsa_used = false, lsq_used = false;
   uint64_t last_start_seq = 0, last_dsa_wb = 0, last_lsq_wb = 0;
   uint64_t dsa_seq = 0, lsq_seq = 0, finish_seq = 0;
-  uint64_t inst_cnt = 0, wait_cnt = 0;
+  uint64_t inst_cnt = 0, wait_cnt = 0, dual_cnt = 0;
 
   Logic64 insts, waits, pc_sig;
 };

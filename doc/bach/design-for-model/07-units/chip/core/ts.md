@@ -71,8 +71,8 @@ TS 是 core 的控制单元，一块配好就按固定逻辑跑的硬件，不�
 <rect x="230" y="320" width="400" height="130" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="244" y="340" font-size="12" font-weight="700" fill="#111827">完成事件合流</text>
 <text x="244" y="358" font-size="9.5" fill="#475569">七路：三个 RV core、三个 DSA、Reduce Done</text>
-<text x="244" y="373" font-size="9.5" fill="#475569">RECV_UNIT 00：RV core 的完成即完成</text>
-<text x="244" y="388" font-size="9.5" fill="#475569">RECV_UNIT 01：同一执行单元两路都到才完成</text>
+<text x="244" y="373" font-size="9.5" fill="#475569">RECV_UNIT 00 只认 RV core，01 只认 DSA</text>
+<text x="244" y="388" font-size="9.5" fill="#475569">RECV_UNIT 10：同一执行单元两路都到才完成</text>
 <text x="244" y="403" font-size="9.5" fill="#475569">TASK_TYPE 4：只认 Reduce Done，按 user_id 完成当前任务</text>
 <text x="244" y="418" font-size="9.5" fill="#475569">当前任务 → FINISH；后面的项只点亮那一位</text>
 <text x="244" y="433" font-size="9.5" fill="#475569">丢弃：权重加载期间全部；自启动模式 SID 15 / TID 63</text>
@@ -85,7 +85,7 @@ TS 是 core 的控制单元，一块配好就按固定逻辑跑的硬件，不�
 <text x="674" y="418" font-size="9.5" fill="#475569">　　　　　task_path_id · pid_pending · end</text>
 <text x="674" y="433" font-size="9.5" fill="#475569">Rmem credit：rmem_busy</text>
 <text x="674" y="448" font-size="9.5" fill="#475569">task_fsm：IDLE → WAIT → READY → INFLY → FINISH</text>
-<text x="674" y="463" font-size="9.5" fill="#475569">八个写口按固定优先级仲裁，请求保持到 accepted</text>
+<text x="674" y="463" font-size="9.5" fill="#475569">十四个写口按固定优先级仲裁，请求保持到 accepted</text>
 <rect x="1090" y="320" width="320" height="145" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1104" y="340" font-size="12" font-weight="700" fill="#111827">User_Match</text>
 <text x="1104" y="358" font-size="9.5" fill="#475569">user_id 比对：老用户复用，新用户建表</text>
@@ -221,7 +221,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | 编号 | 功能 |
 | - | - |
 | F1 | `TASK_CHAIN_0～63` 各占两个 32 位寄存器：`TASK_CHAIN_n_PC` 在 `0x000 + 8n`，`TASK_CHAIN_n_ATTR` 在 `0x004 + 8n`。软件每项先写 PC 再写 ATTR，写 ATTR 时硬件把 `TASK_VALID` 置 1。这张表是一条全序链，位域里没有前驱表也没有后继表，依赖信息只有数组下标 |
-| F2 | ATTR 位域：`TASK_SEND_UNIT[1:0]`（00 DTE、01 MU、10 VU）；`TASK_RECV_UNIT[3:2]`（00 只调 RV core，收到 RV core 的完成即完成；01 调 RV core 与 DSA，两路完成都到才完成）；`WAIT_WAKE[4]`（要等 Router 送来的数据唤醒，即搬入任务）；`TASK_TYPE[7:5]`；`TASK_P2P_REISSUE_TID[13:8]`（重发搬入配对的搬出任务）；`TASK_CREDIT_EN[14]`；`TASK_PATH_ID[22:15]`；`TASK_END[23]`；`TASK_VALID[31]` 只读。写不进的编码（`TASK_SEND_UNIT` 的 11，`TASK_RECV_UNIT` 的 10 与 11，`TASK_TYPE` 的 6 与 7）保持旧值 |
+| F2 | ATTR 位域：`TASK_SEND_UNIT[1:0]`（00 DTE、01 MU、10 VU）；`TASK_RECV_UNIT[3:2]`（00 只等 RV core 的完成；01 只等 DSA 的完成；10 RV core 与 DSA 两路完成都到才完成）；`WAIT_WAKE[4]`（要等 Router 送来的数据唤醒，即搬入任务）；`TASK_TYPE[7:5]`；`TASK_P2P_REISSUE_TID[13:8]`（重发搬入配对的搬出任务）；`TASK_CREDIT_EN[14]`；`TASK_PATH_ID[22:15]`；`TASK_END[23]`；`TASK_VALID[31]` 只读。写不进的编码（`TASK_SEND_UNIT` 的 11，`TASK_RECV_UNIT` 的 11，`TASK_TYPE` 的 6 与 7）保持旧值 |
 | F3 | `TASK_TYPE` 六档：0 普通；1 Broadcast 或 P2P 重发的搬出；2 Broadcast 重发的搬入；3 P2P 重发的搬入；4 逐级 reduce；5 PID 更新，这一项完成时带回新 PID，交给紧邻的后继 |
 | F4 | `DATAIN_TASK_PC`（`0x200`）与 `DATAIN_TASK_ATTR`（`0x204`）：`WEIGHTS_MODE[0]`、`TASK_SEND_UNIT[2:1]` 只读且固定为 DTE、`TASK_VALID[31]`。只在权重加载与自启动两种模式下用 |
 | F5 | 全局项：`STREAM_NUM`（`0x208`，`[4:0]`，超过 16 的值只写入 16）、`TS_INIT_FINISH`（`0x20C`）、`TS_STATE`（`0x210`，`[0]` 是 `TASK_CHAIN_ERROR`）、`SELF_START`（`0x214`） |
@@ -273,7 +273,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | F29 | `task_path_id` 取自那一项的 `TASK_PATH_ID`；上一项是 PID 更新任务、这一项又紧邻它时，取它完成时带回的新 PID。`pid_pending = 1` 表示 `task_path_id` 里存的是还没被继承的新 PID |
 | F30 | `rmem_busy` 是本级 Rmem 的 credit，每个用户一份：发出一笔逐级 reduce 就占掉，Router 报回这一笔做完才还 |
 | F31 | `task_fsm` 五个状态：IDLE、WAIT（等 Router 送数据，或等 credit）、READY、INFLY、FINISH |
-| F32 | **八个写口**，按来源命名，固定优先级仲裁，每口一拍一笔，请求保持到 `accepted` 才算生效。优先级由高到低：`retirement`（清 `valid` 并推 `head_ptr`；自启动模式原地重新激活）、`completion`（完成事件）、`install`（Task_ctrl 生成后继，整项写）、三个 `issue`（三条发射通路收到 ACCEPT 后置 INFLY）、`credit_wake`（credit 到了置 READY）、`create`（User_Match 建表或补跳过位）。落到不同 stream 的写同一拍都做 |
+| F32 | **十四个写口**，按来源命名，固定优先级仲裁，每口一拍一笔，请求保持到 `accepted` 才算生效。优先级由高到低：`retirement`（清 `valid` 并推 `head_ptr`；自启动模式原地重新激活）、七个 `completion`（每条 Completion Lane 一个）、`install`（Task_ctrl 生成后继，整项写）、三个 `issue`（三条发射通路收到 ACCEPT 后置 INFLY）、`credit_wake`（credit 到了置 READY）、`create`（User_Match 建表或补跳过位）。落到不同 stream 的写同一拍都做 |
 | F33 | 写失败分两种：整项写（新用户建表、`install`）失败后要重读最新表内容再来；只改几个字段的写失败后只重试这一笔，不能重新下发已经被 RV core 接收的任务 |
 | F34 | `completion` 口的写：`done_bitmap[task_id]` 无条件置位；`task_fsm` 只有这一笔的 `task_id` 等于当前 `task_id` 时才改成 FINISH。同一笔还可以带三样：自启动 core 补 `user_id`、PID 更新任务写新 PID、逐级 reduce 还 Rmem credit |
 | F35 | `credit_wake` 口：Router 授予 credit 时置 READY 并把 `reissue` 置起来；Rmem credit 到位时只置 READY |
@@ -296,7 +296,7 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | F42 | 候选：`valid = 1`、`task_fsm = READY`、`task_unit = DTE` 的 stream，加 `DataIn_task_table` 那一格 |
 | F43 | 全部按相对 `head_ptr` 的 stream 年龄比，较老者优先；同一个 stream 上两者都在时先选 Generated。Bypass 那一格不占 stream，按最老算 |
 | F44 | 选中后非抢占保持：命令与字段保持不变，直到 DTE RV core 回 `raw ACCEPT` |
-| F45 | 命令带 `task_pc`、`stream_id`、`task_id`、`user_id`、`path_id`（当前任务的实际 PID）、`task_dsa_en`（`TASK_RECV_UNIT = 01` 时为 1）与 `vcid`。`vcid` 按实际 PID 查 `ROUTER_TABLE` 取 `TASK_VCID`；搬入那一格不查表，填 0 |
+| F45 | 命令带 `task_pc`、`stream_id`、`task_id`、`user_id`、`path_id`（当前任务的实际 PID）、`task_dsa_en`（`TASK_RECV_UNIT` 为 01 或 10 时为 1）与 `vcid`。`vcid` 按实际 PID 查 `ROUTER_TABLE` 取 `TASK_VCID`；搬入那一格不查表，填 0 |
 | F46 | 收到 ACCEPT 后：Generated 向 `stream_table` 提交 READY → INFLY，逐级 reduce 任务的这一笔同时占掉这个用户的 Rmem credit；搬入那一格只让 `DataIn_task_table` 出槽 |
 
 ### MU_Arb / VU_Arb
@@ -305,14 +305,14 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | - | - |
 | F47 | 候选：`valid = 1`、`task_fsm = READY`、`task_unit = MU`（或 VU）；从 `head_ptr` 起选最老的 stream，发射宽度各 1；`task_dsa_en` 的取法同 DTE |
 | F48 | 三条发射通路各自逐拍推进，同一拍可以并行下发 3 个 task |
-| F49 | RV core 按 `task_queue` 是否有空槽回 `ready`；没收下之前 TS 不释放这一笔、不跳到下一个 |
+| F49 | RV core 按 `task_queue` 是否有空槽回 `ready`；没收下之前 TS 不释放这一笔、不跳到下一个。上一笔的 READY → INFLY 回写还没被 `stream_table` 收下时，三条发射通路都不挑下一笔：每条通路只有一个回写槽，接着挑会盖掉没收下的那一笔，它的 INFLY 丢了就会被再下发一次 |
 
 ### 完成事件合流
 
 | 编号 | 功能 |
 | - | - |
-| F50 | 七路完成事件：DTE、MU、VU 各自的 RV core 完成与 DSA 完成共六路，加 Router 的 Reduce Done。七路都是脉冲，这里永远就绪、不向上游反压：完成事件没有重发通路，拒收就等于把那个 stream 永远停在当前任务 |
-| F51 | 哪几路算数由那一项的 `TASK_RECV_UNIT` 定：00 只认 RV core 的完成；01 要同一个执行单元的两路都到，先到的一半按 `{执行单元, stream_id, task_id}` 记下，另一半到了才算完成，两半同拍到可以直接完成 |
+| F50 | 七路完成事件：DTE、MU、VU 各自的 RV core 完成与 DSA 完成共六路，加 Router 的 Reduce Done。七路都是脉冲，这里永远就绪、不向上游反压：完成事件没有重发通路，拒收就等于把那个 stream 永远停在当前任务。七路各是一条独立的 Completion Lane，各有一个排队与一个 `completion` 写口，每拍各处理一笔 |
+| F51 | 哪几路算数由那一项的 `TASK_RECV_UNIT` 定：00 只认 RV core 的完成；01 只认 DSA 的完成，RV core 那一路丢掉；10 要同一个执行单元的两路都到，先到的一半按 `{执行单元, stream_id, task_id}` 记下，另一半到了才算完成，两半同拍到可以直接完成 |
 | F52 | 逐级 reduce 任务（`TASK_TYPE = 4`）只认 Router 的 Reduce Done：按 `user_id` 找到那个 stream，完成的是它的当前任务，PID 不参与匹配。同一个用户同一时刻最多一笔 reduce 在做，由 F30 的 Rmem credit 保证。本地两路完成对 reduce 任务只算搬完，不改状态 |
 | F53 | 完成的是当前任务就置 FINISH；是后面某一项（提前完成的搬入任务）就只点亮那一位，不推进 `task_id` |
 | F54 | 两类完成直接丢掉：权重加载期间的全部完成事件；自启动模式下带 `stream_id = 15`、`task_id = 63` 的完成，它来自 Bypass 那一路搬入 |
@@ -350,8 +350,8 @@ MAS 把完成事件的处理、credit 与退休都写在 `Stream_table` 的功�
 | - | - |
 | F72 | `SELF_START = 1` 时写完配置就建 `stream_num` 个表项（权重加载模式下写 `TS_INIT_FINISH` 不建），每项是一条自启动任务链，按 stream 编号称 taskchain0～15；每项按 Task 0 的属性建、`task_fsm` 按 F38 定。B core 与 R core 的 Task 0 既不标 `WAIT_WAKE` 也不标 `TASK_CREDIT_EN`，所以一建好就是 READY。两者的 `stream_num` 配 16，自启动数因此是 16 |
 | F73 | 进来的数据走 Bypass（F19），数据收齐的标志由软件维护，不在 TS 里更新。上电后 datain 那一路与自启动任务链同时启动，并行执行互不干扰 |
-| F74 | 查标志的那一项占着 MU RV core 长期工作，不调 DSA（`TASK_RECV_UNIT = 00`）。它在这类 core 的链上没有别的活：B core 的链是 MU 查标志与 DTE 搬出，下面还有 EP 组时再加一项转发；R core 的链是 MU 查标志、DTE 搬入、VU 求和、DTE 搬出 |
-| F75 | Task 0 一次只下发一笔：一条链的 Task 0 下发之后、执行完成之前，三条发射通路都不下发其余链的 Task 0。上电后先下发 taskchain0 的 Task 0，它执行完成后才下发 taskchain1 的，此时 taskchain0 在执行第 2 个任务，两条链并行。软件在 Task 0 里认下数据时清掉那个用户的标志，下一条链的 Task 0 查不到同一笔 |
+| F74 | 查标志的那一项占着 MU RV core 长期工作，不调 DSA（`TASK_RECV_UNIT = 00`）。它在这类 core 的链上没有别的活：B core 的链是 MU 查标志与 DTE 搬出，下面还有 EP 组时再加一项转发；R core 的链是 MU 查标志与 DTE 把两半送进本级 Rmem 相加 |
+| F75 | 同时激活 16 个用户的自启动任务：16 条链的 Task 0 与别的任务一样参加仲裁、连续下发，在 MU RV core 的 `task_queue` 里排队，按下发的先后逐个执行。软件在 Task 0 里认下数据时清掉那个用户的标志，后面那条链的 Task 0 查不到同一笔 |
 
 ### 超前发送窗口
 
@@ -425,7 +425,7 @@ DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录）�
 
 ### 模型里四种 core 的任务链
 
-`recv` 一栏是 `TASK_RECV_UNIT`，`type` 一栏是 `TASK_TYPE`。VU 多宏任务（门控 / 求和）最后一条置 `EVENT_EN`，`recv` 配 DSA，TS 收齐 RV ACK 与这一笔 `dsa_done`。
+`recv` 一栏是 `TASK_RECV_UNIT`，`type` 一栏是 `TASK_TYPE`。调 DSA 的任务一律配 01：RV core 写完配置就以 `task_done(0)` 交还、不报 TS，TS 只等 DSA 的完成。VU 多宏任务（门控）最后一条置 `EVENT_EN`，TS 等的就是这一笔 `dsa_done`。
 
 默认用例是 EPTP-NK：FC1、FC3 在 chip 间切 N、chip 内切 K，FC2 在 chip 间切 K、chip 内切 N。每颗 chip 的 8 个计算 core 按逻辑槽位 `s`（0～7）分工，槽位 0～6 配计算 core 的链，槽位 7 配 dot core 的链。同一个 kernel 镜像服务全部槽位，按槽位变化的项（FC1、FC3 部分和，FC2，发给 dot core）每个槽位一个入口，由 `TASK_CHAIN_n_PC` 选。
 
@@ -434,25 +434,28 @@ DTE 另有一张按 path 查 `task_id` 的表（产物的 `PATHTASK` 记录）�
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
 | 0 | token 搬入 | DTE | 01 | 1 | 0 | 0 | token 广播 path | 0 |
-| 1 | FC1、FC3 部分和：token 第 `s` 段乘本 core 的 W1、W3，每个专家各一份 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 1 | FC1、FC3 部分和：token 第 `s` 段乘本 core 的 W1、W3，每个专家各一份 | MU | 01 | 0 | 0 | 0 | — | 0 |
 | 2 | 部分和出核，逐级 reduce | DTE | 01 | 0 | 4 | 1 | chip 内归约 path | 0 |
 | 3 | FC2 输入搬入 | DTE | 01 | 1 | 0 | 0 | FC2 输入广播 path | 0 |
-| 4 | FC2 第 `s` 段，MU 内按 `W_ep` 做专家间累加 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 4 | FC2 第 `s` 段，MU 内按 `W_ep` 做专家间累加 | MU | 01 | 0 | 0 | 0 | — | 0 |
 | 5 | 发给 dot core，包头落点是 concat 区第 `s` 段 | DTE | 01 | 0 | 0 | 待定 | 槽位 `s` 的 concat path | 1 |
 
-**dot core（逻辑槽位 7）**：dot core 是每颗 chip 的逻辑 core7，chip 内 FC1、FC3 部分和的归约落点，也是做 silu·dot·量化、广播 FC2 输入、收 concat、往行链上发本 chip 结果的那个 core。它的物理位置在第一列与中间两列 chip 是 core9，在最后一列 chip 是 core8。行链是一行 4 颗 chip 的 dot core 从第一列到最后一列逐跳 reduce、最后一跳落进本行 R core 的那条链。
+**dot core（逻辑槽位 7）**：dot core 是每颗 chip 的逻辑 core7，chip 内 FC1、FC3 部分和的归约落点，也是做 silu·dot·量化、广播 FC2 输入、收 concat、往行链上发本 chip 结果的那个 core。它的物理位置在第一列与中间两列 chip 是 core9，在最后一列 chip 是 core8。行链是一行 4 颗 chip 的 dot core 从第一列到最后一列逐跳相加、最后一跳落进本行 R core 的那条链：行首那颗只送本 core 那一包；其余几颗先把上一颗送来的那一包搬进本核 Core Mem 的 `MOE_ROW_IN_OFF`，再把它与本 core 那一包作为本 core 的两个操作数送进本级 Rmem 相加（Core 多操作数）。行链的 path 两个号轮换，行里第 `gx` 颗发的那一包用 `ROW_PATH[gx % 2]`（7 或 13），都走 VC3。行首那颗的链 15 项，其余几颗 16 项。
 
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
 | 0 | token 搬入 | DTE | 01 | 1 | 0 | 0 | token 广播 path | 0 |
-| 1 | FC1、FC3 部分和，槽位 7 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 1 | FC1、FC3 部分和，槽位 7 | MU | 01 | 0 | 0 | 0 | — | 0 |
 | 2 | 部分和出核，逐级 reduce；它是归约链的链尾，结果交回本 core | DTE | 01 | 0 | 4 | 1 | chip 内归约 path | 0 |
 | 3 | 归约结果搬入 | DTE | 01 | 1 | 0 | 0 | chip 内归约 path | 0 |
 | 4 | silu·dot·量化：每个专家一份，BF16 读，MXFP8 写 | VU | 01 | 0 | 0 | 0 | — | 0 |
 | 5 | FC2 输入广播 | DTE | 01 | 0 | 0 | 待定 | FC2 输入广播 path | 0 |
-| 6 | FC2 第 7 段，直接写进 concat 区 | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 6 | FC2 第 7 段，直接写进 concat 区 | MU | 01 | 0 | 0 | 0 | — | 0 |
 | 7～13 | concat 搬入，每个上游 core 一项：第 7 + k 项收槽位 k 发来的那一段 | DTE | 01 | 1 | 0 | 0 | 槽位 k 的 concat path | 0 |
-| 14 | 行链出核，逐级 reduce | DTE | 01 | 0 | 4 | 1 | 行链 path | 1 |
+| 14 | 上一颗 chip 送来的行链那一包搬入，落 `MOE_ROW_IN_OFF`；行首那颗没有这一项 | DTE | 01 | 1 | 0 | 0 | 上一颗 chip 的行链 path | 0 |
+| 行首 14，其余 15 | 行链出核，逐级 reduce：行首只送本 core 那一包；其余几颗先送 `MOE_ROW_IN_OFF` 那一包（不带 `ack_ts_en`），再送本 core 那一包（带 `ack_ts_en`）。下一跳是下一颗 chip 的 dot core 时包头落点写 `MOE_ROW_IN_OFF`，是本行 R core 或出阵列时写这个用户那一槽的前一半 | DTE | 01 | 0 | 4 | 1 | 本 chip 的行链 path | 1 |
+
+行链出核那一项按行里的位置取四个 kernel 入口之一：行首用 `task_dte_send_row`（下一跳是 R core 或出阵列）或 `task_dte_send_row_next`（下一跳是下一颗 chip 的 dot core），其余几颗用 `task_dte_add_row` 或 `task_dte_add_row_next`，分法相同。非行首的 dot core 在 DTE 的 `PATHTASK` 里多一项：上一颗 chip 的行链 path 对第 14 项。
 
 FC2 输入广播与发给 dot core 这两项的 `credit_en` 还没有定。
 
@@ -468,10 +471,8 @@ FC2 输入广播与发给 dot core 这两项的 `credit_en` 还没有定。
 
 | 项 | 内容 | unit | recv | wait_wake | type | credit_en | path | end |
 | - | - | - | - | - | - | - | - | - |
-| 0 | 查一个用户的两半是否集齐（`task_rc_find`） | MU | 00 | 0 | 0 | 0 | — | 0 |
-| 1 | 从 Matrix Mem 搬两半进 Core Mem（`task_dte_rc_load`） | DTE | 01 | 0 | 0 | 0 | — | 0 |
-| 2 | 求和，VL = 6144 的 BF16 相加（`task_vu_add`） | VU | 01 | 0 | 0 | 0 | — | 0 |
-| 3 | 结果出核，送下一行 R core（`task_dte_rc_send`） | DTE | 01 | 0 | 0 | 0 | 出核 path | 1 |
+| 0 | 从用户 FIFO 取一个两半都来了的用户，等两半落进 Matrix Mem（`task_rc_find`） | MU | 00 | 0 | 0 | 0 | — | 0 |
+| 1 | 两半从 Matrix Mem 作为本 core 的两个操作数送进本级 Rmem，相加的结果由 Rmem 直接送下一行 R core，逐级 reduce（`task_dte_rc_reduce`）；链首那一行只送本行一半 | DTE | 01 | 0 | 4 | 1 | R core 之间那条 path | 1 |
 
 ### 四种 core 级切分模式的任务链
 
@@ -818,14 +819,14 @@ TS 的三套时延数字口径不同：TS MAS 的 2～3 cycle 是硬件目标值
   <text x="114" y="237" font-size="10" fill="#374151" text-anchor="middle">ack_half · FF · 1RW</text>
   <rect x="904" y="20" width="282" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="908" y="24" width="274" height="34" fill="none" stroke="#374151"/>
-  <text x="1045" y="45" font-size="10" fill="#374151" text-anchor="middle">stream_table · FF 16 项 · 1W（completion 口）</text>
+  <text x="1045" y="45" font-size="10" fill="#374151" text-anchor="middle">stream_table · FF 16 项 · 7W（completion 口）</text>
   <rect x="252" y="20" width="608" height="234" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="270" y="36" font-size="8.5" fill="#6b7280">M6</text>
   <text x="846" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="270" y="56" font-size="12" fill="#111827">完成合流 · 按 TASK_RECV_UNIT 与 TASK_TYPE 判</text>
   <text x="270" y="78" font-size="10.5" fill="#475569">1. WEIGHTS_MODE → 全部丢；SELF_START &amp;&amp; {stream_id, task_id} == {15, 63} → 丢</text>
   <text x="270" y="98" font-size="10.5" fill="#475569">2. TYPE[t] == 4 → 只认 Reduce Done：i = user_id 命中的 stream，t = task_id[i]，rmem_busy = 0</text>
-  <text x="270" y="118" font-size="10.5" fill="#475569">3. RECV_UNIT[t] == 00 → RV core 的完成即完成；== 01 → ack_half 里两半都到才完成</text>
+  <text x="270" y="118" font-size="10.5" fill="#475569">3. RECV_UNIT[t]：00 → 只认 RV core；01 → 只认 DSA；10 → ack_half 两半都到</text>
   <text x="270" y="138" font-size="10.5" fill="#475569">4. done_bitmap[t] = 1；t == task_id → FINISH；!user_id_vld → 写 user_id；TYPE[t] == 5 → 写 pid</text>
   <text x="270" y="162" font-size="10" fill="#9ca3af">七路都是脉冲，本级永远就绪，不向上游反压</text>
   <path d="M208 49 L251 49" stroke="#475569" marker-end="url(#tsm6)" fill="none"/>
@@ -954,7 +955,7 @@ path_flowctl        64 项，按 PID 索引 {flowctl_en, window_n}
 DataIn_task_table   1 项
 stream_table        16 项，建表与退休各一拍一项；stream_num 软件配 1～16，超过 16 写入 16；自启动数等于 stream_num
 Bypass 的保留身份    stream_id = 15、task_id = 63
-八个写口优先级       retirement > completion > install > issue × 3 > credit_wake > create
+十四个写口优先级     retirement > completion × 7 > install > issue × 3 > credit_wake > create
 done_bitmap         64 位，对应 64 项
 DTE / MU / VU Arb   发射宽度各 1
 task_fsm            五态 IDLE / WAIT / READY / INFLY / FINISH
@@ -987,7 +988,7 @@ task 唤醒延迟        2～3 cycle（MAS 的硬件目标值）
 | P2P 重发的搬入且不重发：两项都跳过，不派 DTE，照样建表 | F14、F18、F62 | `BachTsIssue.P2pReissueInSkipsBothWithoutDte` |
 | 跳过位含当前任务时当前任务算做完 | F15 | `BachStreamTable.SkipMaskFinishesOnlyTheCurrentTask` |
 | 自启动 core 上进来的包走 Bypass，不建表，身份用 SID 15 / TID 63 | F19、F23 | `BachTsIssue.SelfStartCoreDatainDoesNotCreateAStream` |
-| 八个写口的优先级，不同 stream 同拍都写 | F32 | `BachTs.WritePortPriorityOnSameStream`、`BachStreamTable.SameStreamGoesByPriority`、`BachStreamTable.DifferentStreamsAreWrittenTogether` |
+| 十四个写口的优先级，不同 stream 同拍都写 | F32 | `BachTs.WritePortPriorityOnSameStream`、`BachStreamTable.SameStreamGoesByPriority`、`BachStreamTable.DifferentStreamsAreWrittenTogether` |
 | `completion` 口无条件置位，只在是当前任务时改状态 | F34 | `BachStreamTable.CompletionSetsDoneBitButGuardsTheFsm` |
 | 后继是 End 以内没做完的最低一项，一拍跳完 | F37 | `BachTaskCtrl.SkipsDoneTasksInOneStep`、`BachTs.WalksTheWholeChain` |
 | 第 0 项到 End 都做完时不生成后继 | F37 | `BachTaskCtrl.NoSuccessorWhenEverythingThroughEndIsDone` |
@@ -1007,7 +1008,7 @@ task 唤醒延迟        2～3 cycle（MAS 的硬件目标值）
 | credit 申请带四个号，授予后置 READY 并置 `reissue` | F58、F35 | `BachTsCredit.RequestCarriesTheFourIds`、`BachTsCredit.GrantWakesTheTaskAndSetsReissue` |
 | 逐级 reduce 用本级 Rmem credit，一项做完才发下一项 | F30、F46、F52、F59 | `BachTsCredit.ReduceTakesTheLocalRmemCredit`、`BachTs.ReduceIssuesOneTaskAtATime` |
 | Head-only 退休，第 0 项到 End 全做完才退，先还 credit 再清 valid | F68、F69 | `BachTsCredit.OnlyTheHeadEntryRetires`、`BachTsCredit.ClearsOnlyAfterRouterAccepts`、`BachTsCredit.NextEntryRetiresAfterTheHead`、`BachTsCredit.RetiresOnceEveryTaskThroughEndIsDone`、`BachTs.OneUserRunsFromTriggerToRetire` |
-| 自启动建满 `stream_num` 项；Task 0 一次只下发一笔；Router 收下退休请求后原地重新激活 | F70、F72、F75 | `BachStreamTable.SelfStartFillsEveryEntry`、`BachTs.SelfStartIssuesOneTask0AtATime`、`BachTs.SelfStartChainRestartsInPlace`、`BachMoeChip.BcoreStartsTheBroadcast`、`BachMoeChip.TwoEpGroupsMeetAtTheReductionCore` |
+| 自启动建满 `stream_num` 项；16 条链的 Task 0 连续下发；Router 收下退休请求后原地重新激活 | F70、F72、F75 | `BachStreamTable.SelfStartFillsEveryEntry`、`BachTs.SelfStartIssuesTask0sBackToBack`、`BachTs.SelfStartChainRestartsInPlace`、`BachMoeChip.BcoreStartsTheBroadcast`、`BachMoeChip.TwoEpGroupsMeetAtTheReductionCore` |
 | 超前发送窗口按 path 配 | F77 | `BachTsCfg.FlowControlWindowIsPerPath` |
 | 重发未成功前数据不覆盖；P2P 阻塞缓冲；B core 按方向查 credit；广播 CreditCounter；异常上报；窗口判断 | F63～F67、F71、F78 | 未建 |
 
@@ -1026,6 +1027,10 @@ task 唤醒延迟        2～3 cycle（MAS 的硬件目标值）
 * **为什么同一个用户的逐级 reduce 一项做完才发下一项**
   * Rmem 给每个用户一个 32 KiB 分区，同一时刻只装得下这个用户的一笔 reduce；上一笔的结果没有全部交付之前，下一笔进来会覆盖它的上下文
   * 所以本级 credit 每个用户只有一份，下发占掉、Rmem 做完才还。代价是几项之间多出一段 Rmem 往返
+* **为什么行链上一颗 chip 送来的那一包先落 Core Mem，不直接进本级 Rmem**
+  * Router MAS F-030 要求同一 UserID 的各笔 Reduce 任务在各输入流中的到达顺序一致，由上游保证。dot core 的 Rmem 对同一用户先做 chip 内归约、后做行链
+  * 上一颗的那一包若直接进 Rmem，可能先于 chip 内归约到达、占住这个用户的分区，而行链要的本 core 那一包要等 chip 内归约做完才有，负载一高两者就互相等待，形成死锁
+  * 落 Core Mem 之后，行链的两份输入都由本 core 在 chip 内归约完成之后发出。代价是每个 token 多一次 12 KB 的搬入与一次 12 KB 的读出
 * **为什么提前完成的搬入不推进 task_id**
   * 推进 `task_id` 意味着承认任务链走到了那一项，而搬入的到达顺序与链序无关
   * 只落 `done_bitmap` 的一位，就把“这一项的数据齐了”与“任务链走到了这一项”分开记，两者在 Task_ctrl 生成后继时才合到一起判断

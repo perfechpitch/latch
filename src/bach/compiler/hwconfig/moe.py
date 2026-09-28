@@ -7,7 +7,10 @@
 数据流照 EP6+TP8 的 KN 拆分：B core 把 token 广播进各计算 core；每颗 chip 的 8
 份 FC1、FC3 部分和沿 chip 内归约链归约进 dot core；dot core 做 silu·dot·量化，
 把 FC2 输入广播回本 chip；8 段 FC2 在 dot core 上拼成 concat；一行 chip 的 dot
-core 逐跳归约进本行 R core，各行 R core 串成一条链逐行相加。
+core 逐跳相加进本行 R core：上一颗 chip 送来的那一包落进本 dot core 的 Core
+Mem，本 core 的结果算好后两包一起送进本级 Rmem 相加，再发往下一颗。各行 R core
+串成一条链逐行相加：R core 把一个用户的两份从 Matrix Mem 送进本级 Rmem，相加的
+结果直接发往下一行。
 
 常量与模型侧同源，改一处要一起改：方向与 flow 位照 `router_table.h`，chip 的
 四个口与 2×5 的编号照 `chip.h`，角色分配照 `lpu_grid.h` 的 `RoleOf`，Core Mem
@@ -81,13 +84,14 @@ REDUCE_BF16 = 0
 IN_PATH = 4          # token 广播进各计算 core
 BCAST_IN_PATH = 5    # 送进 B core 那一段
 CHIP_RED_PATH = 3    # chip 内 FC1、FC3 部分和归约进 dot core
-ROW_PATH = 7         # 一行 chip 的 dot core 逐跳归约进本行 R core
 FC2_BCAST_PATH = 11  # dot core 把 FC2 输入广播回本 chip
 # concat：本 chip 另外 7 个计算 core 把 FC2 那一段发给 dot core，每个槽位一条。
 # dot core 上 7 项 concat 搬入各对一个 PID，DTE 的 path_task_map 一个 PID 对一项。
 CONCAT_PATH = tuple(16 + s for s in range(DOT_SLOT))
-# R core 之间那条链与组间那一跳各用两个号轮换：一个 core 既要收上游又要往下游
-# 发时，同一个号上填不下两种转法。
+# 行链、R core 之间那条链与组间那一跳各用两个号轮换：一个 core 既要收上游又要往
+# 下游发时，同一个号上填不下两种转法。行链是一行 chip 的 dot core 逐跳相加进本行
+# R core，第 i 颗 chip 的 dot core 发的那一包用 ROW_PATH[i % 2]。
+ROW_PATH = (7, 13)
 R_PATH = (8, 9)
 RELAY_PATH = (6, 10)
 
@@ -96,8 +100,9 @@ RELAY_PATH = (6, 10)
 # 面各跳，两处取同一个值。
 REDUCE_VC = 3
 VC_OF_PATH = {IN_PATH: 0, BCAST_IN_PATH: 0, RELAY_PATH[0]: 0,
-              RELAY_PATH[1]: 0, R_PATH[0]: 0, R_PATH[1]: 0,
-              CHIP_RED_PATH: REDUCE_VC, ROW_PATH: REDUCE_VC,
+              RELAY_PATH[1]: 0, R_PATH[0]: REDUCE_VC, R_PATH[1]: REDUCE_VC,
+              CHIP_RED_PATH: REDUCE_VC, ROW_PATH[0]: REDUCE_VC,
+              ROW_PATH[1]: REDUCE_VC,
               FC2_BCAST_PATH: 1}
 VC_OF_PATH.update({p: 2 for p in CONCAT_PATH})
 
@@ -519,31 +524,35 @@ def dot_core_of(col):
 
 
 def wire_row(fab, row_chips, has_rcore):
-    """行链：一行 chip 的 dot core 从行首到行尾逐跳归约。
+    """行链：一行 chip 的 dot core 从行首到行尾逐跳相加。
 
-    行首那颗 chip 的 dot core 只有自己一份，经 mid 到 core4 从 E 口出；中间几颗从
-    W 口进，沿第 1 行往右经过 core5 到 dot core 之间的各个 core，在 dot core 加上
-    本 chip 那一份，再经 mid 到 core4 从 E 口出。行尾那颗在最后一列时 dot core 是
-    core8，加完往右落进 R core core9 的 Matrix Mem；没有 R core 时行尾那颗同样从
-    E 口出去，结果离开阵列。
+    行首那颗 chip 的 dot core 只送本 core 那一包，本级 Rmem 单流直通。其余几颗
+    从 W 口收上一颗送来的那一包，沿第 1 行往右落进 dot core 的 Core Mem；本 core
+    的结果算好后，DTE 把这两包作为本 core 的两个操作数送进本级 Rmem 相加，表项的
+    reduce1、reduce2 两位都置，Router 把它们依次分到 reduce_in_mask 的 bit0、bit1
+    两路（Core 多操作数）。
+
+    相加的结果往下一跳发：不在行尾的经 mid 到 core4 从 E 口出去；行尾那颗在最后
+    一列时 dot core 是 core8，往右落进 R core core9 的 Matrix Mem；没有 R core 时
+    行尾那颗同样从 E 口出去，结果离开阵列。
     """
-    path = ROW_PATH
     n = len(row_chips)
     for i, chip in enumerate(row_chips):
         col = fab.cols[chip]
         dot = dot_core_of(col)
         first = i == 0
-        into_rcore = has_rcore and i + 1 == n
         last = i + 1 == n
+        into_rcore = has_rcore and last
+        path = ROW_PATH[i % 2]
         if into_rcore and dot != RCORE_ID - 1:
             raise ValueError("行尾那颗 chip 的 dot core 要紧挨着 R core")
 
-        in_lane = DIR_NUM
         if not first:
-            # 从 W 口进来，沿第 1 行往右到 dot core。
+            # 上一颗送来的那一包从 W 口进来，沿第 1 行往右落进 dot core。
+            in_path = ROW_PATH[(i - 1) % 2]
             walk = range(core_of_port(CHIP_W), dot)
-            fab.put_walk(chip, walk, path, DIR_RIGHT)
-            in_lane = DIR_LEFT
+            fab.put_walk(chip, walk, in_path, DIR_RIGHT)
+            fab.put(chip, dot, in_path, land_in_core(in_path))
 
         if into_rcore:
             flow = FLOW_RIGHT
@@ -556,24 +565,33 @@ def wire_row(fab, row_chips, has_rcore):
                     pass_through(path, FLOW_RIGHT))
 
         mask = 1
-        if in_lane != DIR_NUM:
-            mask |= 1 << in_lane
+        if not first:
+            mask = (1 << DIR_MID) | (1 << DIR_LEFT)
+            flow |= FLOW_REDUCE1 | FLOW_REDUCE2
         fab.put(chip, dot, path, reduce_hop(path, mask, flow, first, last),
                 dte=True)
 
 
-def wire_rcore_hop(fab, here, below, path_id):
-    """R core 之间那一跳：本行 R core 从 S 口下到下一层最后一列那颗 chip 的 N 口，
-    经 core0、core5、core6、core7、core8 落到 core9。below 给 None 表示这是最后一
-    行，结果经 mid 到 core4 从 E 口出去。"""
+def wire_rcore_hop(fab, here, below, path_id, head):
+    """R core 之间那一跳：本行 R core 的 DTE 把一个用户那一槽的两份从 Matrix Mem
+    作为本 core 的操作数送进本级 Rmem，相加后从 S 口下到下一层最后一列那颗 chip
+    的 N 口，经 core0、core5、core6、core7、core8 落到 core9。below 给 None 表示
+    这是最后一行，结果经 mid 到 core4 从 E 口出去。
+
+    两份都从本 core 出来，表项的 reduce1、reduce2 两位都置，Router 把它们依次分到
+    reduce_in_mask 的 bit0、bit1 两路（Core 多操作数）。链首那一行只有本行那一份，
+    只收 bit0 一路。
+    """
+    mask = 1 if head else (1 << DIR_MID) | (1 << DIR_LEFT)
+    flow = FLOW_MID if below is None else FLOW_RIGHT
+    if not head:
+        flow |= FLOW_REDUCE1 | FLOW_REDUCE2
+    fab.put(here, RCORE_ID, path_id,
+            reduce_hop(path_id, mask, flow, head, below is None), dte=True)
     if below is None:
-        fab.put(here, RCORE_ID, path_id, pass_through(path_id, FLOW_MID),
-                dte=True)
         fab.put(here, core_of_port(CHIP_E), path_id,
                 pass_through(path_id, FLOW_RIGHT))
         return
-    fab.put(here, RCORE_ID, path_id, pass_through(path_id, FLOW_RIGHT),
-            dte=True)
     fab.put(below, core_of_port(CHIP_N), path_id,
             pass_through(path_id, FLOW_MID))
     fab.put_walk(below, range(CHIP_COLS, RCORE_ID), path_id, DIR_RIGHT)
@@ -605,8 +623,9 @@ class ChainItem:
     """任务链上的一笔，字段与 TASK_CHAIN_xx_PC / ATTR 一一对应。
 
     `sym` 是这一笔在 kernel 里的函数，(镜像, 函数名)；入口地址由上层查符号表填。
-    `recv_unit` 取 "RV_ONLY"（只收 RV core 的 ACK）或 "DSA"（RV core 与 DSA 两路
-    都收）。`task_type` 取 bachir.TASK_TYPE_NAME 里的一档。
+    `recv_unit` 取 "RV_ONLY"（只等 RV core 的 ACK）、"DSA"（只等 DSA 的 ACK，
+    kernel 用 task_done(0) 交还、不向 TS 报）或 "RV_DSA"（两路都等）。
+    `task_type` 取 bachir.TASK_TYPE_NAME 里的一档。
     """
 
     def __init__(self, idx, unit, recv_unit, sym, path_id=0, wait_wake=False,
@@ -648,14 +667,27 @@ def compute_chain(slot):
 
 # dot core 上 concat 搬入那 7 项从第几项起
 DOT_CONCAT_TASK = 7
+# dot core 上收上一颗 chip 行链那一包的那一项，行首没有这一项
+DOT_ROW_IN_TASK = DOT_CONCAT_TASK + DOT_SLOT
+
+# 行链出核那一笔的 kernel 函数，按 (是不是行首, 下一跳是不是下一颗 chip 的 dot
+# core) 取
+ROW_SEND_SYM = {
+    (True, False): "task_dte_send_row",
+    (True, True): "task_dte_send_row_next",
+    (False, False): "task_dte_add_row",
+    (False, True): "task_dte_add_row_next",
+}
 
 
-def dot_chain():
-    """dot core（槽位 7）的任务链。
+def dot_chain(gx, cols):
+    """dot core（槽位 7）的任务链。gx 是本 chip 在行里第几颗，cols 是一行几颗。
 
-    归约结果与 7 段 concat 都是搬入任务，标 wait_wake；concat 每个上游 core 一
-    项，各对一个 PID。行链出核是逐级 reduce 任务，由 Router 报完成。"""
+    归约结果、7 段 concat 与上一颗 chip 行链那一包都是搬入任务，标 wait_wake；
+    concat 每个上游 core 一项，各对一个 PID。行链出核是逐级 reduce 任务，由
+    Router 报完成：行首只送本 core 那一包，其余几颗连同上一颗送来的那一包一起送。"""
     s = str(DOT_SLOT)
+    first = gx == 0
     items = [
         ChainItem(0, "DTE", "DSA", ("dte", "task_dte_token_datain"),
                   path_id=IN_PATH, wait_wake=True),
@@ -673,19 +705,28 @@ def dot_chain():
         items.append(ChainItem(DOT_CONCAT_TASK + k, "DTE", "DSA",
                                ("dte", f"task_dte_concat_datain_s{k}"),
                                path_id=CONCAT_PATH[k], wait_wake=True))
-    items.append(ChainItem(DOT_CONCAT_TASK + DOT_SLOT, "DTE", "DSA",
-                           ("dte", "task_dte_send_row"), path_id=ROW_PATH,
-                           task_type="REDUCE", credit_en=True, end=True))
+    idx = DOT_ROW_IN_TASK
+    if not first:
+        items.append(ChainItem(idx, "DTE", "DSA", ("dte", "task_dte_row_datain"),
+                               path_id=ROW_PATH[(gx - 1) % 2], wait_wake=True))
+        idx += 1
+    sym = ROW_SEND_SYM[(first, gx + 1 < cols)]
+    items.append(ChainItem(idx, "DTE", "DSA", ("dte", sym),
+                           path_id=ROW_PATH[gx % 2], task_type="REDUCE",
+                           credit_en=True, end=True))
     return items
 
 
-def path_task_of(slot):
-    """DTE 的 path_task_map：进核那一笔的 PID 对任务链上哪一项搬入任务。"""
+def path_task_of(slot, gx):
+    """DTE 的 path_task_map：进核那一笔的 PID 对任务链上哪一项搬入任务。gx 是本
+    chip 在行里第几颗。"""
     if slot != DOT_SLOT:
         return {IN_PATH: 0, FC2_BCAST_PATH: 3}
     table = {IN_PATH: 0, CHIP_RED_PATH: 3}
     for k in range(DOT_SLOT):
         table[CONCAT_PATH[k]] = DOT_CONCAT_TASK + k
+    if gx > 0:
+        table[ROW_PATH[(gx - 1) % 2]] = DOT_ROW_IN_TASK
     return table
 
 
@@ -703,13 +744,14 @@ def bcore_chain(out_path, next_path=0):
 
 
 def rcore_chain(out_path):
-    """R core 的链二：扫标志表、搬进 Core Mem、两半求和、送下一行。"""
+    """R core 的链二：从用户 FIFO 取一个 ready 用户，把它那一槽的两份从 Matrix Mem
+    送进本级 Rmem 相加，结果直接发往下一行。送进 Rmem 那一笔是逐级 reduce 任务，
+    由 Router 报完成。"""
     return [
         ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find")),
-        ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_load")),
-        ChainItem(2, "VU", "DSA", ("vu", "task_vu_add")),
-        ChainItem(3, "DTE", "DSA", ("dte", "task_dte_rc_send"),
-                  path_id=out_path, end=True),
+        ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_reduce"),
+                  path_id=out_path, task_type="REDUCE", credit_en=True,
+                  end=True),
     ]
 
 
@@ -723,13 +765,25 @@ DATAIN_SYM = {
 # 业务模式下进核那一笔（DTEIN）：(route, no_ack, 标志表基址, 一个槽位多大)。
 # route 0 落 Core Mem、1 落 Matrix Mem。计算 core 落 Core Mem、回 Ack、不置标志；
 # B core 与 R core 落 Matrix Mem、不回 Ack，搬完置标志。标志表几何与 kernel/bach.h
-# 同源：B core 是 BC_FLAG_OFF 与 BC_TOKEN_BYTES，R core 是 RC_FLAG_OFF 与
-# RC_HALF_BYTES。
+# 同源：槽数按 Matrix Mem 容量算，B core 再受 Share Mem 标志表大小限制。
 ROUTE_CM, ROUTE_MM = 0, 1
+MMEM_BYTES = 36 * 1024 * 1024
+SMEM_BYTES = 32 * 1024
+TS_STREAM_NUM = 16
+BC_TOKEN_BYTES = 6144
+RC_HALF_BYTES = 0x3080
+RC_SLOT_BYTES = 2 * RC_HALF_BYTES
+RC_SLOTS = MMEM_BYTES // RC_SLOT_BYTES
+RC_FLAG_OFF = 0
+BC_SLOTS_MM = MMEM_BYTES // BC_TOKEN_BYTES
+BC_SMEM_OVERHEAD = 4 + 4 + TS_STREAM_NUM * 4 + 4 + 4 + 4
+BC_SLOTS_SM = (SMEM_BYTES - BC_SMEM_OVERHEAD) // 8
+BC_SLOTS = min(BC_SLOTS_MM, BC_SLOTS_SM)
+BC_FLAG_OFF = 0
 DTEIN_OF_ROLE = {
     "NORMAL": (ROUTE_CM, 0, 0x0000, 0),
-    "BROADCAST": (ROUTE_MM, 1, 0x0500, 6144),
-    "REDUCTION": (ROUTE_MM, 1, 0x0000, 0x3080),
+    "BROADCAST": (ROUTE_MM, 1, BC_FLAG_OFF, BC_TOKEN_BYTES),
+    "REDUCTION": (ROUTE_MM, 1, RC_FLAG_OFF, RC_HALF_BYTES),
 }
 
 # 角色分配：组头 chip 的 core0 是 B core，最后一列 chip 的 core9 是 R core。
@@ -829,8 +883,8 @@ def build_plan(desc):
 
     每颗 chip 各自做 chip 内归约、FC2 输入广播与 concat。每行 chip 的结果沿行链
     归约：最后一列是“最后一列”那种 chip 时落进它的 R core，各行 R core 串成一
-    条链，最后一行 R core 的结果经 core4 从 E 口出去；否则行尾那颗 chip 直接从 E
-    口出去。
+    条链，在各自的 Rmem 里逐行相加，最后一行 R core 的结果经 core4 从 E 口出去；
+    否则行尾那颗 chip 直接从 E 口出去。
     """
     rows, cols = int(desc["rows"]), int(desc["cols"])
     groups = int(desc.get("groups", 1))
@@ -881,7 +935,7 @@ def build_plan(desc):
         for gy in range(rows):
             here = gy * cols + cols - 1
             below = here + cols if gy + 1 < rows else None
-            wire_rcore_hop(fab, here, below, R_PATH[gy % 2])
+            wire_rcore_hop(fab, here, below, R_PATH[gy % 2], gy == 0)
     if use_bcore:
         for g in range(groups - 1):
             wire_relay_hop(fab, bcore_chip(g), bcore_chip(g) + cols,
@@ -902,9 +956,11 @@ def build_plan(desc):
                 slot = DOT_SLOT if core == dot else next(
                     s for s in range(CORE_PER_CHIP)
                     if core_of_slot(col, s) == core)
-                plan.chains[(chip, core)] = (dot_chain() if slot == DOT_SLOT
+                gx = chip % cols
+                plan.chains[(chip, core)] = (dot_chain(gx, cols)
+                                             if slot == DOT_SLOT
                                              else compute_chain(slot))
-                plan.path_task[(chip, core)] = path_task_of(slot)
+                plan.path_task[(chip, core)] = path_task_of(slot, gx)
             elif role == "BROADCAST":
                 nxt = RELAY_PATH[g % 2] if g + 1 < groups else 0
                 plan.chains[(chip, core)] = bcore_chain(IN_PATH, nxt)

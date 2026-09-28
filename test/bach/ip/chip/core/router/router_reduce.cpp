@@ -408,7 +408,7 @@ TEST(BachReduce, PartitionIsAllocatedWhenTheFirstTaskEnters) {
   EXPECT_TRUE(holds) << "任务做完分区还留着，等 Retire 才放";
 }
 
-// 结果按 flit 出（Router MAS「整包输入输出与结果流水」）：某个结果 flit 要的
+// 结果按 flit 出（Router MAS“整包输入输出与结果流水”）：某个结果 flit 要的
 // 操作数都累加完了就发，不等整包。左路后面几个 flit 晚到，结果的首 flit 先出去，
 // 包锁定到尾 flit，后面的等数据到了再接着发。
 TEST(BachReduce, ResultFlitLeavesBeforeTheWholePacketArrives) {

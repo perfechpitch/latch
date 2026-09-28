@@ -109,7 +109,7 @@ class IssueBench : public BachModule {
       cmd.DriveReady(false);
       return;
     }
-    // 认「这是不是上一笔」要连 path_id 一起看：自启动 core 的 datain 没有
+    // 认“这是不是上一笔”要连 path_id 一起看：自启动 core 的 datain 没有
     // stream，几笔的 stream_id 与 task_id 都一样，只有 path_id 分得开。
     uint64_t key = ((cmd.stream_id.Get() * kTaskChainNum + cmd.task_id.Get()) *
                         kTaskChainNum +

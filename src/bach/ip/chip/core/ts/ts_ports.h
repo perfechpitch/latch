@@ -198,16 +198,6 @@ struct StreamSnapshot {
   uint64_t InFlight() const { return in_flight; }
   // 从 head_ptr 开始的环形年龄序：越靠近 head 越老。
   uint64_t AgeOrder(uint64_t k) const { return (head_ptr + k) % kStreamNum; }
-  // 有没有哪一条链停在 Task 0、已经发射还没完成。自启动 core 上 Task 0 一次只
-  // 放一笔，三条发射通路按它判。
-  bool Task0Infly() const {
-    for (StreamEntry const& e : entry) {
-      if (e.valid && e.task_id == 0 && e.task_fsm == TaskFsm::kInfly) {
-        return true;
-      }
-    }
-    return false;
-  }
 };
 
 using StreamSnapshotPtr = std::shared_ptr<StreamSnapshot>;

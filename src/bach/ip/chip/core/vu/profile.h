@@ -13,7 +13,7 @@
 // error_code 那一档不一样：error_code 是读的时候全部清零并同时清
 // status.ERROR_FLAG。计数器按 64-bit 累加，溢出后回绕，不置任何异常。
 //
-// 发射期的四个 issue_stall_* 是「pipe_ctrl 有空位却没派发」的原因分解，按
+// 发射期的四个 issue_stall_* 是“pipe_ctrl 有空位却没派发”的原因分解，按
 // fence > cmfence > dep > eu 的优先级归因、一拍只记一项，可以相加：
 //   有空位周期 = 派发周期 + 四项之和 + issue_starve_cycle。
 // 取值都从各模块的观测访问器读，所以这里记的是相邻两拍的差。

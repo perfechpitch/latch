@@ -40,7 +40,7 @@ namespace bach {
 //
 // 对齐飞书《DTE DSA》后，进核改成配置驱动：落点与 shareMem 标志表都由 kernel 配
 // CFG 寄存器表达（route 走 CFG_TRANS_MODE，flag 走 CFG_SM_W_ADDR/DATA +
-// wr_sharemem_flag），这里只留 no_ack 一档——「进核不回 Ack」是 SCP 配的档位，
+// wr_sharemem_flag），这里只留 no_ack 一档——“进核不回 Ack”是 SCP 配的档位，
 // 与 kernel 的 CFG 无关。
 struct InboundCfg {
   bool no_ack = false;  // 进核不回 Ack 的档位

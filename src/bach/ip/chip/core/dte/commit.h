@@ -5,13 +5,13 @@
 //
 // 对齐飞书《DTE DSA》：所有任务（进核 + 出核）统一从 RV core 的配置入口来。RV core
 // 配好寄存器写 CFG_TRIGGER 后，Regfile 把快照出的 Descriptor 送进中央 TaskQueue
-// （深度 16，保存「已快照、尚未 dispatch」的完整 TaskDesc，不同通道的任务可乱序
+// （深度 16，保存“已快照、尚未 dispatch”的完整 TaskDesc，不同通道的任务可乱序
 // 下发）；Commit 再按目标通道的读/写 TaskQueue 槽、Completion RS 槽、出核的 VC
 // credit 从队头 dispatch。
 //
-// 「三样一起拿」的语义从 Fire 时刻移到 dispatch 时刻：dispatch 时检查目标 Lane 的
+// “三样一起拿”的语义从 Fire 时刻移到 dispatch 时刻：dispatch 时检查目标 Lane 的
 // 读侧 + 写侧 TaskQueue 项与 Completion RS 项，任一侧没有空间就整体保持（挡住
-// 「读已开始、写没落脚点」的半任务）；出核任务还要先看这条 VC 通路发不发得出。
+// “读已开始、写没落脚点”的半任务）；出核任务还要先看这条 VC 通路发不发得出。
 //
 // 反压：中央 TaskQueue 满（16）就不收 Regfile 送来的 Descriptor，Regfile 据此拉低
 // dsa_cfg 的 req_ready 反压 RV core。
@@ -124,6 +124,12 @@ class Commit : public BachModule {
   // 查 VC credit。
   void TryDispatch() {
     if (holding) return;
+    // 上一拍刚发过一笔就空一拍：对方收下那一笔之后才把它算进 ready，这一拍读到
+    // 的 ready 还没算上它。
+    if (just_sent) {
+      just_sent = false;
+      return;
+    }
     if (central_q.empty()) return;
     uint64_t blocked = 0;  // 这一拍已经有任务没发出去的通道，按位记
     for (auto it = central_q.begin(); it != central_q.end(); ++it) {
@@ -180,7 +186,7 @@ class Commit : public BachModule {
   }
 
   // 出核任务要发出去的那个包在这里造好，读回来的数据往它的 payload 里填。
-  // 出核按文档「重组包头」改写 path_id、user_id、loopback[3:2](vc)、pkt_length
+  // 出核按文档“重组包头”改写 path_id、user_id、loopback[3:2](vc)、pkt_length
   // 四个字段（详细设计 3.15/66），size 由各使能数据段长度算出。片外那一段的
   // 目的标识（dst）跟着 path_id 的表项走。
   void MakeOutboundMsg(Descriptor& d) const {
@@ -223,7 +229,9 @@ class Commit : public BachModule {
     return true;
   }
 
-  // 发出去，直到两边都收下。一次握手最少两拍，接收方按序号认。
+  // 发出去，直到两边都收下。一次握手最少两拍，接收方按序号认。两边的 ready 是
+  // 收下这一拍的请求之后算的，TryDispatch 发一笔之后又空一拍，所以读到 ready 时
+  // 发过的每一笔都已算进去，发一拍就算送到。
   void Deliver() {
     for (uint64_t i = 0; i < to_lane.size(); ++i) {
       if (holding && i == held_lane) {
@@ -234,8 +242,8 @@ class Commit : public BachModule {
     }
     if (holding) {
       to_rs->Drive(held, admit_seq);
-      // 两边都是「下一拍一定收得下」，所以发一拍就算送到。
       holding = false;
+      just_sent = true;
       held = std::shared_ptr<Descriptor>();
       return;
     }
@@ -250,9 +258,10 @@ class Commit : public BachModule {
   std::shared_ptr<AdmitPort> to_rs;
   std::shared_ptr<Descriptor> held;
   bool holding = false;
+  bool just_sent = false;  // 上一拍发过一笔
   uint64_t held_lane = 0, admit_seq = 0;
 
-  // 中央 TaskQueue：保存「已快照、尚未 dispatch」的完整 TaskDesc。
+  // 中央 TaskQueue：保存“已快照、尚未 dispatch”的完整 TaskDesc。
   std::deque<Descriptor> central_q;
   uint64_t last_rv_seq = 0;
   uint64_t admit_pending = 0, stall_pending = 0;

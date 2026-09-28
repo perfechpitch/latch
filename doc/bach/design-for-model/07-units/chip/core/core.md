@@ -66,7 +66,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="246.0" y="168.0" font-size="8.5" fill="#475569">CFG_REG：task_chain 64 项 · datain_task 1 项 · stream_num</text>
 <text x="246.0" y="181.5" font-size="8.5" fill="#475569">　SELF_START · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
 <text x="246.0" y="195.0" font-size="8.5" fill="#475569">User_Match · DataIn_task_table（只有 1 项，占住就反压 Router）</text>
-<text x="246.0" y="208.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 六个写口</text>
+<text x="246.0" y="208.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 十四个写口</text>
 <text x="834.0" y="168.0" font-size="8.5" fill="#475569">Task_ctrl：按完成位图一拍找后继 · 原子安装 · 不越过 End</text>
 <text x="834.0" y="181.5" font-size="8.5" fill="#475569">DTE_Arb（reissue 最高）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
 <text x="834.0" y="195.0" font-size="8.5" fill="#475569">credit 子模块：注册 / 唤醒 · retire：Head-only 退休</text>
@@ -85,14 +85,14 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1536.0" y="335.0" font-size="8.5" fill="#475569">　　　　+ DTE DSA 的 shareMem 写</text>
 <text x="1536.0" y="348.5" font-size="8.5" fill="#475569">用途：task 间共享数据</text>
 <text x="1536.0" y="362.0" font-size="8.5" fill="#475569">B core 的 head / tail 指针</text>
-<text x="1536.0" y="375.5" font-size="8.5" fill="#475569">R core 的 arrive_num 与 tmp_info 表</text>
+<text x="1536.0" y="375.5" font-size="8.5" fill="#475569">R core 的映射表与用户 FIFO</text>
 <text x="1812" y="402.0" font-size="8.5" fill="#9ca3af" text-anchor="end">四个 master 仲裁</text>
 <rect x="324" y="364" width="330" height="106" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="336" y="385" font-size="11" fill="#111827" font-weight="600">MU RV core</text>
 <text x="336.0" y="402.0" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
 <text x="336.0" y="415.5" font-size="8.5" fill="#475569">sm_lsq 16</text>
 <text x="336.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
-<text x="642" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
+<text x="642" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，一拍最多两条</text>
 <rect x="324" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="336" y="551" font-size="11" fill="#111827" font-weight="600">MU DSA（七个模块）</text>
 <text x="336.0" y="568.0" font-size="8.5" fill="#475569">regfile · issue_q 16 · gen_ep_info（topK_ep_table）</text>
@@ -107,7 +107,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="726.0" y="402.0" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
 <text x="726.0" y="415.5" font-size="8.5" fill="#475569">sm_lsq 16</text>
 <text x="726.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
-<text x="1032" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
+<text x="1032" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，一拍最多两条</text>
 <rect x="714" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="726" y="551" font-size="11" fill="#111827" font-weight="600">VU DSA（十一个模块）</text>
 <text x="726.0" y="568.0" font-size="8.5" fill="#475569">config_register：8 组静态模板 + 12 个动态参数</text>
@@ -122,7 +122,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1116.0" y="402.0" font-size="8.5" fill="#475569">task_queue · dsa_iss（每拍 ≤ 1 条）· dsa_rq 8 项</text>
 <text x="1116.0" y="415.5" font-size="8.5" fill="#475569">sm_lsq 16 · cm_lsq 16 · Router I/O reg</text>
 <text x="1116.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
-<text x="1422" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，每条 1 拍</text>
+<text x="1422" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，一拍最多两条</text>
 <rect x="1104" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（八个模块）</text>
 <text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头断言）· Commit（双 Bank，Bank0 优先）</text>

@@ -225,6 +225,8 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       TaskEntry e;
       e.task_pc = Num(tok[4]);
       e.send_unit = SendUnit(Num(tok[5]));
+      LOGCHECK(Num(tok[6]) <= 2,
+               "LoadBundle: TCHAIN 的 recv_unit 只有 0 RV、1 DSA、2 RV 与 DSA。");
       e.recv_unit = RecvUnit(Num(tok[6]));
       e.wait_wake = Num(tok[7]) != 0;
       e.task_type = TaskType(Num(tok[8]));

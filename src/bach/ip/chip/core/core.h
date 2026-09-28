@@ -253,7 +253,7 @@ class Core : public BachModule {
 
   // 本拍新下发的那几笔 task，落成三个信号。
   //
-  // 认「新的一笔」看的是三条发射通路各自的 seq：一笔命令会在端口上连着摆几拍
+  // 认“新的一笔”看的是三条发射通路各自的 seq：一笔命令会在端口上连着摆几拍
   // 等 RV core 收下，只看 cmd_valid 会把同一笔数很多遍。
   //
   //   ts_unit  位掩码，bit0 DTE、bit1 MU、bit2 VU。0 表示本拍没有新下发。
@@ -294,7 +294,7 @@ class Core : public BachModule {
   //   ts_install  装后继笔数（单调）：上一步做完，TaskCtrl 把下一项写进表项。
   //
   // 两者是同一件事的两种来源 —— 第一个 task 走 create，其余走 install —— 都是
-  // 「这一步进入 TS、可以被下发了」。与 ts_unit/ts_task/ts_user 里那一笔下发对
+  // “这一步进入 TS、可以被下发了”。与 ts_unit/ts_task/ts_user 里那一笔下发对
   // 起来，差值就是这一步在 TS 里等的时间：等 credit、等发射通路空出来、等前一笔
   // 从 RV core 那边腾出槽位。不含 RV core 与 DSA 的任何时间。
   //
@@ -338,14 +338,14 @@ class Core : public BachModule {
   //   dsa_start  位掩码，bit0 DTE、bit1 MU、bit2 VU —— 与 ts_unit 同位序。
   //   dsa_done   位掩码，同上。这是 DSA 自己的完成脉冲，也就是它发给 TS 的那一路。
   //
-  // 起点取的是「过门槛」那一拍，不是写 trigger 那一拍。写 trigger 只是把任务收
+  // 起点取的是“过门槛”那一拍，不是写 trigger 那一拍。写 trigger 只是把任务收
   // 进各自的寄存器，真正开始还要过一道闸，而且三个单元的闸门各不相同：
   //   DTE  被 Commit 从中央 TaskQueue dispatch，Lane 读写两侧与 Completion RS
   //        三样资源都拿得到；出核任务还要等 VC credit。进核、出核都由 RV core
   //        配置起，都算。
   //   MU   进 issue_q，drain 走完且队列有空位。
   //   VU   一个 task 的第一条宏指令被 ISQ 收下，静态配置已释放、上一条已被取走。
-  // 这三个闸门等多久都可能，所以「收下任务」与「开始算」不能混为一谈。
+  // 这三个闸门等多久都可能，所以“收下任务”与“开始算”不能混为一谈。
   //
   // 终点是各家把完成报回来的那一拍：
   //   DTE  两侧完成条件配齐、且带 task_last 的那一笔报到 TS，no_ack 的不报。

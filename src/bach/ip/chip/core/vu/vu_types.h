@@ -328,7 +328,7 @@ enum class SexeOp : uint32_t {
 
 // ── 每个单元支持哪些编码、每条指令用哪几路源 ──
 //
-// 「源用哪几路」是一位一路：bit0 src1、bit1 src2、bit2 src3。指令未使用的源选择
+// “源用哪几路”是一位一路：bit0 src1、bit1 src2、bit2 src3。指令未使用的源选择
 // 字段一律被忽略，不检查编码、不占端口、置任何值都不置 CFG_ERROR。
 //
 // 未分配的编码与本单元不支持的编码按无操作处理，该单元的全部字段一并被忽略。
@@ -406,7 +406,7 @@ inline bool SexeUsesTwoSrc(uint32_t opcode) {
   return opcode >= 0x01u && opcode <= 0x04u;
 }
 
-// 这个 VALU 的编码是不是「不支持掩码」的那一类：对应 MASK_SEL 被忽略。
+// 这个 VALU 的编码是不是“不支持掩码”的那一类：对应 MASK_SEL 被忽略。
 inline bool ValuNoMask(ValuOp op) {
   return op >= ValuOp::kMvVf && op <= ValuOp::kSlide1Down;
 }
@@ -543,6 +543,68 @@ inline bool VuValuOn(VuStaticCfg const& c, uint64_t which) {
 }
 inline bool VuVsfuOn(VuStaticCfg const& c, uint64_t which) {
   return c.VsfuActive(which) && VsfuSupports(uint32_t(c.VsfuOpcode(which)));
+}
+
+// VEXE 各单元在一条宏指令里的计算次序（《VU-DSA 微操作与编码方案》：五个 VEXE
+// 之间不限定先后顺序，任意一个都可以取另一个的输出作为源）。VALU0 / VALU1 /
+// VALU2 记作 0 / 1 / 2，VSFU 两个单元算一个，记作 3。
+constexpr uint64_t kVuVexeNum = 4;
+constexpr uint64_t kVuVexeVsfu = 3;
+
+// 一路 src_sel 指向哪个 VEXE 单元，不是 VEXE 的输出返回 kVuVexeNum。
+inline uint64_t VuVexeOfSrc(uint64_t sel) {
+  switch (sel) {
+    case kSrcValu0: return 0;
+    case kSrcValu1: return 1;
+    case kSrcValu2: return 2;
+    case kSrcVsfu0: case kSrcVsfu1: return kVuVexeVsfu;
+    default: return kVuVexeNum;
+  }
+}
+
+// 用到的 VEXE 单元按取源关系排出先后：被取的排在取它的前面，互不相干的保持
+// VALU0、VALU1、VALU2、VSFU 的次序。order 按次序列出用到的单元，n 是个数。取
+// 源成环时排不出来，返回 false。
+inline bool VuVexeOrder(VuStaticCfg const& c, bool bf16,
+                        std::array<uint64_t, kVuVexeNum>& order, uint64_t& n) {
+  std::array<bool, kVuVexeNum> on{};
+  std::array<uint64_t, kVuVexeNum> deps{};   // 每个单元依赖哪几个，按位记
+  for (uint64_t i = 0; i < 3; ++i) {
+    if (!VuValuOn(c, i)) continue;
+    on[i] = true;
+    uint64_t used = ValuSrcUsed(ValuOp(c.valu[i].opcode));
+    uint64_t const f[3] = {c.valu[i].src1, c.valu[i].src2, c.valu[i].src3};
+    for (uint64_t b = 0; b < 3; ++b) {
+      if ((used & (1u << b)) == 0) continue;
+      uint64_t u = VuVexeOfSrc(f[b]);
+      if (u < kVuVexeNum) deps[i] |= 1ull << u;
+    }
+  }
+  for (uint64_t which = 0; which < 2; ++which) {
+    if (!VuVsfuOn(c, which) || (which == 1 && bf16)) continue;
+    on[kVuVexeVsfu] = true;
+    uint64_t u = VuVexeOfSrc(c.VsfuSrc(which));
+    if (u < kVuVexeNum) deps[kVuVexeVsfu] |= 1ull << u;
+  }
+  n = 0;
+  uint64_t placed = 0, want = 0;
+  for (uint64_t u = 0; u < kVuVexeNum; ++u) {
+    if (on[u]) want |= 1ull << u;
+  }
+  while (placed != want) {
+    bool progress = false;
+    for (uint64_t u = 0; u < kVuVexeNum; ++u) {
+      if (!on[u] || (placed >> u & 1u)) continue;
+      // 依赖里没用到的单元不算数：取一个没使能单元的输出另有合法性检查去拦。
+      if ((deps[u] & want & ~placed) != 0) continue;
+      order[n++] = u;
+      placed |= 1ull << u;
+      progress = true;
+      break;
+    }
+    if (!progress) return false;
+  }
+  return true;
 }
 
 // 这一条有没有哪一路真的被用到的源指向这个编码。指令未使用的源选择字段一律被

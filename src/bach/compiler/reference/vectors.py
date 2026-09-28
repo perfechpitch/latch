@@ -15,6 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ffn_reference as ffn
 import numeric_ref as n
 
+try:
+    import kn_gpu
+except ImportError:          # 没装 torch：KN 那一段只走纯 Python
+    kn_gpu = None
+
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vectors")
 
 
@@ -561,10 +566,11 @@ def kn_fc2(act, group, chip, slot):
 
 
 def rcore_add(row, prev):
-    """R core 的两半求和：两份 BF16 读进来按 FP32 相加、Clamp，按 BF16 写回。链首
-    没有上一行，另一半一直是 0。"""
-    a = bf16_decode(row)
-    b = bf16_decode(prev) if prev is not None else [0.0] * len(a)
+    """R core 的两份求和：两份 BF16 读进来按 FP32 相加、Clamp，按 BF16 写回。链首
+    没有上一行，只有本行一份，Rmem 按单流直通，原样出去。"""
+    if prev is None:
+        return row
+    a, b = bf16_decode(row), bf16_decode(prev)
     return n.encode(n.BF16, [n.clamp_nan_inf(n.f32(x + y))
                              for x, y in zip(a, b)])
 
@@ -572,13 +578,28 @@ def rcore_add(row, prev):
 def kn_chip(token, group, chip):
     """一颗 chip 上的整段：8 个 core 的部分和沿 chip 内归约链归约进 dot core，dot
     core 做 silu·dot·量化并广播，8 个 core 各算 FC2 一段，在 dot core 上拼成 6144
-    个 BF16。返回各步的中间量。"""
+    个 BF16。返回各步的中间量。有 CUDA 时在 GPU 上算，结果逐 bit 相同。"""
+    if gpu() is not None:
+        return gpu().chips([token], group)[0][0][chip]
     parts = [kn_part(token, group, chip, s) for s in range(KN_SLOTS)]
     red = router_reduce([parts[s] for s in KN_CHIP_CHAIN])
     act = kn_gate(red)
     fc2 = [kn_fc2(act, group, chip, s) for s in range(KN_SLOTS)]
     return {"parts": parts, "red": red, "act": act, "fc2": fc2,
             "concat": b"".join(fc2)}
+
+
+# GPU 那一份：本机有 CUDA 时第一次用到才建，权重解码后留在显存里给后面复用。
+GPU_STATE = {"ready": False, "gpu": None}
+
+
+def gpu():
+    """KN 那一段的 GPU 实现；没有 CUDA 时是 None，走纯 Python。"""
+    if not GPU_STATE["ready"]:
+        GPU_STATE["ready"] = True
+        if kn_gpu is not None and kn_gpu.available():
+            GPU_STATE["gpu"] = kn_gpu.KnGpu(sys.modules[__name__])
+    return GPU_STATE["gpu"]
 
 
 def kn_header(note, extra):
@@ -664,7 +685,10 @@ def write_moe_two_groups(path):
 
 def kn_rows(token, groups):
     """几个 EP 组：每组两行，每行 4 颗 chip 的结果沿行链归约进本行 R core，各行的
-    R core 逐行相加。返回每颗 chip 的中间量、每行的行链结果与每个 R core 的结果。"""
+    R core 逐行相加。返回每颗 chip 的中间量、每行的行链结果与每个 R core 的结果。
+    有 CUDA 时在 GPU 上算，结果逐 bit 相同。"""
+    if gpu() is not None:
+        return gpu().rows([token], groups)[0]
     chips, rows, rcores = [], [], []
     prev = None
     for g in range(groups):
@@ -729,15 +753,20 @@ def kn_lpu_out(k):
 
 def moe_lpu_tokens_lines(outs):
     """连续跑那一份的全部行：outs 是各 token 出口上的结果，按序号排。"""
-    return kn_header("48 颗 chip 上连续跑 32 个 token：每个 token 出口上的结果",
+    return kn_header(f"48 颗 chip 上连续跑 {len(outs)} 个 token：每个 token 出口上的结果",
                      [f"groups {MOE_LPU_GROUPS}", f"tokens {len(outs)}"] +
                      [f"out{k} {hbytes(o)}" for k, o in enumerate(outs)])
 
 
-def write_moe_lpu_tokens(path):
-    """48 颗 chip 上连续跑 32 个 token，各 token 内容不同、topK 相同，每个只留
-    出口上的结果。"""
-    outs = [kn_lpu_out(k) for k in range(MOE_LPU_TOKENS)]
+def write_moe_lpu_tokens(path, count=MOE_LPU_TOKENS):
+    """48 颗 chip 上连续跑 count 个 token，各 token 内容不同、topK 相同，每个只留
+    出口上的结果。有 CUDA 时整批在 GPU 上一起算。"""
+    if gpu() is not None:
+        res = gpu().rows([kn_token(k) for k in range(count)], MOE_LPU_GROUPS,
+                         keep=False)
+        outs = [r[2][-1] for r in res]
+    else:
+        outs = [kn_lpu_out(k) for k in range(count)]
     write(path, moe_lpu_tokens_lines(outs))
 
 
@@ -755,7 +784,8 @@ SLOW = ("moe_group.txt", "moe_lpu.txt", "moe_lpu_tokens.txt")
 
 def main(skip_slow=False):
     os.makedirs(OUT_DIR, exist_ok=True)
-    print("比对向量：")
+    print("比对向量（KN 那一段走 %s）：" %
+          ("GPU" if gpu() is not None else "纯 Python"))
     write_scalar(os.path.join(OUT_DIR, "scalar.txt"))
     write_block(os.path.join(OUT_DIR, "block.txt"))
     write_accum(os.path.join(OUT_DIR, "accum.txt"))

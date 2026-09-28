@@ -275,8 +275,8 @@ TEST(Mu, PrimitiveVlane2IsK64N128) {
 }
 
 TEST(Mu, AccumOrderIsPartOfResult) {
-  // 换一个累加顺序，同一份输入算出来就不是同一个 bit。这条是「参考实现必须照抄
-  // 硬件顺序」那句话的凭据。
+  // 换一个累加顺序，同一份输入算出来就不是同一个 bit。这条是“参考实现必须照抄
+  // 硬件顺序”那句话的凭据。
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   MatrixExe exe(clk, "exe");

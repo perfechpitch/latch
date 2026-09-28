@@ -11,6 +11,8 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/clock.h"
 #include "base/runtime.h"
@@ -198,11 +200,11 @@ TEST(BachRvCore, RunsOneTaskAndReportsDone) {
   EXPECT_GT(insts, 0u);       // 真的跑了指令
 }
 
-// 配了 DSA 的 task：RV core 配完寄存器照样向 TS 报一次完成，DSA 做完另报一次，
-// TS 两路都收到才算这一笔做完。
-TEST(BachRvCore, DsaTaskStillReportsItsOwnDone) {
+// 配了 DSA 的 task：RV core 配完寄存器用 task_done(0) 交还自己，不向 TS 报；这一笔
+// 的完成由 DSA 报，TASK_RECV_UNIT 配只等 DSA。
+TEST(BachRvCore, DsaTaskHandsBackWithoutNotifyingTs) {
   if (!KernelBuilt("dte")) GTEST_SKIP() << "kernel 还没编";
-  uint64_t dones = 0, started = 0, dsa_writes = 0;
+  uint64_t dones = 0, started = 0, dsa_writes = 0, finishes = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -221,17 +223,20 @@ TEST(BachRvCore, DsaTaskStillReportsItsOwnDone) {
     dones = ts.dones;
     started = ts.started;
     dsa_writes = dsa.writes;
+    finishes = rv.TaskQueue().Finishes();
   }
   RT::Reset();
   EXPECT_EQ(started, 1u);     // 起了这一个 task
   EXPECT_GT(dsa_writes, 0u);  // 真的配了 DSA 寄存器
-  EXPECT_EQ(dones, 1u);       // RV core 这一路报了一次
+  EXPECT_EQ(finishes, 1u);    // RV core 交还了自己
+  EXPECT_EQ(dones, 0u);       // 但不向 TS 报完成
 }
 
-// 每条指令 1 拍：跑完一个 task 花的拍数不少于它的指令数。
-TEST(BachRvCore, OneInstructionPerCycle) {
+// 双发射：每拍最多发 2 条，跑完一个 task 花的拍数不少于它指令数的一半；没有
+// 依赖的相邻两条确实同拍发出。
+TEST(BachRvCore, AtMostTwoInstructionsPerCycle) {
   if (!KernelBuilt("mu")) GTEST_SKIP() << "kernel 还没编";
-  uint64_t insts = 0, done_at = 0;
+  uint64_t insts = 0, done_at = 0, dual = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -274,12 +279,77 @@ TEST(BachRvCore, OneInstructionPerCycle) {
     RT::JoinAll();
     insts = w.insts;
     done_at = w.done_at;
+    dual = rv.Exec().DualIssued();
   }
   RT::Reset();
   ASSERT_GT(done_at, 0u);
   ASSERT_GT(insts, 0u);
-  // 每条 1 拍，另加访存与 DSA 读的停拍，所以拍数不少于指令数
-  EXPECT_GE(done_at, insts);
+  // 每拍最多 2 条，另加访存与 DSA 读的停拍，所以拍数不少于指令数的一半
+  EXPECT_GE(2 * done_at, insts);
+  EXPECT_GT(dual, 0u) << "没有依赖的相邻两条要同拍发出";
+}
+
+// 身份在 RV 发出 dsaw 那一拍抄进请求。trigger 后面紧跟 task_done 的 task
+// （send_part 就是写一笔 trigger 再交还），背靠背下发两个，DSA 那一侧先压着不收：
+// trigger 还在下发队列里排着时核已经换成下一个 task，DSA 收下时带的仍是发出它的
+// 那个 task 的身份。
+TEST(BachRvCore, TriggerKeepsIdsUntilDsaTakesIt) {
+  if (!KernelBuilt("dte")) GTEST_SKIP() << "kernel 还没编";
+  constexpr uint64_t kSendAt = 2;
+  constexpr uint64_t kOpenAt = 60;  // DSA 这一拍起才收
+  std::vector<std::pair<uint64_t, uint64_t>> ids;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RvCore rv(clk, "rv_dte", RvUnit::kDte);
+    RvDriver drv(clk, rv);
+    MemSides mem(clk, rv);
+    rv.LoadImage(KernelDir() + "kernel_dte.hex");
+    uint64_t pc = SymbolOf("dte", "task_dte_send_part");
+    ASSERT_GT(pc, 0u);
+
+    class Side : public BachModule {
+     public:
+      Side(ClockPtr c, RvCore& core, uint64_t entry)
+          : BachModule(c, "side"), rv(core), pc(entry) {}
+      std::vector<std::pair<uint64_t, uint64_t>> ids;
+
+     protected:
+      void Step() override {
+        uint64_t now = CycleNow();
+        // 两个 task 一个接一个塞进 task_queue：stream 3 / task 5，stream 4 / task 6。
+        if (sent < 2 && now >= kSendAt) {
+          rv.Cmd().Drive(pc, 3 + sent, 5 + sent, 77, 3, true, sent + 1);
+          if (rv.Cmd().Ready()) ++sent;
+        } else {
+          rv.Cmd().Idle();
+        }
+        DsaCfgPort& cfg = rv.DsaCfg();
+        bool open = now >= kOpenAt;
+        cfg.DriveReady(open);
+        if (open && cfg.Valid() && cfg.Seq() != last_seq) {
+          last_seq = cfg.Seq();
+          if (cfg.req_we.Get() != 0 && cfg.req_addr.Get() == 0) {
+            DsaTaskIds got = cfg.TaskIds();
+            ids.push_back({got.stream, got.task});
+          }
+        }
+      }
+
+     private:
+      RvCore& rv;
+      uint64_t pc;
+      uint64_t sent = 0, last_seq = 0;
+    };
+    Side side(clk, rv, pc);
+    clk->Continue(600 * kPeriod);
+    RT::JoinAll();
+    ids = side.ids;
+  }
+  RT::Reset();
+  ASSERT_EQ(ids.size(), 2u);
+  EXPECT_EQ(ids[0], std::make_pair(uint64_t(3), uint64_t(5)));
+  EXPECT_EQ(ids[1], std::make_pair(uint64_t(4), uint64_t(6)));
 }
 
 // task_queue 提前收下一个 task，前一个完成后立刻接上，不留 bubble。

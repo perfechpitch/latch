@@ -4,7 +4,7 @@
 // MU DSA 这一组七个模块的装配。
 //
 // 一笔任务走的路：RV core 写配置到 regfile，最后写 trigger 锁成一笔进 issue_q；
-// agu 按「先循环 tile_K 再循环 tile_N」算三组地址；两条 ldq 分别从 Core Mem 读
+// agu 按“先循环 tile_K 再循环 tile_N”算三组地址；两条 ldq 分别从 Core Mem 读
 // token、从 Matrix Mem 读 weight；matrix exe 按 scale block 分组累加；stq 把结果
 // 拼成整拍写回 Core Mem，与 issue_q 的 finish 合成 dsa_done。
 //
@@ -341,7 +341,7 @@ class Mu {
         return;
       }
       // 全部 tile 都写回后与 issue_q 的 finish 合成 dsa_done。波形那一路每笔完成
-      // 都记一笔（spans 靠 dsa_start / dsa_done 配对出「忙」段）；报 TS 的 dsa_done
+      // 都记一笔（spans 靠 dsa_start / dsa_done 配对出“忙”段）；报 TS 的 dsa_done
       // 只有 task_last 那一笔，其余任务完成只推进 issue_q，不通知 TS。
       done_task = f->cfg.task_id;
       done_user = f->cfg.user_id;

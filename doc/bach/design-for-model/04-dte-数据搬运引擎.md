@@ -208,7 +208,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 <text x="330" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">done → TS（dte2ts_done_ch）</text>
 <rect x="30" y="770" width="1180" height="40" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="787" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">外部通道名照 External Connections：ctrl_ch（SCP）、debug_ch、core_cmd / status（DTE Core）、trigger_dsa 与 router2dsa_ch / dsa2router_ch（Router）、dsa2xbar_ch0_wr / ch1_wr 与 xbar2dsa_ch（DMA_XBAR）、done（TS）。</text>
-<text x="46" y="803" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">MAS 图里 inbound_ch 的写控制标成 ch1_wr_ctrl，按上下文应为 ch0_wr_ctrl，本图按后者；参数：TaskQueue 深度 16（待定）、中间 buffer 约 8 KB、Cmem 口 256 B + 8 B scale、Router 口 256 B。</text>
+<text x="46" y="803" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">MAS 图里 inbound_ch 的写控制标成 ch1_wr_ctrl，按上下文应为 ch0_wr_ctrl，本图按后者；参数：中央 TaskQueue 深度 16、每通道 WR Lane TaskQ 深度 4、中间 buffer 约 8 KB、Cmem 口 256 B + 8 B scale、Router 口 256 B。</text>
 </svg>
 ```
 
@@ -357,8 +357,8 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 
 * **通道之间可以乱序执行**，哪个通道的资源先齐哪个先走
 * **通道内顺序执行**，TaskQueue 按序激活
-* **向 TS 反馈完成的顺序仍按 TS 下发的顺序**，与通道间的乱序无关
-* 每个通道的 TaskQueue **深度不少于 16**，与 TS 的 16 个 stream 对齐
+* **向 TS 反馈完成在同一通道内按下发顺序**，通道之间不互相等
+* 每个通道读写两侧的 TaskQueue **深度 4**（MAS 的 WR Lane TaskQ 深度 4，允许读这一侧先执行 4 个任务）；dispatch 之前另有一个 16 项的中央 TaskQueue
 
 `MM → CM` 不另开通道，**固定复用 VC3 那个出核通道**（那一路带宽有余量，VC0 / VC1 用得最多）。代价是这个通道的目的端要能 MUX 到 Core Mem，不像其余三个只去 Router。
 
@@ -624,8 +624,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 | B core | Router → Matrix Mem | 拆四份：`h → Core Mem`、`k → Core Mem`、`t → Matrix Mem`、`s → Core Mem`。另有一种配法：RV core 把 topK 与 scale 标记成无效，DSA 就把 `k + t + s` 整体当 token 处理，只拆两份 `h → Core Mem`、`t → Matrix Mem` |
 | B core | Matrix Mem → Router | 读的时候改：读到包头时按配置改写 `path_id`，重组成完整的 `h, k, t, s` 搬出 |
 | R core | Router → Matrix Mem | 与 B core 一致。理论上 R core 上不会有 topK 和 scale，真出现了就按有效处理 |
-| R core | Matrix Mem → Core Mem | 数据重组：`Matrix Mem 的 token → Core Mem`，同时把 `Core Mem 里的包头 → Hmem` |
-| R core | Core Mem → Router | 改包头，重写 `path_id`，组成 `h, t` |
+| R core | Matrix Mem → Router（归约） | 一个用户的两笔各组成 `h, t`、重写 `path_id`，作为同一笔 reduce 任务的两个操作数先后送进本级 Rmem |
 | 计算 core | Router → Core Mem（广播） | 拆四份：`h → Hmem`、`k → topK 区`、`t → Core Mem`、`s → Core Mem` |
 | 计算 core | Core Mem → Router（广播重发） | 重写 `path_id`，组成 `h, k, t, s` |
 | 计算 core | Router → Core Mem（归约） | 拆两份：`h → Hmem`、`t → Core Mem` |
@@ -633,7 +632,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 | 计算 core | Concat | 与归约相同，另外要改 `size` |
 
 * **scale 只有 MXFP8 才有**，而归约不用 MXFP8，所以归约方向上不会出现 scale
-* B core 与 R core 的包头落 Core Mem、计算 core 的包头落 Hmem，就是前面那张表里「存哪」的分工
+* B core 与 R core 的包头落 Core Mem、计算 core 的包头落 Hmem，就是前面那张表里“存哪”的分工
 * R core 上 Core Mem 给包头之外剩下的空间约 786 KB（源文档标注这个数要重算）
 
 ### 什么时候存，什么时候丢
@@ -653,7 +652,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 
 * 任务数据传输完成后，按 `sharemem_waddr` / `sharemem_data` 写 shareMem，然后通知 TS
 * 只在 B core 与 R core 使用
-* 存 user_id 与 token entry 的 valid 标志，由软件维护：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid
+* 存 user_id 与 token entry 的 valid 标志，由软件维护：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid。R core 上这块 Share Mem 还放按 `user_id` 寻址的软件映射表，以及按 ready 顺序排 `user_id` 的软件用户 FIFO（头尾指针）
 
 ***
 
@@ -667,7 +666,7 @@ DTE 只有一个任务入口：所有任务（进核 + 出核）都由 RV core �
 
 Fast LUT 是否保留待评估：《DTE DSA》v0.3 只留了一节“LUT 评估”，结论未出。模型里所有任务都走上面这条 RV core 配寄存器的路径。本节是候选方案。
 
-从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 **DTE Setup Time**，目标是压到 10T 以内。
+从“TS 把任务下发下来”到“总线上出现第一笔搬运请求”这一段叫 **DTE Setup Time**，目标是压到 10T 以内。
 
 按上面这条 RV core 配寄存器的路径走，Setup Time 大约 85T（流水启动 5T + 50 条指令算地址 75T + core 发射 5T），太慢。办法是让常规任务根本不走 RV core 的配置代码：
 
@@ -828,7 +827,7 @@ dsawi TASK_CFG_TRG  data2
 PhyAddr = base_addr + stream_id × stride + offset
 ```
 
-拆开看就是「基址 + 用户地址 + 段内偏移」。配置寄存器里给的 `src_addr` / `dst_addr` 相当于 `base_addr + offset`，`stream_id × stride` 是硬件自己叠上去的用户地址。由此得到一条规矩：**软件只配基址，偏移由硬件用 `stream_id` 算出来**。
+拆开看就是“基址 + 用户地址 + 段内偏移”。配置寄存器里给的 `src_addr` / `dst_addr` 相当于 `base_addr + offset`，`stream_id × stride` 是硬件自己叠上去的用户地址。由此得到一条规矩：**软件只配基址，偏移由硬件用 `stream_id` 算出来**。
 
 * `stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE
 * 软件不需要知道这个 token 落在 Core Mem 的哪一片
@@ -1075,7 +1074,8 @@ Router 与 core 之间**不做独立的桥接模块**，按耦合关系把逻辑
 | 项目 | 数量 / 容量 | 说明 |
 | - | - | - |
 | 物理通道 | 5 | 进核 `in_ch` 1 条 + 出核 `out_ch[0..3]` 4 条，与 4 个 VC 一一对应 |
-| TaskQueue | ≥16 | 每通道每侧各一个，与 TS 的 16 个 stream 对齐 |
+| TaskQueue | 16 | 中央一个，保存已快照、尚未 dispatch 的任务，不同通道的任务可乱序下发 |
+| WR Lane TaskQ | 4 | 每通道每侧各一个，允许读这一侧先执行 4 个任务 |
 | 中间 Buffer | 约 8 KB | inbound + outbound，约 256B × (20～30) T，最大可掩盖 32 T 延迟 |
 | 与 Cmem 接口宽度 | 256 B/T | 双向；DTE MAS 与 Cmem MAS 口径一致 |
 | 与 router 接口宽度 | 256 B | Data（看不到 scale），双向 |
@@ -1120,7 +1120,7 @@ stall_cycles  = cycles(valid && !ready)
 * **资源检查取方案一**：TS 查 RouterTable 与 stream 资源，有资源才下发；DTE 只查 VC 通路上的 flit credit
 * **软件约束也取方案一**：TS 里的任务要足够小，下发到 DTE 后不用 RV core 再拆
 
-这么合是因为两个方案各自的短板正好互补。方案二把资源检查全放进 DTE，DTE 就要在 PendingQ 里做拆包，拆出来的小任务数量不确定，会把 TaskQueue 填满、堵住后面那笔释放资源的任务，死锁只是换了个位置。方案一用「任务足够小」这条软件约束避开了拆包，但它的出口仍是按 Buffer 而不是按通道切的，DTE 侧没有乱序执行能力。取通道结构加软件约束，两头都避掉了。
+这么合是因为两个方案各自的短板正好互补。方案二把资源检查全放进 DTE，DTE 就要在 PendingQ 里做拆包，拆出来的小任务数量不确定，会把 TaskQueue 填满、堵住后面那笔释放资源的任务，死锁只是换了个位置。方案一用“任务足够小”这条软件约束避开了拆包，但它的出口仍是按 Buffer 而不是按通道切的，DTE 侧没有乱序执行能力。取通道结构加软件约束，两头都避掉了。
 
 * **为什么一个任务要拆成读写两半**
   * 搬运的两端节奏不同：Router 侧什么时候来数据由上游决定，存储侧要抢 bank

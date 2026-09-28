@@ -30,7 +30,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
 <rect x="0" y="0" width="1420" height="930" fill="#ffffff"/>
 <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 0 层（DTE / MU / VU 各一个实例，硬件相同、接口相同。方位：TS 在上，DSA 在下，Share Mem 与 Core Mem 在右，Router 在下，cfg 从上进）</text>
-<text x="947" y="26" font-size="9.5" fill="#6b7280">黄色虚线框内是折算成每条指令 1 拍、不建流水线的部分</text>
+<text x="947" y="26" font-size="9.5" fill="#6b7280">黄色虚线框内是折算进发射那一拍、不建流水线的部分</text>
 <polygon points="249,44 360,44 351,76 240,76" fill="#f8fafc" stroke="#374151"/>
 <text x="300.0" y="59.0" font-size="9" fill="#374151" text-anchor="middle">task_cmd / task_ack</text>
 <text x="300.0" y="70.0" font-size="7.5" fill="#6b7280" text-anchor="middle">← TS</text>
@@ -62,9 +62,9 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <text x="172.0" y="385.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
 <text x="172.0" y="398.5" font-size="8.5" fill="#475569">　dsaw / dsawi 写 DSA 寄存器，一条写一个</text>
 <text x="172.0" y="412.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· loop</text>
-<text x="172.0" y="425.5" font-size="8.5" fill="#475569">每条指令 1 拍；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
-<text x="172.0" y="439.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch / 双发射 /</text>
-<text x="172.0" y="452.5" font-size="8.5" fill="#475569">　gpr 端口 / SEU 的乘除多拍 / DTCM 的 bank 冲突都折算成 1 拍</text>
+<text x="172.0" y="425.5" font-size="8.5" fill="#475569">双发射顺序执行，一拍最多两条；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
+<text x="172.0" y="439.0" font-size="8.5" fill="#475569">不建流水线：pc_gen / loop_bp / decode / dispatch /</text>
+<text x="172.0" y="452.5" font-size="8.5" fill="#475569">　gpr 端口 / SEU 的乘除多拍 / DTCM 的 bank 冲突都折算进这一拍</text>
 <text x="172.0" y="466.0" font-size="8.5" fill="#475569">复位后按 io_reg 的 boot_pc 启动；收到 task 后按 task_pc 起始执行</text>
 <text x="172.0" y="479.5" font-size="8.5" fill="#475569">task_done：队列有待执行 task 则跳到队头 task 起始 PC，</text>
 <text x="172.0" y="493.0" font-size="8.5" fill="#475569">　否则阻塞取指等待；带 TS 标志时通知 TS</text>
@@ -165,7 +165,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F2a | 一笔命令连着几拍出现在端口上，按 `seq` 认它，同一笔只入队一次。不按 `stream_id` 与 `task_id` 认：B core 与 R core 的 datain 任务不占 stream 表项，几笔的这两项都是 0 |
 | F3 | 下发信息七个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，只读；`user_id` 与 `task_id` 6 bit 由 TS 从 stream_table 取出一起下发；`path_id` 是当前任务的实际 PID；`task_dsa_en`；DTE 任务另带 `vcid`，由 TS 按 PID 查 `ROUTER_TABLE` 得到。三个身份与 `path_id` 硬件写入自定义 CSR |
 | F4 | 自定义 CSR 四个：`stream_id`、`task_id` 只读，`user_id` 与 `path_id` 可读写。`path_id` 是当前任务的 PID，PID 更新任务里 kernel 把新 PID 写进去，随 `task_done` 带回 TS。`user_id` 有两条写入路径，写的是同一个字段：普通计算 core 上 TS 下发 task 时硬件写入；B core 与 R core 上 TS 下发时还没有用户身份，软件认出之后自己写。软件读它算 R core 的用户映射表与 Matrix Mem 地址，Router 与 credit 记账认的也是它 |
-| F5 | 自启动的 B core 与 R core 上，软件扫 Share Mem 的标志表认出这一笔属于哪个用户后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
+| F5 | 自启动的 B core 与 R core 上，软件从 Share Mem 认出这一笔属于哪个用户（B core 按 `head` / `tail` 取一格，R core 从软件用户 FIFO 弹出队头）后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
 | F6 | 完成信息四个字段：`stream_id`、`user_id`、`task_id`、`pid`（`path_id` 这个 CSR 的当前值）。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
 | F6a | 自定义 CSR 读它当场拿到当前这一笔 task 的身份，不排队也不异步返回。DSA 寄存器读是另一档：发出去就走，数据由 dsa_rq 按记录的顺序写回 |
 | F7 | 身份到三个 DSA 走同一条路。自定义 CSR 留给软件读。RV 执行 `dsaw` 的那一拍把当时的 `streamID` / `taskID` / `userID` / `pathID` / `vcid` 抄进这笔配置请求，DSA 收下 trigger 写时用请求上的这一份，软件不必再写一遍。DTE 取全部五项，MU 与 VU 取前三项（`streamID` / `taskID` / `userID`）。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它。配置通路把 trigger 挡住时，已经发出的请求仍带着发出那一拍的身份 |
@@ -176,12 +176,14 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | - | - |
 | F8 | 指令集 RV32IMC：I 基本指令集、M 整型乘除法、C 压缩指令集；不支持 F 与 D，A 考虑支持 |
 | F9 | 特权级只支持 M 态，实现 M 态 CSR，不支持 S / U / H；`fence` 指令实现为 nop |
-| F10 | 每条指令 1 拍。不建流水线：pc_gen、loop_bp、decode、dispatch、双发射、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突都折算进这 1 拍 |
+| F10 | 双发射顺序执行（RV Core MAS：为双发射顺序流水执行）：一拍先发一条，再看紧跟它的那一条能不能同拍发，一拍最多两条。不建流水线：pc_gen、loop_bp、decode、dispatch、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突都折算进这一拍 |
+| F10a | 下面几种第二条不同拍发：第一条跳走了；第二条读或写第一条的目的寄存器；两条都发 DSA 请求（`dsar` / `dsaw` 类自定义指令，或访存落在本核 DSA 的 IO 窗口）；两条都访存（`sm_lsq` 与 `cm_lsq` 各一拍一笔，从严取一条）；两条都是乘除；第一条发了 DSA 请求，第二条是 `task_done` 或写 task 控制区。第二条的源寄存器没就绪、或它要用的 DSA 通路或 lsq 没空，也不发 |
+| F10b | 双发射的第二条是 `task_done` 或写 task 控制区时照常与第一条同拍发：第一条发出的 DSA 请求已经带着发出那一拍的身份（F7），它在 `dsa_iss` 里排几拍、核换成下一个 task，都不改它带的身份 |
 | F11 | 复位后按 io_reg 的 `boot_pc` 启动；收到 TS 下发的 task 后按 `task_pc` 起始执行 |
 | F12 | 自定义指令 `dsar` / `dsari`：读 DSA 寄存器，地址分别来自 rs1 与指令里的 16 bit 字节地址，`bit31` 区分这两种寻址。读不同步返回：目的寄存器的就绪位在发出读那一拍清掉，数据由 `dsa_rq` 写回时才补进 gpr |
 | F13 | 自定义指令写 DSA 寄存器一次写 1 个：`dsaw` 的地址取自 rs2、`dsawi` 的地址是指令里的 16 bit 字节地址，同样由 `bit31` 区分。与 RV Core MAS 的“每条最多配置 1 个 DSA 寄存器”一致；早期 ISA 描述表里的 `.d` 那一档（一次写 2 个）已经不在这一版设计里 |
 | F14 | 自定义指令 `task_done`：通知当前 task 完成。队列有待执行 task 则跳转到队头 task 起始 PC，否则阻塞取指等待；`bit31` 是 `ts` 标志，置位时通知 TS。firmware 程序结束时要执行一条不通知 TS 的 `task_done`，等待业务流 task |
-| F15 | 这一版《RV Core自定义指令详细设计》总计 6 条自定义指令，**不再有 `flag_check`**：B core 与 R core 轮询软件映射表改用普通 Share Mem 读，kernel 里就是 `task_rc_find` / `task_bc_wait` 那种 `for (;;)` 扫表 |
+| F15 | 这一版《RV Core自定义指令详细设计》总计 6 条自定义指令，**不再有 `flag_check`**：B core 与 R core 的轮询改用普通 Share Mem 读，kernel 里就是 `task_rc_find` / `task_bc_wait` 那种 `for (;;)` 轮询：`task_rc_find` 比较软件用户 FIFO 的头尾，弹出一个用户后再等这一槽的标志置齐，`task_bc_wait` 比较 `head` 与 `tail` |
 | F16 | 因此**没有多拍的自定义指令**，6 条都按 1 拍记。原先给 `flag_check` 留的“唯一一条多拍指令、拍数按实际扫过的步数记”随之取消 |
 | F17 | 自定义指令 `loop`：rs1 是最大循环次数、rs2 是当前循环次数，rs2 ≥ rs1 时退出循环，imm 是分支偏移。字段按标准 B 型排，偏移是**有符号字节偏移**，范围 ±4094、低 1 bit 隐含为 0 |
 | F18 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
@@ -227,6 +229,7 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 | F31 | `cm_lsq` 16 项，访问 Core Mem，15～25 拍，顺序执行，每拍仅发一个请求；只有 DTE core 有 |
 | F32 | Router I/O reg 复用 `cm_lsq`，仅 DTE core 需要 |
 | F33 | 访存带宽 32 bit |
+| F33a | 走 `sm_lsq` 或 `cm_lsq` 的访存（Share Mem、Core Mem、Router I/O reg）在 lsq 没空时原地等，不发出去 |
 | F34 | 写回优先级：DTCM 读出数据与 Share Mem / Core Mem 数据同时需写回时，优先写回 Share Mem / Core Mem，阻塞 DTCM |
 | F35 | DTE core 访问 Core Mem 的接口与其余通路不同：一次读请求固定读回 1056 bit，不支持 burst，按 32 bit / 拍返回；地址 18 bit，4 B 粒度；写请求带 4 bit 字节使能 |
 | F35a | 读写<b>不同</b>数据缓存时，请求与返回都可以乱序发出 |
@@ -300,7 +303,7 @@ kernel 清单按 RV core 分：
 | `weights_loader` | DTE core | 用标量指令算出这一片权重落 Matrix Mem 的地址，再发 DTE 指令把数据从 Router 搬过去 | DTE DSA |
 | `bcore_datain` | DTE core | 把 Share Mem 里 `head` 指的槽位地址配给 DTE DSA，DSA 搬完置 `head = head + 1` | DTE DSA |
 | `broadcast` | DTE core | 把 `tail` 指的槽位配给 DTE DSA 搬到 Router，搬完置 `tail = tail + 1` | DTE DSA |
-| `check_flag` | MU core | B core 上循环比较 `head` 与 `tail`；R core 上循环扫 `arrive_num` 找等于 2 的项，找到就清零并写 `tmp_info1[stream_id]` | RV core 自己 |
+| `check_flag` | MU core | B core 上循环比较 `head` 与 `tail`；R core 上比较软件用户 FIFO 的头尾，不等就弹出一个 `user_id`，等这一槽的标志置齐，把槽号写进 `RC_SLOT_OFF[stream_id]` | RV core 自己 |
 | `token_datain` | DTE core | 按包头判断这是任务链里哪一步的数据，把 Router buffer 里的数据配给 DTE DSA 搬进 Core Mem | DTE DSA |
 | `dataout` | DTE core | 按 `task_id` 查 `path_id` 与 `size` 改写硬件包头，把 Core Mem 里的结果配给 DTE DSA 搬到 Router | DTE DSA |
 | `mu_gemv` | MU core | 判断 8 个激活专家里哪些落在本 EP 组、挑出加权权重、配好 Mmem 与 Cmem 地址，写两条 `dsawi`（先 `topk_stream_stride`，后 `trigger`）启动 | MU DSA |
@@ -312,14 +315,14 @@ kernel 清单按 RV core 分：
 
 ## 5　流水线总览
 
-本模块不建流水线，第 1 层图画的是四段的拍数记账关系：取 task、执行、异步返回、报完成。执行段每条指令 1 拍，两条异步返回段的拍数由被访问方给。
+本模块不建流水线，第 1 层图画的是四段的拍数记账关系：取 task、执行、异步返回、报完成。执行段一拍最多两条指令，两条异步返回段的拍数由被访问方给。
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 678 436" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
   <defs><marker id="arvov" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
   <rect x="0" y="0" width="678" height="436" fill="#ffffff"/>
 
-  <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 1 层流水线总览（不建流水线，每条指令 1 拍，延迟记在 gpr 就绪表上）</text>
+  <text x="20" y="26" font-size="12" fill="#111827">RV core · 第 1 层流水线总览（不建流水线，一拍最多两条指令，延迟记在 gpr 就绪表上）</text>
   <text x="20" y="42" font-size="9.5" fill="#6b7280">横向是级序，不是拍序；每级的拍数在右上角 Dx。橙色虚线框是变长级，非按比例。</text>
   <path d="M150 52 L150 70" stroke="#e5e7eb" fill="none"/>
 <path d="M150 126 L150 328" stroke="#e5e7eb" fill="none"/>
@@ -358,7 +361,7 @@ kernel 清单按 RV core 分：
   <text x="458" y="256" font-size="8.5" fill="#92400e" text-anchor="end">D变长</text>
   <text x="326" y="276" font-size="11" fill="#7c2d12">lsq 发射与返回</text>
   <path d="M300 270 L315 270" stroke="#475569" marker-end="url(#arvov)" fill="none"/>
-  <text x="20" y="352" font-size="10.5" fill="#374151">M2 一拍一条：pc_gen、译码、双发射、乘除多拍、DTCM bank 冲突都折算进这一拍。</text>
+  <text x="20" y="352" font-size="10.5" fill="#374151">M2 一拍最多两条：pc_gen、译码、乘除多拍、DTCM bank 冲突都折算进这一拍。</text>
   <text x="20" y="380" font-size="10.5" fill="#374151">M4 与 M5 的拍数由被访问方给：ITCM 1、DTCM 3、Share Mem 5～10、Core Mem 15～25、DSA 读寄存器由该 DSA 决定。</text>
   <text x="20" y="408" font-size="10.5" fill="#374151">M2 读到未就绪的源寄存器就原地等，等待时长就是 M4 或 M5 的拍数。</text>
 </svg>
@@ -679,7 +682,8 @@ custom-0 字段布局   见下一节
 | 自定义 CSR 同步返回，DSA 寄存器读异步写回 | F6a | `csr_sync_read` |
 | 三个 DSA 的身份都随配置写走，dsaw 发出时从 CSR 抄下 | F7 | `dsa_id_paths` |
 | RV32IMC + 只支持 M 态 + fence 为 nop | F8、F9 | `isa_scope` |
-| 每条指令 1 拍，流水线细节折算进这 1 拍 | F10 | `one_cycle_per_inst` |
+| 双发射顺序执行，一拍最多两条，流水线细节折算进这一拍 | F10、F10a | `AtMostTwoInstructionsPerCycle` |
+| trigger 压在下发队列里时核换了 task，DSA 收下时仍带发出它的那个 task 的身份 | F7、F10b | `TriggerKeepsIdsUntilDsaTakesIt` |
 | 六条 custom-0 自定义指令的译码与执行 | F12～F17 | `custom0` |
 | 写 DSA 寄存器两种寻址各就位 | F13 | `custom0` · `WritesDsaRegisterBothAddressModes` |
 | 16 bit 立即数拆进三个字段后仍拼得回来 | F13 | `custom0` · `ImmediateAddressLandsInWindow`、`DecodeMapsEachEncoding` |
@@ -710,8 +714,8 @@ custom-0 字段布局   见下一节
   * 提前接收把这段延迟藏在前一个 task 的执行里
 * **为什么不建流水线**
   * 本轮关心的是 core 内的调度与访存排队，不是标量核自身的 IPC
-  * kernel 是真实 RV32 程序，指令条数是真的；每条 1 拍加上访存与 DSA 读的真实延迟，已经能反映“配置耗时是否小于计算耗时”这一条约束
-  * 代价是双发射、分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争都不体现
+  * kernel 是真实 RV32 程序，指令条数是真的；一拍最多两条加上访存与 DSA 读的真实延迟，已经能反映“配置耗时是否小于计算耗时”这一条约束
+  * 代价是分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争都不体现
 * **为什么 DSA 读寄存器不阻塞而配置写会阻塞**
   * 配置写要占 DSA 的配置通路，通路满了只能等
   * 读只是取一个状态，用 dsa_rq 记下目的寄存器就能异步返回，不必占住发射口
@@ -719,3 +723,6 @@ custom-0 字段布局   见下一节
   * 模型只跑业务流那一段：TS 下发 task 时取 `task_pc` 起始执行，firmware 从 `boot_pc` 跑到那条不通知 TS 的 `task_done` 为止的那一段没有执行的时机
   * `sp` 与 `gp` 是 firmware 起始那两条指令设的，不设就是 0，kernel 一用栈就访问 0 号地址附近
   * 取值照链接脚本给的 DTCM 栈顶与全局指针，与 firmware 设的那两个相同
+* **为什么 kernel 里只做一次的初始化认一个特定值**
+  * firmware 不跑，`kernel_init` 没有执行的时机，DTCM 里的 `.bss` 也没人清零；模型里没写过的 DTCM 读出来是填充值
+  * DTE 的八套模板由每个 core 最先跑的那种进核任务在第一次时配，配完往 DTCM 里的标记写一个特定值；读到的不是这个值就再配一遍

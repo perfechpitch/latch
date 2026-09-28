@@ -21,10 +21,17 @@
 //
 // 不派角色的 core 上只走直通：数据走完整流水线但不投递本 core，不检查 credit、
 // 不支持阻塞重发。
+//
+// Core 多操作数：一笔 reduce 任务的几份操作数都从本 core 出来时，core 方向这一站
+// 把它们依次分到 reduce_in_mask 置位的几路上（《Router》：Rmem支持一个方向来的
+// 多个操作数，需要配置特殊模式）。同一用户在这条 path 上的第 k 个包走第 k 个置位
+// 的那一路，走满一轮从头计。一个包从首 flit 定下走哪一路，后面的 flit 跟着走。
 
 #include <array>
 #include <deque>
+#include <map>
 #include <string>
+#include <utility>
 
 #include "base/log.h"
 #include "bach/ip/chip/core/router/router_ports.h"
@@ -156,7 +163,8 @@ class RouterStation : public BachModule {
         // 配置写入前不投递任何包。
         continue;
       }
-      uint64_t mask = OutMaskOf(e, *f.msg);
+      uint64_t lane = ReduceLaneOf(e, f, v);
+      uint64_t mask = OutMaskOf(e, *f.msg, lane);
       if (mask == 0) {
         // 开了 path_core_mask 的那一档：这条 path 走遍一串 core，落在哪几个由
         // 包头的 mask 挑，走到既没人要又没有下游的那一跳，这一笔就是走到头了，
@@ -187,6 +195,7 @@ class RouterStation : public BachModule {
       req->msg = f.msg;
       req->seq = ++req_seq;
       rr_last = v;
+      if (CoreOperands(e) && f.head) TakeOperand(e, *f.msg, lane, v);
       // flit 离开本级 VC Buffer 就归还 VC credit，走共享总线，一拍最多一个 VC。
       Slot s = vc_buf[v].front();
       vc_buf[v].pop_front();
@@ -241,16 +250,17 @@ class RouterStation : public BachModule {
   // 出方向掩码。
   //
   // 进不进 ReduceModule 由 operation 决定，不由 flow_dir：flow_dir 管的是这条
-  // path 从本级「往哪几个方向发」，是归约算完之后的事；operation 管的是本级在
+  // path 从本级“往哪几个方向发”，是归约算完之后的事；operation 管的是本级在
   // 这条 path 上的角色。两者混用会成环：归约结果回注时用同一个 path_id 查表，
   // 若按 flow_dir 判就会被再次送进 ReduceModule。
   //
   // 本级要做归约时这一笔只进 ReduceModule，不同时往下游发；下游那一段由
   // ReduceModule 收齐后按 flow_dir 自己发。
-  uint64_t OutMaskOf(RouteEntry const& e, Message const& m) const {
+  uint64_t OutMaskOf(RouteEntry const& e, Message const& m,
+                     uint64_t lane) const {
     if (!pass_through && e.operation != Operation::kForward &&
         e.reduce_in_mask != 0) {
-      return 1ull << (kOutReduce0 + ReduceLaneOf(e));
+      return 1ull << (kOutReduce0 + lane);
     }
     uint64_t mask = 0;
     if (e.flow_dir & kFlowMid) mask |= 1ull << kOutMid;
@@ -263,19 +273,56 @@ class RouterStation : public BachModule {
   }
 
   // 三路 reduce 输入对应三个相邻方向，与 reduce_in_mask 的三位同一套编号：
-  // bit0 mid、bit1 left、bit2 right。三个数据源是「两个上游 core 加一个本
-  // core」，本 core 自己那一份从 core 方向进来，走哪一路由本表项 flow_dir 的
+  // bit0 mid、bit1 left、bit2 right。三个数据源是“两个上游 core 加一个本
+  // core”，本 core 自己那一份从 core 方向进来，走哪一路由本表项 flow_dir 的
   // reduce1 与 reduce2 两位指定：两位都不置走 bit0，置 reduce1 走 bit1，置
   // reduce2 走 bit2。一个 core 既收上游分量又出自己那一份时，两者不能挤在同
-  // 一路上，这两位就是拿来错开的。
-  uint64_t ReduceLaneOf(RouteEntry const& e) const {
+  // 一路上，这两位就是拿来错开的。两位都置是 Core 多操作数：本 core 出的几份
+  // 依次占 reduce_in_mask 置位的几路。
+  uint64_t ReduceLaneOf(RouteEntry const& e, FlitView const& f,
+                        uint64_t v) const {
     if (dir < kR2RNum) return dir;
+    if (CoreOperands(e)) {
+      if (!f.head) return cur_lane[v];
+      auto it = operand_seen.find({f.msg->path_id, f.msg->user_id});
+      uint64_t k = it == operand_seen.end() ? 0 : it->second;
+      return NthLane(e.reduce_in_mask, k);
+    }
     if (e.flow_dir & kFlowReduce2) return 2;
     if (e.flow_dir & kFlowReduce1) return 1;
     return 0;
   }
+  bool CoreOperands(RouteEntry const& e) const {
+    return dir == kInLocal && !pass_through &&
+           e.operation != Operation::kForward &&
+           (e.flow_dir & kFlowReduce1) && (e.flow_dir & kFlowReduce2);
+  }
+  // reduce_in_mask 里第 k 个置位的那一路。
+  static uint64_t NthLane(uint64_t in_mask, uint64_t k) {
+    for (uint64_t r = 0; r < kR2RNum; ++r) {
+      if (((in_mask >> r) & 1u) == 0) continue;
+      if (k == 0) return r;
+      --k;
+    }
+    LOGCHECK(false, "RouterStation: Core 多操作数的份数超过 reduce_in_mask 的路数。");
+    return 0;
+  }
+  // 首 flit 发出去才算占了这一路：本拍没发出去的下一拍重算，不能多记一份。
+  void TakeOperand(RouteEntry const& e, Message const& m, uint64_t lane,
+                   uint64_t v) {
+    cur_lane[v] = lane;
+    uint64_t n = 0;
+    for (uint64_t r = 0; r < kR2RNum; ++r) n += (e.reduce_in_mask >> r) & 1u;
+    auto key = std::make_pair(m.path_id, m.user_id);
+    uint64_t k = operand_seen[key] + 1;
+    if (k >= n) {
+      operand_seen.erase(key);
+    } else {
+      operand_seen[key] = k;
+    }
+  }
 
-  // 换 VC：本跳读到表里的「下一跳 VC」后改写包头里的那个字段供下一跳读。
+  // 换 VC：本跳读到表里的“下一跳 VC”后改写包头里的那个字段供下一跳读。
   // 多个出方向时取第一个置位方向的配置。
   uint64_t NextVcOf(RouteEntry const& e, uint64_t mask, uint64_t cur) const {
     if (mask & (1ull << kOutMid)) return e.nxt_vc[0];
@@ -299,6 +346,10 @@ class RouterStation : public BachModule {
   uint64_t shared_depth = kVcSharedDepth;
   std::array<uint64_t, kVcNum> private_used{};
   uint64_t shared_used = 0;
+  // Core 多操作数：各 VC 上正在发的那个包走哪一路；每个 (path, 用户) 这一轮已经
+  // 发出几份。
+  std::array<uint64_t, kVcNum> cur_lane{};
+  std::map<std::pair<uint64_t, uint64_t>, uint64_t> operand_seen;
   uint64_t rr_last = 0;
   uint64_t req_seq = 0;
   uint64_t forwarded_pending = 0, dropped_pending = 0;

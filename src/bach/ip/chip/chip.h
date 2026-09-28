@@ -212,6 +212,10 @@ class Chip : public BachModule {
       // 桥收下一个 flit 就把 VC 位置还给这个 core：边界那一跳的反压与 core 之
       // 间那几跳同一套账，不还就是只减不加。
       bridges[d]->AttachToCoreBack(cores[i]->BackWire(dir[d]));
+      // 反方向同理：桥往这个 core 发，按它这个口入口的 VC 深度记账，core 腾出
+      // 位置再发。
+      bridges[d]->EnableCoreCredit(cores[i]->UpBackWire(dir[d]),
+                                   kVcPrivateDepth, kVcSharedDepth);
     }
   }
 

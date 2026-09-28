@@ -179,7 +179,7 @@ TEST_F(BachBundleCheck, ComputeCoreLandingInMatrixMemIsRejected) {
 // B core 的 DTEIN 落 Matrix Mem。
 TEST_F(BachBundleCheck, BroadcastCoreLandingInCoreMemIsRejected) {
   ExpectRejected("bcore_to_cm",
-                 {{{"DTEIN 0 0 1 1 0x500 6144", "DTEIN 0 0 0 1 0x500 6144"}},
+                 {{{"DTEIN 0 0 1 1 0x0 6144", "DTEIN 0 0 0 1 0x0 6144"}},
                   {}});
 }
 

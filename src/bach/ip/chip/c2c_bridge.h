@@ -13,7 +13,9 @@
 //   TX Engine      按 4 KB 边界拆包，加 4 位 seq_id 与 tail 标记，位宽 2048
 //                  转 1024，一拍拆两拍发
 //   RX Engine      按 seq_id 缓存，一个 flit 的段到齐就还原这个 flit 发给 core，
-//                  位宽 1024 转 2048
+//                  位宽 1024 转 2048。发给 core 按 core 那一侧入口的 VC 深度记
+//                  账，没有位置就压在本级，release 不受这一关挡；一个 flit 交给
+//                  core 之后才把它占的缓冲还给对侧
 //   AXI Bridge     credit 与 AXI4 的协议转换。出方向按这一段物理链路的延迟
 //                  计时（PCIe C2C 300 ns，按 1 T = 1 ns 折算），入方向只做转
 //                  换不再计时，一段线的时间算在发送侧。Router 到 Router 的
@@ -36,6 +38,7 @@
 #include "base/log.h"
 #include "bach/common/flit.h"
 #include "bach/common/params.h"
+#include "bach/ip/chip/core/router/router_table.h"
 #include "bach/ip/module_base.h"
 
 namespace latch {
@@ -55,7 +58,7 @@ constexpr uint64_t kC2cRcStages = 3;      // RC / VA / SA 三关
 // Router 给这个方向的 VC credit 总量一致：每个 VC 一份 private，四个 VC 共用一
 // 份 shared。
 constexpr uint64_t kC2cInCap = kVcNum * kC2cTxPrivate + kC2cTxShared;
-// VC credit 攒到几个 flit 打成一笔。原文只说「转成包粒度」，没给数，按 4 KB 的
+// VC credit 攒到几个 flit 打成一笔。原文只说“转成包粒度”，没给数，按 4 KB 的
 // 分段边界除以一拍 256 B 取 16 偏大，这里取 4：攒太多会让上游等得久。
 constexpr uint64_t kC2cCreditPackFlits = 4;
 
@@ -84,6 +87,8 @@ struct C2cBeat {
   ReleaseView rel;
   // 这一笔 VC release 代表几个 flit。业务层那两类恒为 1。
   uint64_t vc_len = 1;
+  // RX 拼回的一个 flit 由几段组成，交给 core 时按这个数还对侧的链路 credit。
+  uint64_t segs = 1;
 };
 
 // ── 一个方向的 credit ──
@@ -149,20 +154,21 @@ class C2cRcVaSa : public BachModule {
   // 往线上发要看对侧还有没有位置，额度是对侧 RX 的 buffer 容量，不是本级自己
   // 的：本级收不收得下是从 core 收那一步的事，两件事不能混。release 不占
   // credit：它是让对侧腾出位置的那一笔，被数据堵住就两边互等。
-  bool HasBeat() const {
-    if (out.empty()) return false;
-    C2cBeat const& b = out.front();
-    return b.is_release || credit.Has(b.seg.vc);
-  }
+  //
+  // 按进来的先后取第一笔走得了的：各 VC 分开记账，一个 VC 没额度只压住它自
+  // 己，排在后面的别的 VC 照走。同一个 VC 里前一笔没额度，后一笔也没有，所以
+  // 同一 VC 内不会越序。
+  bool HasBeat() const { return Pick() != out.end(); }
   C2cBeat TakeBeat() {
-    C2cBeat b = out.front();
+    auto it = Pick();
+    C2cBeat b = *it;
     if (!b.is_release) {
       credit.Take(b.seg.vc);
       // 离开本级缓冲才把位置还给 core。收下就还的话，core 拿回额度又发，而本级
       // 还没腾空，那些 flit 只能挡回去，一个包就缺了一截。
       back_pend.push_back(b.seg.vc);
     }
-    out.pop_front();
+    out.erase(it);
     return b;
   }
   // 对侧还回来的 credit。
@@ -205,6 +211,12 @@ class C2cRcVaSa : public BachModule {
   }
 
  private:
+  std::deque<C2cBeat>::const_iterator Pick() const {
+    auto it = out.begin();
+    while (it != out.end() && !it->is_release && !credit.Has(it->seg.vc)) ++it;
+    return it;
+  }
+
   // 链路层的 credit 归还先发：它不占对侧 credit，也不能被数据堵住，否则两侧
   // 互等。
   bool SendC2cCredit(uint64_t now) {
@@ -426,7 +438,30 @@ class C2cRxEngine : public BachModule {
   void AttachToCore(LinkEndPtr p) { to_core = std::move(p); }
 
   void Push(C2cBeat const& b) { in.push_back(b); }
-  // 本级收下一段之后要还给对侧的那一笔。
+  // 接着本片 core 时打开：往 core 发按 core 那一侧入口的 VC 深度记账，每 VC 一份
+  // private，四个 VC 共用一份 shared，与 RouterStation 的两级深度一致；core 入口
+  // 腾出位置时经 up_back 那根线还回来。对着测试桩的那一侧没有 core，不开。
+  void AttachCoreUpBack(LinkEndPtr p) { core_up_back = std::move(p); }
+  void EnableCoreCredit(uint64_t priv, uint64_t shared) {
+    core_credit = true;
+    core_cap = priv;
+    core_priv.fill(priv);
+    core_shared_cap = shared;
+    core_shared = shared;
+  }
+  // core 入口腾出一个位置。回填先补 private，满了补 shared。
+  void GiveCoreCredit(uint64_t vc) {
+    if (!core_credit) return;
+    LOGCHECK(vc < kVcNum, "C2cRxEngine: 归还的 VC 号越界。");
+    if (core_priv[vc] < core_cap) {
+      ++core_priv[vc];
+      return;
+    }
+    LOGCHECK(core_shared < core_shared_cap,
+             "C2cRxEngine: core 还回来的位置超过初值。");
+    ++core_shared;
+  }
+  // 本级交出一个 flit 之后要还给对侧的那几笔。
   bool HasRelease() const { return !credit_back.empty(); }
   uint64_t TakeRelease() {
     uint64_t vc = credit_back.front();
@@ -449,7 +484,11 @@ class C2cRxEngine : public BachModule {
 
  protected:
   void Step() override {
-    // 末级先做：先把拼好的发出去，再收新的段。
+    // 先收 core 还回来的位置，再把拼好的发出去，最后收新的段。
+    if (core_credit && core_up_back) {
+      ReleaseView r = ReadRelease(core_up_back->release);
+      if (r.vc_valid) GiveCoreCredit(r.vc_id);
+    }
     Emit();
     Reassemble();
 
@@ -464,15 +503,27 @@ class C2cRxEngine : public BachModule {
       to_core->Idle();
       return;
     }
-    C2cBeat b = ready.front();
+    // 按到达先后取第一笔走得了的：release 总走得了；数据要它那个 VC 在 core
+    // 那一侧有位置。各 VC 分开记账，一个 VC 没位置只压住它自己，排在后面的
+    // 别的 VC 与 release 照走，否则压着的那一笔要等的正是被它挡住的那几笔。
+    // 同一个 VC 里前一笔没位置，后一笔也没有，所以同一 VC 内不会越序。
+    auto it = ready.begin();
+    while (it != ready.end() && !it->is_release && !CoreRoom(it->seg.vc)) {
+      ++it;
+    }
+    if (it == ready.end()) {
+      to_core->Idle();
+      return;
+    }
+    C2cBeat b = *it;
     if (b.is_release && b.vc_len > 1) {
       // 收方按这一笔代表的 flit 数展开：下游的 VC credit 一拍只加一个。
-      --ready.front().vc_len;
+      --it->vc_len;
       to_core->flit.Idle();
       to_core->release.Drive(b.rel.vc_valid, b.rel.vc_id, false, 0);
       return;
     }
-    ready.pop_front();
+    ready.erase(it);
     if (b.is_release) {
       to_core->flit.Idle();
       to_core->release.Drive(b.rel.vc_valid, b.rel.vc_id, b.rel.stream_valid,
@@ -482,6 +533,20 @@ class C2cRxEngine : public BachModule {
     to_core->release.Idle();
     to_core->flit.Drive(b.seg.vc, b.seg.head, b.seg.tail, b.seg.bytes,
                         b.seg.msg);
+    TakeCoreRoom(b.seg.vc);
+    for (uint64_t k = 0; k < b.segs; ++k) credit_back.push_back(b.seg.vc);
+  }
+
+  bool CoreRoom(uint64_t vc) const {
+    return !core_credit || core_priv[vc] > 0 || core_shared > 0;
+  }
+  void TakeCoreRoom(uint64_t vc) {
+    if (!core_credit) return;
+    if (core_priv[vc] > 0) {
+      --core_priv[vc];
+    } else {
+      --core_shared;
+    }
   }
 
   void Reassemble() {
@@ -506,7 +571,6 @@ class C2cRxEngine : public BachModule {
     }
     C2cBeat whole = half[key];
     half.erase(key);
-    credit_back.push_back(whole.seg.vc);
 
     reasm[whole.seg.vc].push_back(whole);
     if (!whole.seg.seg_last) return;
@@ -520,17 +584,22 @@ class C2cRxEngine : public BachModule {
     for (auto const& s : segs) total += s.seg.bytes;
     out.seg.bytes = total;
     out.seg.tail = whole.seg.tail;
+    out.segs = segs.size();
     segs.clear();
     ready.push_back(out);
     ++asm_cnt;
   }
 
-  LinkEndPtr to_core;
+  LinkEndPtr to_core, core_up_back;
   std::deque<C2cBeat> in, ready;
   std::map<uint64_t, C2cBeat> half;
   std::map<uint64_t, std::deque<C2cBeat>> reasm;
   std::deque<uint64_t> credit_back, peer_credit;
   uint64_t asm_cnt = 0;
+  // 往本片 core 发的账。
+  bool core_credit = false;
+  uint64_t core_cap = 0, core_shared_cap = 0, core_shared = 0;
+  std::array<uint64_t, kVcNum> core_priv{};
 
   Logic64 assembled, depth;
 };
@@ -581,6 +650,13 @@ class C2cBridge {
   // 出方向由对端调 TakeOut()，入方向由对端调 PushIn()。两座桥对接就是这两个
   // 方法互相喂：C2C 上传的是段与 release，不是 flit。
   void AttachToCoreBack(LinkEndPtr p) { rcvasa->AttachToCoreBack(std::move(p)); }
+  // 接着本片 core：往 core 发按那一侧入口的 VC 深度记账，core 入口腾出的位置
+  // 从它的 up_back 那根线收。
+  void EnableCoreCredit(LinkEndPtr core_up_back, uint64_t priv,
+                        uint64_t shared) {
+    rx->AttachCoreUpBack(std::move(core_up_back));
+    rx->EnableCoreCredit(priv, shared);
+  }
 
   bool HasOut() const { return out_axi->HasBeat(); }
   C2cBeat TakeOut() { return out_axi->TakeBeat(); }

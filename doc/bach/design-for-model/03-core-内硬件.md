@@ -352,7 +352,7 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 
 **立即数是 16 bit 的窗口内偏移**，不是绝对地址：DSA 的 IO reg 不落在 RV core 的访存地址空间里。编码给的是 0～64K，但一个核的 DSA IO 窗口 DTE / MU 只有 4 KB、VU 20 KB，窗口之外路由不到，所以实际能用的是低 12 位（DTE / MU）或低 15 位（VU）那一块。
 
-**这一版没有 `flag_check`**：B core 与 R core 轮询软件映射表改用普通 Share Mem 读扫表，也就没有多拍的自定义指令，6 条都按 1 拍记。软件侧的编码宏在 `src/bach/compiler/kernel/self_inst.h`。
+**这一版没有 `flag_check`**：B core 与 R core 的轮询改用普通 Share Mem 读（B core 比较 `head` 与 `tail`，R core 比较软件用户 FIFO 的头尾），也就没有多拍的自定义指令，6 条都按 1 拍记。软件侧的编码宏在 `src/bach/compiler/kernel/self_inst.h`。
 
 #### DSA 任务配置指令的语义
 
@@ -369,9 +369,9 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 
 #### flag_check（映射表快速查找）——已移出设计
 
-《RV Core自定义指令详细设计》只列 6 条自定义指令，没有这一条；RV Core MAS 的 Features 也早已删除“内存 flag 查询指令”。B core / R core 轮询软件映射表改用普通 Share Mem 读自己扫表，kernel 里是 `task_rc_find` 与 `task_bc_wait` 那种 `for (;;)`。
+《RV Core自定义指令详细设计》只列 6 条自定义指令，没有这一条；RV Core MAS 的 Features 也早已删除“内存 flag 查询指令”。B core / R core 的轮询改用普通 Share Mem 读，kernel 里是 `task_rc_find` 与 `task_bc_wait` 那种 `for (;;)`。
 
-留下这条记录是为了对上旧稿：见到“R core 执行 flag_check 对应的 task”这类说法，按“软件扫 Share Mem 的标志表”读。
+留下这条记录是为了对上旧稿：见到“R core 执行 flag_check 对应的 task”这类说法，按“软件用普通 Share Mem 读轮询”读：R core 比较软件用户 FIFO 的头尾，B core 比较 `head` 与 `tail`。
 
 ### 流水线微架构
 
@@ -443,7 +443,7 @@ TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 T
 | - | - | - | - |
 | `task_pc` | 有 | — | 起始取指 PC |
 | `stream_id` | 有 | 有 | 4 bit，用于计算该用户的 Core Mem 与 share_mem 区域基址；硬件写入自定义 CSR，只读 |
-| `user_id` | 有 | 有 | 用户号，软件读它算 R-core 的用户映射表和 Matrix Mem 地址，Router 与 credit 记账认的也是它；**可读写**，普通计算 core 上 TS 下发 task 时硬件写入，B core 与 R core 上由软件扫 Share Mem 标志表认出用户后写入 |
+| `user_id` | 有 | 有 | 用户号，软件读它算 R-core 的用户映射表和 Matrix Mem 地址，Router 与 credit 记账认的也是它；**可读写**，普通计算 core 上 TS 下发 task 时硬件写入，B core 与 R core 上由软件从 Share Mem 认出用户后写入（R core 从软件用户 FIFO 弹出，B core 按 `head` 取一格） |
 | `task_id` | — | 有 | 6 bit，只读；**异步 datain 任务由软件识别包头后写入**，用于告诉 TS 是任务链中哪一步完成 |
 
 ### dsa_iss 的下发规则

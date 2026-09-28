@@ -32,7 +32,7 @@ static void vu_launch(u32 config_idx, u32 ld, u32 st, u32 fence) {
 TASK void task_vu_compute(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   vu_launch(0, base + CMEM_FC1_OFF, base + CMEM_ACT_OFF, 0);
-  task_done(1);
+  task_done(0);
 }
 
 /* ===== dot core：silu·dot·量化 =====
@@ -105,8 +105,8 @@ static void vu_fire(u32 group, u32 ld, u32 st, u32 mask, u32 event_en,
 /* 每个专家一份：silu(fc1)·fc3，量化成 MXFP8 作为 FC2 输入。
  *
  * 组 1 只动态化 LD（fc1）；组 2 动态化 LD（fc3）与 ST（act）。只在本 task
- * 最后一个专家的组 2 置 EVENT_EN。TASK_RECV_UNIT 配 DSA，所以仍 task_done(1)：
- * TS 要收齐 rv_done 与这一笔 dsa_done。 */
+ * 最后一个专家的组 2 置 EVENT_EN。TASK_RECV_UNIT 配 DSA（只等 DSA）：写完最后
+ * 一条 trigger 就 task_done(0) 交还，TS 等最后一条退休的 dsa_done。 */
 TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
@@ -120,57 +120,8 @@ TASK void task_vu_gate(void) {
     vu_fire(1, fc1, 0, VU_MASK_LD_ADDR, 0, 0);
     vu_fire(2, fc3, act, VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, last, 0);
   }
-  task_done(1);
+  task_done(0);
 }
 
-/* ===== R core：两半求和 =====
- *
- * 两条宏指令，同样经 VRF 中转：一条宏指令只有一路 LU，两个向量进不来。
- *
- *   组 4  LU 读前一半（BF16）→ 写 VRF
- *   组 5  LU 读后一半（BF16）→ VALU0 与 VRF 相加 → SU 按 BF16 写回 Core Mem
- *
- * 向量长度是 MOE_EMBED，与门控那两条的 MOE_SEG_INTER 不同，所以另占两组静态配置。
- * 组 4/5 由 bundle VUSTATIC / PreloadVuAdd 在装载时写。 */
-#if 0
-static void add_setup(void) {
-  /* 读写与中间一律 BF16，RNE。向量通路的一拍吃多少个 element 由 DATA_TYPE 定：
-     BF16 一拍 64 个，正好是 CM 一拍 128 B 装的个数，一个块一段流过去；配成 FP32
-     的话通路一拍只吃 32 个，一个块要拆成两段，通路就成了瓶颈，一条 VL = 6144 的
-     向量在通路上要 192 拍而不是 96 拍 */
-  u32 type_vl = MOE_EMBED | (1u << VU_DATA_TYPE_SHIFT);
-
-  vu_static(4, VU_LU_OP, op_word(VU_LU_LD_BF16, 0, 0));
-  vu_static(4, VU_SU_OP, op_word(VU_SU_NOP, 0, 0));
-  vu_static(4, VU_PRF_OP, VU_SRC_LU);
-  vu_static(4, VU_STATIC_DUP + VU_VRF_WT_INDEX, RC_VRF);
-  vu_static(4, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
-
-  vu_static(5, VU_LU_OP, op_word(VU_LU_LD_BF16, 0, 0));
-  vu_static(5, VU_VALU0_OP,
-            op_word(VU_VALU_FADD_VV, VU_SRC_LU, VU_SRC_VRF_P0));
-  vu_static(5, VU_SU_OP, op_word(VU_SU_ST_BF16, VU_SRC_VALU0, 0));
-  vu_static(5, VU_PRF_OP, 0);
-  vu_static(5, VU_STATIC_DUP + VU_VRF_RD_INDEX, RC_VRF);
-  vu_static(5, VU_STATIC_DUP + VU_TYPE_VL, type_vl);
-}
-#endif
-
-/* R core 链二的求和那一步：本行结果与上一行送来的那一份逐元素相加。
- *
- * 两半开头那 16 B 是软件辅助信息，跳过；结果写回前一半的同一处。与门控同一档：
- * 只在最后一条置 EVENT_EN，TASK_RECV_UNIT 配 DSA。组 5 读组 4 的 VRF，fence 传 0。 */
-TASK void task_vu_add(void) {
-  u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
-  u32 at = MOE_SW_HEAD_BYTES;
-  /* add_setup(); 静态组由 bundle VUSTATIC / PreloadVuAdd 写 */
-  vu_fire(4, base + RC_A_OFF + at, base + RC_SUM_OFF + at,
-          VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, 0, 0);
-  vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at,
-          VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, 1, 0);
-  task_done(1);
-}
-
-void kernel_init(void) {
-  /* firmware 不跑。组 1/2、4/5 由 bundle VUSTATIC 在装载时写。 */
-}
+/* firmware 的入口还会调它。模型不跑 firmware，组 1、组 2 由 bundle VUSTATIC 写 */
+void kernel_init(void) {}

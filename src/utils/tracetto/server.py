@@ -191,7 +191,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_error(400, f"too many lanes (>{MAX_LANES})")
         want_build = self._one(query, "build")
         if want_build is not None and want_build != srv.build:
-            # 索引换代了：让前端重拉 init 再来（不是错误，是「你手上的那份过期了」）
+            # 索引换代了：让前端重拉 init 再来（不是错误，是“你手上的那份过期了”）
             return self.send_error(409, f"stale build {want_build} != {srv.build}")
 
         entries = []
@@ -199,14 +199,14 @@ class Handler(SimpleHTTPRequestHandler):
         pos = 0
         try:
             for lane_id in lanes:
-                # 通道号是「core 序号 × 一个 core 几条通道 + 通道号」，步长与
+                # 通道号是“core 序号 × 一个 core 几条通道 + 通道号”，步长与
                 # 显示成几行无关（TS 拆成三行之后仍然是一行对一条通道）。
                 ci, row = divmod(lane_id, srv.manifest["lanes_per_core"])
                 if ci >= len(srv.manifest["core_size"]):
                     continue
                 # 不派角色的 core 没有索引文件（manifest 里 core_size 记 0），它本来
                 # 就没有行：跳过。不能落到下面那个 FileNotFoundError 上 —— 那是留给
-                # 「索引文件在跑的时候被人删了」的。
+                # “索引文件在跑的时候被人删了”的。
                 if srv.manifest["core_size"][ci] == 0:
                     continue
                 cf = srv.core(ci)

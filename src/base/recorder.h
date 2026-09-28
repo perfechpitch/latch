@@ -51,7 +51,7 @@ class Recorder {
   void SetPathPrefix(const std::string& v);
   // 换个前缀重新开一份。上一份已经写好的文件留着不动，这一份从零攒。一个进程
   // 里跑几轮、每轮要各自一份波形时用它：Finalize 之后只是把文件收了尾，状态还
-  // 停在「已收尾」上，不清掉就再也写不出第二份的索引。
+  // 停在“已收尾”上，不清掉就再也写不出第二份的索引。
   void StartNew(const std::string& v);
 
  private:

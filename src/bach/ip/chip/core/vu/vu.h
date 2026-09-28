@@ -166,6 +166,26 @@ class Vu {
     chain(sexe, dmux);
     chain(dmux, su);
     chain(su, retire);
+
+    // VEXE 这一截：结果在第一个单元按取源次序一次算完，链上各单元只计级数。
+    for (auto& v : valu) v->SetVexe(true);
+    vsfu->SetVexe(true);
+    valu[0]->SetEvaluate([this](VuFlow& f) { EvalVexe(f); });
+  }
+
+  // 用到的 VEXE 单元按取源关系排好次序逐个算。取源成环的配置在 pipe_ctrl 就按
+  // CFG_ERROR 拦下了，走到这里的都排得出来。
+  void EvalVexe(VuFlow& f) {
+    if (f.vexe_done) return;
+    std::array<uint64_t, kVuVexeNum> order{};
+    uint64_t n = 0;
+    if (!VuVexeOrder(f.uops.cfg, f.uops.inst.Bf16(), order, n)) return;
+    for (uint64_t k = 0; k < n; ++k) {
+      VuExeStage& st = order[k] < 3 ? static_cast<VuExeStage&>(*valu[order[k]])
+                                    : static_cast<VuExeStage&>(*vsfu);
+      if (st.ActiveFor(f.uops)) st.ComputeNow(f);
+    }
+    f.vexe_done = true;
   }
 
   ClockPtr clk;

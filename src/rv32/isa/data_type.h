@@ -500,10 +500,10 @@ union fp16_t {
       bits = fp16_t::PosInf().bits;
     } else if (fp32.IsNegInf()) {
       bits = fp16_t::NegInf().bits;
-    // **上溢的门槛是「舍入之后」超不超**,不是「原值大不大于 Max」:IEEE 就近舍入下,
+    // **上溢的门槛是“舍入之后”超不超**,不是“原值大不大于 Max”:IEEE 就近舍入下,
     //   落在 (Max, 中点) 之间的值该舍回 Max,只有到了中点(65520 = (65504+65536)/2)
     //   才进位成 Inf。按原值比 Max 的话 65505..65519 会被直接判成 Inf,比 IEEE 大一档。
-    //   这里只拦 f32 指数已经大到「f16 指数字段必然溢出」的那些(new_exp ≥ 31,即
+    //   这里只拦 f32 指数已经大到“f16 指数字段必然溢出”的那些(new_exp ≥ 31,即
     //   fp32.exp ≥ 143 ⇒ |x| ≥ 65536),其余交给下面的正常路径 —— 它的进位逻辑
     //   (new_man 满了就 exp += 1)自然会在该给 Inf 的时候给出 exp = 31。
     //   `clamp` 语义不变:要夹的话仍夹到 Max / Min。
@@ -526,7 +526,7 @@ union fp16_t {
           field.sign = fp32.field.sign;
           field.exp = 0;
           // **右移丢掉的低位要并进 sticky**：只把 `full >> sh` 交给 HasRoundCarry 的话，
-          //   移出去的那 sh 位就没人看了 —— 「略大于正中点」会被当成「正好在正中点」、
+          //   移出去的那 sh 位就没人看了 —— “略大于正中点”会被当成“正好在正中点”、
           //   按 LSB 取偶舍掉，结果比 IEEE 就近舍入小一个 ulp。实测:x=2.98e-08(略大于
           //   f16 最小次正规数的一半)本该进位成 0x0001,舍成了 0x0000;40 万个 f32 里 55 个
           //   踩到,全集中在指数 102(= 2^-25 附近)。把丢掉的位压成一位塞进 bit0 即可 ——
@@ -635,7 +635,7 @@ union fp16_t {
   bool IsNegInf() const { return IsInf() && field.sign != 0; }
   // 就近舍入、逢中取偶:f32 的 23 位尾数留高 10 位,丢 bits[12:0]。round = 最高丢弃位 bit12,
   //   sticky = 它**以下全部**丢弃位 bits[11:0],guard = 留下来那部分的最低位(结果的 LSB)。
-  //   sticky 少算一位就会漏掉「bit12=1 且只有 bit11 非零」这一档:它不是正中点,该进位却当成
+  //   sticky 少算一位就会漏掉“bit12=1 且只有 bit11 非零”这一档:它不是正中点,该进位却当成
   //   了正中点、按 LSB 取偶,结果偏小一个 ulp。
   bool HasRoundCarry(uint32_t f32_man) const {
     bool guard = (f32_man >> 13) & 0x1;

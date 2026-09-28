@@ -12,7 +12,7 @@
 // 32 B 对齐、标量按 4 B 对齐，所以一条向量的两端都可能落在 128 B 块的中间：
 // 本级把请求向下对齐到块边界，多读的部分收齐后截掉，这就是跨 128 B 边界的拆分
 // 与重组。地址不满足当前访问格式的对齐要求时置位 CM_ADDR_ERROR（硬件到这一步
-// 就把这笔 Load 丢弃、请求不发出；模型照发不误，见 vu.md 的「取舍」一节）。
+// 就把这笔 Load 丢弃、请求不发出；模型照发不误，见 vu.md 的“取舍”一节）。
 //
 // 14 拍的访问延迟由 Core Mem 那一侧给，本级只按 valid/ready 收发。
 
@@ -51,7 +51,9 @@ class VuLu : public BachModule {
   uint64_t BusyCycles() const { return busy_cnt; }
   // CM 端口反压住本级的拍数。
   uint64_t StallCycles() const { return stall_cnt; }
-  bool Quiescent() const override { return !busy && !holding; }
+  bool Quiescent() const override {
+    return ctxs.empty() && !holding && ready_q.empty();
+  }
 
  protected:
   void Step() override {
@@ -63,6 +65,7 @@ class VuLu : public BachModule {
     Accept();
     if (!mem_used) cmem->IdleReq();
 
+    bool busy = !ctxs.empty();
     if (busy) ++busy_cnt;
     beats = beat_cnt;
     TracePerCycle("busy", busy ? 1 : 0);
@@ -71,6 +74,16 @@ class VuLu : public BachModule {
   }
 
  private:
+  // 一条宏指令的读：读哪几块、发了几块、回了几块，收回来的字节，分段的进度。
+  struct Ctx {
+    VuFlowPtr flow;
+    uint64_t base = 0, head = 0, blocks = 0, sent = 0, got = 0, want_bytes = 0;
+    // 分段走的那一档：一段多少元素、在 CM 上多少字节、共几段、已经交出去几段。
+    // seg_len 为 0 表示本条不分段。
+    uint64_t seg_len = 0, seg_bytes = 0, seg_total = 1, seg_done = 0;
+    std::vector<uint8_t> buf, scale_buf;
+  };
+
   // 攒好的段排队往下发，一拍一个。下游没收下就原样压着。
   void Drain() {
     if (!holding) return;
@@ -80,55 +93,43 @@ class VuLu : public BachModule {
     }
     holding = false;
     held = VuFlowPtr();
-    if (!ready_q.empty()) {
-      held = ready_q.front();
-      ready_q.pop_front();
-      holding = true;
-      out_seq = ++emit_seq;
-      out->Drive(held, out_seq);
-    }
+    PumpQueue();
   }
 
+  // 相邻两条宏指令的读可以接着发（《Vector Unit DSA》pipe_ctrl：用后一条的取数段
+  // 掩盖前一条的尾段，重叠深度上限为 2）：前一条的读请求都发出去了就收下一条，
+  // 不等它的响应回来。最多两条同时在读；不读 CM 的那一条要等前面的读都收完，免得
+  // 抢到前面去。出口排队攒多了也先停一停。
   void Accept() {
-    bool full = busy || holding || !ready_q.empty();
+    bool issuing = !ctxs.empty() && ctxs.back().sent < ctxs.back().blocks;
+    bool full = issuing || ctxs.size() >= kVuOverlap ||
+                ready_q.size() >= kReadyQDepth;
+    if (!full && in->Valid() && in->Seq() != last_seq) {
+      auto peek = in->Uops();
+      if (peek && !peek->cfg.lu.Active() && !ctxs.empty()) full = true;
+    }
     in->DriveReady(!full);
-    if (full) {
-      if (!holding) out->Idle();
-      return;
-    }
-    if (!in->Valid() || in->Seq() == last_seq) {
-      out->Idle();
-      return;
-    }
+    if (full) return;
+    if (!in->Valid() || in->Seq() == last_seq) return;
     auto uops = in->Uops();
-    if (!uops) {
-      out->Idle();
-      return;
-    }
+    if (!uops) return;
     last_seq = in->Seq();
 
-    flow = std::make_shared<VuFlow>();
+    auto flow = std::make_shared<VuFlow>();
     flow->uops = *uops;
-    seq = in->Seq();
 
     if (!uops->cfg.lu.Active()) {
-      // 本条不读 CM，直接往下走。
-      EmitNow(flow);
+      // 本条不读 CM，排到出口队列里直接往下走。
+      ready_q.push_back(flow);
+      PumpQueue();
       return;
     }
-    Plan(*uops);
-    out->Idle();
-  }
-
-  void EmitNow(VuFlowPtr const& f) {
-    held = f;
-    holding = true;
-    out_seq = ++emit_seq;
-    out->Drive(held, out_seq);
+    Plan(flow);
   }
 
   // 算这一条要读哪几个 128 B 块。
-  void Plan(VuUops const& uops) {
+  void Plan(VuFlowPtr const& flow) {
+    VuUops const& uops = flow->uops;
     VuMacroInst const& inst = uops.inst;
     LuOp op = LuOp(uops.cfg.lu.opcode);
     uint64_t vl = inst.Vl();
@@ -140,54 +141,55 @@ class VuLu : public BachModule {
                         ? 4
                         : (vl * elem_bits + 7) / 8;
 
+    Ctx c;
+    c.flow = flow;
     // 能拆的那一档按 RF entry 拆段：一段的元素数就是一个 entry 装得下的数，
     // 在 CM 上占 seg_bytes 个字节。拆不了的照旧整条走一份。
-    seg_len = 0;
-    seg_total = 1;
-    seg_done = 0;
     if (VuCanSegment(uops)) {
-      seg_len = inst.Bf16() ? 64 : 32;
-      seg_bytes = seg_len * elem_bits / 8;
-      seg_total = (vl + seg_len - 1) / seg_len;
+      c.seg_len = inst.Bf16() ? 64 : 32;
+      c.seg_bytes = c.seg_len * elem_bits / 8;
+      c.seg_total = (vl + c.seg_len - 1) / c.seg_len;
     }
 
     uint64_t addr = inst.LdAddr();
     // 对齐由访问格式决定：向量与掩码 32 B，标量 4 B。不合规置 CM_ADDR_ERROR，
     // 硬件到这一步就把这笔 Load 丢弃、请求不发出；模型照发不误（见 vu.md 的
-    // 「取舍」一节），只把异常位记下来。
+    // “取舍”一节），只把异常位记下来。
     uint64_t grain = op == LuOp::kLdSFp32 ? kVuScalarAlign : kVuCmAlign;
     if (addr % grain != 0) {
       flow->error |= kVuErrCmAddr;
       flow->err_unit = kVuErrUnitLu;
     }
     // 请求地址向下对齐到 128 B 块，前面多出来的那一截收齐后截掉。
-    head = addr % kVuVrfEntryBytes;
-    base = addr - head;
-    uint64_t total = head + want;
-    blocks = (total + kVuVrfEntryBytes - 1) / kVuVrfEntryBytes;
-    sent = 0;
-    got = 0;
-    want_bytes = want;
-    buf.clear();
-    scale_buf.clear();
-    busy = true;
+    c.head = addr % kVuVrfEntryBytes;
+    c.base = addr - c.head;
+    uint64_t total = c.head + want;
+    c.blocks = (total + kVuVrfEntryBytes - 1) / kVuVrfEntryBytes;
+    c.want_bytes = want;
+    ctxs.push_back(std::move(c));
   }
 
+  // 按收下的次序发：只有最后收下的那一条可能还有块没发。
   void Issue() {
-    if (!busy || sent >= blocks) return;
+    if (ctxs.empty()) return;
+    Ctx& c = ctxs.back();
+    if (c.sent >= c.blocks) return;
     if (!cmem->Ready()) {
       ++stall_cnt;
       return;
     }
-    bool need_scale = LuOp(flow->uops.cfg.lu.opcode) == LuOp::kLdMxfp8;
-    cmem->Read(base + sent * kVuVrfEntryBytes, kVuVrfEntryBytes, need_scale);
+    bool need_scale = LuOp(c.flow->uops.cfg.lu.opcode) == LuOp::kLdMxfp8;
+    cmem->Read(c.base + c.sent * kVuVrfEntryBytes, kVuVrfEntryBytes, need_scale);
     mem_used = true;
-    ++sent;
+    ++c.sent;
     ++beat_cnt;
   }
 
+  // 响应按发出的次序回来：记到最早那条还没收齐的上。
   void Collect() {
-    if (!busy || !cmem->RspValid()) return;
+    if (ctxs.empty() || !cmem->RspValid()) return;
+    Ctx& c = ctxs.front();
+    LOGCHECK(c.got < c.sent, "VuLu: 收到响应，却没有在等的读。");
     ByteBlockPtr d = cmem->RspData();
     if (d) {
       // CM 数据信号是 1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 有效。
@@ -196,65 +198,60 @@ class VuLu : public BachModule {
       uint64_t body_len = d->size();
       if (body_len > kVuVrfEntryBytes) {
         body_len = kVuVrfEntryBytes;
-        scale_buf.insert(scale_buf.end(), d->begin() + kVuVrfEntryBytes,
-                         d->end());
+        c.scale_buf.insert(c.scale_buf.end(), d->begin() + kVuVrfEntryBytes,
+                           d->end());
       }
-      buf.insert(buf.end(), d->begin(), d->begin() + body_len);
+      c.buf.insert(c.buf.end(), d->begin(), d->begin() + body_len);
     }
-    ++got;
-    if (seg_len != 0) {
-      EmitSegments();
+    ++c.got;
+    if (c.seg_len != 0) {
+      EmitSegments(c);
       return;
     }
-    if (got < blocks) return;
+    if (c.got < c.blocks) return;
 
     // 收齐了：截掉对齐多读的两头，再按 CM 侧格式解成 FP32。
     std::vector<uint8_t> body;
-    if (head < buf.size()) {
-      uint64_t end = head + want_bytes;
-      if (end > buf.size()) end = buf.size();
-      body.assign(buf.begin() + head, buf.begin() + end);
+    if (c.head < c.buf.size()) {
+      uint64_t end = c.head + c.want_bytes;
+      if (end > c.buf.size()) end = c.buf.size();
+      body.assign(c.buf.begin() + c.head, c.buf.begin() + end);
     }
-    flow->seg_len = flow->uops.inst.Vl();
-    Convert(flow, body);
-
-    busy = false;
-    ready_q.push_back(flow);
-    flow = VuFlowPtr();
+    c.flow->seg_len = c.flow->uops.inst.Vl();
+    Convert(c.flow, body, c);
+    ready_q.push_back(c.flow);
+    ctxs.pop_front();
     PumpQueue();
   }
 
   // 已经收到的字节够哪几段，就把那几段各做成一份交下去。最后一段按实际剩下的
   // 元素数算，整条不一定正好铺满一个 entry。
-  void EmitSegments() {
-    uint64_t have = got * kVuVrfEntryBytes;
-    uint64_t vl = flow->uops.inst.Vl();
-    while (seg_done < seg_total) {
-      uint64_t from = head + seg_done * seg_bytes;
-      uint64_t to = from + seg_bytes;
-      bool last = seg_done + 1 == seg_total;
-      if (last) to = head + want_bytes;
-      if (to > have && !(last && got >= blocks)) break;
-      if (to > buf.size()) to = buf.size();
+  void EmitSegments(Ctx& c) {
+    uint64_t have = c.got * kVuVrfEntryBytes;
+    uint64_t vl = c.flow->uops.inst.Vl();
+    while (c.seg_done < c.seg_total) {
+      uint64_t from = c.head + c.seg_done * c.seg_bytes;
+      uint64_t to = from + c.seg_bytes;
+      bool last = c.seg_done + 1 == c.seg_total;
+      if (last) to = c.head + c.want_bytes;
+      if (to > have && !(last && c.got >= c.blocks)) break;
+      if (to > c.buf.size()) to = c.buf.size();
 
       auto seg = std::make_shared<VuFlow>();
-      seg->uops = flow->uops;
-      seg->error = flow->error;
-      seg->err_unit = flow->err_unit;
-      seg->seg = seg_done;
-      seg->seg_base = seg_done * seg_len;
-      seg->seg_len = last ? vl - seg->seg_base : seg_len;
+      seg->uops = c.flow->uops;
+      seg->error = c.flow->error;
+      seg->err_unit = c.flow->err_unit;
+      seg->seg = c.seg_done;
+      seg->seg_base = c.seg_done * c.seg_len;
+      seg->seg_len = last ? vl - seg->seg_base : c.seg_len;
       seg->seg_last = last;
       std::vector<uint8_t> body;
-      if (from < to) body.assign(buf.begin() + from, buf.begin() + to);
-      Convert(seg, body);
+      if (from < to) body.assign(c.buf.begin() + from, c.buf.begin() + to);
+      Convert(seg, body, c);
       ready_q.push_back(seg);
-      ++seg_done;
+      ++c.seg_done;
     }
-    if (seg_done >= seg_total) {
-      busy = false;
-      flow = VuFlowPtr();
-    }
+    if (c.seg_done >= c.seg_total) ctxs.pop_front();
     PumpQueue();
   }
 
@@ -268,7 +265,8 @@ class VuLu : public BachModule {
     out->Drive(held, out_seq);
   }
 
-  void Convert(VuFlowPtr const& f, std::vector<uint8_t> const& body) {
+  void Convert(VuFlowPtr const& f, std::vector<uint8_t> const& body,
+               Ctx const& c) {
     VuUops const& uops = f->uops;
     VuMacroInst const& inst = uops.inst;
     LuOp op = LuOp(uops.cfg.lu.opcode);
@@ -298,7 +296,7 @@ class VuLu : public BachModule {
     numeric::DataType t = CmType(op);
     std::vector<float> scale;
     if (op == LuOp::kLdMxfp8) {
-      scale = numeric::DecodeScale(t, scale_buf, scale_buf.size());
+      scale = numeric::DecodeScale(t, c.scale_buf, c.scale_buf.size());
     }
     std::vector<float> v = numeric::Decode(t, body, vl);
     if (!scale.empty()) {
@@ -306,7 +304,7 @@ class VuLu : public BachModule {
       // scale 是第 (head + i) / 32 个。向量从一行中间开始时 head 不为 0。
       uint64_t block = numeric::ScaleBlockOf(t);
       for (uint64_t i = 0; i < v.size(); ++i) {
-        uint64_t b = (head + i) / block;
+        uint64_t b = (c.head + i) / block;
         if (b < scale.size()) v[i] *= scale[b];
       }
     }
@@ -335,16 +333,14 @@ class VuLu : public BachModule {
   std::shared_ptr<VuFlowPort> out;
   std::shared_ptr<MemPort> cmem;
 
-  VuFlowPtr flow, held;
+  VuFlowPtr held;
+  std::deque<Ctx> ctxs;
   std::deque<VuFlowPtr> ready_q;
-  bool busy = false, holding = false, mem_used = false;
-  uint64_t seq = 0, out_seq = 0, last_seq = 0, emit_seq = 0;
-  uint64_t base = 0, head = 0, blocks = 0, sent = 0, got = 0, want_bytes = 0;
-  // 分段走的那一档：一段多少元素、在 CM 上多少字节、共几段、已经交出去几段。
-  // seg_len 为 0 表示本条不分段。
-  uint64_t seg_len = 0, seg_bytes = 0, seg_total = 1, seg_done = 0;
+  bool holding = false, mem_used = false;
+  uint64_t out_seq = 0, last_seq = 0, emit_seq = 0;
   uint64_t beat_cnt = 0, busy_cnt = 0, stall_cnt = 0;
-  std::vector<uint8_t> buf, scale_buf;
+  // 出口排队最多攒几段就先不收下一条。
+  static constexpr uint64_t kReadyQDepth = 4;
 
   Logic64 beats;
 };

@@ -116,6 +116,8 @@ struct VuFlow {
   // 替换模式下本段被换掉的 NaN / Inf element 数，退休时累进 Profile 计数器。
   uint64_t nan_replaced = 0;
   uint64_t inf_replaced = 0;
+  // VEXE 这一截的结果已经按取源次序一次算好：后面的 VEXE 单元只计拍数。
+  bool vexe_done = false;
 
   // 本段多少个元素。各级按它算，不再直接取 VL：分段之后 VL 是整条的长度。
   uint64_t SegLen() const { return seg_len != 0 ? seg_len : uops.inst.Vl(); }

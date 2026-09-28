@@ -86,10 +86,10 @@
 
 [LPU](07-units/lpu.md)　[链路](07-units/link.md)　[PCIe Switch](07-units/pcie-switch.md)　[片外桩](07-units/external-stub.md)　[Chip](07-units/chip/chip.md)　[Core](07-units/chip/core/core.md)　[Router](07-units/chip/core/router.md)　[TS](07-units/chip/core/ts.md)　[RV core](07-units/chip/core/rv-core.md)　[DTE DSA](07-units/chip/core/dte.md)　[MU DSA](07-units/chip/core/mu.md)　[VU DSA](07-units/chip/core/vu.md)　[存储子系统](07-units/chip/core/memory.md)
 
-**先看动画**：浏览器直接打开，每份四个场景：① 硬件拓扑、② 场景与任务、③ 逐步执行、④ 每个模块的运行逻辑。右侧先用有序列表说清这一步做什么，再用统一的「收到 → 输出」列出信息传递：`源→目的　通道名　字段`，模块名与左图一一对应，内部模块写成 `TS.Stream_table`、`Router.ReduceModule` 这样的形式。
+**先看动画**：浏览器直接打开，每份四个场景：① 硬件拓扑、② 场景与任务、③ 逐步执行、④ 每个模块的运行逻辑。右侧先用有序列表说清这一步做什么，再用统一的“收到 → 输出”列出信息传递：`源→目的　通道名　字段`，模块名与左图一一对应，内部模块写成 `TS.Stream_table`、`Router.ReduceModule` 这样的形式。
 
 * [`09-system-工作细节.html`](09-system-工作细节.html)：72 步，一个 token 从 GPU 出发再回到 GPU 的完整系统流程：上电装 kernel 与 weights、切业务模式、进 Node、B core 沿第一列下传并向组内广播、64 个 core 算 FFN、三层归约、沿 12 个 R core 的链逐行累加、链尾出核、credit 回收。三张平面并排：12 × 4 的 chip 网格、一颗 chip 的 core 阵列、一个 core 的四层。第 ② 场画三类 core 的任务链形态与四种 TS 工作模式，第 ④ 场按第 7 章的对象清单逐个模块讲。结构照 `01-完整工作流程.md` 的流程图与 `07-units/` 的单元文档。
-* [`09-ts-工作细节.html`](09-ts-工作细节.html)：59 步，跟 `tp_nk` 切分下一个用户的任务链（计算 core 6 项，dot core 15 项；dot core 是每颗 chip 的逻辑 core7，收 chip 内 FC1/FC3 部分和的归约、做 silu·dot·量化、广播 FC2 输入、收 concat、发行链）从建表走到退休，涵盖按 PID 找搬入任务、异步 datain、逐级 reduce 只认 Router 的完成、按完成位图一拍找后继、head-only 退休。结构图照 `03-core-内硬件.md` 的 core 顶层结构与 `03-ts-任务调度器.md` 的 TS 模块组成图。
+* [`09-ts-工作细节.html`](09-ts-工作细节.html)：60 步，跟 `tp_nk` 切分下一个用户的任务链（计算 core 6 项，dot core 16 项，行首那颗 chip 15 项；dot core 是每颗 chip 的逻辑 core7，收 chip 内 FC1/FC3 部分和的归约、做 silu·dot·量化、广播 FC2 输入、收 concat、发行链）从建表走到退休，涵盖按 PID 找搬入任务、异步 datain、逐级 reduce 只认 Router 的完成、按完成位图一拍找后继、head-only 退休。结构图照 `03-core-内硬件.md` 的 core 顶层结构与 `03-ts-任务调度器.md` 的 TS 模块组成图。
 
 Router 一个走法一份，图与逐步执行各自独立，八个模块的拓扑与运行逻辑五份共用同一套画法：
 

@@ -4,7 +4,7 @@
 // 数值格式的编解码。
 //
 // 六种格式：FP32、BF16、FP8 的 E4M3 与 E5M2、FP4 的 E2M1、以及 E8M0 这种只有
-// 指数的 scale。MX 系列（MXFP8 / MXFP4 / NVFP4）是「一个 block 共用一个 scale」
+// 指数的 scale。MX 系列（MXFP8 / MXFP4 / NVFP4）是“一个 block 共用一个 scale”
 // 的组合，见 mx.h。
 //
 // 中间累加一律 FP32：MU 的 CSA 树、Router 的 reduce、VU 的归约都是。输入输出

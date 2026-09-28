@@ -7,20 +7,23 @@
 // 它的单元当拍透传。各单元的级数设计未给，本轮统一取 4 拍并标为待定；SEXE 是
 // 同一物理单元的三次串行迭代，所以是 3 倍。
 //
-// 单元之间的先后：硬件上它们并联，谁在谁前由静态配置里的 bypass 连接决定。建模
-// 把它们串成一条固定的链 VALU0 → VALU1 → VALU2 → VSFU → MEXE → SEXE，取源时
-// 从链上游的输出直接取。一条只用一个单元的宏指令因此只耗那个单元的级数，用两个
-// 且有依赖的耗两段，这正是「合并点的两个源操作数不同拍到达」那件事。链序原文
-// 没给，标为待定。
+// 单元之间的先后：硬件上它们并联，谁在谁前由静态配置里的 bypass 连接决定，五个
+// VEXE 之间不限定先后顺序。建模把它们串成一条链 VALU0 → VALU1 → VALU2 → VSFU →
+// MEXE → SEXE，只用来记拍数：一条宏指令的总拍数是用到的单元各自级数之和，与谁
+// 先谁后无关（《Vector Unit DSA》：总周期 = 启动延迟 + Σ(被激活模块的首拍延迟) +
+// (SEG − 1)）。数据按取源关系算：一段进到 VEXE 这一截的第一个单元时，用到的
+// VEXE 单元按 VuVexeOrder 排出的次序一次算完，后面的 VEXE 单元只计级数。MEXE 与
+// SEXE 在 VEXE 之后，照链上的次序各自算。
 //
 // 这一段是流水的：每拍收一个 RF entry，内部走 stages 级，每拍交出一个。MAS 记
-// 的「全吞吐为常态，每周期接受 1 个 VRF entry；跨分组串联只增加首拍填充延迟，
-// 不降低稳态吞吐」就是这个意思。本条不动这个单元时当拍透传，不占级数。
+// 的“全吞吐为常态，每周期接受 1 个 VRF entry；跨分组串联只增加首拍填充延迟，
+// 不降低稳态吞吐”就是这个意思。本条不动这个单元时当拍透传，不占级数。
 //
 // 硬件不提供软件可见的缓冲队列：在飞的条数就等于级数，压不住就往上游报不收。
 
 #include <cmath>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -123,6 +126,14 @@ class VuExeStage : public BachModule {
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
 
   uint64_t Done() const { return done.Get(); }
+
+  // 本单元是 VEXE 之一：它的结果由 VEXE 这一截的第一个单元按次序一次算好。
+  void SetVexe(bool on) { vexe = on; }
+  // VEXE 这一截的第一个单元挂上这一步：每一段进来先把 VEXE 的结果一次算完。
+  void SetEvaluate(std::function<void(VuFlow&)> fn) { evaluate = std::move(fn); }
+  // 按次序算 VEXE 时逐个调各单元的这一格。
+  void ComputeNow(VuFlow& f) { Compute(f); }
+  bool ActiveFor(VuUops const& u) const { return Active(u); }
   // 本单元处于 Busy 状态的累计拍数，Profile 那一档要它。
   uint64_t BusyCycles() const { return busy_cnt; }
   bool Quiescent() const override { return pipe.empty() && !holding; }
@@ -176,8 +187,9 @@ class VuExeStage : public BachModule {
     Slot s;
     s.f = f;
     s.seq = in->Seq();
+    if (evaluate) evaluate(*f);
     if (Active(f->uops)) {
-      Compute(*f);
+      if (!(vexe && f->vexe_done)) Compute(*f);
       s.left = stages;
     } else {
       // 本条不动这个单元：当拍透传，不占级数。
@@ -208,6 +220,8 @@ class VuExeStage : public BachModule {
   }
 
   uint64_t stages;
+  bool vexe = false;
+  std::function<void(VuFlow&)> evaluate;
   std::shared_ptr<VuFlowPort> in, out;
   std::deque<Slot> pipe;
   VuFlowPtr held;

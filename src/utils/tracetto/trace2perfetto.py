@@ -9,8 +9,8 @@ chrome://tracing。
 **与 tracetto 显示的是同一份数据**：段与标签都走 `spans.py` 里那套（`core_spans`
 折段、`ROWS` 那九行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
 
-两边的对应关系（Perfetto 只有「process → thread」两级，tracetto 是
-「chip → core → 九行」三级，压掉最上面一级）：
+两边的对应关系（Perfetto 只有“process → thread”两级，tracetto 是
+“chip → core → 九行”三级，压掉最上面一级）：
 
     pid  = 一个派角色的 core，名字写成 `chip0.core1`，左栏能直接搜
     tid  = 那条 core 的九行之一，名字就是行名（TS-DTE / DTE-Core / …）
@@ -22,7 +22,7 @@ chrome://tracing。
 前面、TS 掉到第五行），而名字的字典序本来就排不对。试过把序号写进名字里（`chip00`
 / `1 TS`）来代替这两组键，也不行，所以键留着（258 KB）。
 
-**颜色**：Perfetto 是**按段上的名字上色**的，所以「哪一行」必须写进那段字里 ——
+**颜色**：Perfetto 是**按段上的名字上色**的，所以“哪一行”必须写进那段字里 ——
 单元名带前缀（`TS-DTE` / `CORE-DTE` / `DSA-DTE` …），九个槽的名字两两不同，九行
 才分得开。不给 cname（只能填十来个具名色，里面近似的不少）、也不给 cat（不参与
 上色）。
@@ -33,7 +33,7 @@ chrome://tracing。
 精简（都是实测省下来的）：
   · 不写 args —— Perfetto 自己会显示起止与时长，再塞一份 user/task 是白给；
   · 字段只留 name/ph/ts/dur/pid/tid 六样；
-  · 不发 cat（140 KB）：它不参与上色（颜色按段上的名字走），只对「按分类过滤」
+  · 不发 cat（140 KB）：它不参与上色（颜色按段上的名字走），只对“按分类过滤”
     有用，而这个转换器给不出有意义的分类；
   · 分隔符用最紧的写法，整数不写小数，一行一个事件（方便 grep，代价 ~1 B/行）。
 
@@ -99,7 +99,7 @@ def build(prefix: str) -> dict:
             meta.append({"ph": "M", "pid": pid, "name": "process_sort_index",
                          "args": {"sort_index": ordinal}})
             for row, row_name in enumerate(S.ROW_NAMES):
-                # 行号从 1 编：tid=0 在 Chrome 这套格式里是「进程级」那条轨道，
+                # 行号从 1 编：tid=0 在 Chrome 这套格式里是“进程级”那条轨道，
                 # Perfetto 会把 tid=0 的段并进进程那一行，行名就不成一条独立轨道了。
                 tid = row + 1
                 meta.append({"ph": "M", "pid": pid, "tid": tid,

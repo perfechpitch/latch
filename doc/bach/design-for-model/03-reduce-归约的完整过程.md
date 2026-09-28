@@ -132,9 +132,9 @@
 | - | - | - | - | - | - |
 | 第一层　core 内 | 本 core 上几个激活专家的 FC2 结果，乘各自的专家权重 | MU DSA（`C = C + (A × B) × W_ep`） | 算一个专家加一次，就地 | Core Mem | 无 |
 | 第二层　chip 内 core 间 | 切 K 后各 core 的部分和 | Router 的 ReduceModule，Read-Modify-Write | 包流经每一跳就加，不等齐 | ReduceModule 上下文，16 用户 × 32 KiB | Reduce credit |
-| 第三层　EP 组间 | 各行的结果，沿 12 个 R core 逐行累加 | R core 的 VU | 一个用户的两笔到齐才加 | R core 的 Matrix Mem，32 MB | 派遣前预留所有 R core 的余量 |
+| 第三层　EP 组间 | 各行的结果，沿 12 个 R core 逐行累加 | R core 本级 Router 的 ReduceModule：两笔到齐后由 DTE 从 Matrix Mem 送进去相加 | 一个用户的两笔到齐才加 | R core 的 Matrix Mem，32 MB | 派遣前预留所有 R core 的余量 |
 
-三层不共用机制。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层用一个 core 的 Matrix Mem 做缓冲，等齐再加。《EP组间Reduction讨论（过程）》把“复用 TP Reduction 通路做 EP Reduction”列在放弃方案里，原话是“EP覆盖的范围远大于TP的范围，而且EP之间存在很大程度的不均衡问题……否则会频繁导致任务较少的EP被反压”。
+第二层与第三层都在 ReduceModule 里做加法，区别在数据在哪等：第二层流经每一跳就加，第三层先在一个 core 的 Matrix Mem 里等齐，再送进 ReduceModule 加。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层用 Matrix Mem 做缓冲。《EP组间Reduction讨论（过程）》把“复用 TP Reduction 通路做 EP Reduction”列在放弃方案里，原话是“EP覆盖的范围远大于TP的范围，而且EP之间存在很大程度的不均衡问题……否则会频繁导致任务较少的EP被反压”。
 
 第二层还带一条对软件的硬约束：**Rmem 给一个用户 32 KiB，按 FP32 驻留算，最多 8192 个 FP32**。一笔 reduce 装不下时，软件要按这个容量把它拆成几笔，每笔在 TS 任务链上配成一项逐级 reduce 任务。《TS_通信机制》的例子是把一笔 32 KB 拆成 **4 笔 8 KB**，链上连着配 4 项。默认用例的两条归约链一笔都装得下，不用拆：一行 4 颗 chip 逐跳 reduce 进本行 R core 的那条链，一包是 16 B 软件信息加 12288 B（6144 个 BF16），在 Rmem 里驻留 6144 个 FP32；chip 内 8 个计算 core 归约部分和的那条链，一包是 16 B 软件信息加 2048 B（1024 个 BF16），驻留 1024 个 FP32。
 
@@ -181,7 +181,7 @@ chip 间这一级 FC2 固定切 K，整条 FFN 只做一次 chip 间 reduce：FC
 1. **chip 内归约链**：本 chip 8 个计算 core 把 FC1、FC3 的部分和沿一条链逐跳 reduce，链尾落进 dot core 的 Core Mem。一个包里依次是两个专家的 FC1 与 FC3。
 2. dot core 对每个专家算 silu(FC1)·FC3，量化成 MXFP8，作为 FC2 输入广播给本 chip 另外 7 个计算 core。
 3. 每个计算 core 算 FC2 的一段，并在 MU 内做专家间累加。另外 7 个计算 core 把各自那一段发给 dot core，dot core 自己那一段由 MU 直接写进去，8 段 concat 成 6144 维。这一步不归约。
-4. **行链**：一行 4 颗 chip 的 dot core 从第一列到最后一列逐跳 reduce，最后一跳落进本行 R core 的 Matrix Mem。
+4. **行链**：一行 4 颗 chip 的 dot core 从第一列到最后一列逐跳 reduce，最后一跳落进本行 R core 的 Matrix Mem。行首那颗 dot core 只送本 chip 结果，本级 Rmem 单流直通。其余几颗先把上一颗送来的那一包收进本核 Core Mem，本 chip 结果算好后，DTE 把两包作为本 core 的两个操作数送进本级 Rmem 相加，再发往下一跳。相邻两颗 chip 的 dot core 发行链用两个 PID 轮换：一行里第 gx 颗发的那一包用 `ROW_PATH[gx % 2]`，`ROW_PATH = (7, 13)`，两条都走 VC3。
 
 MU 的输出与两条链的输入输出都是 BF16，ReduceModule 内的中间累加固定 FP32。
 
@@ -199,9 +199,9 @@ chip 内归约链一律按逻辑槽位次序 6 → 5 → 4 → 0 → 1 → 2 →
 
 | chip 所在列 | 走法 |
 | - | - |
-| 第一列（行首） | dot core core9 出本行结果 → mid → core4 → 东口 |
-| 中间两列 | 西口 → core5 → core6 →（core7）→ core8 → dot core core9（加上本 chip 结果）→ mid → core4 → 东口 |
-| 最后一列 | 西口 → core5 → core6 → core7 → dot core core8（加上本 chip 结果）→ R core core9，落 Matrix Mem |
+| 第一列（行首） | dot core core9 出本 chip 结果，本级 Rmem 单流直通 → mid → core4 → 东口 |
+| 中间两列 | 西口 → core5 → core6 →（core7）→ core8 → dot core core9，落 Core Mem；本 chip 结果算好后两包进本级 Rmem 相加 → mid → core4 → 东口 |
+| 最后一列 | 西口 → core5 → core6 → core7 → dot core core8，落 Core Mem；本 chip 结果算好后两包进本级 Rmem 相加 → R core core9，落 Matrix Mem |
 
 ### 一个 Reduce 包怎么走
 
@@ -2534,7 +2534,7 @@ R core 之间每行一跳：从本行 R core 的南口下到下一层最后一�
 <rect width="1100" height="640" fill="#ffffff"/>
 <defs><marker id="rfa" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="rfas" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="rfai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="rfais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="rfab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="rfabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="rfar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="rfars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="rfac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="rfacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="rfap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="rfaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
 <text x="30" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="start">R core 内部：两条任务链，两笔数据按用户对齐</text>
-<text x="30" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">链一由 Router 触发，只负责把到达的一笔存进 Matrix Mem 并记账；链二自启动，扫到哪个用户两笔齐了就把它算完送走。谁先集齐谁先走，与到达顺序无关</text>
+<text x="30" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">链一由 Router 触发，只负责把到达的一笔存进 Matrix Mem、记账，到齐就把用户排进 FIFO；链二自启动，从 FIFO 取一个到齐的用户，把两笔送进本级 Rmem 相加送走。谁先集齐谁先走，与到达顺序无关</text>
 <rect x="40" y="90" width="150" height="90" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="48" y="105" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router</text>
 <text x="48" y="119" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">两个来向的数据：</text>
@@ -2552,60 +2552,61 @@ R core 之间每行一跳：从本行 R core 的南口下到下一层最后一�
 <rect x="220" y="80" width="400" height="130" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
 <text x="420" y="98" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#d97706" font-weight="700" text-anchor="middle">链一：Router → Matrix Mem（Router 触发）</text>
 <rect x="232" y="110" width="180" height="88" rx="5" fill="#ffffff" stroke="#d97706" stroke-width="1.3"/>
-<text x="240" y="125" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">task 0　DTE</text>
-<text x="240" y="139" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">软件读 arrive_num[gpu_id][token_id]</text>
-<text x="240" y="151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">第一笔：新分配 Matrix Mem 空间、建映射表项</text>
-<text x="240" y="163" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">第二笔：写进已开好的空间</text>
-<text x="240" y="175" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">记 tmp_info0[stream_id] = (gpu_id, token_id)</text>
-<text x="240" y="187" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">把地址配给 DTE DSA，Router → Matrix Mem</text>
+<text x="240" y="125" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">datain_task　DTE</text>
+<text x="240" y="139" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">照包头 dst_addr 配进核搬运，槽号就是 user_id</text>
+<text x="240" y="151" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">搬完硬件置这一半的标志</text>
+<text x="240" y="163" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">映射表[user_id] 加一，不等数据落地</text>
+<text x="240" y="175" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">包头到齐（非链首两笔、链首一笔）就入 FIFO</text>
+<text x="240" y="187" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">最后弹掉包头</text>
 <rect x="428" y="110" width="180" height="40" rx="5" fill="#ffffff" stroke="#d97706" stroke-width="1.3"/>
-<text x="436" y="125" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">task 1　DTE</text>
-<text x="436" y="139" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">arrive_num[gpu_id][token_id] ++</text>
+<text x="436" y="125" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">软件用户 FIFO</text>
+<text x="436" y="139" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">到齐的 user_id 按先后排，头尾指针</text>
 <path d="M412 130 L427.3 130" stroke="#16181d" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#rfai)"/>
 <text x="518" y="175" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">两个方向对应两个不同的 stream</text>
 <text x="518" y="188" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">链一与链二不共用 stream_id</text>
 <rect x="220" y="230" width="860" height="150" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="650" y="248" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="700" text-anchor="middle">链二：求和并送出（自启动）</text>
+<text x="650" y="248" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="700" text-anchor="middle">链二：送进 Rmem 相加并送出（自启动）</text>
 <rect x="232" y="260" width="190" height="100" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="240" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">task 0　MU</text>
-<text x="240" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">循环扫 arrive_num 找 == 2 的项</text>
-<text x="240" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">找不到就继续等</text>
-<text x="240" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">找到：清零，把 (gpu_id, token_id)</text>
-<text x="240" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">写进 tmp_info1[stream_id]，报完成</text>
+<text x="240" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">比较软件用户 FIFO 的头尾指针</text>
+<text x="240" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">相等就继续等</text>
+<text x="240" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">不等：弹出队头 user_id，再等标志置齐</text>
+<text x="240" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">清计数与标志，槽号写进 RC_SLOT_OFF，报完成</text>
 <text x="240" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">（可顺手再创建一个新 stream）</text>
 <rect x="436" y="260" width="190" height="100" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="444" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">task 1　DTE</text>
-<text x="444" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">按 tmp_info1[stream_id] 把两笔</text>
-<text x="444" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">从 Matrix Mem 搬到 Core Mem</text>
-<text x="444" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start"></text>
-<text x="444" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">备选：不在 VU 加，DTE 把第二笔</text>
-<text x="444" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">搬到 Router 的 ReduceModule 加完直接送出</text>
+<text x="444" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">按 RC_SLOT_OFF[stream_id] 把两笔作为</text>
+<text x="444" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">本 core 的两个操作数，从 Matrix Mem</text>
+<text x="444" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">送进本级 Rmem（Core 多操作数）</text>
+<text x="444" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">链首那一行只送本行一笔</text>
+<text x="444" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">逐级 reduce 任务，由 Router 报完成</text>
 <rect x="640" y="260" width="190" height="100" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="648" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">task 2　VU</text>
-<text x="648" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">两笔求和，结果写回 Core Mem</text>
+<text x="648" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Rmem（本级 Router）</text>
+<text x="648" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">两笔相加：BF16 进、FP32 累加、BF16 出</text>
 <text x="648" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start"></text>
 <text x="648" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">MU 已把各专家的结果合成一笔，</text>
 <text x="648" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">行链已把本行各 chip 加成一笔，</text>
 <text x="648" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">这里只加两笔</text>
 <rect x="844" y="260" width="224" height="100" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="852" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">task 3　DTE</text>
-<text x="852" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">结果 Core Mem → Router</text>
+<text x="852" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Rmem 直接发出结果</text>
+<text x="852" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">结果照抄首笔包头，不回本 core</text>
 <text x="852" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">不是链尾：送下一行的 R core</text>
 <text x="852" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">链尾（第 11 行）：经 PCIe Switch 进 SNIC DPU DDR，</text>
 <text x="852" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">地址由 (gpu_id, token_id) 算出</text>
-<text x="852" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">链结束：释放 stream 与 Matrix Mem，通知 Router 更新 credit</text>
+<text x="852" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">发完报 TS，链结束：释放 stream 与 Matrix Mem</text>
 <path d="M422 310 L435.3 310" stroke="#16181d" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#rfai)"/>
 <path d="M626 310 L639.3 310" stroke="#16181d" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#rfai)"/>
 <path d="M830 310 L843.3 310" stroke="#16181d" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#rfai)"/>
 <rect x="220" y="400" width="300" height="90" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
-<text x="228" y="415" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#d97706" font-weight="700" text-anchor="start">Share Mem 里的三张表</text>
-<text x="228" y="429" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">arrive_num[gpu_id][token_id]：已到几笔，0 → 1 → 2</text>
-<text x="228" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">tmp_info0[stream_id]：链一本次搬运对应的 (gpu_id, token_id)</text>
-<text x="228" y="453" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">tmp_info1[stream_id]：链二本次要算的 (gpu_id, token_id)</text>
+<text x="228" y="415" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#d97706" font-weight="700" text-anchor="start">Share Mem 里的四样</text>
+<text x="228" y="429" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">标志表：每槽两半各一项，DTE 搬完置位</text>
+<text x="228" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">软件映射表[user_id]：来了几笔，弹出时清零</text>
+<text x="228" y="453" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">软件用户 FIFO：到齐的 user_id，深 64</text>
+<text x="228" y="465" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">RC_SLOT_OFF[stream_id]：链二本次要加的槽号</text>
 <rect x="540" y="400" width="300" height="90" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="548" y="415" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#d97706" font-weight="700" text-anchor="start">Matrix Mem 32 MB</text>
-<text x="548" y="429" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">按 (gpu_id, token_id) 用软件映射表定位，乱序分配、乱序释放</text>
-<text x="548" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">不是 B core 那种一对 head / tail 指针的顺序 FIFO</text>
+<text x="548" y="429" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">按 user_id 分槽，每用户一槽两半；乱序到达、乱序取走</text>
+<text x="548" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">槽按 user_id 固定，不是 B core 那种按到达顺序的环形缓冲</text>
 <text x="548" y="453" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">每笔 12 KiB（6144 个 BF16）→ 约 1300 个用户的半成品同时挂着</text>
 <rect x="860" y="400" width="208" height="90" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="868" y="415" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="700" text-anchor="start">为什么两条链</text>
@@ -2615,42 +2616,39 @@ R core 之间每行一跳：从本行 R core 的南口下到下一层最后一�
 <text x="868" y="465" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">推进顺序由链二自己挑，不受到达顺序约束</text>
 <rect x="30" y="510" width="1040" height="46" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="527" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">两笔的来向：本行行链逐跳 reduce 的结果从 dot core 进来；上一行 R core 的 reduction 数据从行间通路进来。到达顺序完全不定，所以 (g0, t8) 的第一笔比 (g0, t7) 晚到，却可能先集齐、先被链二取走。</text>
-<text x="46" y="543" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">对 TS 的要求：token 与 reduction 结果都能注册 stream；支持乱序，谁先集齐谁先算；R core 的 stream 映射到 Matrix Mem 而不是 16 项的 Core Mem。对 DTE 的要求：新增 Matrix Mem → Core Mem（或 → Router）的搬运。</text>
+<text x="46" y="543" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">对 TS 的要求：token 与 reduction 结果都能注册 stream；支持乱序，谁先集齐谁先算；R core 的 stream 映射到 Matrix Mem 而不是 16 项的 Core Mem。对 DTE 的要求：新增 Matrix Mem → Router 的搬运。</text>
 </svg>
 ```
 
-R core 每个用户要等两笔数据，两笔从两个方向来，用户之间到达顺序完全不定。B core 那种一对 head / tail 指针的顺序 FIFO 在这里会把先集齐的用户堵在后面，所以 R core 用软件映射表按 `(gpu_id, token_id)` 定位 Matrix Mem 空间，乱序分配、乱序释放，谁先集齐谁先走。
+R core 每个用户要等两笔数据，两笔从两个方向来，用户之间到达顺序完全不定。B core 那种一对 head / tail 指针的顺序 FIFO 在这里会把先集齐的用户堵在后面，所以 R core 按 `user_id` 分槽（槽号就是 `user_id`，要小于槽数，槽数按 Matrix Mem 容量算），用软件映射表记每个用户来了几笔，到齐的用户按先后排进软件用户 FIFO，谁先集齐谁先走。
 
-Share Mem 里的三张表：
+Share Mem 里的四样：
 
 | 结构 | 作用 |
 | - | - |
-| `arrive_num[gpu_id][token_id]` | 该用户已到几笔数据，初值 0，到 2 表示齐了 |
-| `tmp_info0[stream_id]` | 链一用：本次搬运对应的 `(gpu_id, token_id)`，从 task 0 传给 task 1 |
-| `tmp_info1[stream_id]` | 链二用：本次要算的 `(gpu_id, token_id)`，从 task 0 传给后面的搬运与计算 |
+| 标志表 | 每槽两半各一项，DTE 把这一半搬进 Matrix Mem 后置位 |
+| 软件映射表 | 按 `user_id` 寻址，记这个用户已经来了几笔，按包头计，数据落没落地看标志表。非链首到两笔、链首到一笔算到齐 |
+| 软件用户 FIFO | 按到齐的先后排 `user_id`，一对头尾指针，深 64，每个用户只入队一次 |
+| `RC_SLOT_OFF[stream_id]` | 链二每 stream 一格：弹出 FIFO 那一步把槽号记在这里，送进 Rmem 那一步按它取 |
 
-**链一：Router → Matrix Mem**，由 Router 触发，每来一包激活一次。
-
-| task | 执行单元 | 内容 |
-| - | - | - |
-| 0 | DTE | 软件读 `arrive_num`，结合 `(gpu_id, token_id)` 算出 Matrix Mem 存放位置配给 DTE DSA：是这个用户的第一笔就新分配空间并建映射表项，是第二笔就写进已开好的空间。同时记下 `tmp_info0[stream_id]` |
-| 1 | DTE | `arrive_num[gpu_id][token_id]++` |
-
-**链二：求和并送出**，自启动，stream 复位后就占满。
+**链一：Router → Matrix Mem**，由 Router 触发，每来一包激活一次，是一个 datain task。
 
 | task | 执行单元 | 内容 |
 | - | - | - |
-| 0 | MU | 循环扫 `arrive_num` 找 == 2 的项。找不到就继续等；找到则把该项清零、把 `(gpu_id, token_id)` 写进 `tmp_info1[stream_id]`，向 TS 报完成（可以顺手再创建一个新 stream） |
-| 1 | DTE | 按 `tmp_info1[stream_id]` 把两笔数据从 Matrix Mem 搬到 Core Mem |
-| 2 | VU | 两笔求和，结果写回 Core Mem |
-| 3 | DTE | 结果从 Core Mem 搬到 Router。不是链尾就送往下一行的 R core；是链尾（第 11 行）就经 PCIe Switch 送进 SNIC DPU 的 DDR，目的地址由 `(gpu_id, token_id)` 算出。任务链结束，释放 stream 与 Matrix Mem 空间，并通知 Router 更新本 core 的 credit |
+| datain | DTE | 照包头 `dst_addr` 配进核搬运（落哪一半由发方算好），搬完硬件置这一半的标志；映射表按 `user_id` 加一，不等标志；非链首到两笔、链首到一笔时把 `user_id` 写进 FIFO 尾；最后弹掉包头 |
+
+**链二：送进 Rmem 相加并送出**，自启动，stream 复位后就占满。
+
+| task | 执行单元 | 内容 |
+| - | - | - |
+| 0 | MU | 比较 FIFO 的头尾指针。相等就继续等；不等就弹出队头 `user_id`，再等这一槽的标志置齐（非链首两半都置、链首一半），也就是该到的几笔都落进了 Matrix Mem；然后清掉这一槽的映射计数与两半标志，把槽号写进 `RC_SLOT_OFF[stream_id]`、把 `user_id` 写回身份寄存器，向 TS 报完成（可以顺手再创建一个新 stream） |
+| 1 | DTE | 逐级 reduce 任务。按 `RC_SLOT_OFF[stream_id]` 里的槽号把两笔从 Matrix Mem 作为本 core 的两个操作数先后送进本级 Rmem；Rmem 相加后直接往下游发，不回本 core：不是链尾就送往下一行的 R core，是链尾（第 11 行）就经 PCIe Switch 送进 SNIC DPU 的 DDR，目的地址由 `(gpu_id, token_id)` 算出。Rmem 发完向 TS 报完成，任务链结束，释放 stream 与 Matrix Mem 空间 |
+
+两笔都从本 core 出来，走 Router 的 Core 多操作数模式：core 方向把同一用户先后送出的两包分到 Rmem 的两路输入上（《Router》线上版：“Rmem支持一个方向来的多个操作数（需要配置特殊模式），但是不支持操作数精度不一致”）。相加按第二层同一套数值规则：BF16 进、FP32 累加、BF16 出，包头之后的 16 B 软件辅助信息不参与加法，结果照抄首笔的包头。
 
 两条链用的不是同一套 stream_id；链一的两个方向也分别对应两个不同的 stream。
 
-链首那一行的 R core 只等一笔：这个用户在它之前没有别的行，槽的另一半一直是 0。
-它照样走链二，两笔求和时加上去的是 0，不改值，结果直接送下一行。两条链拆开的是“在 TS 里占一个 stream 项”与“数据在本核停留”两段时间：在途用户上限从 stream_table 的 16 项换成 Matrix Mem 的容量，按每笔 12 KiB（6144 个 BF16）算，32 MB 能同时挂着约 1300 个用户的半成品；推进顺序由链二自己挑，不受到达顺序约束。
-
-链二的 task 1 与 task 2 有一个备选：不在 VU 加，两笔先到的存 Matrix Mem，另一笔到达后 DTE 把它搬到 Router 的 ReduceModule 加完直接向下游输出。
+链首那一行的 R core 只等一笔：这个用户在它之前没有别的行。它照样走链二，只把本行那一笔送进 Rmem，Rmem 按单流输入直通，结果直接送下一行。两条链拆开的是“在 TS 里占一个 stream 项”与“数据在本核停留”两段时间：在途用户上限从 stream_table 的 16 项换成 Matrix Mem 的容量，按每笔 12 KiB（6144 个 BF16）算，32 MB 能同时挂着约 1300 个用户的半成品；推进顺序由链二自己挑，不受到达顺序约束。
 
 ### 对 Router、TS、DTE 的要求
 
@@ -2658,7 +2656,7 @@ Share Mem 里的三张表：
 | - | - |
 | Router | 收到 reduce / reduction 数据后通知 TS 下发 DTE 搬运任务；**搬运要原子化**，某个方向的用户数据全部搬进 Matrix Mem 后才能搬别的方向或别的用户。这与第二层要求交织（每个方向进来 128 B 就往后传）正好相反 |
 | TS | R core 配与普通 core 不同的任务链；新增要 DTE 激活才能下发的 task 类型；stream 映射到 Matrix Mem 而不是 16 项的 Core Mem；支持乱序，哪个用户的数据先集齐就先算 |
-| DTE | 新增 Matrix Mem → Core Mem（或 → Router）的搬运方向 |
+| DTE | 新增 Matrix Mem → Router 的搬运方向，两笔作为同一笔 reduce 任务的两个操作数送进本级 Rmem |
 
 ### 死锁与派遣
 
@@ -2796,13 +2794,13 @@ LPU Dispatch 的派遣规则：
 <text x="950" y="226" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">7 段发给 dot core，拼接不归约</text>
 <rect x="238" y="256" width="124" height="40" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.1"/>
 <text x="300" y="271" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.8" fill="#2563eb" font-weight="700" text-anchor="middle">⑦ 行链：chip 间逐跳 reduce</text>
-<text x="300" y="286" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">本行 4 颗 chip 的 dot core 流着加</text>
+<text x="300" y="286" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">本行 4 颗 chip 的 dot core 逐颗相加</text>
 <rect x="498" y="316" width="124" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.1"/>
 <text x="560" y="331" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.8" fill="#7c3aed" font-weight="700" text-anchor="middle">⑧ 进本行 R core（reduce 数据）</text>
-<text x="560" y="346" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">链一：存 Matrix Mem，arrive_num++</text>
+<text x="560" y="346" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">链一：存 Matrix Mem，映射表加一</text>
 <rect x="758" y="316" width="124" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.1"/>
 <text x="820" y="331" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.8" fill="#7c3aed" font-weight="700" text-anchor="middle">⑨ 与上一行 reduction 数据相加</text>
-<text x="820" y="346" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">链二：两笔齐 → VU 求和</text>
+<text x="820" y="346" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">链二：两笔齐 → 送进 Rmem 相加</text>
 <rect x="888" y="376" width="124" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.1"/>
 <text x="950" y="391" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.8" fill="#7c3aed" font-weight="700" text-anchor="middle">⑩ 送下一行 / 第 11 行出核</text>
 <text x="950" y="406" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="6.5" fill="#5c6370" font-weight="400" text-anchor="middle">落本组累加，不落只转发；链尾 → PCIe → DPU</text>
@@ -2818,7 +2816,7 @@ LPU Dispatch 的派遣规则：
 <path d="M882 336 L887.93 395.3" stroke="#9aa1ad" stroke-width="1.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#rha)"/>
 <rect x="30" y="440" width="1040" height="62" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="457" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">④ 之前的 ③′ 是 nk 模式独有的：FC1 / FC3 在 chip 内切 K，部分和必须先归约成完整的 FC1、FC3 结果才能做 dot，所以汇聚到一个 core 做完再广播回去；tp_nn 模式没有这一步，chip 内只剩 FC2 的逐级 reduce。</text>
-<text x="46" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">⑦ 是 FFN 唯一一次 chip 间 reduce：FC2 chip 间切 K，每颗 chip 的 dot core 出的是 concat 后完整长度的部分和，沿本行 4 颗 chip 流着加进本行 R core，不需要中途汇聚再广播。</text>
+<text x="46" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">⑦ 是 FFN 唯一一次 chip 间 reduce：FC2 chip 间切 K，每颗 chip 的 dot core 出的是 concat 后完整长度的部分和，沿本行 4 颗 chip 逐颗相加进本行 R core，不需要中途汇聚再广播。</text>
 <text x="46" y="489" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">⑧ ⑨ ⑩ 在 12 个 R core 上逐行发生：有激活专家的组，两行的 R core 各加一次；没有激活专家的组，两行的 R core 只转发上一行的结果，不相加。</text>
 </svg>
 ```
@@ -2832,8 +2830,8 @@ LPU Dispatch 的派遣规则：
 5. FC2：MU 算本 core 的那一段并做**第一层**专家间累加
 6. FC2 chip 内切 N：另外 7 个计算 core 把各自那一段发给 dot core，与 dot core 自己那一段 concat 成 6144 维，不归约
 7. FC2 chip 间切 K：**第二层**沿行链把本行 4 颗 chip 的 dot core 逐跳 reduce 进本行 R core，这是 FFN 唯一一次 chip 间 reduce
-8. 本行结果作为 reduce 数据进 R core，链一存进 Matrix Mem、`arrive_num++`
-9. 上一行 R core 的 reduction 数据到达，两笔齐了，链二做**第三层**求和
+8. 本行结果作为 reduce 数据进 R core，链一存进 Matrix Mem、映射表加一
+9. 上一行 R core 的 reduction 数据到达，两笔齐了，这个用户排进 FIFO，链二把两笔送进本级 Rmem 做**第三层**相加
 10. 送下一行 R core；第 11 行 R core 的结果经 mid 到 core4，从右下角 chip 的东口经 PCIe Switch 进 DPU DDR，回 GPU
 
 `tp_nn` 模式没有第 3 步的汇聚：FC1 / FC3 两级都切 N，chip 内只剩 FC2 的逐级 reduce。第 8 到 10 步在 12 个 R core 上逐行发生：用户有激活专家的组，两行的 R core 各加一次；没有激活专家的组，两行的 R core 只转发上一行的结果，不相加。
@@ -2880,7 +2878,7 @@ bit 级一致性：Router reduce 按到达顺序 FP32 累加，MU 的 CSA 树按
 | Reduce credit 谁维护、什么粒度 | 本级由 TS 按用户记，ReduceModule 按用户、按任务维护相邻下游，Router 不维护（Router MAS） | HAS：core 与 reduce 之间按用户粒度、reduce 之间按 flit 加用户双粒度，单独的流控网络，user stream 的释放由 core 集中管理 |
 | 第一层做在哪 | MU 的 `C = C + (A × B) × W_ep`（建模默认） | 《软件栈》示例链里是一个 VU task；MAS 的备注是把它挪进 MU 以省 Core Mem |
 | 本行没有激活专家时 R core 怎么知道 | 这一行的 R core 只转发上一行的结果，不相加 | 判断方式待定，见第 8 章 |
-| R core 求和做在哪 | 链二的 VU task | 备选：DTE 把第二笔搬进 Router 的 ReduceModule 加完直接送出 |
+| R core 求和做在哪 | 链二的 DTE 把两笔从 Matrix Mem 送进本级 Rmem 相加（《EP组间Reduction讨论（过程）》“Reduction计算通路”末尾：“可以选择不在VU做reduction计算，在Router进行计算，数据先来在Matrix Mem存储，用户的另一个累加数据到达后通知DTE将数据搬运到Router计算后直接向下游输出”） | 《软件计算流程详细评估》“各行间FC2 psum reduction”：“使用VU完成两行间redcution”；同文与“core 内调度机制”的 R core 示例链是四步（MU 查、DTE 搬进 Core Mem、VU 求和、DTE 搬出）。按用户决定取前者，见第 8 章 |
 | R core 在哪个 core | 最后一列每颗 chip 的 `core9`，也就是 chip 的南口；每行一个，共 12 个 | 《编译器设计构想》给的候选是最后一列 chip 的 core4、core9，两个都不在该 chip 的 8 个计算 core 里，EP 组切分不受影响 |
 | reduce 任务的拆分 | 一笔 32 KB 的 reduce 拆成链上几项 8 KB 的逐级 reduce 任务，一项做完再发下一项（TS MAS 与 TS LLD） | 《软件计算流程详细评估》：TS 并行发射多笔，以保证 reduce 的计算延迟 |
 | dispatcher 是谁 | Bach core，顺序调度 | slave CPU 做 dispatcher 可乱序，需 CPU 管理每组 reduction 资源 |
@@ -2891,12 +2889,15 @@ bit 级一致性：Router reduce 按到达顺序 FP32 累加，MU 的 CSA 树按
 ## 取舍
 
 * **为什么第三层不复用第二层的 Router 逐跳累加**：EP 覆盖的范围远大于 TP，且 EP 之间不均衡很大，逐跳 reduce 的 buffer 要大到能掩盖不均衡，否则任务少的 EP 被频繁反压。借一个 core 拿它的 32 MB Matrix Mem 当 buffer，另外四个候选各有硬伤：经 Ethernet 送 GPU 算要 7 个 ETH 通道；外挂 CPU 受限于内存通道与主板功耗；PCIe Switch 挂 FPGA 成本过高；chip 内新增小 core 会让不需要 reduction 的 chip 浪费 3/4 到 7/8 的新增面积。
-* **为什么 chip 间只在 FC2 切 K**：切 K 的 reduce 在 Router 里逐跳流水累加，数据流过就加，不必等齐；FC2 若切 N，各 chip 的段要先汇聚成完整向量再广播回所有 chip，是关键路径上的一次串行往返，省的是等待不是带宽。
+* **为什么 chip 间只在 FC2 切 K**：切 K 的 reduce 沿行链逐颗相加，每颗 chip 加上自己那一份就往下送，不必等齐全部 chip；FC2 若切 N，各 chip 的段要先汇聚成完整向量再广播回所有 chip，是关键路径上的一次串行往返，省的是等待不是带宽。
 * **为什么 FC2 在 chip 内先 concat 到 dot core**：FC2 chip 内切 N，每个 core 只出 6144 维里的一段，而 Router reduce 只匹配元素位置一致的操作数。每个 core 补零发整条要多 8 倍带宽；每段一条链又要求 release 按 path 区分去向，《Router MAS》把这一点列为待定。先 concat 成完整向量，再逐跳 reduce，两个限制都不碰。
+* **为什么行链上一颗送来的那一包先落 Core Mem**：dot core 的 Rmem 对同一个用户先做 chip 内归约、后做行链，《Router MAS》F-030 要求同一 UserID 的各笔 Reduce 任务在各输入流中的到达顺序一致，由上游保证。上一颗 chip 的行链分量什么时候到与本 chip 的进度无关，直接进 Rmem 就可能先于 chip 内归约到达、占住这个用户的分区；行链要的本 core 那一份又要等 chip 内归约做完，两边互等。moe_lpu_tokens 连发 64 个或 128 个 token 时，出口停在第 24～33 个。先落 Core Mem，行链的两份输入都由本 core 在 chip 内归约完成之后发出，到达顺序在映射上就有保证；代价是 dot core 每个 token 多进一包、多出一包，各约 12 KB。
 * **为什么 R core 每行一个**：按《软件计算流程详细评估》“EP6+TP8 KN拆分”一节，各行结果进本行 R core、逐行相加。一行 4 颗 chip 的行链比整组 8 颗 chip 的蛇形链短，而且行链只沿东口、西口走，不必在 chip 内一笔画过全部计算 core。
 * **为什么 MU 输出与 reduce 用 BF16**：《Bach算子拆分及性能评估》把 MoE 输出写成 BF16；包比 FP32 小一半，一行的结果 12288 B 装得进一个 reduce 包。
 * **为什么 ReduceModule 不允许降级**：若允许绕过 Reduce 直接存储或转发，下游收到的是未归约的原始数据，且不知道这件事，没有补做的机会，宁可反压。
 * **为什么退休时 ReduceModule 的下游映射要等 release 回来才清**：Retire 只说明 core 侧的搬运结束，ReduceModule 发往相邻下游的任务可能还没做完。本地分区当场放，下游映射等各方向在途任务的 Reduce release 都回来才清，旧 release 才不会落到复用这个 UserID 的新用户上。
+* **为什么 R core 的两笔送进 Rmem 加而不用 VU**：VU 从 Core Mem 读两份，读口每拍 128 B，一个用户两份共 24 KB，每个 token 光读就要约 196 拍。moe_lpu_tokens（48 颗 chip，32 个 token，每 100 拍注入一个，不限 GPU 额度）实测：改前 32 个 token 跑完 27289 拍，第 0 个 token 延迟 17825 拍，稳态每约 254 拍出一个；改后 21205 拍、12411 拍，第 8～31 个 token 平均每约 179 拍出一个（多数间隔 166 拍）。按 1 GHz 折算约 3.9M 与 5.6M token/s。Rmem 相加时 VU 与 Core Mem 都不经过，Matrix Mem 仍做缓冲，《EP组间Reduction讨论（过程）》否掉的只是不经 Matrix Mem、直接在 Router 逐跳累加的做法。
+* **为什么 R core 链一不等数据落地**：等 12 KB 落进 Matrix Mem 一次约 125 拍，链一在 DTE 的 RV core 上等的话，非链首每个 token 等两次，加上送进 Rmem 那一步约 27 拍，每个 token 约 277 拍都占着 DTE 的 RV core，是持续负载下整条流水最慢的一环：moe_lpu_tokens 每 200 拍注入一个 token 时，第 1 行 R core 每约 270 拍才做完一个用户，跟不上。等标志挪到链二 task 0，由 MU 的 RV core 做，它在 R core 上本来就一直轮询 FIFO。
 * **为什么 R core 要两条链**：单链下在途用户数被 stream_table 的 16 项卡住，推进顺序只能按到达顺序；R core 必须按“谁先集齐”推进，这一点单链做不到，与缓冲大小无关。
 * **为什么死锁交给调度侧**：硬同步要 R core 之间互相通知，最差首尾 R core 直接通信；调度侧预留只要求硬件上报释放，R core 不带反压逻辑，代价是只能顺序调度。
 
