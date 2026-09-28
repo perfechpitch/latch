@@ -74,7 +74,7 @@ class Dte {
     for (uint64_t i = 0; i < kLaneNum; ++i) {
       DteBuffer& b = (i == kInCh) ? *in_buf : *out_buf;
       lanes.push_back(std::make_unique<Lane>(
-          clock, "lane" + std::to_string(i), i, b, agcu, gid, false));
+          clock, "lane" + std::to_string(i), i, b, gid, false));
     }
     Wire();
   }
@@ -131,10 +131,6 @@ class Dte {
   void AttachMmemWr(std::shared_ptr<MemPort> p) {
     xbar->AttachMmemWr(std::move(p));
   }
-  MemPort& CmemRd() { return xbar->CmemRd(); }
-  MemPort& CmemWr() { return xbar->CmemWr(); }
-  MemPort& MmemRd() { return xbar->MmemRd(); }
-  MemPort& MmemWr() { return xbar->MmemWr(); }
 
   // ── 配置面 ──
   Hmem& Tables() { return *hmem; }
@@ -146,12 +142,9 @@ class Dte {
   // ── 观测 ──
   HeaderParser& Parser() { return *parser; }
   DteRegfile& Regfile() { return *reg; }
-  DteXbar& Xbar() { return *xbar; }
   DteOutArb& OutArb() { return *out_arb; }
   Commit& Committer() { return *commit; }
   CompletionRs& Completion() { return *comp; }
-  Lane& GetLane(uint64_t i) { return *lanes.at(i); }
-  DteBuffer& InBuf() { return *in_buf; }
   DteBuffer& OutBuf() { return *out_buf; }
 
   void RunStep() {

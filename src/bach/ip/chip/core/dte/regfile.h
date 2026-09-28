@@ -44,12 +44,8 @@ namespace bach {
 
 // ── 地址空间（16KB，照文档 §寄存器地址域划分）──
 constexpr uint64_t kDteConfigBase = 0x0000;
-constexpr uint64_t kDteCtrlBase = 0x0400;     // 不落地 (d)
-constexpr uint64_t kDteProfileBase = 0x0800;  // 不落地 (d)
-constexpr uint64_t kDteDebugBase = 0x0C00;    // 不落地 (d)
 constexpr uint64_t kDteTemplateBase = 0x1000;
 constexpr uint64_t kDteTaskqBase = 0x2000;
-constexpr uint64_t kDteHmemBase = 0x3000;
 constexpr uint64_t kDteTemplateStride = 0x80;
 constexpr uint64_t kDteTemplateNum = 8;
 
@@ -88,7 +84,6 @@ constexpr uint64_t kDteTempIndexMask = 0x7;
 constexpr uint64_t kDteModeMask = 0x7;              // [2:0] transfer_mode
 constexpr uint64_t kDteAddrValidShift = 3;          // [6:3] addr_valid[3:0]
 constexpr uint64_t kDteAddrValidMask = 0xF;
-constexpr uint64_t kDteHwHeaderOp = 1ull << 7;      // [7] 包头 保存/丢弃/修改
 constexpr uint64_t kDteWrSharememFlag = 1ull << 8;  // [8] 完成后写 ShareMem
 constexpr uint64_t kDteAckTsEn = 1ull << 9;         // [9] 完成后通知 TS（原 task_last）
 
@@ -153,18 +148,14 @@ class DteRegfile : public BachModule {
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return rdata; }
   // 起任务这一笔交给 Commit 的 from_rv 口：一根线两端是同一个对象。
   std::shared_ptr<DescPort> OutPtr() const { return out; }
-  void AttachOut(std::shared_ptr<DescPort> p) { out = std::move(p); }
 
   // B core、R core 与 weights 加载阶段进核的包不建 stream 表项，进核那一笔的完成
   // 没有可报的对象，不回 Ack。SCP 切模式时配，Fire 时落进进核任务的 no_ack。
   void SetInboundNoAck(bool on) { inbound_no_ack = on; }
 
   // ── 观测 ──
-  DteConfig const& Template(uint64_t i) const { return tpl.at(i); }
-  DteConfig const& CfgFile() const { return cfg_file; }
   uint64_t Triggers() const { return trig_cnt; }
   uint64_t Writes() const { return write_cnt; }
-  uint64_t Reads() const { return read_cnt; }
   bool Quiescent() const override { return !holding && pending_read.empty(); }
 
  protected:
@@ -200,7 +191,6 @@ class DteRegfile : public BachModule {
     if (cfg->req_we.Get() == 0) {
       pending_read.push_back({CycleNow() + kDsaReadLatency, ReadReg(at),
                               last_seq});
-      ++read_cnt;
       return;
     }
     ++write_cnt;
@@ -297,7 +287,6 @@ class DteRegfile : public BachModule {
     d->no_ack = IsInbound(d->route) && inbound_no_ack;
     uint64_t addr_valid = (merged.trans_mode >> kDteAddrValidShift) &
                           kDteAddrValidMask;
-    d->hw_header_op = (merged.trans_mode & kDteHwHeaderOp) != 0;
     d->wr_sharemem_flag = (merged.trans_mode & kDteWrSharememFlag) != 0;
     d->ack_ts_en = (merged.trans_mode & kDteAckTsEn) != 0;
     d->smem_addr = merged.smem_addr;
@@ -341,7 +330,7 @@ class DteRegfile : public BachModule {
   bool holding = false, rdata_used = false;
   // 进核任务不回 Ack 的档位，由 SCP 切模式时配。
   bool inbound_no_ack = false;
-  uint64_t last_seq = 0, held_seq = 0, trig_cnt = 0, write_cnt = 0, read_cnt = 0;
+  uint64_t last_seq = 0, held_seq = 0, trig_cnt = 0, write_cnt = 0;
 
   Logic64 triggers, writes;
 };

@@ -68,14 +68,6 @@ constexpr uint64_t kDteBufFlits = 32;
 // 单个 DTE 任务的搬运量上限：256 B × 128 拍 = 32 KB。超过的要拆成多个任务包。
 constexpr uint64_t kMaxTaskBytes = 32 * 1024;
 
-// CFG_DATA_LEN 是 16 bit，以字节（1B）为单位，所以一段最长 64 KB 差 1 B。
-// 段 0 承载包头（18B），不要求 8B 对齐；段 1~3 软件须保证 8B 整数倍。
-constexpr uint64_t kDteDataLenMax = 0xFFFFu;
-
-// 包头段长：core_mask 2B + 软件包头 16B = 18B。飞书文档另标「【暂定】硬件默认
-// 19B align 到 24B」，实现以 18B 为准。
-constexpr uint64_t kDteHeaderBytes = 18;
-
 // 一个段位的端点，由地址范围译码决定段落在哪块存储。
 enum class SegEndpoint : uint32_t {
   kCmem = 0,     // CoreMem 数据
@@ -134,14 +126,9 @@ struct Descriptor {
   // 任务不回 Ack。
   bool ack_ts_en = true;
   bool no_ack = false;
-  // hw_header_op 对应 CFG_TRANS_MODE[7]：包头 保存 / 丢弃 / 修改。当前模型包头
-  // 走 Hmem，这一位只作记录，不改数据通路。
-  bool hw_header_op = false;
   // reduce 包的任务边界：发方的 task_id，ReduceModule 靠它分开同一个用户前后
   // 两笔 reduce 任务。
   uint64_t reduce_seq = 0;
-  // 走归约路径出核的包，包头打上 reduce_seq。
-  bool reduce_pkt = false;
 
   // shareMem 写：数据搬完之后按这一对写一笔，写出去了才通知 TS。只有 B core
   // 与 R core 用，存的是 user_id 与 token entry 的 valid 标志。对应 CFG_TRANS_MODE[8]
@@ -249,16 +236,6 @@ struct Descriptor {
     if (route == Route::kMmToCm) return kInnerLane;
     return kOutCh0 + (vc % 4);
   }
-};
-
-// 完成的六个层级。向 TS 的报告是 exactly-once。
-enum class CompState : uint32_t {
-  kQueued = 0,     // 已进 TaskQueue 未装载
-  kActive = 1,     // 由对应 AGCU / Ctrl 执行
-  kIssueDone = 2,  // 该侧最后一个请求已 Fire
-  kDrained = 3,    // 相关响应、Buffer 数据和外部副作用均已收敛
-  kJoinDone = 4,   // 同一 task_id 的 RD 与 WR 都满足
-  kTaskDone = 5,   // 进 Done Pending 并与 TS 成功握手
 };
 
 }  // namespace bach

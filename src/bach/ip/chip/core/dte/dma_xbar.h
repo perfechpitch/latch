@@ -38,8 +38,7 @@ class DteXbar : public BachModule {
  public:
   DteXbar(ClockPtr clock, const std::string& name, uint64_t parent = 0,
           bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        grants(clock) {
+      : BachModule(clock, name, parent, tick) {
     for (uint64_t w = 0; w < kWhichNum; ++w) {
       out[w][kRead] = std::make_shared<MemPort>(clock);
       out[w][kWrite] = std::make_shared<MemPort>(clock);
@@ -75,7 +74,6 @@ class DteXbar : public BachModule {
     out[kToMmem][kWrite] = std::move(p);
   }
 
-  uint64_t Grants() const { return grant_cnt; }
   bool Quiescent() const override {
     for (uint64_t w = 0; w < kWhichNum; ++w) {
       if (!pend[w].empty()) return false;
@@ -90,7 +88,6 @@ class DteXbar : public BachModule {
   void Step() override {
     Serve(kToCmem);
     Serve(kToMmem);
-    grants = grant_cnt;
     TracePerCycle("grants", grant_cnt);
   }
 
@@ -171,8 +168,6 @@ class DteXbar : public BachModule {
   std::array<std::array<uint64_t, kRwNum>, kWhichNum> grant{};
   std::array<std::deque<uint64_t>, kWhichNum> pend;
   uint64_t grant_cnt = 0;
-
-  Logic64 grants;
 };
 
 }  // namespace bach

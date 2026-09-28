@@ -78,7 +78,6 @@ class CompletionRs : public BachModule {
   void AttachAdmit(std::shared_ptr<AdmitPort> p) { admit = std::move(p); }
   bool HasRoom() const { return rs.size() < kCompRsNum; }
 
-  uint64_t SmemWrites() const { return smem_cnt; }
   uint64_t Joined() const { return joined.Get(); }
   uint64_t Reported() const { return reported.Get(); }
   uint64_t Used() const { return used.Get(); }
@@ -197,7 +196,6 @@ class CompletionRs : public BachModule {
       smem_wr->Write(p.smem_addr, d);
       smem_used = true;
       p.smem = false;
-      ++smem_cnt;
       return;
     }
     if (!p.notify) {
@@ -219,7 +217,6 @@ class CompletionRs : public BachModule {
   std::shared_ptr<HalfDonePort> rd_done, wr_done;
   std::shared_ptr<MemPort> smem_wr;
   bool smem_used = false;
-  uint64_t smem_cnt = 0;
   std::shared_ptr<DonePort> to_ts;
   std::shared_ptr<AdmitPort> admit;
   uint64_t last_admit_seq = 0;

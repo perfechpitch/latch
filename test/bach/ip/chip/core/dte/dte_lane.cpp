@@ -15,6 +15,7 @@
 
 #include "base/clock.h"
 #include "base/runtime.h"
+#include "bach/ip/chip/core/dte/agcu.h"
 #include "bach/ip/chip/core/dte/lane.h"
 #include "bach/ip/chip/core/memory/core_mem.h"
 #include "bach/ip/chip/core/memory/matrix_mem.h"
@@ -198,8 +199,7 @@ TEST(BachDteLane, OutboundScaleFollowsTheData) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kOutCh0, buf, 0, false);
     CoreMem cmem(clk, "cmem");
     ln.AttachCmem(cmem.PortPtr(kCmemDteRd));
     uint64_t base = 0x100;
@@ -236,8 +236,7 @@ TEST(BachDteLane, MatrixToCoreCarriesScale) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kInnerLane, buf, 0, false);
     CoreMem cmem(clk, "cmem");
     MatrixMem mmem(clk, "mmem");
     ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
@@ -309,9 +308,8 @@ TEST(BachDteLane, ReadAheadStopsAtTheOutstandingLimit) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
     // 出核通道，进核那个走的是另一条路。
-    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kOutCh0, buf, 0, false);
     LaneHarness h(clk, ln);
     // 存储很慢，读请求会攒着。
     h.mem_latency = 20;
@@ -335,8 +333,7 @@ TEST(BachDteLane, TasksActivateInOrder) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kOutCh0, buf, 0, false);
     LaneHarness h(clk, ln);
     // 两笔出核任务，源地址不同：第一笔从 0 起，第二笔从 0x100 起。
     h.jobs = {{2, Task(1, Route::kCmToRouter, 0, kFlitBytes, 0, 0)},
@@ -360,9 +357,8 @@ TEST(BachDteLane, MatrixToCoreWritesOnlyCoreMem) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
     // 走 out_ch[3]，MM → CM 固定复用它。
-    Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kInnerLane, buf, 0, false);
     LaneHarness h(clk, ln);
     h.jobs = {{2, Task(1, Route::kMmToCm, 1, kFlitBytes, 0x9000, 0x40)}};
     clk->Continue(80 * kPeriod);
@@ -391,8 +387,7 @@ TEST(BachDteLane, LongMoveWritesEveryBeat) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", kDteBufFlits, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kInnerLane, buf, 0, false);
     LaneHarness h(clk, ln);
     h.jobs = {{2, Task(1, Route::kMmToCm, 0, kBytes, 0x9000, 0)}};
     clk->Continue(8000 * kPeriod);
@@ -418,8 +413,7 @@ TEST(BachDteLane, MatrixSideAddressIsUsedAsIs) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kInnerLane, buf, 0, false);
     LaneHarness h(clk, ln);
     h.jobs = {{2, Task(1, Route::kMmToCm, /*stream=*/2, kFlitBytes, 0x9000,
                        0x40)}};
@@ -444,8 +438,7 @@ TEST(BachDteLane, NextTaskStartsAfterIssueDone) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kOutCh0, buf, 0, false);
     LaneHarness h(clk, ln);
     // 存储很慢：第一笔的响应要 30 拍才回来。
     h.mem_latency = 30;
@@ -472,8 +465,7 @@ TEST(BachDteLane, ReadAheadCountsThePreviousTasksResponses) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 4, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kOutCh0, buf, 0, false);
     LaneHarness h(clk, ln);
     h.mem_latency = 5;
     h.router_ready = false;
@@ -498,8 +490,7 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kOutCh0, buf, 0, false);
     LaneHarness h(clk, ln);
     // 响应一直不回来，几笔任务会堆在等收敛的那一队里。
     h.mem_latency = 100000;
@@ -534,8 +525,7 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu;
-    Lane ln(clk, "lane", kInCh, buf, agcu, 0, false);
+    Lane ln(clk, "lane", kInCh, buf, 0, false);
     CoreMem cmem(clk, "cmem");
     ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
     auto topk_port = std::make_shared<MuTopkPort>(clk);

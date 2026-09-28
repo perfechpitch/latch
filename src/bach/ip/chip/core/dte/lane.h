@@ -36,7 +36,6 @@
 #include <string>
 
 #include "base/log.h"
-#include "bach/ip/chip/core/dte/agcu.h"
 #include "bach/ip/chip/core/dte/buffer.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/dte/task_queue.h"
@@ -76,22 +75,17 @@ inline bool WrSeg(SegEndpoint k) {
 class Lane : public BachModule {
  public:
   Lane(ClockPtr clock, const std::string& name, uint64_t lane_idx,
-       DteBuffer& buf, Agcu const& addr_gen, uint64_t parent = 0,
-       bool tick = true)
+       DteBuffer& buf, uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         idx(lane_idx),
         buffer(buf),
-        agcu(addr_gen),
         cmem(std::make_shared<MemPort>(clock)),
         mmem(std::make_shared<MemPort>(clock)),
         to_router(std::make_shared<CoreDataPort>(clock)),
         payload(std::make_shared<PayloadPort>(clock)),
         admit(std::make_shared<AdmitPort>(clock)),
         rd_done(std::make_shared<HalfDonePort>(clock)),
-        wr_done(std::make_shared<HalfDonePort>(clock)),
-        rd_active(clock),
-        wr_active(clock),
-        moved(clock) {}
+        wr_done(std::make_shared<HalfDonePort>(clock)) {}
 
   // Commit 从这个口把准入的任务送进来。读写两侧同时进队，所以 ready 要两侧
   // 都有空位才给。
@@ -114,9 +108,6 @@ class Lane : public BachModule {
 
   // topK 旁带写进 MU 的那条数据线。只有进核通道收到，出核通道恒为空。
   void AttachMuTopk(std::shared_ptr<MuTopkPort> p) { mu_topk = std::move(p); }
-
-  uint64_t Moved() const { return moved.Get(); }
-  uint64_t QueueLen(uint64_t half) const { return q[half].Size(); }
 
   bool Quiescent() const override {
     return q[kRd].Empty() && q[kWr].Empty() && !ctx[kRd].busy &&
@@ -144,9 +135,6 @@ class Lane : public BachModule {
     if (!router_used) to_router->Idle();
     if (mu_topk && !topk_driven) mu_topk->Idle();
 
-    rd_active = ctx[kRd].busy ? 1 : 0;
-    wr_active = ctx[kWr].busy ? 1 : 0;
-    moved = move_pending;
     TracePerCycle("rd_q", q[kRd].Size());
     TracePerCycle("wr_q", q[kWr].Size());
   }
@@ -414,7 +402,6 @@ class Lane : public BachModule {
       to_router->Drive(n, /*last=*/true, /*head=*/false, c.desc.vc, c.desc.msg);
       c.topk_pending = false;
       router_used = true;
-      ++move_pending;
       c.issue_done = true;
       return;
     }
@@ -433,7 +420,6 @@ class Lane : public BachModule {
       c.sent_first = true;
       router_used = true;
       buffer.Pop(idx);
-      ++move_pending;
       if (b.last) {
         if (has_topk) c.topk_pending = true;
         else c.issue_done = true;
@@ -494,13 +480,11 @@ class Lane : public BachModule {
     c.off += n;
     c.part = 0;
     buffer.Pop(idx);
-    ++move_pending;
     if (last) c.issue_done = true;
   }
 
   uint64_t idx;
   DteBuffer& buffer;
-  Agcu agcu;
   std::shared_ptr<MemPort> cmem, mmem;
   std::shared_ptr<CoreDataPort> to_router;
   std::shared_ptr<PayloadPort> payload;
@@ -518,9 +502,6 @@ class Lane : public BachModule {
   uint64_t last_payload_seq = 0, last_admit_seq = 0;
   bool cmem_used = false, mmem_used = false, router_used = false;
   bool topk_driven = false;
-  uint64_t move_pending = 0;
-
-  Logic64 rd_active, wr_active, moved;
 };
 
 }  // namespace bach

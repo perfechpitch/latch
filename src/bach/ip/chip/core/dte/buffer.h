@@ -51,9 +51,7 @@ class DteBuffer : public BachModule {
             uint64_t users = 1, uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         depth(users == 0 ? cap : cap / users),
-        occupancy(clock),
-        pushed(clock),
-        popped(clock) {}
+        occupancy(clock) {}
 
   // 读那一半问还能不能往里放。这就是可用 Credit。
   bool HasRoom(uint64_t lane) const { return q[lane].size() < depth; }
@@ -65,7 +63,6 @@ class DteBuffer : public BachModule {
     LOGCHECK(HasRoom(lane),
              "DteBuffer: 满了。读那一半应当先看 Credit 再发请求。");
     q[lane].push_back(b);
-    ++push_pending;
   }
 
   bool Empty(uint64_t lane) const { return q[lane].empty(); }
@@ -73,7 +70,6 @@ class DteBuffer : public BachModule {
   void Pop(uint64_t lane) {
     LOGCHECK(!q[lane].empty(), "DteBuffer: 空的时候取数。");
     q[lane].pop_front();
-    ++pop_pending;
   }
 
   // 某一笔的数据在 buffer 里排空了没有。写那一半要等这个才算 drained。
@@ -87,8 +83,6 @@ class DteBuffer : public BachModule {
   }
 
   uint64_t Occupancy() const { return occupancy.Get(); }
-  uint64_t Pushed() const { return pushed.Get(); }
-  uint64_t Popped() const { return popped.Get(); }
 
   bool Quiescent() const override {
     for (auto const& lane : q) {
@@ -105,17 +99,14 @@ class DteBuffer : public BachModule {
     for (auto const& lane : q) sum += lane.size();
 
     occupancy = sum;
-    pushed = push_pending;
-    popped = pop_pending;
     TracePerCycle("occupancy", sum);
   }
 
  private:
   uint64_t depth;   // 每个通道分到的深度
   std::array<std::deque<BufBeat>, kLaneNum> q;
-  uint64_t push_pending = 0, pop_pending = 0;
 
-  Logic64 occupancy, pushed, popped;
+  Logic64 occupancy;
 };
 
 }  // namespace bach

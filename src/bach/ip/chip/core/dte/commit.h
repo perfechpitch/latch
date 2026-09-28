@@ -170,13 +170,12 @@ class Commit : public BachModule {
     ++stall_pending;
   }
 
-  // 走归约路径出核的包标成 reduce 包，包头的 reduce_seq 打上发方的
-  // task_id：ReduceModule 靠它分开同一个用户前后两笔 reduce 任务。一条归约链上
-  // 各 core 的任务链一样，同一笔任务的 task_id 也一样。
+  // 走归约路径出核的包，包头的 reduce_seq 打上发方的 task_id：ReduceModule 靠它
+  // 分开同一个用户前后两笔 reduce 任务。一条归约链上各 core 的任务链一样，同一
+  // 笔任务的 task_id 也一样。
   void MarkReducePkt(Descriptor& d) {
     if (d.route != Route::kCmToRouter && d.route != Route::kMmToRouter) return;
     if (hmem.Rtab(d.path_id).operation == Operation::kForward) return;
-    d.reduce_pkt = true;
     d.reduce_seq = d.task_id;
   }
 
