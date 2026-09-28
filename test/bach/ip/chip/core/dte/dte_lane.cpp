@@ -28,12 +28,7 @@ constexpr Time kPeriod = 1;
 
 void EnsureSlots() { RT::Reset(8, 8); }
 
-CmemLayout Layout() {
-  CmemLayout l;
-  l.stream_base = 0x10000;
-  l.stream_stride = 0x8000;
-  return l;
-}
+constexpr uint64_t kStride = 0x8000;
 
 // 造一笔任务：段 1 装数据，带 scale 时再补段 2。src/dst 是软件配的段地址，展开
 // 成 src_addr/dst_addr 并译码端点走与 regfile Fire 同一条路径。
@@ -54,17 +49,17 @@ std::shared_ptr<Descriptor> Task(uint64_t commit_seq, Route route,
   d->seg[1].valid = true;
   d->seg[1].src = from_mm ? (src | mm_tag) : src;
   d->seg[1].dst = dst;
-  d->seg[1].stride = Layout().stream_stride;
+  d->seg[1].stride = kStride;
   d->seg[1].len = bytes;
   if (scale) {
     // 段 2 = scale 旁带：地址带 scale tag，低位给对应数据地址，长度按 bytes/32。
     d->seg[2].valid = true;
     d->seg[2].src = src | sc_tag;
     d->seg[2].dst = dst | sc_tag;
-    d->seg[2].stride = Layout().stream_stride;
+    d->seg[2].stride = kStride;
     d->seg[2].len = bytes / 32;
   }
-  Agcu agcu(Layout());
+  Agcu agcu;
   for (uint64_t i = 0; i < 4; ++i) {
     if (d->seg[i].valid) agcu.ExpandOut(d->seg[i], stream, route);
   }
@@ -203,11 +198,11 @@ TEST(BachDteLane, OutboundScaleFollowsTheData) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
     CoreMem cmem(clk, "cmem");
     ln.AttachCmem(cmem.PortPtr(kCmemDteRd));
-    uint64_t base = Layout().stream_base + 0x100;
+    uint64_t base = 0x100;
     cmem.Poke(base, data);
     cmem.PokeScale(base, scale);
 
@@ -241,7 +236,7 @@ TEST(BachDteLane, MatrixToCoreCarriesScale) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
     CoreMem cmem(clk, "cmem");
     MatrixMem mmem(clk, "mmem");
@@ -254,23 +249,13 @@ TEST(BachDteLane, MatrixToCoreCarriesScale) {
     RealMemHarness h(clk, ln, d);
     clk->Continue(300 * kPeriod);
     RT::JoinAll();
-    uint64_t at = Layout().stream_base + Layout().stream_stride + 0x40;
+    uint64_t at = kStride + 0x40;
     got_data = cmem.Peek(at, kData);
     got_scale = cmem.PeekScale(at, scale.size());
   }
   RT::Reset();
   EXPECT_EQ(got_data, data);
   EXPECT_EQ(got_scale, scale);
-}
-
-// Core Mem 那一侧按 stream_id 叠偏移，Matrix Mem 那一侧不叠。
-TEST(BachAgcu, StreamOffsetOnCoreMemSideOnly) {
-  Agcu a(Layout());
-  EXPECT_EQ(a.DataAddr(0, /*core_mem=*/true, 0x40), 0x10000u + 0x40);
-  EXPECT_EQ(a.DataAddr(3, true, 0x40), 0x10000u + 3 * 0x8000 + 0x40);
-  // Matrix Mem 一侧配的就是最终物理地址。
-  EXPECT_EQ(a.DataAddr(3, /*core_mem=*/false, 0x9000), 0x9000u);
-  EXPECT_EQ(a.DataAddr(0, false, 0x9000), 0x9000u);
 }
 
 // 端点由地址高 4 bit tag 译码决定，与 route 无关：Cmem 是 0（默认），Mmem / scale /
@@ -283,20 +268,20 @@ TEST(BachAgcu, EndpointIsDecodedFromTheAddressRange) {
   EXPECT_EQ(Agcu::Decode(0x40001000ull), SegEndpoint::kHeader);
 }
 
-// 段地址逐段展开：stream_start = CfgAddr + SID × stride。Cmem 一侧叠 stream_base
-// 与偏移，Mmem 一侧给物理地址不叠；MM→CM 源端不叠 stride。
+// 段地址逐段展开：stream_start = CfgAddr + SID × stride。Cmem 一侧按段地址与
+// 偏移展开，Mmem 一侧给物理地址不叠；MM→CM 源端不叠 stride。
 TEST(BachAgcu, ExpandOutExpandsPerSegmentAddress) {
-  Agcu a(Layout());
+  Agcu a;
   uint64_t mm_tag = uint64_t(SegEndpoint::kMmem) << kEpShift;
 
   Segment data;
   data.src = 0x40;
   data.dst = 0x80;
-  data.stride = Layout().stream_stride;
-  // CmToRouter：源端是 Cmem，叠 stream_base + SID × stride；目的端是 Router，无地址。
+  data.stride = kStride;
+  // CmToRouter：源端是 Cmem，叠 SID × stride；目的端是 Router，无地址。
   a.ExpandOut(data, 3, Route::kCmToRouter);
   EXPECT_EQ(data.src_kind, SegEndpoint::kCmem);
-  EXPECT_EQ(data.src_addr, 0x10000u + 3 * 0x8000 + 0x40);
+  EXPECT_EQ(data.src_addr, 3 * 0x8000 + 0x40);
   EXPECT_EQ(data.dst_addr, 0u);
 
   Segment m2r;
@@ -310,11 +295,11 @@ TEST(BachAgcu, ExpandOutExpandsPerSegmentAddress) {
   Segment m2c;
   m2c.src = 0x9000u | mm_tag;
   m2c.dst = 0x40;
-  m2c.stride = Layout().stream_stride;
+  m2c.stride = kStride;
   a.ExpandOut(m2c, 1, Route::kMmToCm);
   EXPECT_EQ(m2c.src_addr, 0x9000u) << "MM→CM 源端不叠 stride";
   EXPECT_EQ(m2c.dst_kind, SegEndpoint::kCmem);
-  EXPECT_EQ(m2c.dst_addr, 0x10000u + 0x8000 + 0x40);
+  EXPECT_EQ(m2c.dst_addr, 0x8000 + 0x40);
 }
 
 // 出核读那一半的领先量卡在 outstanding 限额上，不会无限发请求。
@@ -324,7 +309,7 @@ TEST(BachDteLane, ReadAheadStopsAtTheOutstandingLimit) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     // 出核通道，进核那个走的是另一条路。
     Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
@@ -350,7 +335,7 @@ TEST(BachDteLane, TasksActivateInOrder) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
     // 两笔出核任务，源地址不同：第一笔从 0 起，第二笔从 0x100 起。
@@ -364,8 +349,8 @@ TEST(BachDteLane, TasksActivateInOrder) {
   }
   RT::Reset();
   ASSERT_GE(addrs.size(), 2u);
-  EXPECT_EQ(addrs[0], 0x10000u) << "第一笔的源地址";
-  EXPECT_EQ(addrs[1], 0x10000u + 0x100) << "第二笔排在它后面";
+  EXPECT_EQ(addrs[0], 0u) << "第一笔的源地址";
+  EXPECT_EQ(addrs[1], 0x100u) << "第二笔排在它后面";
 }
 
 // MM → CM 那一档只写 Core Mem：出核通道的数据不会被写回 Matrix Mem。
@@ -375,7 +360,7 @@ TEST(BachDteLane, MatrixToCoreWritesOnlyCoreMem) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     // 走 out_ch[3]，MM → CM 固定复用它。
     Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
@@ -406,7 +391,7 @@ TEST(BachDteLane, LongMoveWritesEveryBeat) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", kDteBufFlits, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
     h.jobs = {{2, Task(1, Route::kMmToCm, 0, kBytes, 0x9000, 0)}};
@@ -422,9 +407,8 @@ TEST(BachDteLane, LongMoveWritesEveryBeat) {
   uint64_t want = (kBytes + kFlitBytes - 1) / kFlitBytes;
   EXPECT_EQ(writes, want) << "每个 beat 都要写出去";
   ASSERT_FALSE(addrs.empty());
-  EXPECT_EQ(addrs.front(), Layout().stream_base) << "从段首写起";
-  EXPECT_EQ(addrs.back(), Layout().stream_base + (want - 1) * kFlitBytes)
-      << "写到段尾";
+  EXPECT_EQ(addrs.front(), 0u) << "从段首写起";
+  EXPECT_EQ(addrs.back(), (want - 1) * kFlitBytes) << "写到段尾";
 }
 
 // 出核从 Matrix Mem 读时不叠 stream 偏移，配的地址就是最终地址。
@@ -434,7 +418,7 @@ TEST(BachDteLane, MatrixSideAddressIsUsedAsIs) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kInnerLane, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
     h.jobs = {{2, Task(1, Route::kMmToCm, /*stream=*/2, kFlitBytes, 0x9000,
@@ -460,7 +444,7 @@ TEST(BachDteLane, NextTaskStartsAfterIssueDone) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
     // 存储很慢：第一笔的响应要 30 拍才回来。
@@ -488,7 +472,7 @@ TEST(BachDteLane, ReadAheadCountsThePreviousTasksResponses) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 4, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
     h.mem_latency = 5;
@@ -514,7 +498,7 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kOutCh0, buf, agcu, 0, false);
     LaneHarness h(clk, ln);
     // 响应一直不回来，几笔任务会堆在等收敛的那一队里。
@@ -550,7 +534,7 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     DteBuffer buf(clk, "buf", 64, 1, 0, false);
-    Agcu agcu(Layout());
+    Agcu agcu;
     Lane ln(clk, "lane", kInCh, buf, agcu, 0, false);
     CoreMem cmem(clk, "cmem");
     ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
