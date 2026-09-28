@@ -46,43 +46,36 @@ struct InboundCfg {
   bool no_ack = false;  // 进核不回 Ack 的档位
 };
 
-struct DteCfg {
-  CmemLayout cmem;
-  InboundCfg inbound;
-  bool tick = true;
-};
-
 class Dte {
  public:
-  Dte(ClockPtr clock, const std::string& name, DteCfg const& setting,
-      uint64_t parent = 0)
-      : clk(clock), cfg(setting), agcu(setting.cmem) {
+  Dte(ClockPtr clock, const std::string& name, uint64_t parent = 0)
+      : clk(clock) {
     const uint64_t gid = TraceGroup(name, parent);
-    hmem = std::make_unique<Hmem>(clock, "hmem", gid, setting.tick);
+    // 都不自己挂时钟：外层每拍调一次 RunStep()，按末级先做的次序逐个走一遍，
+    // 整个 DTE 只占外层那一个协程（同 Mu）。
+    hmem = std::make_unique<Hmem>(clock, "hmem", gid, false);
     // 一个通道一份 Buffer：进核那块归 in_ch，出核那块四个出核通道各一份，
     // 各自 kDteBufFlits 项，不是四个分一份。
     in_buf = std::make_unique<DteBuffer>(clock, "in_buf", kDteBufFlits,
-                                         1, gid, setting.tick);
+                                         1, gid, false);
     out_buf = std::make_unique<DteBuffer>(clock, "out_buf",
                                           kDteBufFlits * (kLaneNum - 1),
-                                          kLaneNum - 1, gid, setting.tick);
+                                          kLaneNum - 1, gid, false);
     parser = std::make_unique<HeaderParser>(clock, "parser", *hmem, gid,
-                                            setting.tick);
+                                            false);
     commit = std::make_unique<Commit>(clock, "commit", *hmem, gid,
-                                      setting.tick);
+                                      false);
     out_arb = std::make_unique<DteOutArb>(clock, "out_arb", gid,
-                                          setting.tick);
+                                          false);
     reg = std::make_unique<DteRegfile>(clock, "regfile", agcu, gid,
-                                       setting.tick);
-    comp = std::make_unique<CompletionRs>(clock, "comp", gid, setting.tick);
-    xbar = std::make_unique<DteXbar>(clock, "xbar", gid, setting.tick);
+                                       false);
+    comp = std::make_unique<CompletionRs>(clock, "comp", gid, false);
+    xbar = std::make_unique<DteXbar>(clock, "xbar", gid, false);
     for (uint64_t i = 0; i < kLaneNum; ++i) {
       DteBuffer& b = (i == kInCh) ? *in_buf : *out_buf;
       lanes.push_back(std::make_unique<Lane>(
-          clock, "lane" + std::to_string(i), i, b, agcu, gid, setting.tick));
+          clock, "lane" + std::to_string(i), i, b, agcu, gid, false));
     }
-    // 进核不回 Ack 的档位由 Regfile 在 Fire 时落进 Descriptor。
-    SetInbound(setting.inbound);
     Wire();
   }
 
@@ -217,7 +210,6 @@ class Dte {
   }
 
   ClockPtr clk;
-  DteCfg cfg;
   Agcu agcu;
 
   std::unique_ptr<Hmem> hmem;

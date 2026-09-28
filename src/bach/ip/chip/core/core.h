@@ -68,10 +68,7 @@ class Core : public BachModule {
     tcfg.tick = false;
     ts = std::make_unique<Ts>(clock, "ts", tcfg, Id());
 
-    DteCfg dcfg;
-    dcfg.tick = false;
-    dcfg.inbound = business_in;
-    dte = std::make_unique<Dte>(clock, "dte", dcfg, Id());
+    dte = std::make_unique<Dte>(clock, "dte", Id());
 
     cmem = std::make_unique<CoreMem>(clock, "cmem", Id(), false);
     mmem = std::make_unique<MatrixMem>(clock, "mmem", Id(), false);

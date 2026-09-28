@@ -24,7 +24,7 @@ namespace {
 
 constexpr Time kPeriod = 1;
 
-// DTE 是十一个模块，加驱动就超过默认的 8 个协程槽位。
+// 兜底调大协程槽位：driver 与各 harness 都自己挂时钟。
 void EnsureSlots() { RT::Reset(8, 8); }
 
 MessagePtr MakeMsg(uint64_t user, uint64_t path, uint64_t bytes,
@@ -268,6 +268,19 @@ void AttachDummyMem(Dte& dte, ClockPtr clk, std::vector<std::shared_ptr<MemPort>
   dte.AttachMmemWr(out[3]);
 }
 
+// 驱动 DTE：子模块都不自己挂时钟，外层每拍调一次 RunStep()，按末级先做的次序
+// 逐个走一遍（同 Mu 与 Core::Step 的驱动方式）。
+class DteDriver : public BachModule {
+ public:
+  DteDriver(ClockPtr c, Dte& target) : BachModule(c, "driver"), dte(target) {}
+
+ protected:
+  void Step() override { dte.RunStep(); }
+
+ private:
+  Dte& dte;
+};
+
 }  // namespace
 
 // Router → CM：配置起一笔进核任务，一个整包进来，搬进 Core Mem，两侧 Join 后向 TS
@@ -277,7 +290,8 @@ TEST(BachDte, InboundRouterToCoreMem) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);
@@ -316,7 +330,8 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     CoreMem cmem(clk, "cmem");
     dte.AttachCmemRd(cmem.PortPtr(kCmemDteRd));
     dte.AttachCmemWr(cmem.PortPtr(kCmemDteWr));
@@ -366,7 +381,8 @@ TEST(BachDte, HeaderOnlyTask) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);
@@ -397,7 +413,8 @@ TEST(BachDte, HeaderOnlyTask) {
 static void FeedOversizedFrame() {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
-  Dte dte(clk, "dte", DteCfg{});
+  Dte dte(clk, "dte");
+  DteDriver driver(clk, dte);
   std::vector<std::shared_ptr<MemPort>> mem;
   AttachDummyMem(dte, clk, mem);
   // 超过单任务上限 32 KB
@@ -420,7 +437,8 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
 
@@ -498,7 +516,8 @@ TEST(BachDte, JoinReportsExactlyOnce) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);
@@ -536,7 +555,8 @@ TEST(BachDte, BufferFullBackpressuresRouter) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
 
@@ -583,7 +603,8 @@ TEST(BachDte, TriggerSamplesDirectIds) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);
@@ -663,7 +684,8 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Dte dte(clk, "dte", DteCfg{});
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
     auto ids = std::make_shared<DsaIdsPort>(clk);

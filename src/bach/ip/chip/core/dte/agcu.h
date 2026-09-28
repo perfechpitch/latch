@@ -33,17 +33,8 @@ namespace bach {
 // 端点 tag 的位宽与掩码（地址高 4 bit）定义在 dte_types.h（kEpShift/kEpMask/
 // kEpDataMask），与 SegEndpoint 同处。
 
-// Core Mem 的 stream 分片跨度。进核那一笔保持包驱动：包头带的落点是段内偏移，
-// 收方还要叠自己的 stream 偏移才得到最终地址，这个跨度就取在这里（存疑：文档的
-// 进核是配置驱动，本模型保持包驱动，见 04-dte 建模文档）。
-struct CmemLayout {
-  uint64_t stream_base = 0;
-  uint64_t stream_stride = 64 * 1024;
-};
-
 class Agcu {
  public:
-  explicit Agcu(CmemLayout const& layout) : cm(layout) {}
 
   // 端点译码：地址高 4 bit 选端点，其余位是端内偏移。
   static SegEndpoint Decode(uint64_t addr) {
@@ -70,33 +61,17 @@ class Agcu {
     if (src_mem) {
       // MM→CM 源端是 Matrix Mem，软件给物理地址，不叠 stride。
       uint64_t stride = (route == Route::kMmToCm) ? 0 : s.stride;
-      // 源端是 Core Mem（仅 CmToRouter）时叠 stream_base，Mmem 那一侧不给。
-      uint64_t base = (route == Route::kCmToRouter) ? cm.stream_base : 0;
-      s.src_addr = (s.src & kEpDataMask) + base + sid * stride;
+      s.src_addr = (s.src & kEpDataMask) + sid * stride;
     } else {
       s.src_addr = 0;
     }
     if (dst_mem) {
-      // 目的端是 Core Mem（RouterToCm / MmToCm）时叠 stream_base，Mmem 不给。
-      uint64_t base = (route == Route::kRouterToCm || route == Route::kMmToCm)
-                          ? cm.stream_base
-                          : 0;
-      s.dst_addr = (s.dst & kEpDataMask) + base + sid * s.stride;
+      s.dst_addr = (s.dst & kEpDataMask) + sid * s.stride;
     } else {
       s.dst_addr = 0;
     }
   }
 
-  // Core Mem 一侧加 stream 偏移，Matrix Mem 一侧不加。
-  uint64_t DataAddr(uint64_t stream_id, bool core_mem, uint64_t off) const {
-    if (!core_mem) return off;
-    return cm.stream_base + stream_id * cm.stream_stride + off;
-  }
-
-  CmemLayout const& Layout() const { return cm; }
-
- private:
-  CmemLayout cm;
 };
 
 }  // namespace bach
