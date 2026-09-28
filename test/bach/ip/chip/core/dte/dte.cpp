@@ -106,7 +106,7 @@ class FrameFeeder : public BachModule {
 };
 
 // 扮演 DTE RV core：按脚本逐笔写寄存器（每笔保持到被收下），每个任务最后一笔是
-// 写 CFG_TRIGGER；每拍驱动四个直连身份信号。配置驱动进核/出核的统一入口。
+// 写 CFG_TRIGGER。身份随每一笔写走。配置驱动进核/出核的统一入口。
 class RvCfgDriver : public BachModule {
  public:
   struct Wr {
@@ -117,26 +117,25 @@ class RvCfgDriver : public BachModule {
     std::vector<Wr> wr;
   };
 
-  RvCfgDriver(ClockPtr c, Dte& target, std::shared_ptr<DsaIdsPort> p,
-              std::vector<Task> cfg, uint64_t start = 0)
-      : BachModule(c, "rv"), dte(target), ids(std::move(p)),
-        tasks(std::move(cfg)), start_at(start) {}
+  RvCfgDriver(ClockPtr c, Dte& target, std::vector<Task> cfg,
+              uint64_t start = 0)
+      : BachModule(c, "rv"), dte(target), tasks(std::move(cfg)),
+        start_at(start) {}
 
  protected:
   void Step() override {
     uint64_t now = CycleNow();
     DsaCfgPort& cfg = dte.Cfg();
     if (now < start_at || task_cursor >= tasks.size()) {
-      ids->Drive(0, 0, 0, 0);
       cfg.Idle();
       return;
     }
     Task const& t = tasks[task_cursor];
-    ids->Drive(t.stream, t.task, t.user, t.path);
+    DsaTaskIds ids{t.stream, t.task, t.user, t.path, 0};
 
     if (driving) {
       if (!cfg.Ready()) {  // 没被收下就保持同一笔
-        cfg.Drive(held_addr, held_data, held_seq);
+        cfg.Drive(held_addr, held_data, held_seq, ids);
         return;
       }
       driving = false;
@@ -147,7 +146,7 @@ class RvCfgDriver : public BachModule {
       held_seq = ++next_seq;
       ++wr_cursor;
       driving = true;
-      cfg.Drive(held_addr, held_data, held_seq);
+      cfg.Drive(held_addr, held_data, held_seq, ids);
       return;
     }
     // 这一笔任务写完，切下一个。
@@ -158,7 +157,6 @@ class RvCfgDriver : public BachModule {
 
  private:
   Dte& dte;
-  std::shared_ptr<DsaIdsPort> ids;
   std::vector<Task> tasks;
   uint64_t start_at;
   uint64_t task_cursor = 0, wr_cursor = 0;
@@ -294,10 +292,7 @@ TEST(BachDte, InboundRouterToCoreMem) {
     DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
-    RvCfgDriver rv(clk, dte, ids,
+    RvCfgDriver rv(clk, dte,
                    {InboundTask(/*stream=*/0, /*task=*/0, /*user=*/11,
                                 /*dst=*/0x100, /*len=*/512)},
                    2);
@@ -339,9 +334,6 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
     auto mm_wr = std::make_shared<MemPort>(clk);
     dte.AttachMmemRd(mm_rd);
     dte.AttachMmemWr(mm_wr);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
     // 段 1 = 数据（512 B），段 2 = scale（16 组，端点 tag 0x2，落点同数据地址）。
     RvCfgDriver::Task t;
     t.stream = 0;
@@ -354,7 +346,7 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
             {kDteRegDataLen2, scale.size()},
             {kDteRegTransMode, TransMode(Route::kRouterToCm, (1u << 1) | (1u << 2))},
             {kDteRegTrigger, 0}};
-    RvCfgDriver rv(clk, dte, ids, {t}, 2);
+    RvCfgDriver rv(clk, dte, {t}, 2);
 
     MessagePtr m = MakeMsg(11, 0, kData + scale.size());
     m->payload = data;
@@ -385,9 +377,6 @@ TEST(BachDte, HeaderOnlyTask) {
     DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
     RvCfgDriver::Task t;
     t.stream = 0;
     t.task = 0;
@@ -395,7 +384,7 @@ TEST(BachDte, HeaderOnlyTask) {
     t.path = 0;
     t.wr = {{kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
             {kDteRegTrigger, 0}};
-    RvCfgDriver rv(clk, dte, ids, {t}, 2);
+    RvCfgDriver rv(clk, dte, {t}, 2);
     FrameFeeder feed(clk, dte, {{20, MakeMsg(12, 0, 0)}});
     MemSide m(clk, mem);
     TsSide ts(clk, dte);
@@ -457,9 +446,6 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
       std::vector<std::shared_ptr<MemPort>> ports;
     };
     DeadMem mem_dead(clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
     // 连着配 30 个纯包头任务，把 RS 占满（RS 只有 16 项）。
     std::vector<RvCfgDriver::Task> tasks;
     for (uint64_t i = 0; i < 30; ++i) {
@@ -472,7 +458,7 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
               {kDteRegTrigger, 0}};
       tasks.push_back(t);
     }
-    RvCfgDriver rv(clk, dte, ids, tasks, 2);
+    RvCfgDriver rv(clk, dte, tasks, 2);
 
     class Probe : public BachModule {
      public:
@@ -520,16 +506,13 @@ TEST(BachDte, JoinReportsExactlyOnce) {
     DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
     std::vector<RvCfgDriver::Task> cfg;
     std::vector<FrameFeeder::Item> pkts;
     for (uint64_t s = 0; s < 3; ++s) {
       cfg.push_back(InboundTask(s, s, 200 + s, 0x200 + s * 0x1000, 16));
       pkts.push_back({40 + s * 10, MakeMsg(200 + s, 0, 16, /*stream=*/s, /*task=*/s)});
     }
-    RvCfgDriver rv(clk, dte, ids, cfg, 2);
+    RvCfgDriver rv(clk, dte, cfg, 2);
     FrameFeeder feed(clk, dte, pkts);
     MemSide m(clk, mem);
     TsSide ts(clk, dte);
@@ -575,12 +558,9 @@ TEST(BachDte, BufferFullBackpressuresRouter) {
       std::vector<std::shared_ptr<MemPort>> ports;
     };
     DeadMem mem_dead(clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
     // 一个很大的包：256 B × 100 拍，buffer 只有 32 拍
     constexpr uint64_t kBig = 100 * 256;
-    RvCfgDriver rv(clk, dte, ids,
+    RvCfgDriver rv(clk, dte,
                    {InboundTask(0, 0, 30, 0x400, kBig)}, 2);
     FrameFeeder feed(clk, dte, {{20, MakeMsg(30, 0, kBig)}});
     TsSide ts(clk, dte);
@@ -596,8 +576,8 @@ TEST(BachDte, BufferFullBackpressuresRouter) {
   EXPECT_GT(sent, 0u);
 }
 
-// 写 Trigger 那一拍采样四个直连身份信号：软件不写身份，DSA 报完成时填的是
-// 直连过来的那一组。
+// 写 Trigger 时采样这笔写带进来的身份：软件不另写身份寄存器，DSA 报完成时填的
+// 是 dsaw 发出那一拍抄上的那一组。
 TEST(BachDte, TriggerSamplesDirectIds) {
   uint64_t trigs = 0, dones = 0, done_stream = 0, done_task = 0;
   {
@@ -607,35 +587,31 @@ TEST(BachDte, TriggerSamplesDirectIds) {
     DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
-    // 扮演 DTE RV core：每拍驱动身份，照《DTE DSA》的顺序写段 1 配置、CFG_TRANS_MODE
-    // 再写 CFG_TRIGGER 提交。
+    // 扮演 DTE RV core：照《DTE DSA》的顺序写段 1 配置、CFG_TRANS_MODE，再写
+    // CFG_TRIGGER 提交。身份随每一笔写走。
     class RvSide : public BachModule {
      public:
-      RvSide(ClockPtr c, Dte& d, std::shared_ptr<DsaIdsPort> p)
-          : BachModule(c, "rv"), dte(d), ids(std::move(p)) {}
+      explicit RvSide(ClockPtr c, Dte& d) : BachModule(c, "rv"), dte(d) {}
 
      protected:
       void Step() override {
-        ids->Drive(/*stream=*/6, /*task=*/9, /*user=*/77, /*path=*/2);
+        DsaTaskIds ids{6, 9, 77, 2, 0};
         uint64_t now = CycleNow();
         DsaCfgPort& cfg = dte.Cfg();
         if (now == 3) {
-          cfg.Drive(kDteRegAddr1Src, 0, 1);    // 段 1 源地址
+          cfg.Drive(kDteRegAddr1Src, 0, 1, ids);    // 段 1 源地址
         } else if (now == 4) {
-          cfg.Drive(kDteRegAddr1Dst, 0, 2);    // 段 1 目的地址
+          cfg.Drive(kDteRegAddr1Dst, 0, 2, ids);    // 段 1 目的地址
         } else if (now == 5) {
-          cfg.Drive(kDteRegDataLen1, 256, 3);  // 段 1 长度，字节
+          cfg.Drive(kDteRegDataLen1, 256, 3, ids);  // 段 1 长度，字节
         } else if (now == 6) {
           // transfer_mode = 010（Cmem → Router）+ addr_valid[1]（段 1 参与）
           // + ack_ts_en（完成后通知 TS）。
           uint64_t trans = uint64_t(Route::kCmToRouter) |
                            (1u << (kDteAddrValidShift + 1)) | kDteAckTsEn;
-          cfg.Drive(kDteRegTransMode, trans, 4);
+          cfg.Drive(kDteRegTransMode, trans, 4, ids);
         } else if (now == 7) {
-          cfg.Drive(kDteRegTrigger, 0, 5);     // 写 CFG_TRIGGER 提交任务
+          cfg.Drive(kDteRegTrigger, 0, 5, ids);     // 写 CFG_TRIGGER 提交任务
         } else {
           cfg.Idle();
         }
@@ -643,9 +619,8 @@ TEST(BachDte, TriggerSamplesDirectIds) {
 
      private:
       Dte& dte;
-      std::shared_ptr<DsaIdsPort> ids;
     };
-    RvSide rv(clk, dte, ids);
+    RvSide rv(clk, dte);
     MemSide m(clk, mem);
     TsSide ts(clk, dte);
     // 出核那一侧一律收得下。
@@ -673,7 +648,7 @@ TEST(BachDte, TriggerSamplesDirectIds) {
   RT::Reset();
   EXPECT_EQ(trigs, 1u);        // 写一次 Trigger 起一笔任务
   EXPECT_EQ(dones, 1u);
-  EXPECT_EQ(done_stream, 6u);  // 报完成时填的是直连过来的那一组
+  EXPECT_EQ(done_stream, 6u);  // 报完成时填的是 trigger 写带进来的那一组
   EXPECT_EQ(done_task, 9u);
 }
 
@@ -688,21 +663,16 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
     DteDriver driver(clk, dte);
     std::vector<std::shared_ptr<MemPort>> mem;
     AttachDummyMem(dte, clk, mem);
-    auto ids = std::make_shared<DsaIdsPort>(clk);
-    dte.AttachIds(ids);
-
     // 同一个序号连着驱动十拍：只该起一笔。
     class HoldOne : public BachModule {
      public:
-      HoldOne(ClockPtr c, Dte& d, std::shared_ptr<DsaIdsPort> p)
-          : BachModule(c, "hold"), dte(d), ids(std::move(p)) {}
+      explicit HoldOne(ClockPtr c, Dte& d) : BachModule(c, "hold"), dte(d) {}
 
      protected:
       void Step() override {
-        ids->Drive(1, 2, 3, 0);
         uint64_t now = CycleNow();
         if (now >= 3 && now < 13) {
-          dte.Cfg().Drive(kDteRegTrigger, 0, 7);
+          dte.Cfg().Drive(kDteRegTrigger, 0, 7, DsaTaskIds{1, 2, 3, 0, 0});
         } else {
           dte.Cfg().Idle();
         }
@@ -710,9 +680,8 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
 
      private:
       Dte& dte;
-      std::shared_ptr<DsaIdsPort> ids;
     };
-    HoldOne hold(clk, dte, ids);
+    HoldOne hold(clk, dte);
     MemSide m(clk, mem);
     TsSide ts(clk, dte);
     clk->Continue(120 * kPeriod);

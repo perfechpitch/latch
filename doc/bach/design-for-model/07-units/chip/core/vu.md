@@ -45,8 +45,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="172.0" y="175.0" font-size="8.5" fill="#475569">　字段：CONFIG_IDX · STATIC_DYNAMIC_MASK · EVENT_EN</text>
 <text x="172.0" y="188.5" font-size="8.5" fill="#475569">　· STREAM_ID_OVERRIDE · MACRO_INST_FENCE · CM_FENCE</text>
 <text x="172.0" y="202.0" font-size="8.5" fill="#475569">TYPE_VL 一个寄存器含 VL、DATA_TYPE、ROUND_MODE、NAN_INF_REPLACE_EN</text>
-<text x="172.0" y="215.5" font-size="8.5" fill="#475569">stream_id 与 task_id 没有寄存器，软件不配：经 dsa_ids 从 VU RV</text>
-<text x="172.0" y="229.0" font-size="8.5" fill="#475569">　core 的 CSR 直连过来，硬件在写 trigger 那一拍自动采样</text>
+<text x="172.0" y="215.5" font-size="8.5" fill="#475569">stream_id / task_id / user_id 没有寄存器，软件不配：</text>
+<text x="172.0" y="229.0" font-size="8.5" fill="#475569">　随 dsaw 带进来，发出那一拍从 CSR 抄下</text>
 <text x="172.0" y="242.5" font-size="8.5" fill="#475569">静态配置改写：目标组正被未完成的宏指令引用时，硬件把这次</text>
 <text x="172.0" y="256.0" font-size="8.5" fill="#475569">　配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效</text>
 <text x="172.0" y="269.5" font-size="8.5" fill="#475569">in-flight 的宏指令始终按改写前的配置执行完毕</text>
@@ -84,7 +84,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <polygon points="649,44 780,44 771,74 640,74" fill="#f8fafc" stroke="#374151"/>
 <text x="710.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_done / Event → TS</text>
 <polygon points="29,120 140,120 131,150 20,150" fill="#f8fafc" stroke="#374151"/>
-<text x="80.0" y="138.5" font-size="9" fill="#374151" text-anchor="middle">dsa_ids</text>
+<text x="80.0" y="138.5" font-size="9" fill="#374151" text-anchor="middle">身份随写</text>
 <path d="M136.0 135.0 L159.0 135.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#p)"/>
 <rect x="160" y="380" width="150" height="140.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
 <text x="172" y="401" font-size="11" fill="#111827" font-weight="600">Profile</text>
@@ -252,8 +252,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F2b | 状态区 `0x3000` 共 12 个寄存器：`macro_inst_left`、`status`、`error_code`、`error_info`、`snapshot_addr`、`snapshot_data` 与 6 个错误上下文寄存器。其中只有 `snapshot_addr` 是软件写进去生效的；其余由硬件维护，写访问不报错也不改变值 |
 | F3 | `macro_inst_trigger` 是唯一的启动寄存器，写一次执行一次；两次写之间没有其他配置也启动两次 |
 | F4 | trigger 的六个字段：`CONFIG_IDX`（选静态配置组）、`STATIC_DYNAMIC_MASK`（逐参数选静态模板值还是动态寄存器值）、`EVENT_EN`、`STREAM_ID_OVERRIDE`、`MACRO_INST_FENCE`、`CM_FENCE` |
-| F5 | 宏指令的 `stream_id` 有两个来源：`STREAM_ID_OVERRIDE` 为 `0` 时沿用 VU-Core CSR 中自带的那一个，为 `1` 时改用 `macro_inst_trigger.STREAM_ID` 字段（4 bit，共 16 个 stream）给出的值，用来访问不属于本 task 的 stream。`task_id` 始终取 VU-Core CSR 那一份，不受这一位影响。`dsa_done` 回给 TS 的就是这一组。VU-DSA 内部不按 stream 划分顺序域：所有宏指令一律按发射顺序进 ISQ 并按序派发，`STREAM_ID` 只作 TS Event 的标签 |
-| F5a | VU-Core CSR 那一组从 VU RV core 经 `dsa_ids` 直连过来，每拍有效，写 `macro_inst_trigger` 那一拍采样。**`task_id` 不是软件配置项**：VU 的寄存器空间里没有它，软件写不进来，硬件在采样那一拍自动填进宏指令描述符，`dsa_done` 回 TS 时原样带出 |
+| F5 | 宏指令的 `stream_id` 有两个来源：`STREAM_ID_OVERRIDE` 为 `0` 时沿用这笔 trigger 写带进来的那一个，为 `1` 时改用 `macro_inst_trigger.STREAM_ID` 字段（4 bit，共 16 个 stream）给出的值，用来访问不属于本 task 的 stream。`task_id` 与 `user_id` 始终取写上带的那一份，不受这一位影响。`dsa_done` 回给 TS 的就是这一组。VU-DSA 内部不按 stream 划分顺序域：所有宏指令一律按发射顺序进 ISQ 并按序派发，`STREAM_ID` 只作 TS Event 的标签 |
+| F5a | 身份随配置写走。VU RV core 执行 `dsaw` 的那一拍从自定义 CSR 抄下 `stream_id` / `task_id` / `user_id`，写 `macro_inst_trigger` 被收下时填进宏指令描述符。**这三项都不是软件配置项**：VU 的寄存器空间里没有它们。配置通路把 trigger 挡住时，已经发出的请求仍带着发出那一拍的身份，kernel 写完最后一条 trigger 就可以 `task_done`，不必等通路收下 |
 | F6 | `TYPE_VL` 一个寄存器含 VL、DATA_TYPE、ROUND_MODE、NAN_INF_REPLACE_EN 四个字段，随 `STATIC_DYNAMIC_MASK.bit[0]` 一起在静态模板与动态寄存器之间切换，不能只让其中一个走动态通路 |
 | F7 | 静态配置的改写规则：目标组正被未完成的宏指令引用时，硬件把这次配置写阻塞在配置通路上，等引用它的宏指令退休后写入生效、解除阻塞 |
 | F8 | in-flight 的宏指令始终按改写前的配置执行完毕 |
@@ -355,13 +355,12 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 ```
 port dsa_cfg (slave, valid/ready, clk)            // VU RV core 的 dsa_iss；Ctrl-NOC 与 Debug Module 共享同一份寄存器视图
   in  req_valid · req_we · req_addr[15:0] · req_wdata[31:0]
+  in  stream_id[3:0] · task_id[5:0] · user_id[15:0]  // dsaw 发出那一拍从 CSR 抄下；path_id / vcid 随请求到，VU 不取
   out req_ready                                     // = 配置通路未阻塞；目标静态配置组被 in-flight 宏指令引用时拉低
 port dsa_rdata (master, 脉冲, clk)                // 读寄存器的异步返回
   out valid · rdata[31:0]
-port dsa_ids (slave, 电平, clk)                   // VU RV core 的 CSR 直连；写 macro_inst_trigger 那一拍采样
-  in  stream_id[3:0] · task_id[5:0]                 // RV core 侧驱动四项，VU 只取这两项
 port dsa_done (master, 脉冲, clk)                 // → TS：仅 EVENT_EN 置位的宏指令退休时发，同拍 event=1
-  out valid · stream_id[3:0] · task_id[5:0] · event   // 取自 dsa_ids 采样的那一组，STREAM_ID_OVERRIDE 置位时 stream_id 改用 trigger 里显式给定的值
+  out valid · stream_id[3:0] · task_id[5:0] · event   // 取自 trigger 写带进来的那一组，STREAM_ID_OVERRIDE 置位时 stream_id 改用 trigger 里显式给定的值
 port cmem_ld (master, valid/ready, clk)           // LU → Core Mem，一次固定 1024 bit，不 burst
   out req_valid · req_addr[31:0]
   in  req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
@@ -489,8 +488,8 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <rect x="24" y="166" width="160" height="34" fill="none" stroke="#374151"/>
   <text x="104" y="183" font-size="10" fill="#374151" text-anchor="middle">dyn_param · FF 12 个 · 1R1W</text>
   <polygon points="30,216 188,216 178,262 20,262" fill="#f8fafc" stroke="#374151"/>
-  <text x="104" y="234" font-size="10.5" fill="#374151" text-anchor="middle">dsa_ids</text>
-  <text x="104" y="252" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_id[3:0] · task_id[5:0]</text>
+  <text x="104" y="234" font-size="10.5" fill="#374151" text-anchor="middle">身份在 dsa_cfg 上</text>
+  <text x="104" y="252" font-size="9.5" fill="#6b7280" text-anchor="middle">stream · task · user</text>
   <rect x="677" y="92" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="681" y="96" width="168" height="34" fill="none" stroke="#374151"/>
   <text x="765" y="113" font-size="10" fill="#374151" text-anchor="middle">isq · FIFO 8 项 · 1W</text>
@@ -500,8 +499,8 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="250" y="70" font-size="12" fill="#111827">config_register · 写一次执行一次</text>
   <text x="250" y="92" font-size="10.5" fill="#475569">1. dsa_cfg.req_we → 动态参数区或静态模板区按 req_addr 写入</text>
   <text x="250" y="112" font-size="10.5" fill="#475569">2. 目标静态组正被在飞宏指令引用 → req_ready = 0，阻塞这次写</text>
-  <text x="250" y="132" font-size="10.5" fill="#475569">3. 写 macro_inst_trigger → 锁存当前 12 个动态参数为一份快照，同拍采样 dsa_ids</text>
-  <text x="250" y="152" font-size="10.5" fill="#475569">4. stream_id = STREAM_ID_OVERRIDE ? trigger.STREAM_ID : dsa_ids 那一份；task_id 只取后者</text>
+  <text x="250" y="132" font-size="10.5" fill="#475569">3. 写 macro_inst_trigger → 锁存当前 12 个动态参数，身份取这笔写带进来的</text>
+  <text x="250" y="152" font-size="10.5" fill="#475569">4. stream_id = STREAM_ID_OVERRIDE ? trigger.STREAM_ID : 写上的那一份；task_id / user_id 只取后者</text>
   <text x="250" y="172" font-size="10.5" fill="#475569">5. inst = {快照, CONFIG_IDX 指针, STATIC_DYNAMIC_MASK, 六个字段, stream_id, task_id}</text>
   <text x="250" y="192" font-size="10" fill="#9ca3af">在飞宏指令按改写前的配置执行完毕</text>
   <path d="M188 58 L231 58" stroke="#475569" marker-end="url(#arq1)" fill="none"/>
@@ -894,8 +893,8 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | 8 组静态模板 + 12 个动态参数，trigger 写一次执行一次 | F1、F3 | `macro_inst_trigger` |
 | 静态组 23 个 = 12 个 op 加 11 个动态副本，副本偏移 = 动态地址 + 0x2C | F15a | `static_dup_layout` |
 | STATIC_DYNAMIC_MASK 逐位控制哪个参数走动态，op 类不在覆盖范围内 | F15b | `static_dynamic_mask` |
-| stream_id 取自 VU-Core CSR 或 trigger 的 STREAM_ID 字段，task_id 只取前者 | F5 | `vu_ids_source` |
-| VU-Core CSR 那一组走 dsa_ids 直连，写 trigger 那一拍采样 | F5a | `vu_ids_direct` |
+| stream_id 取自 trigger 写或 STREAM_ID 字段，task_id / user_id 只取写上的那一份 | F5 | `vu_ids_source` |
+| 身份随配置写走，dsaw 发出时从 CSR 抄下 | F5a | `vu_ids_on_cfg_write` |
 | 动态参数区与静态模板区都能用 dsawi 的 16 bit 字节地址直接寻址 | F2 | `reg_addressing` |
 | TYPE_VL 四字段随 STATIC_DYNAMIC_MASK 一起切换 | F6 | `type_vl_switch` |
 | 静态配置组被引用时配置写阻塞，in-flight 按改写前执行完 | F7、F8 | `static_cfg_block` |

@@ -136,6 +136,9 @@ class CfgWriter : public BachModule {
   CfgWriter(ClockPtr c, std::shared_ptr<DsaCfgPort> p)
       : BachModule(c, "cfg_writer"), port(std::move(p)) {}
 
+  void SetIds(uint64_t stream, uint64_t task, uint64_t user = 0) {
+    ids = {stream, task, user, 0, 0};
+  }
   void Push(uint64_t addr, uint64_t data) { q.push_back({addr, data}); }
   bool Idle() const { return q.empty() && !driving; }
   uint64_t Sent() const { return sent; }
@@ -152,13 +155,14 @@ class CfgWriter : public BachModule {
       port->Idle();
       return;
     }
-    port->Drive(q.front().first, q.front().second, ++seq);
+    port->Drive(q.front().first, q.front().second, ++seq, ids);
     driving = true;
   }
 
  private:
   std::shared_ptr<DsaCfgPort> port;
   std::deque<std::pair<uint64_t, uint64_t>> q;
+  DsaTaskIds ids;
   bool driving = false;
   uint64_t sent = 0, seq = 0;
 };
@@ -221,13 +225,15 @@ struct Rig {
     stmem = std::make_unique<MemStub>(clk, "stmem", *st, bytes);
     sink = std::make_unique<DoneSink>(clk, vu->Done());
     driver = std::make_unique<VuDriver>(clk, *vu);
-    // stream_id 与 task_id 沿用 VU-Core CSR 自带的那一组：TS 下发给这个核的
-    // 值，由 VU RV core 在写 trigger 之前配进来。
-    vu->ConfigRegister().SetCoreIds(3, 7);
+    // 身份随配置写走。缺省 stream 3、task 7，与下面 kStream / kTask 一致。
+    writer->SetIds(3, 7);
     // profile_ctrl.RUN 的复位值是 0，写 1 才开始计数。用例要读计数器，先开上。
     Write(kVuProfileCtrl, kVuProfileRun);
   }
 
+  void SetIds(uint64_t stream, uint64_t task, uint64_t user = 0) {
+    writer->SetIds(stream, task, user);
+  }
   void Write(uint64_t addr, uint64_t data) { writer->Push(addr, data); }
 
   // 写一组静态配置。off 是组内字节偏移。
@@ -738,11 +744,11 @@ TEST(Vu, TriggerRunsOncePerWrite) {
 }
 
 TEST(Vu, StreamIdOverrideDoesNotTouchTaskId) {
-  // STREAM_ID_OVERRIDE = 0 沿用 VU-Core CSR 自带的 Stream ID，= 1 改用 trigger
-  // 的 STREAM_ID 字段。task_id 不在这个寄存器里，始终取 VU-Core 那一份。
+  // STREAM_ID_OVERRIDE = 0 沿用 trigger 写带进来的 stream_id，= 1 改用 trigger
+  // 的 STREAM_ID 字段。task_id 不在这个寄存器里，始终取写上带的那一份。
   Rig rig;
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x302)));
-  rig.vu->ConfigRegister().SetCoreIds(2, 41);
+  rig.SetIds(2, 41);
   SetupChain(rig, 0, 0, kSrcLu);
   rig.Write(kVuMacroInstTrigger,
             TriggerWord(0, 0, kVuTrigEventEn | kVuTrigSidOverride |
@@ -1125,7 +1131,7 @@ TEST(Vu, ThreeCfgPathsShareOneRegisterView) {
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
   noc_writer.Push(kVuStaticBase + kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
 
-  rig.vu->ConfigRegister().SetCoreIds(6, 12);
+  rig.SetIds(6, 12);
   rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
   rig.Run(500);
 
@@ -1405,7 +1411,7 @@ TEST(Vu, SuInputReportsNanWhenReplaceDisabled) {
   std::vector<float> in = Tame(kVl, 0x234);
   in[3] = std::numeric_limits<float>::quiet_NaN();
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
-  rig.vu->ConfigRegister().SetCoreIds(kStream, kTask, 5);
+  rig.SetIds(kStream, kTask, 5);
 
   rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
   rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcLu));
@@ -1475,7 +1481,7 @@ TEST(Vu, ErrorInfoLatchesFirstError) {
   // 非法配置在调度阶段被拦下：本条不执行，上下文照锁。FIRST_ERR 给的是首次
   // 置位的 error_code 位号，ERR_UNIT 给上报单元，配置总线访问那条报 0x0。
   Rig rig;
-  rig.vu->ConfigRegister().SetCoreIds(kStream, kTask, 9);
+  rig.SetIds(kStream, kTask, 9);
   rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(kVl, 0x236)));
   // 两个 VRF 写口指向同一个执行单元 → CFG_ERROR。
   rig.WriteStatic(2, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));

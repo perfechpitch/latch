@@ -534,7 +534,7 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 <text x="50" y="366.0" font-size="8.8" fill="#475569">一个用户一个包头，只用 stream_id 就索引得到，软件只配一个地址</text>
 <rect x="40" y="404" width="624" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
 <text x="50" y="423" font-size="11" fill="#111827" font-weight="600">去掉了 path_id_table 与 task_len_table</text>
-<text x="50" y="439.0" font-size="8.8" fill="#475569">path_id 由 TS 直连送来，size 由 RV core 配寄存器</text>
+<text x="50" y="439.0" font-size="8.8" fill="#475569">path_id 随配置写送来，size 由 RV core 配寄存器</text>
 <text x="50" y="451.5" font-size="8.8" fill="#475569">硬件只改 core_mask，RV core 改软件包头</text>
 <text x="50" y="464.0" font-size="8.8" fill="#2563eb">Concat 改 size，MoE Route 改 core_mask，发包几乎都改 path_id</text>
 <rect x="40" y="502" width="624" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
@@ -770,7 +770,7 @@ dsawi TASK_CFG_TRG  data2
 | `wr_sharemem_flag` | 1 | 模板 / 动态 | 任务完成后写不写 shareMem flag |
 | `task_last` | 1 | 动态 | 本任务包是这个 task 的最后一笔，用于通知 TS |
 
-`src_addr` 与 `dst_addr` 都是 32 bit：Core Mem 1 MB 用 20 bit，Matrix Mem 36 MB 用 26 bit，Router 作为一端时不需要地址。`stream_id` 4 bit、`task_id` 6 bit、`user_id` 16 bit 这三个身份字段不由这套寄存器配，它们从 RV core 的 CSR 直连过来，写 trigger 那一拍采样。
+`src_addr` 与 `dst_addr` 都是 32 bit：Core Mem 1 MB 用 20 bit，Matrix Mem 36 MB 用 26 bit，Router 作为一端时不需要地址。`stream_id` 4 bit、`task_id` 6 bit、`user_id` 16 bit 这三个身份字段不由这套寄存器配。RV 执行写 trigger 的 `dsaw` 时从 CSR 抄进这笔请求，DSA 收下时用这一份。
 
 **第一组，模式与开关**，或进同一个寄存器一次写下：
 
@@ -1051,7 +1051,7 @@ Header 里与进核搬运有关的字段，以及 Header Parser 对它们的检�
 | - | - | - |
 | `dst_addr` | 发方算好的落点，收方的 datain 任务从 Router I/O reg 读出来配进 `CFG_ADDRx_DST` | — |
 | `byte_count` | Payload 总有效字节数 | 不超过单任务上限 32 KB，与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
-| `task_id` / `stream_id` | 发方带的身份，软件可从 Router I/O reg 读；进核任务的身份由 RV core 经 STUPV 直连送来 | — |
+| `task_id` / `stream_id` | 发方带的身份，软件可从 Router I/O reg 读；进核任务的身份由 RV core 随配置写送来 | — |
 
 ### core 侧承担的桥接职责
 

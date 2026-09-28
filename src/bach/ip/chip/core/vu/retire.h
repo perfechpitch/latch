@@ -7,9 +7,9 @@
 // 减一、把它从 Scoreboard 上摘掉、释放对这一组静态配置的引用。被阻塞的配置写
 // 这时生效并解除阻塞。
 //
-// dsa_done 只在 EVENT_EN 置位时发给 TS：stream_id 与 task_id 是写 trigger 那一拍
-// 从 dsa_ids 采下来的那一组（STREAM_ID_OVERRIDE 置位时 stream_id 用 trigger 里
-// 的值），同拍把 event 拉高。未置 EVENT_EN 的宏指令照常退休，不打完成口。
+// dsa_done 只在 EVENT_EN 置位时发给 TS：stream_id 与 task_id 是 trigger 写带进来
+// 的那一组（STREAM_ID_OVERRIDE 置位时 stream_id 用 trigger 里的值），同拍把
+// event 拉高。未置 EVENT_EN 的宏指令照常退休，不打完成口。
 
 #include <memory>
 #include <string>

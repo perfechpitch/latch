@@ -171,7 +171,7 @@ void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red,
 
 // 按序把配置写发进去，看见 ready 才换下一笔。
 void DriveOne(std::deque<std::pair<uint64_t, uint64_t>>& que, DsaCfgPort& port,
-              bool& busy, uint64_t& sq) {
+              bool& busy, uint64_t& sq, DsaTaskIds ids = {}) {
   if (busy) {
     if (!port.Ready()) return;
     que.pop_front();
@@ -181,7 +181,7 @@ void DriveOne(std::deque<std::pair<uint64_t, uint64_t>>& que, DsaCfgPort& port,
     port.Idle();
     return;
   }
-  port.Drive(que.front().first, que.front().second, ++sq);
+  port.Drive(que.front().first, que.front().second, ++sq, ids);
   busy = true;
 }
 
@@ -233,7 +233,7 @@ class MoeRig : public BachModule {
     if (vu.Done().Valid()) ++vdones;
     Advance();
     DriveOne(q, *cfg, driving, seq);
-    DriveOne(vq, *vcfg, vdriving, vseq);
+    DriveOne(vq, *vcfg, vdriving, vseq, DsaTaskIds{0, 4, 0, 0, 0});
     mu.RunStep();
     vu.RunStep();
     cmem.RunStep();
@@ -319,7 +319,6 @@ TEST(BachMoe, OneCoreMatchesReference) {
     vu.AttachCfg(vu_cfg);
     vu.AttachCmemLd(cmem.PortPtr(kCmemVuRd));
     vu.AttachCmemSt(cmem.PortPtr(kCmemVuWr));
-    vu.ConfigRegister().SetCoreIds(0, 4);
 
     PokeCoreData(cmem, mmem, mu, want);
 
@@ -367,7 +366,7 @@ class GateRig : public BachModule {
  protected:
   void Step() override {
     if (vu.Done().Valid()) ++dones;
-    DriveOne(q, *cfg, driving, seq);
+    DriveOne(q, *cfg, driving, seq, DsaTaskIds{0, 4, 0, 0, 0});
     vu.RunStep();
     cmem.RunStep();
   }
@@ -402,7 +401,6 @@ TEST(BachMoe, VuGateMatchesReference) {
     vu.AttachCfg(cfg_port);
     vu.AttachCmemLd(cmem.PortPtr(kCmemVuRd));
     vu.AttachCmemSt(cmem.PortPtr(kCmemVuWr));
-    vu.ConfigRegister().SetCoreIds(0, 4);
 
     // 只有自己一份分量的归约原样出来，所以归约结果那一包的数据段就是部分和。
     uint64_t red = kn::kRedOff + kn::kSwHead;

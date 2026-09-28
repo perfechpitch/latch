@@ -232,8 +232,8 @@ class RvExec : public BachModule {
 
     if (!dsa_used) dsa_req->Idle();
     if (!lsq_used) lsq_req->Idle();
-    // 身份信号直连本核那个 DSA，每拍驱动。软件改 user_id 或 task_id 之后，
-    // 下一次写 trigger 采到的就是新值。vcid 是 TS 随 DTE 任务下发的 VCID。
+    // CSR 视图每拍驱动，供软件读。DSA 收下 trigger 用的不是这一束，而是 dsaw
+    // 发出那一拍抄进请求的那一份。
     dsa_ids->Drive(cur.stream_id, cur.task_id, cur.user_id, cur.path_id,
                    cur.vcid);
 
@@ -411,7 +411,11 @@ class RvExec : public BachModule {
 
   void Send(bool we, uint64_t addr, uint64_t data, uint64_t rd) {
     LOGCHECK(!dsa_used, "RvExec: 一拍里发了两笔 DSA 请求。");
-    dsa_req->Drive(we, addr, data, rd, ++dsa_seq);
+    // 身份在发出这一拍锁进请求。后面 task_done 换了 CSR，已经在路上的 trigger
+    // 仍带着这一笔的身份。
+    DsaTaskIds ids{cur.stream_id, cur.task_id, cur.user_id, cur.path_id,
+                   cur.vcid};
+    dsa_req->Drive(we, addr, data, rd, ++dsa_seq, ids);
     dsa_used = true;
   }
 

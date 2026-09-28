@@ -6,8 +6,8 @@
 // 分静态与动态两档：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速
 // 调用；动态配置随用户变化，跟随任务下发，含静态配置的选择。
 //
-// streamID / taskID / userID 不再由软件写寄存器：三个身份信号从 MU RV core 的
-// CSR 直连过来（DsaIdsPort），写 TASK_TRIGGER 那一拍采样进任务快照。dsa_done 回
+// streamID / taskID / userID 不再由软件写寄存器：RV 在发出 dsaw 那一拍把 CSR
+// 抄进配置请求，写 TASK_TRIGGER 被收下时从这笔请求采样进任务快照。dsa_done 回
 // 给 TS 的 stream_id / task_id 就是这一组，与 DTE、VU 同一套做法。
 //
 // 寄存器偏移照《Matrix Unit DSA》§Register Map Overview（任务配置 0x0000~0x03FF），
@@ -128,7 +128,6 @@ class MuRegfile : public BachModule {
             bool tick = true)
       : BachModule(clock, name, parent, tick),
         cfg_port(std::make_shared<DsaCfgPort>(clock)),
-        ids(std::make_shared<DsaIdsPort>(clock)),
         rdata(std::make_shared<DsaRdataPort>(clock)),
         triggers(clock) {}
 
@@ -139,9 +138,6 @@ class MuRegfile : public BachModule {
   DsaCfgPort& CfgPort() { return *cfg_port; }
   std::shared_ptr<DsaCfgPort> CfgPortPtr() const { return cfg_port; }
   void AttachCfg(std::shared_ptr<DsaCfgPort> p) { cfg_port = std::move(p); }
-  // 身份信号：写 TASK_TRIGGER 那一拍采样进任务快照。
-  DsaIdsPort& Ids() { return *ids; }
-  void AttachIds(std::shared_ptr<DsaIdsPort> p) { ids = std::move(p); }
   // 读寄存器隔几拍才回，返回数据走独立的一根线。
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return rdata; }
   // 忙不忙由装配层每拍写进来：这一级看不到 issue_q 与执行通路。
@@ -237,9 +233,10 @@ class MuRegfile : public BachModule {
       case kMuTaskTrigger:
         // 写 1 启动，硬件接收后自清零。身份信号在这一拍采样，必须最后写。
         if (v & kMuTriggerValid) {
-          live.stream_id = ids->Stream();
-          live.task_id = ids->Task();
-          live.user_id = ids->User();
+          DsaTaskIds ids = cfg_port->TaskIds();
+          live.stream_id = ids.stream;
+          live.task_id = ids.task;
+          live.user_id = ids.user;
           latched = live;
           pending = true;
           ++trigger_pending;
@@ -267,7 +264,6 @@ class MuRegfile : public BachModule {
   };
 
   std::shared_ptr<DsaCfgPort> cfg_port;
-  std::shared_ptr<DsaIdsPort> ids;
   std::shared_ptr<DsaRdataPort> rdata;
   std::deque<ReadBack> pending_read;
   bool rdata_used = false, busy = false;

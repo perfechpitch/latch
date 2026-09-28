@@ -1332,7 +1332,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 
 包里没有 `task_id`，也没有 `vc_id`：
 
-* `task_id` 是 core 内的东西。出核时 `path_id` 由 TS 直连给 DTE、`size` 由 RV core 配寄存器，DTE 拿这两样改写包头；入核时异步 datain 任务由软件识别包头后把 `task_id` 写进 CSR
+* `task_id` 是 core 内的东西。出核时 `path_id` 由 RV 随配置写给 DTE、`size` 由 RV core 配寄存器，DTE 拿这两样改写包头；入核时异步 datain 任务由软件识别包头后把 `task_id` 写进 CSR
 * **每一级用哪个 VC 记在 RouterTable 里**，包按 `PathID` 索引到表项，从表项拿 VC，不靠包头带
 
 本文其余各节用到的两个包头位，落在上表的哪里：

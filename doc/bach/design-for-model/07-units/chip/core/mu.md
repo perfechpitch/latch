@@ -49,8 +49,8 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 <text x="262.0" y="175.0" font-size="8.5" fill="#475569">动态配置：随用户变化，跟随任务下发</text>
 <text x="262.0" y="188.5" font-size="8.5" fill="#475569">启动：dsawi 写 trigger</text>
 <text x="262.0" y="202.0" font-size="8.5" fill="#475569">trigger 含 last 标志</text>
-<text x="262.0" y="215.5" font-size="8.5" fill="#475569">streamID / taskID / userID 由 DSA 自己读，</text>
-<text x="262.0" y="229.0" font-size="8.5" fill="#475569">　不需要软件配置</text>
+<text x="262.0" y="215.5" font-size="8.5" fill="#475569">streamID / taskID / userID 随 dsaw 带进来，</text>
+<text x="262.0" y="229.0" font-size="8.5" fill="#475569">　发出那一拍从 CSR 抄下，不需软件配置</text>
 <rect x="556" y="110" width="230" height="154.0" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="568" y="131" font-size="11" fill="#111827" font-weight="600">issue_q</text>
 <text x="568.0" y="148.0" font-size="8.5" fill="#475569">队列深度 16</text>
@@ -200,7 +200,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | - | - |
 | F1 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
 | F2 | 任务启动写 `dsawi` 到 `trigger`；trigger 寄存器含 last 标志 |
-| F3 | `streamID` / `taskID` / `userID` 由**软件写进动态配置寄存器**，不来自硬件通路：MU RV core 从自定义 CSR 读出 TS 下发的这三个值，在写 trigger 之前用配置指令写给 MU。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是寄存器里的这一组 |
+| F3 | `streamID` / `taskID` / `userID` **不由软件写进寄存器**。MU RV core 执行 `dsaw` 时从自定义 CSR 抄进这笔配置请求，写 `TASK_TRIGGER` 被收下时从请求上采样进任务快照。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是这一组 |
 | F4 | 寄存器地址映射本轮用临时映射（`regmap.h`）。原来等的《MU/DTE 寄存器配置参数》已改名为《DTE 寄存器配置参数》，只剩 DTE 那一半（地址空间三段加寄存器模板，见《DTE 数据搬运引擎》），**MU 侧的寄存器地址映射仍无着落** |
 
 ### issue_q
@@ -279,13 +279,14 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 ## 3　接口
 
 ```
-port dsa_cfg (slave, valid/ready, clk)            // MU RV core 的 dsa_iss
+port dsa_cfg (slave, valid/ready, clk)            // MU RV core 的 dsa_iss，身份随这笔请求走
   in  req_valid · req_we · req_addr[11:0] · req_wdata[31:0]
+  in  stream_id[3:0] · task_id[5:0] · user_id[15:0]  // dsaw 发出那一拍从 CSR 抄下；path_id / vcid 随请求到，MU 不取
   out req_ready                                     // = regfile 配置通路未反压
 port dsa_rdata (master, 脉冲, clk)                // 读寄存器的异步返回
   out valid · rdata[31:0]
 port dsa_done (master, 脉冲, clk)                 // → TS：trigger 的 last 标志置位的那一笔完成时报
-  out valid · stream_id[3:0] · task_id[5:0]       // 取自软件写入的动态配置寄存器
+  out valid · stream_id[3:0] · task_id[5:0]       // 取自 trigger 写带进来的那一组
 port cmem_rd (master, valid/ready, clk)           // Token ldq → Core Mem，132 B（128 B data + 4 B scale）
   out req_valid · req_addr[17:0] · req_scale_en
   in  req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
@@ -426,7 +427,7 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="250" y="101" font-size="10.5" fill="#475569">1. dsa_cfg.req_we → regfile[req_addr] = req_wdata</text>
   <text x="250" y="121" font-size="10.5" fill="#475569">2. req_ready = 配置通路未反压</text>
   <text x="250" y="141" font-size="10.5" fill="#475569">3. 写 trigger 寄存器 → 锁存当前动态参数为一个任务描述</text>
-  <text x="250" y="161" font-size="10.5" fill="#475569">4. desc.last = trigger.last；desc.{stream_id, task_id, user_id} = 软件写入的寄存器值</text>
+  <text x="250" y="161" font-size="10.5" fill="#475569">4. desc.last = trigger.last；身份取这笔 trigger 写带进来的那一组</text>
   <text x="250" y="185" font-size="10" fill="#9ca3af">启动用两条 dsawi，最后写 trigger</text>
   <path d="M188 58 L231 58" stroke="#475569" marker-end="url(#aru1)" fill="none"/>
   <path d="M188 139 L231 139" stroke="#475569" marker-end="url(#aru1)" fill="none"/>
@@ -758,7 +759,7 @@ Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一
 | 机制 | 功能 | 用例 |
 | - | - | - |
 | 静态与动态配置分开，trigger 含 last 标志 | F1、F2 | `mu_regfile_split` |
-| streamID / taskID / userID 由软件写进动态配置寄存器 | F3 | `mu_ids_by_software` |
+| streamID / taskID / userID 随配置写走，dsaw 发出时从 CSR 抄下 | F3 | `mu_ids_on_cfg_write` |
 | issue_q 顺序执行，任务切换无 bubble | F6、F7 | `mu_issue_q` |
 | task 间三段重叠 | F8 | `mu_three_stage_overlap` |
 | topK 直接存组内序号（local index），读出来就算 weight 访存地址 | F10、F11 | `gen_ep_info` |

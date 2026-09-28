@@ -96,8 +96,6 @@ class Dte {
   }
   DsaCfgPort& Cfg() { return reg->Cfg(); }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return reg->CfgPtr(); }
-  // 四个身份信号从 DTE RV core 直连过来，写 trigger 那一拍采样。
-  void AttachIds(std::shared_ptr<DsaIdsPort> p) { reg->AttachIds(std::move(p)); }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return reg->RdataPtr(); }
   DescPort& FromRv() { return commit->FromRv(); }
   DonePort& ToTs() { return comp->ToTs(); }

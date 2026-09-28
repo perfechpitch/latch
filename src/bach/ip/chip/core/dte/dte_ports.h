@@ -8,6 +8,7 @@
 
 #include "base/logic.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
+#include "bach/ip/chip/core/rv_core/rv_ports.h"
 
 namespace latch {
 namespace bach {
@@ -196,19 +197,31 @@ class AdmitPort : public Logic {
 class DsaCfgPort : public Logic {
  public:
   Logic64 req_valid, req_we, req_addr, req_wdata, req_ready, req_seq;
+  Logic64 req_stream, req_task, req_user, req_path, req_vc;
 
   explicit DsaCfgPort(ClockPtr c)
       : req_valid(c), req_we(c), req_addr(c), req_wdata(c), req_ready(c),
-        req_seq(c) {
-    Fields(req_valid, req_we, req_addr, req_wdata, req_ready, req_seq);
+        req_seq(c), req_stream(c), req_task(c), req_user(c), req_path(c),
+        req_vc(c) {
+    Fields(req_valid, req_we, req_addr, req_wdata, req_ready, req_seq,
+           req_stream, req_task, req_user, req_path, req_vc);
   }
 
-  void Drive(uint64_t addr, uint64_t data, uint64_t seq) {
+  void Drive(uint64_t addr, uint64_t data, uint64_t seq, DsaTaskIds ids = {}) {
     req_valid = 1;
     req_we = 1;
     req_addr = addr;
     req_wdata = data;
     req_seq = seq;
+    req_stream = ids.stream;
+    req_task = ids.task;
+    req_user = ids.user;
+    req_path = ids.path;
+    req_vc = ids.vc;
+  }
+  DsaTaskIds TaskIds() const {
+    return {req_stream.Get(), req_task.Get(), req_user.Get(), req_path.Get(),
+            req_vc.Get()};
   }
   // 读寄存器：不会被阻塞，返回数据走独立的 dsa_rdata 口异步回来。
   void DriveRead(uint64_t addr, uint64_t seq) {
@@ -224,6 +237,11 @@ class DsaCfgPort : public Logic {
     req_addr = 0;
     req_wdata = 0;
     req_seq = req_seq.Get();
+    req_stream = 0;
+    req_task = 0;
+    req_user = 0;
+    req_path = 0;
+    req_vc = 0;
   }
   void DriveReady(bool ok) { req_ready = ok ? 1 : 0; }
   bool Valid() const { return req_valid.Get() != 0; }

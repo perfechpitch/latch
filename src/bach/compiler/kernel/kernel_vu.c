@@ -27,24 +27,11 @@ static void vu_launch(u32 config_idx, u32 ld, u32 st, u32 fence) {
                 | (fence ? VU_MACRO_INST_FENCE : 0u));
 }
 
-/* 交还之前等本 task 最后那条 trigger 被 VU 的配置通路收下。
- *
- * VU 在收下 trigger 的那一拍才采 stream_id / task_id，而 RV 发出 dsaw 不等它被
- * 收下：ISQ 满时 trigger 压在通路上，这时交还，下一笔 task 一起来，身份就换成
- * 了下一笔的，dsa_done 报给了别人。DSA 读写同走一条通路、按序收，所以读一次
- * 并用掉读回的值（mv zero 读这个寄存器，值没回来就停在这条上），就说明前面的
- * trigger 都已收下。 */
-static inline __attribute__((always_inline)) void vu_wait_trigger_taken(void) {
-  u32 v = dsa_read(VU_MACRO_INST_LEFT);
-  __asm__ volatile("mv zero, %0" : : "r"(v));
-}
-
 /* 单 core 用例的 VU 那一步：MU 算出来的 BF16 逐元素算一遍，仍按 BF16 写回。
  * 算什么由第 0 组静态配置定。置 EVENT_EN，VU 退休才把 dsa_done 打给 TS。 */
 TASK void task_vu_compute(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   vu_launch(0, base + CMEM_FC1_OFF, base + CMEM_ACT_OFF, 0);
-  vu_wait_trigger_taken();
   task_done(1);
 }
 
@@ -133,7 +120,6 @@ TASK void task_vu_gate(void) {
     vu_fire(1, fc1, 0, VU_MASK_LD_ADDR, 0, 0);
     vu_fire(2, fc3, act, VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, last, 0);
   }
-  vu_wait_trigger_taken();
   task_done(1);
 }
 
@@ -182,7 +168,6 @@ TASK void task_vu_add(void) {
           VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, 0, 0);
   vu_fire(5, base + RC_B_OFF + at, base + RC_SUM_OFF + at,
           VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, 1, 0);
-  vu_wait_trigger_taken();
   task_done(1);
 }
 

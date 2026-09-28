@@ -607,7 +607,7 @@ struct VuMacroInst {
   bool cm_fence = false;  // CM_FENCE：等前序宏指令的 CM 访问完成才派发
   uint64_t stream_id = 0;
   uint64_t task_id = 0;
-  // 用户号与 stream/task 一样，写 trigger 那一拍从 VU-Core 的身份直连线上采。
+  // 用户号与 stream/task 一样，是 trigger 写带进来的那一份。
   uint64_t user_id = 0;
   uint64_t seq = 0;
   // 入队时按顺序分配的标签，随这条指令携带到退休，超过 0xFF 回绕。快照窗口

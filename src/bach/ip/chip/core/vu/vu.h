@@ -80,10 +80,6 @@ class Vu {
   // boot 期直接写一组配置，不走三条配置通路。
   void Preload(uint64_t addr, uint64_t data) { cfg_reg->Preload(addr, data); }
 
-  // stream_id 与 task_id 从 VU RV core 的 CSR 直连过来。
-  void AttachIds(std::shared_ptr<DsaIdsPort> p) {
-    cfg_reg->AttachIds(std::move(p));
-  }
   DsaCfgPort& CtrlNoc() { return cfg_reg->Path(VuCfgPath::kCtrlNoc); }
   DsaCfgPort& Debug() { return cfg_reg->Path(VuCfgPath::kDebug); }
   DonePort& Done() { return retire->Done(); }

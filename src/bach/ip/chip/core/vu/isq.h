@@ -62,7 +62,7 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
   // 只在最后一条置位，所以起点也按 task 数：收下一条时前面没有未收尾的 task
   // （还没收过，或上一条置了 EVENT_EN），这一条就是一个 task 的开头。
   uint64_t Started() const { return task_start_cnt; }
-  // 最近开始的那个 task 的身份。三项都是写 trigger 那一拍从身份直连线上采的。
+  // 最近开始的那个 task 的身份。三项都是 trigger 写带进来的。
   uint64_t StartStream() const { return start_stream; }
   uint64_t StartTask() const { return start_task; }
   uint64_t StartUser() const { return start_user; }

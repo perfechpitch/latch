@@ -73,8 +73,6 @@ class Mu {
   DsaCfgPort& Cfg() { return reg->CfgPort(); }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return reg->CfgPortPtr(); }
   void AttachCfg(std::shared_ptr<DsaCfgPort> p) { reg->AttachCfg(std::move(p)); }
-  // 身份信号：写 TASK_TRIGGER 那一拍采样进任务快照。
-  void AttachIds(std::shared_ptr<DsaIdsPort> p) { reg->AttachIds(std::move(p)); }
   DonePort& Done() { return *done; }
   void AttachDone(std::shared_ptr<DonePort> p) { done = std::move(p); }
   MemPort& TokenPort() { return token_ldq->Port(); }
@@ -121,8 +119,7 @@ class Mu {
   MuDrain DrainState() const { return ctrl->State(); }
   uint64_t Drains() const { return ctrl->Drains(); }
   // 上一笔宣告完成时的笔数与身份，供 Core 层发波形。完成脉冲本身只带 stream 与
-  // task（Drive 的第三参默认 0），user 取自写 trigger 那一拍从 CSR 直连采样的
-  // 那一份。
+  // task（Drive 的第三参默认 0），user 取自 trigger 写带进来的那一份。
   uint64_t DoneCnt() const { return ctrl->DoneCnt(); }
   uint64_t DoneTask() const { return ctrl->DoneTask(); }
   uint64_t DoneUser() const { return ctrl->DoneUser(); }

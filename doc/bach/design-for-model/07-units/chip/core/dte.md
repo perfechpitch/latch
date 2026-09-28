@@ -173,7 +173,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="1372.0" y="998.0" font-size="8.5" fill="#475569">Hmem = 16 项 × {core_mask 2 B, hardware_used 1 B, sw_header 16 B}：</text>
 <text x="1372.0" y="1011.5" font-size="8.5" fill="#475569">　硬件包头与软件包头合并成一张表，按 stream_id 索引</text>
 <text x="1372.0" y="1025.0" font-size="8.5" fill="#475569">　软件只配一个地址；包头统一存 Hmem</text>
-<text x="1372.0" y="1038.5" font-size="8.5" fill="#475569">path_id 由 TS 直连送来，size 由 RV core 配寄存器；</text>
+<text x="1372.0" y="1038.5" font-size="8.5" fill="#475569">path_id 随配置写送来，size 由 RV core 配寄存器；</text>
 <text x="1372.0" y="1052.0" font-size="8.5" fill="#475569">　不再有 path_id_table 与 task_len_table</text>
 <text x="1372.0" y="1065.5" font-size="8.5" fill="#475569">硬件只改 core_mask 与 hardware_used，RV core 改软件包头</text>
 <text x="1372.0" y="1079.0" font-size="8.5" fill="#475569">进核：只在需要分配新 stream_id 时才存包头（hw_header_op=1），</text>
@@ -258,7 +258,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F1 | 首拍锁存 Header，检查长度和帧格式 |
 | F2 | 检查 `byte_count`：不超过单任务上限 32 KB，与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
 | F3 | 把包头上下文（core_mask / hardware_used / gpu_id / token_id）存进 Header Table，逐拍转发 payload；不生成 Descriptor——任务由 RV core 配置驱动 |
-| F3a | Descriptor 的 `stream_id` / `task_id` / `user_id` / `path_id` / `vcid` 由 RV core 经 STUPV 直连送来（F14a），不取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致 |
+| F3a | Descriptor 的 `stream_id` / `task_id` / `user_id` / `path_id` / `vcid` 由 RV core 随配置写送来（F14a），不取自包头：一个用户在各 core 上占的槽位按到达顺序环形分配，各 core 分出来的号一致 |
 | F3c | Descriptor 的 `dst_addr` 由软件配 `CFG_ADDRx_DST` + `stream_id × stride` 展开（F46/F47），落哪块存储由 `CFG_TRANS_MODE` 的 route 编码决定。回不回 Ack（F3d）是本 core 的进核配置，由 SCP 逐 core 写（`InboundCfg.no_ack`），对应 bundle 的 `DTEIN` 记录：业务模式下计算 core 落 Core Mem、回 Ack，B core 与 R core 落 Matrix Mem、不回 Ack；weights 加载阶段进来的都是权重，落 Matrix Mem、不回 Ack。坏 core 与不派角色的 core 不配这一项 |
 | F3d | B core 与 R core 的进核配置是不回 Ack（F3c）：这两种 core 上进来的包不建 stream 表项，进核那一笔的完成没有可报的对象 |
 | F3b | 每一帧另编一个帧号，从这里发给进核通道。进核那一路按帧号认「这几拍属于哪一帧」：`task_id` 只说这一笔是链上的第几步，同一个 `path` 上连着来的几个包带的是同一个值 |
@@ -278,7 +278,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F12 | 中央 TaskQueue 从队头往后扫，一拍 dispatch 一笔三样齐的任务；队头那个出核任务堵在 VC credit 上时，后面别的通道的任务可以先行（不同通道可乱序下发） |
 | F13 | 只有一个任务入口：所有任务（进核 + 出核）都由 RV core 配 CFG + trigger 起，在 Commit 的中央 TaskQueue 汇成同一套内部任务模型 |
 | F14 | RV core 侧的配置序列：逐段写 19 项任务配置寄存器（0x004~0x04C，段 i 一组 `CFG_ADDRi_SRC` / `CFG_ADDRi_DST` / `CFG_STRIDEi` / `CFG_DATA_LENi`，加 `CFG_SM_W_ADDR` / `CFG_SM_W_DATA` / `CFG_TRANS_MODE`），一条指令写一个，最后写 `CFG_TRIGGER`（0x0000）提交任务。必须最后写 Trigger |
-| F14a | 写 Trigger 那一拍把 19 项配置（`temp_valid` 时以模板为底、显式写过的字段覆盖模板，否则全取 Cfg Reg File）与五个直连身份信号一起采下来拼成 4 段位 Descriptor。五个身份不由软件写：`streamID` / `taskID` / `userID` / `pathID` / `vcid` 从 RV core 直连过来，前四项取自 CSR，`vcid` 是 TS 随任务下发的 |
+| F14a | 写 Trigger 被收下那一拍把 19 项配置（`temp_valid` 时以模板为底、显式写过的字段覆盖模板，否则全取 Cfg Reg File）与这笔写带进来的五个身份一起采下来拼成 4 段位 Descriptor。五个身份不由软件写：RV 执行 `dsaw` 时从 CSR 抄下 `streamID` / `taskID` / `userID` / `pathID`，`vcid` 是 TS 随任务下发、同一拍抄进请求的 |
 | F14b | 一笔配置写在被收下之前一直保持同一个序号。每拍换号的话 DSA 按序号去重就把同一笔认成好几笔，写一次执行一次的 Trigger 会被执行好几遍 |
 
 **Fast LUT（待评估）**：是否保留待评估，模型里所有任务都由 RV core 配寄存器起。候选方案如下。从「TS 把任务下发下来」到「总线上出现第一笔搬运请求」这一段叫 DTE Setup Time，目标是压到 10T 以内。办法是常规任务不走 RV core 的配置 kernel：TS 给的 `task_id` 命中 Fast LUT 后，硬件拿表项内容（`length`、控制位）与 `user_id` 索引到的 User Base Register 拼出 task descriptor，直接推进对应通道的 TaskQueue，命中路径 4T；未命中才转发信息、重设 PC、启动 RV core 的 kernel，代价是 Core Latency + 4T。Fast LUT 只加速任务配置，不改路由定义、数据通路和完成条件。
@@ -333,7 +333,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F37 | topK 段由地址译码命中 `topK_table`（tag 0x3），进核落地时经旁带 `mu_topk` 按 `stream_id` 写进 MU 的 `topK_ep_table`（256 B 一拍、整笔只写一次）。DTE 与 MU 之间有这一条直连通路，不再走 `cmem_wr` 的独立 topK 区 |
 | F38 | 包头**统一合并成一张表**存 Hmem（Header Table，地址 0x3000~0x3FFF），16 项按 `stream_id` 索引，每项 `{core_mask 2 B, hardware_used 1 B, sw_header 16 B}`，软件只配一个地址。计算 core 的 data 落 Core Mem 按 stream 分片，scale 落 Core Mem 的 scale 旁带，topK 经旁带写 MU（F37） |
 | F39 | B core / R core 上：包头同样进 Hmem 那张表（F38），不另开 Core Mem 空间。data 落 Matrix Mem，它的 scale 随它存进 Matrix Mem 的 scale 部分（F49a）；topK 同样由 topK 段译码命中后经旁带写 MU（F37），DTE 不再把它存进 Core Mem 或 Matrix Mem 的独立 topK 区 |
-| F40 | **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 由 TS 直连送过来（TS 配置时就带 `user_id` / `stream_id` / `path_id` / `task_id` 四样），`size` 由 RV core 配寄存器给，或按 `data_len` 算出来 |
+| F40 | **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 随配置写送来（TS 下发 task 时已经写进 RV 的 CSR，`dsaw` 发出时抄进请求），`size` 由 RV core 配寄存器给，或按 `data_len` 算出来 |
 | F41 | 包头分工：硬件只改硬件包头（`core_mask` 与 `hardware_used`），RV core 改软件包头 |
 | F42 | 每段长度由各自的 `CFG_DATA_LENi`（字节）定：段 0 是包头（18 B），段 1~3 装 data / scale / topK 的内容由软件约定，data 段配 data 字节数、scale 段配 scale 字节数、topK 是旁带长度记 0（内容随包整笔写 MU）。各段落哪块存储由地址译码决定，长度不再按方向盖不同范围 |
 | F42a | `CFG_DATA_LEN` 是 16 bit，以字节为单位，一段最长 65535 B。段 0（包头）18 B 不要求对齐；段 1~3 软件须保证 8 B 整数倍 |
@@ -383,7 +383,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | 编号 | 功能 |
 | - | - |
 | F64 | `CFG_TRANS_MODE`（0x04C，10 bit）位域：`transfer_mode`[2:0]（000 router→Cmem / 001 router→Mmem / 010 Cmem→router / 011 Mmem→router / 100 Mmem→Cmem）、`addr_valid`[6:3]（bit i = 段 i 参与本次任务；纯包头任务 = 4'b0001）、`hw_header_op`[7]（包头 保存 / 丢弃 / 修改）、`wr_sharemem_flag`[8]（完成后写 ShareMem）、`ack_ts_en`[9]（完成后通知 TS） |
-| F65 | `CFG_TRIGGER`（0x0000，WO，4 bit）位域：`temp_valid`[0]（1 = 启用 Config Template）、`temp_index`[3:1]（0~7 = 配置表 1~8 号）。写 0x0000 这个动作本身 = 提交任务：采样 STUPV 身份（`streamID` / `taskID` / `userID` / `pathID` / `vcid`）并合并配置组装 4 段位 Descriptor 入 TaskQ |
+| F65 | `CFG_TRIGGER`（0x0000，WO，4 bit）位域：`temp_valid`[0]（1 = 启用 Config Template）、`temp_index`[3:1]（0~7 = 配置表 1~8 号）。写 0x0000 这个动作本身 = 提交任务：取这笔写带进来的 STUPV 身份（`streamID` / `taskID` / `userID` / `pathID` / `vcid`）并合并配置组装 4 段位 Descriptor 入 TaskQ |
 | F66 | 19 项任务配置寄存器（0x004~0x04C）：每段 i 一组 `{CFG_ADDRi_SRC, CFG_ADDRi_DST, CFG_STRIDEi, CFG_DATA_LENi}`，加 `CFG_SM_W_ADDR` / `CFG_SM_W_DATA` / `CFG_TRANS_MODE`；另有 8 套模板（每套同样 19 项，0x1000~0x1FFF，每套 128 B）与 Header Table（0x3000~0x3FFF）。段 1~3 通用，不再为 scale / topK 设专用寄存器 |
 | F67 | 不随任务变的控制与观测寄存器（`SYS_CTRL` / `DTE_CTRL` / `SYS_STATUS` / `DTE_STATUS` / `EXCEPT_*` / `PMU_*`，地址 0x0400~0x0FFF）本轮**不落地**，只保留地址区间占位（见「范围边界」） |
 | F68 | 异常四类（访存越界、非对齐、ECC 错、搬运异常）连同其配置 / 状态寄存器本轮**不落地**，不做行为实现 |
@@ -414,13 +414,12 @@ port router_credit (slave, 电平 + 脉冲, clk)          // Router 侧回来的
   in  stream_credit_vld[2:0] · stream_credit_user[2:0][15:0]
   in  reduce_release_vld · reduce_release_user[15:0]
   in  vc_credit[3:0][7:0]
-port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss
+port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss，身份随这笔请求走
   in  req_valid · req_we · req_addr[13:0] · req_wdata[31:0]
+  in  stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · vcid[1:0]  // dsaw 发出那一拍从 CSR 抄下
   out req_ready                                         // = 配置通路未反压；中央 TaskQueue 满（16）时拉低
 port dsa_rdata (master, 脉冲, clk)                    // 读寄存器的异步返回
   out valid · rdata[31:0]
-port dsa_ids (slave, 电平, clk)                       // DTE RV core 的 CSR 直连；写 task_trigger 那一拍采样
-  in  stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · vcid[1:0]
 port dsa_done (master, 脉冲, clk)                     // → TS：ack_ts_en 的那一笔完成时报
   out valid · stream_id[3:0] · task_id[5:0]
 port cmem_rd / cmem_wr (master, valid/ready, clk)     // 经 DMA_XBAR，256 B
@@ -946,7 +945,7 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | Commit dispatch 三样一起拿：Lane 读/写槽 + Completion RS 都齐才下发 | F9、F10 | `dispatch_all_three` |
 | 进核任务的 stream_id / task_id 由软件配 CFG 表达，Header Parser 只按到达顺序存包头 | F3a | `inbound_ids` |
 | 进核任务 ↔ 数据包按到达顺序 FIFO 配对，同 path 的几个包不串 | F3b | `fifo_pairing` |
-| 写 Trigger 那一拍采样五个直连身份信号（STUPV） | F14a | `trigger_samples_ids` |
+| 写 Trigger 时取这笔写带进来的五个身份（STUPV） | F14a | `trigger_samples_ids` |
 | 一笔配置写在被收下之前保持同一个序号 | F14b | `cfg_seq_stable` |
 | DMA_XBAR 轮转仲裁五个通道对一块存储的访问 | F55a | `dma_xbar_arbitration` |
 | 四个出核通道轮转仲裁 Router 那一个口，一个包不被插断 | F55b | `out_arb_frame` |
@@ -975,7 +974,7 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | topK 经旁带写进 MU 的 topK_ep_table | F37 | `topk_to_mu` |
 | 一个包进核拆成四份分开存 | F36、F39 | `packet_split_four` |
 | 包头两张表合并成 288 B，按 stream_id 索引 | F38 | `hmem_merged` |
-| path_id 由 TS 直连、size 由 RV core 配，不再有查找表 | F40 | `no_lut_table` |
+| path_id 随配置写送来、size 由 RV core 配，不再有查找表 | F40 | `no_lut_table` |
 | 每段长度由各自的 CFG_DATA_LENi 配，不再按方向盖不同范围 | F42 | `data_len_scope` |
 | hw_header_op 决定存不存包头 | F43 | `hw_header_op` |
 | 出核改写 path_id / size / core_mask | F41、F44 | `header_rewrite` |

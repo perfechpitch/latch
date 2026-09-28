@@ -13,8 +13,9 @@
 //   0x3000~0x3FFF  Header Table（16 项 × 128B，本模型走 Hmem，此处只读回读）
 //
 // 起任务的过程：RV core 一条指令写一个寄存器，最后写 CFG_TRIGGER（0x0000）。写
-// trigger 那一拍采样 STUPV 身份（streamID/taskID/userID/pathID/vcid 从 RV core 的
-// CSR 直连过来），合并 19 项配置组装成一个 4 段位 Descriptor 交给 Commit。
+// trigger 那一拍采样这笔写带进来的 STUPV 身份（streamID/taskID/userID/pathID/vcid，
+// RV 在发出 dsaw 时从 CSR 抄进请求），合并 19 项配置组装成一个 4 段位 Descriptor
+// 交给 Commit。
 //
 // 快速配置（Template）：CFG_TRIGGER[0] temp_valid 置位时，以 temp_index 选中的
 // 模板为底，被显式写过的 Cfg Reg File 字段覆盖模板字段；temp_valid 清 0 时全部取
@@ -141,7 +142,6 @@ class DteRegfile : public BachModule {
       : BachModule(clock, name, parent, tick),
         agcu(addr_gen),
         cfg(std::make_shared<DsaCfgPort>(clock)),
-        ids(std::make_shared<DsaIdsPort>(clock)),
         out(std::make_shared<DescPort>(clock)),
         rdata(std::make_shared<DsaRdataPort>(clock)),
         triggers(clock),
@@ -150,8 +150,6 @@ class DteRegfile : public BachModule {
   // ── 对外 ──
   DsaCfgPort& Cfg() { return *cfg; }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return cfg; }
-  DsaIdsPort& Ids() { return *ids; }
-  void AttachIds(std::shared_ptr<DsaIdsPort> p) { ids = std::move(p); }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return rdata; }
   // 起任务这一笔交给 Commit 的 from_rv 口：一根线两端是同一个对象。
   std::shared_ptr<DescPort> OutPtr() const { return out; }
@@ -286,12 +284,14 @@ class DteRegfile : public BachModule {
 
     auto d = std::make_shared<Descriptor>();
     d->valid = true;
-    // 身份直连采样。出核走哪个 VC 取 TS 随任务下发的 VCID。
-    d->stream_id = ids->Stream();
-    d->task_id = ids->Task();
-    d->user_id = ids->User();
-    d->path_id = ids->Path();
-    d->vc = ids->Vc();
+    // 身份是这笔 trigger 写带进来的：RV 在发出 dsaw 那一拍从 CSR 抄下。出核走
+    // 哪个 VC 用同一份里的 VCID。
+    DsaTaskIds ids = cfg->TaskIds();
+    d->stream_id = ids.stream;
+    d->task_id = ids.task;
+    d->user_id = ids.user;
+    d->path_id = ids.path;
+    d->vc = ids.vc;
     d->route = Route(merged.trans_mode & kDteModeMask);
     // 进核任务不回 Ack 的档位（B/R core 与 weights 加载阶段），由 SCP 切模式时配。
     d->no_ack = IsInbound(d->route) && inbound_no_ack;
@@ -324,7 +324,6 @@ class DteRegfile : public BachModule {
 
   Agcu agcu;
   std::shared_ptr<DsaCfgPort> cfg;
-  std::shared_ptr<DsaIdsPort> ids;
   std::shared_ptr<DescPort> out;
   std::shared_ptr<DsaRdataPort> rdata;
 

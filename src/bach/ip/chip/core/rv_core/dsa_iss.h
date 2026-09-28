@@ -68,6 +68,7 @@ class DsaIss : public BachModule {
   struct Item {
     bool we = false;
     uint64_t addr = 0, data = 0, seq = 0;
+    DsaTaskIds ids;
   };
 
   void Drain() {
@@ -94,6 +95,7 @@ class DsaIss : public BachModule {
     it.we = req->We();
     it.addr = req->addr.Get();
     it.data = req->wdata.Get();
+    it.ids = req->TaskIds();
     // 序号在收下这一笔时定死。等 ready 的那几拍要一直发同一个号，每拍换号
     // 的话，接收方按序号去重就把同一笔认成好几笔，写 trigger 那种「写一次执行
     // 一次」的寄存器会被执行好几遍。
@@ -116,7 +118,7 @@ class DsaIss : public BachModule {
     // 再把 req_we 抹掉。
     Item const& it = q.front();
     if (it.we) {
-      cfg->Drive(it.addr, it.data, it.seq);
+      cfg->Drive(it.addr, it.data, it.seq, it.ids);
     } else {
       cfg->DriveRead(it.addr, it.seq);
     }

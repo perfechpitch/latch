@@ -270,7 +270,7 @@ RouterTable 是静态配置，不记。
 两个时刻相减，读出一笔 task 在各段花的时间：
 
 * 建表或装后继到下发：这一步在 TS 里等的时间，等 credit、等发射通路空出来、等前一笔从 RV core 那边腾出槽位。这一条只对主线下发的 task 成立。搬入任务在数据到 Router 时就下发，与主线走到哪无关：普通模式下 task 0 之外的搬入任务，装后继可能落在下发之后，也可能被一拍跳过；自启动 core 与权重加载模式下的 datain 任务既不建表也不装后继。比如 `moe_lpu` 的 `chip0.core9`（dot core）：task 3 第 1276 拍下发，1303 拍才装后继；7 项 concat 搬入在 2060～2330 拍之间按到达次序下发，装后继从 1907 拍的 task 7 一步跳到 2352 拍的 task 14。
-* RV core 接下到交还：这个 RV core 对这笔 task 的执行时间，含 kernel 里轮询 DSA 的时间（MU 的 `mu_wait()`），不含 DSA 自己算的时间。VU 多宏任务不再轮询 `MACRO_INST_LEFT`，交还在写完最后一条 trigger 之后。交还一定发生，通不通知 TS 由 kernel 写进 `task_done` 的值定，所以不通知 TS 的那几笔也有结束的那一拍。
+* RV core 接下到交还：这个 RV core 对这笔 task 的执行时间，含 kernel 里轮询 DSA 的时间（MU 的 `mu_wait()`），不含 DSA 自己算的时间。VU 写完最后一条 trigger 就交还：身份在 `dsaw` 发出时已经抄进那笔请求，不必等配置通路收下。交还一定发生，通不通知 TS 由 kernel 写进 `task_done` 的值定，所以不通知 TS 的那几笔也有结束的那一拍。
 * DSA 开始到报完成：DSA 自己的执行时间。开始取过门槛那一拍，不取写 trigger 那一拍，三个单元的门槛与报完成的时机各不相同：
 
 | 单元 | 开始 | 报完成 |
@@ -279,7 +279,7 @@ RouterTable 是静态配置，不记。
 | MU | 进 `issue_q`：drain 走完且队列有空位 | 整个 task 的 tile 都写回，写回落地后再空两拍 |
 | VU | 被 ISQ 收下：静态配置已释放、上一条已被取走 | 只有 `EVENT_EN` 置位的宏指令退休才报 `dsa_done`。多宏任务只在最后一条置位，`recv_unit` 配 `kDsa`，TS 收齐 `rv_done` 与这一笔 |
 
-三个单元的完成脉冲本身不带 user_id，`dsa_*_user` 填的是单元侧存下的那一份：MU 与 DTE 取 RV core 写进 DSA 的 user_id，VU 取写 trigger 那一拍从身份直连线上采下、随宏指令带到退休的那一份。
+三个单元的完成脉冲本身不带 user_id，`dsa_*_user` 填的是单元侧存下的那一份：都是 trigger 写带进来的 user_id。DTE 与 MU 收在任务快照里，VU 随宏指令带到退休。
 
 `ts_unit` 与 `ts_task` 能把仿真跑出来的下发次序和 bundle 里 `TCHAIN` 逐项对上。比如 `moe_lpu` 的
 `chip0.core2` 跑出来是第 309 拍 DTE task 0、369 拍 MU task 1、811 拍 DTE task 2、

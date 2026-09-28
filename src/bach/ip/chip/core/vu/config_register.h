@@ -106,17 +106,6 @@ class VuConfigRegister : public BachModule {
     if (idx < kVuCfgGroups && ref[idx] > 0) --ref[idx];
   }
 
-  // VU-Core CSR 里的 stream_id 与 task_id：TS 下发给这个核的那一组，从 VU RV
-  // core 直连过来，每拍有效。STREAM_ID_OVERRIDE 只改 stream_id。
-  void AttachIds(std::shared_ptr<DsaIdsPort> p) { ids = std::move(p); }
-  // 单模块测试里没接直连线时用这个直接给。
-  void SetCoreIds(uint64_t stream, uint64_t task, uint64_t user = 0) {
-    fixed_stream = stream;
-    fixed_task = task;
-    fixed_user = user;
-    has_fixed = true;
-  }
-
   // boot 期把一组静态配置直接写进来，不走三条配置通路。装配层照 Router 的
   // Preload 那一套用它：那几笔在业务开始之前就写完了，不占运行时的通路。
   void Preload(uint64_t addr, uint64_t data) { Write(addr, data); }
@@ -238,21 +227,6 @@ class VuConfigRegister : public BachModule {
   }
 
  private:
-  uint64_t CoreStreamId() const {
-    if (has_fixed) return fixed_stream;
-    return ids ? ids->Stream() : 0;
-  }
-  uint64_t CoreTaskId() const {
-    if (has_fixed) return fixed_task;
-    return ids ? ids->Task() : 0;
-  }
-  // 用户号也走这根直连线。宏指令本身不带它，写 trigger 那一拍采下来存进指令里，
-  // 随这条指令一起进 ISQ、一起退休，波形与 dsa_done 才认得是哪一笔 task 的。
-  uint64_t CoreUserId() const {
-    if (has_fixed) return fixed_user;
-    return ids ? ids->User() : 0;
-  }
-
   void Drain() {
     if (pending && driving && out->Ready()) {
       pending = false;
@@ -300,7 +274,7 @@ class VuConfigRegister : public BachModule {
     if (p.Seq() == last_seq[i]) return;
     last_seq[i] = p.Seq();
     if (we) {
-      Write(addr, v);
+      Write(addr, v, p.TaskIds());
       ++write_cnt;
       return;
     }
@@ -366,10 +340,10 @@ class VuConfigRegister : public BachModule {
     return (addr - kVuStaticBase) / kVuStaticStride;
   }
 
-  void Write(uint64_t addr, uint64_t v) {
+  void Write(uint64_t addr, uint64_t v, DsaTaskIds ids = {}) {
     if (addr < kVuDynamicEnd) {
       if (addr == kVuMacroInstTrigger) {
-        Trigger(v);
+        Trigger(v, ids);
         return;
       }
       WriteParam(dyn, addr, v);
@@ -512,7 +486,7 @@ class VuConfigRegister : public BachModule {
 
   // 写 trigger：锁存当前 12 个动态参数为一份快照，与所选静态组的 11 个副本一起
   // 打包。取哪一份逐参数由 STATIC_DYNAMIC_MASK 决定，那件事收在 VuMacroInst 里。
-  void Trigger(uint64_t v) {
+  void Trigger(uint64_t v, DsaTaskIds ids) {
     dyn.trigger = uint32_t(v);
     auto inst = std::make_shared<VuMacroInst>();
     inst->cfg_idx = (v >> kVuTrigCfgIdxShift) & 0x7u;
@@ -526,13 +500,13 @@ class VuConfigRegister : public BachModule {
     inst->seq = ++inst_seq;
     inst->tag = ++tag_seq & 0xFFu;
 
-    // STREAM_ID_OVERRIDE = 0 时沿用 VU-Core CSR 自带的 Stream ID，那一份由
-    // VU RV core 经 dsa_ids 直连给进来；= 1 时改用 trigger 里的 STREAM_ID
-    // 字段。task_id 不在这个寄存器里，始终取 VU-Core 那一份。
+    // STREAM_ID_OVERRIDE = 0 时用这笔 trigger 写带进来的 stream_id（dsaw 发出
+    // 那一拍从 CSR 抄下的）；= 1 时改用 trigger 里的 STREAM_ID 字段。task_id
+    // 与 user_id 不在这个寄存器里，始终取写上带的那一份。
     inst->stream_id = inst->sid_override ? ((v >> kVuTrigSidShift) & 0xFu)
-                                         : CoreStreamId();
-    inst->task_id = CoreTaskId();
-    inst->user_id = CoreUserId();
+                                         : ids.stream;
+    inst->task_id = ids.task;
+    inst->user_id = ids.user;
 
     held = inst;
     pending = true;
@@ -624,9 +598,6 @@ class VuConfigRegister : public BachModule {
   uint64_t rf_addr = 0;
   bool rf_sel_ok = true;
   std::set<uint64_t> not_dispatched;
-  std::shared_ptr<DsaIdsPort> ids;
-  uint64_t fixed_stream = 0, fixed_task = 0, fixed_user = 0;
-  bool has_fixed = false;
   std::array<uint64_t, kVuCfgPathNum> last_seq{};
 
   struct ReadBack {

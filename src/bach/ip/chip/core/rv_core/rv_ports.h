@@ -89,8 +89,8 @@ enum class LsqTarget : uint32_t {
 
 // ── task_queue → 指令执行器 ──
 //
-// 起一个 task：给出起始 PC 与这一笔的身份。身份进自定义 CSR 供软件读，同时经
-// dsa_ids 直连到本核那个 DSA。
+// 起一个 task：给出起始 PC 与这一笔的身份。身份进自定义 CSR 供软件读。发给
+// DSA 的那一份在 dsaw 发出时另抄进配置请求。
 class TaskStartPort : public Logic {
  public:
   Logic64 valid, ready, task_pc, stream_id, task_id, user_id, path_id, dsa_en,
@@ -159,26 +159,45 @@ class TaskDonePort : public Logic {
   uint64_t Seq() const { return seq.Get(); }
 };
 
+// 一笔 DSA 配置写发出时锁下的身份。RV 在执行 dsaw 的那一拍从当前 task 的 CSR
+// 抄进来，跟着这笔写穿过 dsa_iss，DSA 在收下 trigger 时用这一份，不再读当时
+// 直连线上的值。
+struct DsaTaskIds {
+  uint64_t stream = 0;
+  uint64_t task = 0;
+  uint64_t user = 0;
+  uint64_t path = 0;
+  uint64_t vc = 0;
+};
+
 // ── 指令执行器 → dsa_iss ──
 //
-// 一条 DSA 寄存器读写。写会被下发通道反压，读不会。
+// 一条 DSA 寄存器读写。写会被下发通道反压，读不会。身份随这笔请求走。
 class DsaReqPort : public Logic {
  public:
   Logic64 valid, ready, we, addr, wdata, rd_idx, seq;
+  Logic64 stream_id, task_id, user_id, path_id, vc;
 
   explicit DsaReqPort(ClockPtr c)
-      : valid(c), ready(c), we(c), addr(c), wdata(c), rd_idx(c), seq(c) {
-    Fields(valid, ready, we, addr, wdata, rd_idx, seq);
+      : valid(c), ready(c), we(c), addr(c), wdata(c), rd_idx(c), seq(c),
+        stream_id(c), task_id(c), user_id(c), path_id(c), vc(c) {
+    Fields(valid, ready, we, addr, wdata, rd_idx, seq, stream_id, task_id,
+           user_id, path_id, vc);
   }
 
   void Drive(bool is_write, uint64_t at, uint64_t data, uint64_t rd,
-             uint64_t n) {
+             uint64_t n, DsaTaskIds ids = {}) {
     valid = 1;
     we = is_write ? 1 : 0;
     addr = at;
     wdata = data;
     rd_idx = rd;
     seq = n;
+    stream_id = ids.stream;
+    task_id = ids.task;
+    user_id = ids.user;
+    path_id = ids.path;
+    vc = ids.vc;
   }
   void Idle() {
     valid = 0;
@@ -187,6 +206,15 @@ class DsaReqPort : public Logic {
     wdata = 0;
     rd_idx = 0;
     seq = seq.Get();
+    stream_id = 0;
+    task_id = 0;
+    user_id = 0;
+    path_id = 0;
+    vc = 0;
+  }
+  DsaTaskIds TaskIds() const {
+    return {stream_id.Get(), task_id.Get(), user_id.Get(), path_id.Get(),
+            vc.Get()};
   }
   void DriveReady(bool ok) { ready = ok ? 1 : 0; }
   bool Valid() const { return valid.Get() != 0; }
@@ -239,10 +267,8 @@ class LsqReqPort : public Logic {
 
 // ── 指令执行器 → DSA：身份信号 ──
 //
-// 《DTE寄存器配置参数》§硬件直连信号：streamID、taskID、userID、pathID 从
-// RV core 的 CSR 直连到 DSA，DSA 在写 trigger 寄存器那一拍采样。所以这一束不
-// 握手、每拍驱动，取的是本核当前那个 task 的身份。vc 不在那份清单里：它是 TS
-// 随 DTE 任务下发的 VCID，模型经这一束带给 DTE 出核选 VC。
+// 当前 task 的 CSR 视图，每拍驱动、不握手。软件读身份走这里。DSA 收下 trigger
+// 时用的不是这一束，而是 dsaw 发出那一拍抄进 DsaTaskIds、随配置写带过去的那一份。
 class DsaIdsPort : public Logic {
  public:
   Logic64 stream_id, task_id, user_id, path_id, vc;

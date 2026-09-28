@@ -142,6 +142,9 @@ class CfgWriter : public BachModule {
   CfgWriter(ClockPtr c, std::shared_ptr<DsaCfgPort> p)
       : BachModule(c, "cfg_writer"), port(std::move(p)) {}
 
+  void SetIds(uint64_t stream, uint64_t task, uint64_t user = 0) {
+    ids = {stream, task, user, 0, 0};
+  }
   void Push(uint64_t addr, uint64_t data) { q.push_back({addr, data}); }
 
  protected:
@@ -155,13 +158,14 @@ class CfgWriter : public BachModule {
       port->Idle();
       return;
     }
-    port->Drive(q.front().first, q.front().second, ++seq);
+    port->Drive(q.front().first, q.front().second, ++seq, ids);
     driving = true;
   }
 
  private:
   std::shared_ptr<DsaCfgPort> port;
   std::deque<std::pair<uint64_t, uint64_t>> q;
+  DsaTaskIds ids;
   bool driving = false;
   uint64_t seq = 0;
 };
@@ -366,21 +370,16 @@ TEST(Mu, TriggerLatchesConfig) {
   ClockPtr clk = MakeClock(0, kPeriod);
   MuRegfile reg(clk, "regfile");
   auto port = std::make_shared<DsaCfgPort>(clk);
-  auto ids = std::make_shared<DsaIdsPort>(clk);
   reg.AttachCfg(port);
-  reg.AttachIds(ids);
 
-  // 扮演 RV core：逐拍写配置，最后写 TASK_TRIGGER。身份三项在 trigger 那一拍从
-  // CSR 直连采样，不在寄存器里。
+  // 扮演 RV core：逐拍写配置，最后写 TASK_TRIGGER。身份三项随这笔写走。
   class Writer : public BachModule {
    public:
-    Writer(ClockPtr c, std::shared_ptr<DsaCfgPort> p,
-           std::shared_ptr<DsaIdsPort> i)
-        : BachModule(c, "writer"), port(std::move(p)), ids(std::move(i)) {}
+    Writer(ClockPtr c, std::shared_ptr<DsaCfgPort> p)
+        : BachModule(c, "writer"), port(std::move(p)) {}
 
    protected:
     void Step() override {
-      ids->Drive(/*stream=*/5, /*task=*/9, /*user=*/77, /*path=*/0);
       static const std::pair<uint64_t, uint64_t> kSeq[] = {
           {kMuPrimitiveDim, (3u << kMuKblockShift) | 2u},  // KBLOCK=3、NBLOCK=2
           {kMuPrimitiveMode, (1u << kMuPrimTypeShift) |        // 1×K64×N128
@@ -397,14 +396,13 @@ TEST(Mu, TriggerLatchesConfig) {
         return;
       }
       auto const& kv = kSeq[now - 1];
-      port->Drive(kv.first, kv.second, now);
+      port->Drive(kv.first, kv.second, now, DsaTaskIds{5, 9, 77, 0, 0});
     }
 
    private:
     std::shared_ptr<DsaCfgPort> port;
-    std::shared_ptr<DsaIdsPort> ids;
   };
-  Writer w(clk, port, ids);
+  Writer w(clk, port);
 
   clk->Continue((12) * kPeriod);
   RT::JoinAll();
@@ -583,23 +581,6 @@ class MuDriver : public BachModule {
   Mu& mu;
 };
 
-// 扮演 RV core 的身份 CSR：每拍驱动 stream / task / user，写 TASK_TRIGGER 那一拍
-// 由 regfile 采样进任务快照。
-class IdsHolder : public BachModule {
- public:
-  IdsHolder(ClockPtr c, std::shared_ptr<DsaIdsPort> p, uint64_t stream,
-            uint64_t task, uint64_t user)
-      : BachModule(c, "ids"), ids(std::move(p)),
-        stream_(stream), task_(task), user_(user) {}
-
- protected:
-  void Step() override { ids->Drive(stream_, task_, user_, /*path=*/0); }
-
- private:
-  std::shared_ptr<DsaIdsPort> ids;
-  uint64_t stream_, task_, user_;
-};
-
 // topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(t.size() * kTopkEntryBytes, 0);
@@ -629,9 +610,6 @@ TEST(Mu, AssemblySingleTile) {
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
 
-  auto ids = std::make_shared<DsaIdsPort>(clk);
-  mu.AttachIds(ids);
-
   MuTaskCfg want;
   want.a_dtype = numeric::DataType::kBf16;
   want.b_dtype = numeric::DataType::kBf16;   // 无 block scale，先排除 scale
@@ -655,6 +633,7 @@ TEST(Mu, AssemblySingleTile) {
   mmem.Poke(want.b_addr, weight);
 
   CfgWriter writer(clk, cfg_port);
+  writer.SetIds(want.stream_id, want.task_id);
   writer.Push(kMuPrimitiveMode, kMuTaskLast);   // BF16×BF16、1×K128×N64
   writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
   writer.Push(kMuAAddr, want.a_addr);
@@ -662,7 +641,6 @@ TEST(Mu, AssemblySingleTile) {
   writer.Push(kMuCAddr, want.c_addr);
   writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
-  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(2000 * kPeriod);
@@ -694,9 +672,6 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   mu.AttachCmemRd(cmem_rd);
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
-
-  auto ids = std::make_shared<DsaIdsPort>(clk);
-  mu.AttachIds(ids);
 
   MuTaskCfg want;
   want.a_dtype = numeric::DataType::kBf16;
@@ -735,6 +710,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   mmem.Poke(want.b_addr + 0 * want.b_expert_stride, wgt[1]);
 
   CfgWriter writer(clk, cfg_port);
+  writer.SetIds(want.stream_id, want.task_id);
   writer.Push(kMuPrimitiveMode, (want.expert_count << kMuRouterExpertCountShift) |
                                     kMuRouterEpReduceEn | kMuTaskLast);
   writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
@@ -746,7 +722,6 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   writer.Push(kMuBExpertStride, want.b_expert_stride);
   writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
-  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(2000 * kPeriod);
@@ -787,9 +762,6 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
 
-  auto ids = std::make_shared<DsaIdsPort>(clk);
-  mu.AttachIds(ids);
-
   MuTaskCfg want;
   want.a_dtype = numeric::DataType::kBf16;
   want.b_dtype = numeric::DataType::kBf16;
@@ -825,6 +797,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   mmem.Poke(want.b_addr + 0 * want.b_expert_stride, wgt[1]);
 
   CfgWriter writer(clk, cfg_port);
+  writer.SetIds(want.stream_id, want.task_id);
   writer.Push(kMuPrimitiveMode,
               (want.expert_count << kMuRouterExpertCountShift) | kMuTaskLast);
   writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
@@ -836,7 +809,6 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   writer.Push(kMuBExpertStride, want.b_expert_stride);
   writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
-  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(2000 * kPeriod);
@@ -872,9 +844,6 @@ void RunAllTiles(uint64_t prim_type) {
   mu.AttachCmemRd(cmem_rd);
   mu.AttachMmemRd(mmem_rd);
   mu.AttachCmemWr(cmem_wr);
-
-  auto ids = std::make_shared<DsaIdsPort>(clk);
-  mu.AttachIds(ids);
 
   MuTaskCfg want;
   want.a_dtype = numeric::DataType::kMxfp8;
@@ -914,6 +883,7 @@ void RunAllTiles(uint64_t prim_type) {
   }
 
   CfgWriter writer(clk, cfg_port);
+  writer.SetIds(want.stream_id, want.task_id);
   writer.Push(kMuPrimitiveMode, (prim_type << kMuPrimTypeShift) |
                                     (1u << kMuADataTypeShift) |
                                     (1u << kMuRouterEpDtypeShift) | kMuTaskLast);
@@ -923,7 +893,6 @@ void RunAllTiles(uint64_t prim_type) {
   writer.Push(kMuCAddr, want.c_addr);
   writer.Push(kMuTaskTrigger, kMuTriggerValid);
 
-  IdsHolder ids_holder(clk, ids, want.stream_id, want.task_id, /*user=*/0);
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
   clk->Continue(3000 * kPeriod);

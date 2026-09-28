@@ -16,8 +16,8 @@
 // 哪几个方向取自 B_CORE_DIRECTION，进核落点、Ack 与标志表取自 DTE 的进核配置。
 //
 // 三个 DSA 之间没有任何直连：DSA 之间的数据一律经存储交换，控制一律经 TS 与
-// 各自的 RV core。每个 DSA 与本核那个 RV core 之间另有四个身份信号直连
-// （streamID、taskID、userID、pathID），DSA 在写 trigger 寄存器那一拍采样。
+// 各自的 RV core。身份在 RV 发出 dsaw 那一拍从 CSR 抄进配置请求，DSA 收下
+// trigger 时用请求上的那一份。
 
 #include <array>
 #include <memory>
@@ -356,8 +356,7 @@ class Core : public BachModule {
   //
   // 身份与 ts_task / ts_user 同宽：task 8 bit、user 16 bit，本拍没有就填
   // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
-  // 这里填的是各单元侧存下来的那一份：MU 与 DTE 取自 RV core 写进 DSA 的 user，
-  // VU 取自写 trigger 那一拍从身份直连线上采下来、随宏指令一路带到退休的 user。
+  // 这里填的是各单元侧存下来的那一份：都是 trigger 写带进来的 user。
   void EmitDsa() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
@@ -397,7 +396,7 @@ class Core : public BachModule {
   // 上以交还为准，这样不通知 TS 的那几档也有闭合点。
   //
   // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()），不含 DSA 自己的执行时间。
-  // VU 多宏任务不再轮询 MACRO_INST_LEFT，交还在写完最后一条 trigger 之后。
+  // VU 写完最后一条 trigger 就交还：身份已经锁在那笔请求上。
   void EmitRv() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
@@ -476,19 +475,13 @@ class Core : public BachModule {
     vu->AttachDone(ts->DsaDonePtr(2));
   }
 
-  // 每个 RV core 只配自己那个 DSA 的寄存器，另有四个身份信号直连过去。
+  // 每个 RV core 只配自己那个 DSA 的寄存器。身份随配置写走，不另拉直连线。
   void WireRvToDsa() {
     rv[0]->AttachDsaCfg(dte->CfgPtr());
     rv[1]->AttachDsaCfg(mu->CfgPtr());
     rv[2]->AttachDsaCfg(vu->CfgPtr());
-    dte->AttachIds(rv[0]->DsaIdsPtr());
-    // VU 与 MU 的 stream_id / task_id / user_id 也从各自那个 RV core 的 CSR
-    // 直连过来，写 trigger 那一拍采样，不再由软件写进动态配置寄存器。
-    mu->AttachIds(rv[1]->DsaIdsPtr());
-    vu->AttachIds(rv[2]->DsaIdsPtr());
-    // 读 DSA 寄存器的返回值走独立的一根线回 dsa_rq。三个 RV core 各读各的那一个
-    // DSA：MU 的软件轮询 SYS_STATUS 等一笔任务做完，VU 的轮询 macro_inst_left
-    // 等这一批宏指令做完。
+    // 读 DSA 寄存器的返回值走独立的一根线回 dsa_rq。MU 的软件轮询 SYS_STATUS
+    // 等一笔任务做完。
     rv[0]->AttachDsaRdata(dte->RdataPtr());
     rv[1]->AttachDsaRdata(mu->RdataPtr());
     rv[2]->AttachDsaRdata(vu->RdataPtr());
