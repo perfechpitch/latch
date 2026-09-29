@@ -6,12 +6,12 @@
 // 一条宏指令走的路：
 //   config_register 收配置写，写 trigger 锁成一条 → ISQ 排队，在飞数不到两条就
 //   放行 → pipe_ctrl 展开成逐单元的微指令并查依赖 → LU 从 Core Mem 读入，同时
-//   把微指令交给发射级按段读 RF → VEXE 五个分组按 src_sel 各自流水、汇合后进
-//   MEXE → SEXE → DMUX 写回 RF 或交给 SU → SU 写回 Core Mem → Retire 报
-//   dsa_done 并释放静态配置组的引用。
+//   把微指令交给发射级按段读 RF → VEXE 五个分组按 src_sel 各自流水、汇合后，
+//   本条用到 MEXE / SEXE 才进入那一级，没有的级整级跳过 → DMUX 写回 RF 或交给
+//   SU → SU 写回 Core Mem → Retire 报 dsa_done 并释放静态配置组的引用。
 //
-// 不读 LU 的分组不用等 CM 响应。MEXE 与 SEXE 仍在 VEXE 之后；本条不动的那一级
-// 当拍透传。
+// 不读 LU 的分组不用等 CM 响应。MEXE 与 SEXE 仍在 VEXE 之后；本条没有配的那
+// 一级不进入，不加握手拍。
 //
 // 十四个模块由装配统一驱动（tick=false）：VRF / MRF / SRF 是存储阵列不是模块，
 // SMUX 读、DMUX 写，两级在同一个协程里按固定次序跑，读写顺序确定。tick=true 时
@@ -31,6 +31,7 @@
 #include "bach/ip/chip/core/vu/retire.h"
 #include "bach/ip/chip/core/vu/sexe.h"
 #include "bach/ip/chip/core/vu/su.h"
+#include "bach/ip/chip/core/vu/tail_route.h"
 #include "bach/ip/chip/core/vu/valu.h"
 #include "bach/ip/chip/core/vu/vexe_net.h"
 #include "bach/ip/chip/core/vu/vsfu.h"
@@ -63,6 +64,7 @@ class Vu {
         *vsfu, gid, false);
     mexe = std::make_unique<VuMexe>(clock, "mexe", gid, false);
     sexe = std::make_unique<VuSexe>(clock, "sexe", gid, false);
+    route = std::make_unique<VuTailRoute>(clock, "tail", gid, false);
     dmux = std::make_unique<VuDmux>(clock, "dmux", regs, *pipe, gid, false);
     su = std::make_unique<VuSu>(clock, "su", gid, false);
     retire = std::make_unique<VuRetire>(clock, "retire", *cfg_reg, *isq,
@@ -127,7 +129,11 @@ class Vu {
     dmux->RunStep();
     sexe->RunStep();
     mexe->RunStep();
+    // Pre 先放开 ready，VEXE 本拍就能把段交出来；Post 再按本条有没有 MEXE / SEXE
+    // 送到下一级。下一级本拍已经跑过，下一拍才看见。
+    route->Pre();
     net->RunStep();
+    route->Post();
     issue->RunStep();
     lu->RunStep();
     pipe->RunStep();
@@ -138,8 +144,8 @@ class Vu {
   bool Quiescent() const {
     return cfg_reg->Quiescent() && isq->Quiescent() && pipe->Quiescent() &&
            lu->Quiescent() && issue->Quiescent() && net->Quiescent() &&
-           mexe->Quiescent() && sexe->Quiescent() && dmux->Quiescent() &&
-           su->Quiescent();
+           route->Quiescent() && mexe->Quiescent() && sexe->Quiescent() &&
+           dmux->Quiescent() && su->Quiescent();
   }
 
  private:
@@ -175,9 +181,22 @@ class Vu {
 
     auto vexe_out = std::make_shared<VuFlowPort>(clk);
     net->AttachOut(vexe_out);
-    mexe->AttachIn(vexe_out);
-    chain(mexe, sexe);
-    chain(sexe, dmux);
+    route->AttachVexe(vexe_out);
+    auto to_mexe = std::make_shared<VuFlowPort>(clk);
+    route->AttachToMexe(to_mexe);
+    mexe->AttachIn(to_mexe);
+    auto mexe_out = std::make_shared<VuFlowPort>(clk);
+    mexe->AttachOut(mexe_out);
+    route->AttachMexe(mexe_out);
+    auto to_sexe = std::make_shared<VuFlowPort>(clk);
+    route->AttachToSexe(to_sexe);
+    sexe->AttachIn(to_sexe);
+    auto sexe_out = std::make_shared<VuFlowPort>(clk);
+    sexe->AttachOut(sexe_out);
+    route->AttachSexe(sexe_out);
+    auto to_dmux = std::make_shared<VuFlowPort>(clk);
+    route->AttachToDmux(to_dmux);
+    dmux->AttachIn(to_dmux);
     chain(dmux, su);
     chain(su, retire);
   }
@@ -195,6 +214,7 @@ class Vu {
   std::unique_ptr<VuVsfu> vsfu;
   std::unique_ptr<VuIssue> issue;
   std::unique_ptr<VuVexeNet> net;
+  std::unique_ptr<VuTailRoute> route;
   std::unique_ptr<VuMexe> mexe;
   std::unique_ptr<VuSexe> sexe;
   std::unique_ptr<VuDmux> dmux;

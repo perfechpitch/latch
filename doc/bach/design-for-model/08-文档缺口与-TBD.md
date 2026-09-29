@@ -236,7 +236,7 @@
   * CoreStation 的 HeaderFIFO 深度与进 core 的包长上限（OutputBuffer 已取 60 flit，这两个值按它匹配）
 * **DTE**：Buffer、Completion RS、Done Pending 三处深度
 * **VU**：ISQ 深度
-* **VU 各子模块与执行分组的首拍延迟**：规范给的范围仍保留在 `vu.md` 第 7 节。模型在范围内取了暂定值并落进 `VuLatency`（`src/bach/ip/chip/core/vu/vu_latency.h`），按计算可改：config_register 1～2 里取 2、pipe_ctrl 2～4 里取 3、加减 2～4 里取 2、乘 2～4 里取 4、最值 / 比较 / 搬运 2～3 里取 3、MACC 4～6 里取 5、除法 20～30 里取 20、VSFU 4～8 里取 8、MEXE 位运算 1～2 里取 2、提取 2～4 里取 2、SEXE 一次迭代 2～4 里取 2。仍未定的有：
+* **VU 各子模块与执行分组的首拍延迟**：规范给的范围仍保留在 `vu.md` 第 7 节。模型在范围内取了暂定值并落进 `VuLatency`（`src/bach/ip/chip/core/vu/vu_latency.h`），按计算可改：config_register 1～2 里取 1、pipe_ctrl 2～4 里取 2、加减 2～4 里取 2、乘 2～4 里取 4、最值 / 比较 / 搬运 2～3 里取 3、MACC 4～6 里取 5、除法 20～30 里取 20、VSFU 4～8 里取 8、MEXE 位运算 1～2 里取 2、提取 2～4 里取 2、SEXE 一次迭代 2～4 里取 2。仍未定的有：
   * **VALU1 归约与 Top-16 排序**的系数没给，模型先占 4 拍（`kVuExeStages`）
   * **SEXE `fdiv` / `fsqrt`** 文档写更长，额外拍数没给，先与一次迭代同为 2
   * **除法的发起间隔**文档记非全吞吐，间隔没给，模型仍每拍收一段

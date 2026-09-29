@@ -208,7 +208,8 @@ class VuExeStage : public BachModule {
       if (!(vexe && f->vexe_done)) Compute(*f);
       s.left = Latency(f->uops);
     } else {
-      // 本条不动这个单元：当拍透传，不占级数。
+      // 本条没配这个单元。装配上的尾级路由不会把这种段送进来。真送进来时当拍
+      // 交出，下游下一拍才看得见，那一拍仍是级间握手，不是这级的计算。
       s.left = 0;
     }
     s.lat = s.left;

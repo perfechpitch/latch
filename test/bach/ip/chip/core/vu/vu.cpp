@@ -1858,6 +1858,54 @@ TEST(Vu, ParallelGroupsTakeLongerPath) {
   EXPECT_EQ(serial_cycles, parallel_cycles + 2u);
 }
 
+// 本条没有 MEXE、SEXE 时不进入这两级。两边配置写的笔数相同，差别只在 SEXE0
+// 的 opcode：一边是无操作，一边是一次 fadd。无操作那条的 MEXE / SEXE busy
+// 都是 0。有 SEXE 的那条多出来的拍数是这一级的首拍，再加离开这一级的那一拍
+// 握手；被跳过的 MEXE 不在这个差里。
+TEST(Vu, SkipsInactiveMexeAndSexe) {
+  auto arm = [](Rig& rig, bool sexe) {
+    rig.vu->Regfiles().WriteVrf(0, std::vector<float>(32, 1.0f), false,
+                                numeric::RoundMode::kRne);
+    rig.vu->Regfiles().WriteVrf(1, std::vector<float>(32, 2.0f), false,
+                                numeric::RoundMode::kRne);
+    rig.vu->Regfiles().WriteSrf(4, 1.0f);
+    rig.vu->Regfiles().WriteSrf(5, 1.0f);
+    rig.WriteStatic(0, kVuValu0Op,
+                    OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcVrfP1));
+    rig.WriteStatic(0, kVuSexe0Op,
+                    sexe ? OpWord(uint64_t(SexeOp::kFadd), kSrcSrfP0 + 4,
+                                  kSrcSrfP0 + 5)
+                         : 0);
+    rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcValu0, 0, 0, 0));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(32, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(0, 1));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(4, 0));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuSrfRdIndex1, SrfWord(4, 5));
+    rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  };
+
+  Rig bare;
+  arm(bare, false);
+  bare.Run(400);
+  ASSERT_GT(bare.sink->at, 0u);
+  EXPECT_EQ(numeric::BitsOf(bare.vu->Regfiles().ReadVrf(4, 1, false)[0]),
+            numeric::BitsOf(3.0f));
+  EXPECT_EQ(bare.vu->Profile().Counter(VuCounter::kMexeBusyCycle), 0u);
+  EXPECT_EQ(bare.vu->Profile().Counter(VuCounter::kSexeBusyCycle), 0u);
+
+  Rig with_sexe;
+  arm(with_sexe, true);
+  with_sexe.Run(400);
+  ASSERT_GT(with_sexe.sink->at, 0u);
+  EXPECT_EQ(numeric::BitsOf(with_sexe.vu->Regfiles().ReadVrf(4, 1, false)[0]),
+            numeric::BitsOf(3.0f));
+  EXPECT_EQ(with_sexe.vu->Profile().Counter(VuCounter::kMexeBusyCycle), 0u);
+  EXPECT_GT(with_sexe.vu->Profile().Counter(VuCounter::kSexeBusyCycle), 0u);
+  EXPECT_EQ(with_sexe.sink->at,
+            bare.sink->at + VuLatency::Get().Sexe(SexeOp::kFadd) + 1u);
+}
+
 // VALU0 只读 VRF，和 LU 的读同时走。VALU1 要等两路都到。VALU0 的 2 拍盖在 LU 的
 // 读延迟里，完成拍数应与「只有 VALU1 等 LU」相同，而不是再多出 VALU0 的 2 拍。
 TEST(Vu, IndependentGroupOverlapsLoad) {

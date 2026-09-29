@@ -36,8 +36,8 @@ class VuLatency {
     vsfu_.clear();
     mexe_.clear();
     sexe_.clear();
-    config_ = 2;
-    pipe_ = 3;
+    config_ = 1;
+    pipe_ = 2;
   }
 
   uint64_t Valu(ValuOp op) const { return Pick(valu_, uint32_t(op), DefaultValu(op)); }
@@ -131,8 +131,8 @@ class VuLatency {
   }
 
   std::unordered_map<uint32_t, uint64_t> valu_, vsfu_, mexe_, sexe_;
-  uint64_t config_ = 2;
-  uint64_t pipe_ = 3;
+  uint64_t config_ = 1;
+  uint64_t pipe_ = 2;
 };
 
 }  // namespace bach

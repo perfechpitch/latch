@@ -713,7 +713,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令描述的是�
 </svg>
 ```
 
-图上把 M6 画成一个方框、标「各自算一拍组」，是为了对齐第 1 层图的四段画法。框内是 VEXE 的五个分组（VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1）以及下游的 MEXE、SEXE。五个分组之间不限定先后，下一级用 `src_sel` 取输出；MEXE / SEXE 在 VEXE 下游（F16b、F40c）。SEXE 是同一个物理单元的三次迭代，不是第六个并列分组。`D变长` 指各分组首拍延迟彼此不同、随激活了哪些模块而变，具体值见第 7 节那张表（F40d）。
+图上把 M6 画成一个方框、标「各自算一拍组」，是为了对齐第 1 层图的四段画法。框内是 VEXE 的五个分组（VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1）以及下游的 MEXE、SEXE。五个分组之间不限定先后，下一级用 `src_sel` 取输出；MEXE / SEXE 在 VEXE 下游（F16b、F40c）。SEXE 是同一个物理单元的三次迭代，不是第六个并列分组。`D变长` 指各分组首拍延迟彼此不同、随激活了哪些模块而变，具体值见第 7 节那张表（F40d）。本条没有配 MEXE 就不进入 MEXE，没有配 SEXE 就不进入 SEXE；不在依赖链上的那一级不加拍。
 
 ### M7 · DMUX 结果路由
 
@@ -859,9 +859,9 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 
 | 模块 / 计算分组 | 延迟（cycle） | 说明 |
 | - | - | - |
-| `config_register` | 1～2（暂定 2） | 寄存器写入与动态参数打包，与计算流水线并行，不占用流水线周期 |
+| `config_register` | 1～2（暂定 1） | 寄存器写入与动态参数打包，与计算流水线并行，不占用流水线周期 |
 | ISQ | 1 | 队列非空且 pipe_ctrl 就绪时 1 拍出队；队列满时回压 `config_register` |
-| pipe_ctrl | 2～4（暂定 3） | 静态配置解析 + Scoreboard 依赖检查 + 微指令派发；依赖未满足时按依赖等待 |
+| pipe_ctrl | 2～4（暂定 2） | 静态配置解析 + Scoreboard 依赖检查 + 微指令派发；依赖未满足时按依赖等待 |
 | LU | 14 | 与参数框的 CM 访问延迟是同一段，取 14T。请求拆分、地址生成、读往返、格式转换都算在这 14 拍里，不再另加 |
 | SMUX / DMUX | 1 | 纯路由，不改变数据内容；广播不额外增加延迟 |
 | VALU 加 / 减 | 2～4（暂定 2） | 全吞吐，每周期接受 1 个 entry。加减乘原来同一档 2～4，现把乘单独取出 |
@@ -940,6 +940,7 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | LU 不用那几格时读请求先发，发射级仍等第一格 | 取舍 | `LuIssuesAheadOfVrfRaw` |
 | 宏指令即数据流图，pipe_ctrl 展开成各模块微指令 | F16a | `LoadStoreRoundTrip` |
 | 单向数据流：可整级跳过，MEXE / SEXE 不能回喂 VEXE | F16b | pipe_ctrl 合法性检查（无单独用例） |
+| 本条没有 MEXE / SEXE 指令时不进入这两级 | F16b、F40d | `SkipsInactiveMexeAndSexe` |
 | 最多两条相邻宏指令重叠 | F18 | `macro_overlap_two` |
 | 相邻两条的 LU 读接着发，最多两条同时在读 | F29a | `lu_read_overlap` |
 | LU 读请求最多 32 笔占着名额，数据被消耗才还 | 取舍 | `LuReqDepthHoldsUntilConsumed` |
