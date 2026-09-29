@@ -17,6 +17,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "base/clock.h"
@@ -177,12 +178,14 @@ class DoneSink : public BachModule {
     uint64_t stream_id = 0, task_id = 0, event = 0;
   };
   std::vector<Rec> got;
+  std::vector<uint64_t> ats;
   uint64_t at = 0;
 
  protected:
   void Step() override {
     if (port.Valid()) {
       if (got.empty()) at = CycleNow();
+      ats.push_back(CycleNow());
       got.push_back({port.stream_id.Get(), port.task_id.Get(), port.event.Get()});
     }
   }
@@ -881,6 +884,83 @@ TEST(Vu, ScoreboardStallsOnOverlap) {
   EXPECT_EQ(rig.sink->got.size(), 2u);
   EXPECT_GT(rig.vu->Profile().Counter(VuCounter::kStallDepCycle), 0u)
       << "两条写同一段 VRF 却一拍没等过";
+}
+
+TEST(Vu, ScoreboardAliasesInsideFourEntries) {
+  // entry 0 和 entry 3 的区间不相交，但落在同一格 0–3。后一条要等这一格写完。
+  Rig rig;
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(Tame(32, 0x321)));
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcLu, 0, 0, 0));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(32, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0));
+  rig.WriteStatic(1, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(1, kVuPrfOp, PrfWord(kSrcLu, 0, 0, 0));
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(32, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuLdAddr, kSrcAddr + 0x800);
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(3));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigEventEn));
+  rig.Run(800);
+
+  EXPECT_EQ(rig.sink->got.size(), 2u);
+  EXPECT_GT(rig.vu->Profile().Counter(VuCounter::kStallDepCycle), 0u);
+}
+
+TEST(Vu, ScoreboardLetsFirstFourEntriesStart) {
+  // 前一条写 8 个 entry。后一条只读每段的前 4 个 entry，第一格写完就可以派发，
+  // 不必等前一条退休。置 MACRO_INST_FENCE 的对照要多等退休。
+  auto run = [](bool fence) {
+    Rig rig;
+    constexpr uint64_t kN = 256;
+    std::vector<float> in(kN, 1.5f);
+    rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+    rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+    rig.WriteStatic(0, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
+    rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcLu, kSrcVsfu0, 0, 0));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(kN, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, 8));
+    rig.WriteStatic(1, kVuValu0Op,
+                    OpWord(uint64_t(ValuOp::kFmulVv), kSrcVrfP0, kSrcVrfP1));
+    rig.WriteStatic(1, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcValu0));
+    rig.WriteStatic(1, kVuPrfOp, PrfWord(0, 0, 0, 0));
+    rig.WriteStatic(1, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(128, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(1, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+    rig.WriteStatic(1, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(0, 8));
+    rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+    rig.Write(kVuMacroInstTrigger,
+              TriggerWord(1, 0, kVuTrigEventEn | (fence ? kVuTrigFence : 0)));
+    rig.Run(800);
+    return rig;
+  };
+  // Rig 析构会把时钟清掉，完成拍要在它还活着的时候抄出来。
+  uint64_t open_at = 0, fence_at = 0;
+  std::vector<float> open_got, fence_got;
+  {
+    Rig open = run(false);
+    ASSERT_EQ(open.sink->ats.size(), 2u);
+    open_at = open.sink->ats[1];
+    open_got = Fp32Of(open.stmem->Peek(kDstAddr, 128 * 4));
+    EXPECT_GT(open.vu->Profile().Counter(VuCounter::kStallDepCycle), 0u);
+    EXPECT_EQ(open.vu->IssueHolds(), 0u);
+  }
+  {
+    Rig fenced = run(true);
+    ASSERT_EQ(fenced.sink->ats.size(), 2u);
+    fence_at = fenced.sink->ats[1];
+    fence_got = Fp32Of(fenced.stmem->Peek(kDstAddr, 128 * 4));
+  }
+  EXPECT_LT(open_at, fence_at);
+  ASSERT_EQ(open_got.size(), fence_got.size());
+  for (size_t i = 0; i < open_got.size(); ++i) {
+    EXPECT_EQ(numeric::BitsOf(open_got[i]), numeric::BitsOf(fence_got[i])) << i;
+  }
 }
 
 TEST(Vu, FenceWaitsForAllPrior) {
@@ -1825,4 +1905,168 @@ TEST(Vu, IndependentGroupOverlapsLoad) {
   EXPECT_EQ(numeric::BitsOf(Fp32Of(overlapped.stmem->Peek(kDstAddr, 4))[0]),
             numeric::BitsOf(6.0f));
   EXPECT_EQ(both_cycles, lu_cycles);
+}
+
+// 下游不收时，读请求名额不还。32 笔占满之后第 33 笔发不出，要等最早回来的那一笔
+// 被消耗才放行。正常一路收的时候在途停在 14 拍附近，碰不到这道上限。
+TEST(Vu, LuReqDepthHoldsUntilConsumed) {
+  EnsureSlots();
+  ClockPtr clk = MakeClock(0, kPeriod);
+  auto cmem = std::make_shared<MemPort>(clk);
+  auto in = std::make_shared<VuUopsPort>(clk);
+  auto out = std::make_shared<VuFlowPort>(clk);
+  VuLu lu(clk, "lu");
+  lu.AttachIn(in);
+  lu.AttachOut(out);
+  lu.AttachCmem(cmem);
+  MemStub mem(clk, "mem", *cmem, 64 * 1024);
+
+  constexpr uint64_t kSegs = 40;
+  auto uops = std::make_shared<VuUops>();
+  uops->cfg.lu.Set(uint64_t(LuOp::kLdFp32));
+  uops->cfg.su.Set(uint64_t(SuOp::kStFp32));
+  uops->inst.dup.type_vl = uint32_t(TypeVlWord(kSegs * 32, false,
+                                               numeric::RoundMode::kRne));
+  uops->inst.dup.ld_addr = 0;
+  uops->inst.seq = 1;
+
+  struct Src : BachModule {
+    Src(ClockPtr c, VuUopsPort& p, std::shared_ptr<VuUops> u)
+        : BachModule(c, "src"), port(p), uops(std::move(u)) {}
+    void Step() override {
+      if (taken) {
+        port.Idle();
+        return;
+      }
+      port.Drive(uops, 1);
+      if (port.Ready()) taken = true;
+    }
+    VuUopsPort& port;
+    std::shared_ptr<VuUops> uops;
+    bool taken = false;
+  };
+  struct Sink : BachModule {
+    Sink(ClockPtr c, VuFlowPort& p) : BachModule(c, "sink"), port(p) {}
+    void Step() override {
+      // ready 下拍才被 LU 看到。收下这一拍仍要把 ready 留在 1，否则这一段不会被消耗。
+      bool take = port.Valid() && allow > 0 && port.Seq() != seen;
+      if (take) {
+        seen = port.Seq();
+        ++got;
+        --allow;
+      }
+      port.DriveReady(allow > 0 || take);
+    }
+    VuFlowPort& port;
+    uint64_t allow = 0, got = 0, seen = 0;
+  };
+
+  Src src(clk, *in, uops);
+  Sink sink(clk, *out);
+  // 同一只钟只能 Continue 一次。到点改 sink 能收几段，跑完再看记下的数。
+  struct Plan : BachModule {
+    Plan(ClockPtr c, MemStub& m, VuLu& l, Sink& s)
+        : BachModule(c, "plan"), mem(m), lu(l), sink(s) {}
+    void Step() override {
+      uint64_t now = CycleNow();
+      if (now == 200) {
+        full_reads = mem.reads;
+        full_out = lu.Outstanding();
+        full_stall = lu.StallCycles();
+        sink.allow = 1;
+      } else if (now == 220) {
+        one_reads = mem.reads;
+        one_out = lu.Outstanding();
+        one_got = sink.got;
+      } else if (now == 260) {
+        stayed_reads = mem.reads;
+        sink.allow = 40;
+      }
+    }
+    MemStub& mem;
+    VuLu& lu;
+    Sink& sink;
+    uint64_t full_reads = 0, full_out = 0, full_stall = 0;
+    uint64_t one_reads = 0, one_out = 0, one_got = 0, stayed_reads = 0;
+  };
+  Plan plan(clk, mem, lu, sink);
+
+  clk->Continue(420 * kPeriod);
+  RT::JoinAll();
+
+  EXPECT_EQ(plan.full_reads, kVuLuReqDepth);
+  EXPECT_EQ(plan.full_out, kVuLuReqDepth);
+  EXPECT_GT(plan.full_stall, 0u);
+  EXPECT_EQ(plan.one_reads, kVuLuReqDepth + 1);
+  EXPECT_EQ(plan.one_got, 1u);
+  EXPECT_EQ(plan.one_out, kVuLuReqDepth);
+  EXPECT_EQ(plan.stayed_reads, kVuLuReqDepth + 1);
+  EXPECT_EQ(mem.reads, kSegs);
+  EXPECT_EQ(sink.got, kSegs);
+  EXPECT_EQ(lu.Outstanding(), 0u);
+}
+
+// 组 2 的 LU 不读组 1 写的 VRF。读请求在组 1 退休前就发出去，VALU 仍等写回。
+TEST(Vu, LuIssuesAheadOfVrfRaw) {
+  constexpr uint64_t kN = 256;
+  constexpr uint64_t kY = 0x3000;
+  auto run = [](bool fence) {
+    Rig rig;
+    rig.ldmem->Poke(kSrcAddr, Fp32Bytes(std::vector<float>(kN, 1.5f)));
+    rig.ldmem->Poke(kY, Fp32Bytes(std::vector<float>(kN, 2.0f)));
+    rig.WriteStatic(1, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+    rig.WriteStatic(1, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
+    rig.WriteStatic(1, kVuPrfOp, PrfWord(kSrcLu, kSrcVsfu0, 0, 0));
+    rig.WriteStatic(1, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(kN, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(1, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+    rig.WriteStatic(1, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, 8));
+    rig.WriteStatic(2, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+    rig.WriteStatic(2, kVuValu0Op,
+                    OpWord(uint64_t(ValuOp::kFmulVv), kSrcVrfP0, kSrcVrfP1));
+    rig.WriteStatic(2, kVuValu1Op,
+                    OpWord(uint64_t(ValuOp::kFmulVv), kSrcValu0, kSrcLu));
+    rig.WriteStatic(2, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcValu1));
+    rig.WriteStatic(2, kVuPrfOp, PrfWord(0, 0, 0, 0));
+    rig.WriteStatic(2, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(kN, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(2, kVuStaticDupOffset + kVuLdAddr, kY);
+    rig.WriteStatic(2, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+    rig.WriteStatic(2, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(8, 0));
+    rig.Write(kVuMacroInstTrigger, TriggerWord(1, 0, kVuTrigEventEn));
+    rig.Write(kVuMacroInstTrigger,
+              TriggerWord(2, 0, kVuTrigEventEn | (fence ? kVuTrigFence : 0)));
+
+    struct Watch : BachModule {
+      Watch(ClockPtr c, MemPort& p, DoneSink& s)
+          : BachModule(c, "watch"), port(p), sink(s) {}
+      void Step() override {
+        if (port.req_valid.Get() != 0 && port.req_we.Get() == 0 &&
+            port.req_addr.Get() == kY && y_at == 0) {
+          y_at = CycleNow();
+        }
+        if (g1_done == 0 && !sink.ats.empty()) g1_done = sink.ats[0];
+      }
+      MemPort& port;
+      DoneSink& sink;
+      uint64_t y_at = 0, g1_done = 0;
+    };
+    Watch watch(rig.clk, *rig.ld, *rig.sink);
+    rig.Run(800);
+    return std::tuple<uint64_t, uint64_t, std::vector<float>>{
+        watch.y_at, watch.g1_done,
+        Fp32Of(rig.stmem->Peek(kDstAddr, kN * 4))};
+  };
+
+  auto open = run(false);
+  auto fenced = run(true);
+  EXPECT_GT(std::get<0>(open), 0u);
+  EXPECT_LT(std::get<0>(open), std::get<1>(open));
+  EXPECT_GE(std::get<0>(fenced), std::get<1>(fenced));
+  ASSERT_EQ(std::get<2>(open).size(), std::get<2>(fenced).size());
+  for (size_t i = 0; i < std::get<2>(open).size(); ++i) {
+    EXPECT_EQ(numeric::BitsOf(std::get<2>(open)[i]),
+              numeric::BitsOf(std::get<2>(fenced)[i]))
+        << i;
+  }
 }

@@ -20,6 +20,7 @@
 #include "base/log.h"
 #include "bach/ip/chip/core/vu/regfiles.h"
 #include "bach/ip/chip/core/vu/exe_base.h"
+#include "bach/ip/chip/core/vu/pipe_ctrl.h"
 #include "bach/ip/chip/core/vu/vu_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -139,9 +140,10 @@ class VuSmux : public BachModule {
 class VuDmux : public BachModule {
  public:
   VuDmux(ClockPtr clock, const std::string& name, VuRegfiles& rf,
-         uint64_t parent = 0, bool tick = true)
+         VuPipeCtrl& sb, uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         regs(rf),
+        pipe(sb),
         in(std::make_shared<VuFlowPort>(clock)),
         out(std::make_shared<VuFlowPort>(clock)),
         written(clock) {}
@@ -205,6 +207,7 @@ class VuDmux : public BachModule {
       VuOperand const& v = VuSrcOf(f, src);
       if (v.vec.empty()) continue;
       regs.WriteVrf(inst.VrfWt(p) + f.seg, v.vec, inst.Bf16(), inst.Round());
+      NoteEntries(inst.seq, inst.VrfWt(p) + f.seg, v.vec.size(), inst.Bf16(), true);
       ++write_cnt;
     }
 
@@ -213,6 +216,7 @@ class VuDmux : public BachModule {
       VuOperand const& m = VuSrcOf(f, mrf_src);
       if (!m.mask.empty()) {
         regs.WriteMrf(inst.MrfWt() + f.seg, m.mask, inst.Bf16());
+        NoteEntries(inst.seq, inst.MrfWt() + f.seg, m.mask.size(), inst.Bf16(), false);
         ++write_cnt;
       }
     }
@@ -226,6 +230,7 @@ class VuDmux : public BachModule {
     for (uint64_t p = 0; p < kVuSrfWtPorts; ++p) {
       if ((en & (1u << p)) == 0) continue;
       regs.WriteSrf(inst.SrfWt(p), srf_src[p]->scalar);
+      if (f.seg_last) pipe.NoteSrfWrite(inst.seq, inst.SrfWt(p));
       ++write_cnt;
     }
 
@@ -233,7 +238,18 @@ class VuDmux : public BachModule {
     if (c.su.Active()) f.su_in = VuSrcOf(f, c.su.src1);
   }
 
+  // 这一拍写进去的元素跨几个 entry，就逐个通知记分板。凑满这一格就摘掉。
+  void NoteEntries(uint64_t seq, uint64_t entry, uint64_t n, bool bf16, bool vrf) {
+    uint64_t per = bf16 ? 64 : 32;
+    uint64_t cnt = n == 0 ? 1 : (n + per - 1) / per;
+    for (uint64_t i = 0; i < cnt; ++i) {
+      if (vrf) pipe.NoteVrfWrite(seq, entry + i);
+      else pipe.NoteMrfWrite(seq, entry + i);
+    }
+  }
+
   VuRegfiles& regs;
+  VuPipeCtrl& pipe;
   std::shared_ptr<VuFlowPort> in, out;
   VuFlowPtr held;
   bool holding = false;

@@ -49,20 +49,21 @@ class Vu {
     pipe = std::make_unique<VuPipeCtrl>(clock, "pipe_ctrl", *cfg_reg, gid,
                                         false);
     lu = std::make_unique<VuLu>(clock, "lu", gid, false);
+    lu->BindScoreboard(*pipe);
     smux = std::make_unique<VuSmux>(clock, "smux", regs, gid, false);
     for (uint64_t i = 0; i < 3; ++i) {
       valu[i] = std::make_unique<VuValu>(clock, std::string("valu") + char('0' + i),
                                          i, gid, false);
     }
     vsfu = std::make_unique<VuVsfu>(clock, "vsfu", gid, false);
-    issue = std::make_unique<VuIssue>(clock, "issue", *smux, gid, false);
+    issue = std::make_unique<VuIssue>(clock, "issue", *smux, *pipe, gid, false);
     net = std::make_unique<VuVexeNet>(
         clock, "vexe",
         std::array<VuValu*, 3>{valu[0].get(), valu[1].get(), valu[2].get()},
         *vsfu, gid, false);
     mexe = std::make_unique<VuMexe>(clock, "mexe", gid, false);
     sexe = std::make_unique<VuSexe>(clock, "sexe", gid, false);
-    dmux = std::make_unique<VuDmux>(clock, "dmux", regs, gid, false);
+    dmux = std::make_unique<VuDmux>(clock, "dmux", regs, *pipe, gid, false);
     su = std::make_unique<VuSu>(clock, "su", gid, false);
     retire = std::make_unique<VuRetire>(clock, "retire", *cfg_reg, *isq,
                                         *pipe, gid, false);
@@ -104,6 +105,7 @@ class Vu {
   }
   VuIsq& Isq() { return *isq; }
   VuPipeCtrl& PipeCtrl() { return *pipe; }
+  uint64_t IssueHolds() const { return issue->Holds(); }
   VuProfile& Profile() { return *profile; }
   VuRetire& Retire() { return *retire; }
 

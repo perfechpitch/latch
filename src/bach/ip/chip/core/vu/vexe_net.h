@@ -17,6 +17,7 @@
 #include <string>
 
 #include "bach/ip/chip/core/vu/mux.h"
+#include "bach/ip/chip/core/vu/pipe_ctrl.h"
 #include "bach/ip/chip/core/vu/valu.h"
 #include "bach/ip/chip/core/vu/vsfu.h"
 #include "bach/ip/chip/core/vu/vu_latency.h"
@@ -28,12 +29,15 @@ namespace bach {
 // 一条宏指令拆成段，每拍送一段。RF 在这一拍读，与 LU 的读并行。
 class VuIssue : public BachModule {
  public:
-  VuIssue(ClockPtr clock, const std::string& name, VuSmux& mux,
+  VuIssue(ClockPtr clock, const std::string& name, VuSmux& mux, VuPipeCtrl& sb,
           uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
         smux(mux),
+        pipe(sb),
         in(std::make_shared<VuUopsPort>(clock)),
         out(std::make_shared<VuFlowPort>(clock)) {}
+
+  uint64_t Holds() const { return holds; }
 
   VuUopsPort& In() { return *in; }
   void AttachIn(std::shared_ptr<VuUopsPort> p) { in = std::move(p); }
@@ -94,7 +98,13 @@ class VuIssue : public BachModule {
     } else {
       f->seg_last = true;
     }
+    // 这一段用到的 4-entry 格还被前一条占着，先不读 RF。
+    if (!pipe.SegmentReady(*m.uops, m.next, m.split)) {
+      ++holds;
+      return;
+    }
     smux.LoadRf(*f);
+    pipe.NoteSegmentRead(*m.uops, m.next, m.split, f->seg_last);
     held = std::move(f);
     holding = true;
     out_seq = ++emit_seq;
@@ -103,12 +113,13 @@ class VuIssue : public BachModule {
   }
 
   VuSmux& smux;
+  VuPipeCtrl& pipe;
   std::shared_ptr<VuUopsPort> in;
   std::shared_ptr<VuFlowPort> out;
   std::deque<Macro> macros;
   VuFlowPtr held;
   bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0, emit_seq = 0;
+  uint64_t out_seq = 0, last_seq = 0, emit_seq = 0, holds = 0;
 };
 
 // 五个分组各自流水，汇合后交给 MEXE。

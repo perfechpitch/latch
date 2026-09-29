@@ -32,7 +32,7 @@ VU_SRC_VRF_P1 = 0x31
 
 MOE_SEG_INTER = 256
 VRF_X = 0
-VRF_SIG = 8          # ⌈MOE_SEG_INTER / 32⌉
+VRF_SIG = 256        # 写口 p1、读口 p0。x 在 p0 = 0
 
 
 def op_word(opcode, src1=0, src2=0):

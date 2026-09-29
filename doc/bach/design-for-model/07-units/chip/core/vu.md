@@ -280,7 +280,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F16 | 把宏指令展开成各执行单元的微指令 |
 | F16a | 一条宏指令描述的是「从哪读、经过哪些执行单元、写到哪」的一张完整**单向数据流图**，不是单条运算。pipe_ctrl 的职责是把这张图展开成各模块的微指令，并保证图上各级的启动次序与流控正确 |
 | F16b | 数据流图沿 `LU / 寄存器堆 → VEXE → MEXE / SEXE → SU / 寄存器堆` 单向推进，同一条宏指令内不允许回流；VEXE 一级**可以整级跳过**：MEXE 的源可取 VALU0 的掩码输出、也可取 LU 的 `ld.mask` 结果，SEXE 的源可取 VALU1 的归约输出、也可取 LU 的 `ld.s.fp32` 结果。计算一级也可整级跳过：`SU_op.SRC_SEL` 取 LU 的输出时，Load 的数据不经执行单元与寄存器堆直接写出 CM，构成 Load → Store 级联，此时要求 `SU_op.OPCODE` 与 `LU_op.OPCODE` 相同（即两侧数据类型一致）。**反向回喂不存在**：MEXE / SEXE 的输出不能当 VEXE 的源；算法上需要反向回喂时，由软件拆成两条宏指令、经寄存器堆传递并由 Scoreboard 保证次序 |
-| F17 | Scoreboard 对 VRF / MRF / SRF 实时读写状态追踪，检测 RAW / WAR / WAW |
+| F17 | Scoreboard 对 VRF / MRF / SRF 按 4 个 entry 一格记录在飞宏指令的读写，逐格比对 RAW / WAR / WAW。一格写进寄存器堆或被读走就摘掉，不必等整条退休。后一条用到的第一格还命中就推迟派发；后面的格在发射时再等，前面的段可以先算。不追踪 CM 地址 |
 | F18 | 重叠执行：前后宏指令无数据依赖、无执行资源冲突时，后续宏指令无需等前一条完全结束即可重叠发射微操作，最多两条相邻宏指令重叠 |
 | F19 | CM 访存依赖不追踪。存在冲突的宏指令之间须由软件置 `MACRO_INST_FENCE = 1`（等此前全部宏指令完成）或 `CM_FENCE = 1`（只等前序宏指令的 CM 访问——LU 读的数据已取回、SU 写已写响应齐——纯计算的前序不等待） |
 | F20 | 含 Vector 数据广播的宏指令必须置 `MACRO_INST_FENCE`：同一个源同时供给两个及以上消费者就是广播，消费者包括执行单元与寄存器堆写端口。广播由软件判定、硬件不检测 |
@@ -936,11 +936,13 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | 三条配置通路共享寄存器视图，流控独立 | F9 | `three_cfg_paths` |
 | status / macro_inst_left / Profile 软件写无效不报错 | F10 | `readonly_status` |
 | RF 后门通路与宏指令异步，由软件保证不冲突 | F11 | `rf_backdoor` |
-| Scoreboard 检测 RAW / WAR / WAW | F17 | `scoreboard_dep` |
+| Scoreboard 按 4 entry 检测 RAW / WAR / WAW，第一格写完即可派发 | F17 | `scoreboard_dep`、`ScoreboardLetsFirstFourEntriesStart` |
+| LU 不用那几格时读请求先发，发射级仍等第一格 | 取舍 | `LuIssuesAheadOfVrfRaw` |
 | 宏指令即数据流图，pipe_ctrl 展开成各模块微指令 | F16a | `LoadStoreRoundTrip` |
 | 单向数据流：可整级跳过，MEXE / SEXE 不能回喂 VEXE | F16b | pipe_ctrl 合法性检查（无单独用例） |
 | 最多两条相邻宏指令重叠 | F18 | `macro_overlap_two` |
 | 相邻两条的 LU 读接着发，最多两条同时在读 | F29a | `lu_read_overlap` |
+| LU 读请求最多 32 笔占着名额，数据被消耗才还 | 取舍 | `LuReqDepthHoldsUntilConsumed` |
 | 写响应齐后才退休 | F29b | `su_wait_write_rsp` |
 | VEXE 计算次序按取源关系排，互取成环置 CFG_ERROR | F40c | `vexe_order` |
 | CM 访存冲突硬件不追踪，靠 MACRO_INST_FENCE | F19 | `macro_inst_fence` |
@@ -995,6 +997,14 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 * **LU 出口排队取 4 段**
   * 设计给了重叠深度上限 2，没给 LU 交给下游之前能攒几段
   * 模型取 4 段，攒满就先不收下一条宏指令，免得后一条的读数把出口堆满、挡住前一条的尾段
+* **LU 不碰记分板挡住的那几格时，读请求先发**
+  * 整条宏指令的第一格还有 RAW / WAR / WAW 时，本来整条都不派发，LU 的读也跟着等
+  * LU 自己不读、不写那几格时，宏指令照样收下，CM 读先发；发射级等到第一格空出来再算。LU 自己要写的格仍然挡住整条
+  * 后一条已经在记分板上时，不挡前一条继续发射。等的是后一条
+* **LU 读请求缓冲取 32**
+  * 名额在读请求发出时占下，这一笔读回的数据被下游消耗才还，不是响应回到 LU 就还
+  * 下游一直不收时，先回来的数据仍占着名额，在途从 CM 的 14 拍继续往上涨，满 32 就停发。空出最早那一笔，才能发下一笔
+  * 这 32 笔和出口排队的 4 段是两回事：4 段只管先不收下一条宏指令，32 笔管这一条还能不能继续发读请求
 * **CM_FENCE 的等待条件按“带 CM 访问的前序宏指令退休”近似**
   * 硬件等的是前序那条的“LU 读数据已取回、SU 写已写响应齐”，不等它整条做完
   * 模型没有 CM 访问完成的逐条记录，只能等那条退休。比硬件严格一点，介于 `CM_FENCE` 与 `MACRO_INST_FENCE` 之间，两者仍可区分（纯计算的前序不等）

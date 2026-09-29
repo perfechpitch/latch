@@ -114,9 +114,9 @@ void PokeCoreData(Cmem& cm, Mmem& mm, Mu& mu, MoeCase const& want) {
 // ── VU 那一段：silu·dot·量化 ──
 //
 // 与 kernel_vu.c 的 task_vu_gate 同一张图，两条宏指令。
-// VL=256 的 FP32 占 8 个 entry：x 在 0，sigmoid(x) 在 8。
+// VL=256 的 FP32 占 8 个 entry：x 在 0，sigmoid(x) 在 256。
 constexpr uint64_t kVrfX = 0;
-constexpr uint64_t kVrfSig = 8;
+constexpr uint64_t kVrfSig = 256;
 
 uint64_t OpWord(uint64_t opcode, uint64_t src1 = 0, uint64_t src2 = 0) {
   return opcode | (src1 << 8) | (src2 << 16);
@@ -152,21 +152,20 @@ void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
   st(2, kVuStaticDupOffset + kVuTypeVl, TypeVlWord(vl));
 }
 
-// 一个专家两条：组 1 只读 fc1，组 2 读 fc3、写出 act。last 时只在第二条置
-// EVENT_EN。与 kernel_vu.c 的 task_vu_gate 同一种写法。
-void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red,
-              uint64_t e, bool last) {
-  uint64_t fc1 = red + e * kn::kPartStride;
-  uint64_t fc3 = red + (kn::kExperts + e) * kn::kPartStride;
-  uint64_t act = kn::kActOff + e * kn::kActStride;
-  q.push_back({kVuLdAddr, fc1});
+// 两个专家拼成两条：组 1 从 red 起读 512 个 fc1，组 2 从两个专家的 fc3 起点读，
+// 写到 act。VL 走动态寄存器。与 kernel_vu.c 的 task_vu_gate 同一种写法。
+void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red) {
+  uint64_t vl = kn::kSegInter * kn::kExperts;
+  q.push_back({kVuTypeVl, TypeVlWord(vl)});
+  q.push_back({kVuLdAddr, red});
   q.push_back({kVuMacroInstTrigger,
-               kVuMaskLdAddr | (1u << kVuTrigCfgIdxShift)});
-  q.push_back({kVuLdAddr, fc3});
-  q.push_back({kVuStAddr, act});
+               kVuMaskTypeVl | kVuMaskLdAddr | (1u << kVuTrigCfgIdxShift) |
+                   kVuTrigFence});
+  q.push_back({kVuLdAddr, red + kn::kExperts * kn::kPartStride});
+  q.push_back({kVuStAddr, kn::kActOff});
   q.push_back({kVuMacroInstTrigger,
-               kVuMaskLdAddr | kVuMaskStAddr | (2u << kVuTrigCfgIdxShift) |
-                   (last ? kVuTrigEventEn : 0)});
+               kVuMaskTypeVl | kVuMaskLdAddr | kVuMaskStAddr |
+                   (2u << kVuTrigCfgIdxShift) | kVuTrigEventEn});
 }
 
 // 按序把配置写发进去，看见 ready 才换下一笔。
@@ -258,10 +257,8 @@ class MoeRig : public BachModule {
       return;
     }
     if (stage == 2 && dones >= 2) {
-      // 这里没有归约：门控直接读本 core 自己的部分和。
-      for (uint64_t e = 0; e < kn::kExperts; ++e) {
-        GateFire(vq, kn::kFc1Off, e, e + 1 == kn::kExperts);
-      }
+      // 这里没有归约：门控直接读本 core 自己的部分和。两个专家拼成两条。
+      GateFire(vq, kn::kFc1Off);
       stage = 3;
       return;
     }
@@ -408,9 +405,7 @@ TEST(BachMoe, VuGateMatchesReference) {
 
     GateRig rig(clk, vu, cmem, cfg_port);
     GateSetup(rig.q);
-    for (uint64_t e = 0; e < kn::kExperts; ++e) {
-      GateFire(rig.q, red, e, e + 1 == kn::kExperts);
-    }
+    GateFire(rig.q, red);
     clk->Continue(40000 * kPeriod);
     RT::JoinAll();
     dones = rig.dones;

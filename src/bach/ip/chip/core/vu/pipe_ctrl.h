@@ -4,8 +4,13 @@
 // M3 · pipe_ctrl 展开与 Scoreboard。
 //
 // 把一条宏指令按静态配置展开成逐单元一条的微指令，同时查它与在飞宏指令之间有
-// 没有 RAW / WAR / WAW。追踪的粒度是 VRF / MRF / SRF 上的区间：一条宏指令读哪
-// 一段、写哪一段由各端口的索引寄存器与 VL 算得出，重叠就等。
+// 没有 RAW / WAR / WAW。VRF / MRF / SRF 按 4 个 entry 一格记账、逐格比对。一格
+// 写进寄存器堆就从记分板上摘掉，读走也一样，不必等整条宏指令退休。后一条用到
+// 的第一格还命中就先不派发；后面的格在发射时再等，前面的段可以先算。
+//
+// LU 自己不用那几格时，读请求不必等这次派发：宏指令照样收下，LU 先发 CM 读，
+// 发射级等到第一格空出来再开工。LU 自己要写的格仍然挡住整条，免得写回抢到
+// 前一条的读前面去。
 //
 // 三件事不归 Scoreboard 管：
 //   CM 访存依赖不追踪，有冲突的宏指令之间由软件置 MACRO_INST_FENCE（等此前全部
@@ -48,30 +53,71 @@ struct VuSpan {
   }
 };
 
-// 一条宏指令在三块 RF 上的读写足迹。每块可能有几个端口各占一段，所以是一组段
-// 而不是一段：VRF 2 读 2 写、MRF 2 读 1 写、SRF 8 读 6 写。
+// 记分板上的一格：4 个 entry 对齐。last 是这条宏指令在这格里真正用到的最后一个
+// entry，访问到它这格就摘掉。head 是这段的第一格，派发时只看它。
+struct VuSlot {
+  uint64_t align = 0;
+  uint64_t last = 0;
+  bool head = false;
+};
+
+// 一条宏指令在三块 RF 上的读写足迹。每块可能有几个端口各占几格：VRF 2 读 2 写、
+// MRF 2 读 1 写、SRF 8 读 6 写。同一格里的 entry 即使区间没有交叠也算命中。
 struct VuFootprint {
-  std::vector<VuSpan> vrf_rd, vrf_wr;
-  std::vector<VuSpan> mrf_rd, mrf_wr;
-  std::vector<VuSpan> srf_rd, srf_wr;
+  std::vector<VuSlot> vrf_rd, vrf_wr;
+  std::vector<VuSlot> mrf_rd, mrf_wr;
+  std::vector<VuSlot> srf_rd, srf_wr;
   bool cm_load = false;
 
-  static bool Any(std::vector<VuSpan> const& a, std::vector<VuSpan> const& b) {
-    for (VuSpan const& x : a) {
-      for (VuSpan const& y : b) {
-        if (x.Overlap(y)) return true;
+  static void Add(std::vector<VuSlot>& out, uint64_t base, uint64_t count) {
+    if (count == 0) return;
+    uint64_t end = base + count;
+    bool head = true;
+    for (uint64_t a = (base / kVuScoreboardGrain) * kVuScoreboardGrain; a < end;
+         a += kVuScoreboardGrain) {
+      uint64_t hi = a + kVuScoreboardGrain;
+      if (hi > end) hi = end;
+      uint64_t last = hi - 1;
+      if (last < base) last = base;
+      out.push_back(VuSlot{a, last, head});
+      head = false;
+    }
+  }
+
+  static bool Hit(std::vector<VuSlot> const& a, std::vector<VuSlot> const& b,
+                  bool head_only) {
+    for (VuSlot const& x : a) {
+      if (head_only && !x.head) continue;
+      for (VuSlot const& y : b) {
+        if (x.align == y.align) return true;
       }
     }
     return false;
   }
 
-  bool Conflict(VuFootprint const& o) const {
-    // RAW：本条读别人写的；WAR：本条写别人读的；WAW：两条写同一段。
-    return Any(vrf_rd, o.vrf_wr) || Any(vrf_wr, o.vrf_rd) ||
-           Any(vrf_wr, o.vrf_wr) || Any(mrf_rd, o.mrf_wr) ||
-           Any(mrf_wr, o.mrf_rd) || Any(mrf_wr, o.mrf_wr) ||
-           Any(srf_rd, o.srf_wr) || Any(srf_wr, o.srf_rd) ||
-           Any(srf_wr, o.srf_wr);
+  static bool Covers(std::vector<VuSlot> const& slots, uint64_t entry) {
+    uint64_t a = (entry / kVuScoreboardGrain) * kVuScoreboardGrain;
+    for (VuSlot const& s : slots) {
+      if (s.align == a) return true;
+    }
+    return false;
+  }
+
+  static void Release(std::vector<VuSlot>& slots, uint64_t entry) {
+    uint64_t a = (entry / kVuScoreboardGrain) * kVuScoreboardGrain;
+    for (auto it = slots.begin(); it != slots.end();) {
+      if (it->align == a && entry == it->last) it = slots.erase(it);
+      else ++it;
+    }
+  }
+
+  // 派发只看每段的第一格。后面的格留给发射级，按段再等。
+  bool HeadConflict(VuFootprint const& o) const {
+    return Hit(vrf_rd, o.vrf_wr, true) || Hit(vrf_wr, o.vrf_rd, true) ||
+           Hit(vrf_wr, o.vrf_wr, true) || Hit(mrf_rd, o.mrf_wr, true) ||
+           Hit(mrf_wr, o.mrf_rd, true) || Hit(mrf_wr, o.mrf_wr, true) ||
+           Hit(srf_rd, o.srf_wr, true) || Hit(srf_wr, o.srf_rd, true) ||
+           Hit(srf_wr, o.srf_wr, true);
   }
 };
 
@@ -90,6 +136,33 @@ class VuPipeCtrl : public BachModule {
   void AttachIn(std::shared_ptr<VuInstPort> p) { in = std::move(p); }
   VuUopsPort& Out() { return *out; }
   void AttachOut(std::shared_ptr<VuUopsPort> p) { out = std::move(p); }
+
+  // 一格里这条宏指令用到的最后一个 entry 写进 RF，或被读走，这格就摘掉。
+  void NoteVrfWrite(uint64_t seq, uint64_t entry) { Note(seq, &VuFootprint::vrf_wr, entry); }
+  void NoteMrfWrite(uint64_t seq, uint64_t entry) { Note(seq, &VuFootprint::mrf_wr, entry); }
+  void NoteSrfWrite(uint64_t seq, uint64_t entry) { Note(seq, &VuFootprint::srf_wr, entry); }
+  void NoteVrfRead(uint64_t seq, uint64_t entry) { Note(seq, &VuFootprint::vrf_rd, entry); }
+  void NoteMrfRead(uint64_t seq, uint64_t entry) { Note(seq, &VuFootprint::mrf_rd, entry); }
+  void NoteSrfRead(uint64_t seq, uint64_t entry) { Note(seq, &VuFootprint::srf_rd, entry); }
+
+  // 这一段要读、要写的 entry 还被别的在飞宏指令占着，发射级就先别送。
+  // split 为假时这一拍读完整条，每一格都要空。
+  bool SegmentReady(VuUops const& u, uint64_t seg, bool split) const {
+    return ReadySpan(u, seg, split, true);
+  }
+  // 第一格已经不被别的在飞宏指令占着。LU 提前发读时，用它决定何时交给发射级。
+  bool IssueReady(VuUops const& u) const {
+    VuFootprint fp = FootprintOf(u.inst, u.cfg);
+    for (LiveInst const& l : live) {
+      if (l.seq == u.inst.seq) continue;
+      if (fp.HeadConflict(l.fp)) return false;
+    }
+    return true;
+  }
+  // 这一拍实际读到的 entry。SRF 整条都用同一个标量，最后一段读完才摘。
+  void NoteSegmentRead(VuUops const& u, uint64_t seg, bool split, bool last) {
+    Touch(u, seg, split, true, last);
+  }
 
   // M9 退休时把这一条的足迹从 Scoreboard 上摘掉。
   void Retire(uint64_t seq) {
@@ -210,10 +283,17 @@ class VuPipeCtrl : public BachModule {
     if (inst->fence && !live.empty()) return Stall(fence_stall);
     // 2. CM_FENCE：等前序宏指令的 CM 访问做完才派发，纯计算的前序不等待。
     if (inst->cm_fence && AnyCmPending()) return Stall(cmfence_stall);
-    // 3. Scoreboard：与任何一条在飞的有 RAW / WAR / WAW 就等。
+    // 3. Scoreboard：第一格与任何一条在飞的有 RAW / WAR / WAW 就等。
+    // 后面的格不挡派发，发射级按段再等。冲突的格 LU 自己不用时，读请求先发，
+    // 发射级继续等。
+    bool dep = false;
     for (auto const& l : live) {
-      if (fp.Conflict(l.fp)) return Stall(dep_stall);
+      if (fp.HeadConflict(l.fp)) {
+        dep = true;
+        break;
+      }
     }
+    if (dep && !LuLeads(*inst, cfg)) return Stall(dep_stall);
     // 4. 执行分组结构冒险：同一个单元被两条在飞的宏指令同时要。
     for (auto const& l : live) {
       if (l.units & UnitsOf(cfg)) return Stall(eu_stall);
@@ -242,6 +322,7 @@ class VuPipeCtrl : public BachModule {
     uops->units = UnitsOf(cfg);
     uops->inf_replace = uint32_t(cfg_reg.InfReplaceValue());
     uops->nan_replace = uint32_t(cfg_reg.NanReplaceValue());
+    uops->hold_issue = dep;
 
     // CM 访问：LU 读或 SU 写都算，CM_FENCE 要等的是这些。
     live.push_back({inst->seq, fp, uops->units, fp.cm_load || VuSuOn(cfg)});
@@ -284,8 +365,31 @@ class VuPipeCtrl : public BachModule {
     return m;
   }
 
-  // 这一条读写哪几段。VRF / MRF 的占用是从索引起 ⌈VL ÷ 每 entry 元素数⌉ 个连续
-  // entry，SRF 一个索引一个 entry。
+  // 这一条读写哪几格。VRF / MRF 从索引起 ⌈VL ÷ 每 entry 元素数⌉ 个连续 entry，
+  // 按 4 个 entry 对齐成格。SRF 一个索引一个 entry，同样并进 4 entry 的格。
+  // LU 提前发读的条件：这条在读 CM，并且它自己要写的格没有撞上在飞的足迹。
+  // 别的单元用的 VRF / MRF / SRF 不挡读请求。
+  bool LuLeads(VuMacroInst const& inst, VuStaticCfg const& cfg) const {
+    if (!VuLuOn(cfg)) return false;
+    VuFootprint mine;
+    uint64_t entries = inst.Entries();
+    for (uint64_t p = 0; p < 2; ++p) {
+      if (cfg.VrfWtSrc(p) == kSrcLu) {
+        VuFootprint::Add(mine.vrf_wr, inst.VrfWt(p), entries);
+      }
+    }
+    if (cfg.MrfWtSrc() == kSrcLu) {
+      VuFootprint::Add(mine.mrf_wr, inst.MrfWt(), entries);
+    }
+    if ((cfg.SrfWtEn() & 1u) != 0) {
+      VuFootprint::Add(mine.srf_wr, inst.SrfWt(0), 1);
+    }
+    for (auto const& l : live) {
+      if (mine.HeadConflict(l.fp)) return false;
+    }
+    return true;
+  }
+
   static VuFootprint FootprintOf(VuMacroInst const& inst,
                                  VuStaticCfg const& cfg) {
     VuFootprint fp;
@@ -293,25 +397,125 @@ class VuPipeCtrl : public BachModule {
 
     for (uint64_t p = 0; p < 2; ++p) {
       if (VuUsesSrc(cfg, kSrcVrfP0 + p)) {
-        fp.vrf_rd.push_back({inst.VrfRd(p), entries});
+        VuFootprint::Add(fp.vrf_rd, inst.VrfRd(p), entries);
       }
       if (cfg.VrfWtSrc(p) != kSrcNone) {
-        fp.vrf_wr.push_back({inst.VrfWt(p), entries});
+        VuFootprint::Add(fp.vrf_wr, inst.VrfWt(p), entries);
       }
-      if (VuUsesMrfPort(cfg, p)) fp.mrf_rd.push_back({inst.MrfRd(p), entries});
+      if (VuUsesMrfPort(cfg, p)) {
+        VuFootprint::Add(fp.mrf_rd, inst.MrfRd(p), entries);
+      }
     }
-    if (cfg.MrfWtSrc() != kSrcNone) fp.mrf_wr.push_back({inst.MrfWt(), entries});
+    if (cfg.MrfWtSrc() != kSrcNone) {
+      VuFootprint::Add(fp.mrf_wr, inst.MrfWt(), entries);
+    }
 
     for (uint64_t p = 0; p < kVuSrfRdPorts; ++p) {
-      if (VuUsesSrc(cfg, kSrcSrfP0 + p)) fp.srf_rd.push_back({inst.SrfRd(p), 1});
+      if (VuUsesSrc(cfg, kSrcSrfP0 + p)) VuFootprint::Add(fp.srf_rd, inst.SrfRd(p), 1);
     }
     uint64_t en = cfg.SrfWtEn();
     for (uint64_t p = 0; p < kVuSrfWtPorts; ++p) {
-      if (en & (1u << p)) fp.srf_wr.push_back({inst.SrfWt(p), 1});
+      if (en & (1u << p)) VuFootprint::Add(fp.srf_wr, inst.SrfWt(p), 1);
     }
 
     fp.cm_load = VuLuOn(cfg);
     return fp;
+  }
+
+  using SlotList = std::vector<VuSlot> VuFootprint::*;
+
+  void Note(uint64_t seq, SlotList which, uint64_t entry) {
+    for (LiveInst& l : live) {
+      if (l.seq != seq) continue;
+      VuFootprint::Release(l.fp.*which, entry);
+      return;
+    }
+  }
+
+  // 只看更早的宏指令。后一条先派发进来时，它的足迹不能反过来挡住前一条：
+  // RAW / WAR / WAW 都是后一条等。
+  bool OtherHolds(uint64_t seq, SlotList which, uint64_t entry) const {
+    for (LiveInst const& l : live) {
+      if (l.seq >= seq) continue;
+      if (VuFootprint::Covers(l.fp.*which, entry)) return true;
+    }
+    return false;
+  }
+
+  // 读：别人还写着这格。写：别人还读着或写着这格。
+  bool EntryFree(uint64_t seq, SlotList rd, SlotList wr, uint64_t entry,
+                 bool reading) const {
+    if (reading) return !OtherHolds(seq, wr, entry);
+    return !OtherHolds(seq, rd, entry) && !OtherHolds(seq, wr, entry);
+  }
+
+  bool ReadySpan(VuUops const& u, uint64_t seg, bool split, bool reading_side) const {
+    (void)reading_side;
+    VuMacroInst const& inst = u.inst;
+    VuStaticCfg const& cfg = u.cfg;
+    uint64_t n = split ? 1 : inst.Entries();
+    uint64_t base_seg = split ? seg : 0;
+    for (uint64_t i = 0; i < n; ++i) {
+      uint64_t at = base_seg + i;
+      for (uint64_t p = 0; p < 2; ++p) {
+        if (VuUsesSrc(cfg, kSrcVrfP0 + p) &&
+            !EntryFree(inst.seq, &VuFootprint::vrf_rd, &VuFootprint::vrf_wr,
+                       inst.VrfRd(p) + at, true)) {
+          return false;
+        }
+        if (cfg.VrfWtSrc(p) != kSrcNone &&
+            !EntryFree(inst.seq, &VuFootprint::vrf_rd, &VuFootprint::vrf_wr,
+                       inst.VrfWt(p) + at, false)) {
+          return false;
+        }
+        if (VuUsesMrfPort(cfg, p) &&
+            !EntryFree(inst.seq, &VuFootprint::mrf_rd, &VuFootprint::mrf_wr,
+                       inst.MrfRd(p) + at, true)) {
+          return false;
+        }
+      }
+      if (cfg.MrfWtSrc() != kSrcNone &&
+          !EntryFree(inst.seq, &VuFootprint::mrf_rd, &VuFootprint::mrf_wr,
+                     inst.MrfWt() + at, false)) {
+        return false;
+      }
+    }
+    for (uint64_t p = 0; p < kVuSrfRdPorts; ++p) {
+      if (VuUsesSrc(cfg, kSrcSrfP0 + p) &&
+          !EntryFree(inst.seq, &VuFootprint::srf_rd, &VuFootprint::srf_wr,
+                     inst.SrfRd(p), true)) {
+        return false;
+      }
+    }
+    uint64_t en = cfg.SrfWtEn();
+    for (uint64_t p = 0; p < kVuSrfWtPorts; ++p) {
+      if ((en & (1u << p)) &&
+          !EntryFree(inst.seq, &VuFootprint::srf_rd, &VuFootprint::srf_wr,
+                     inst.SrfWt(p), false)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void Touch(VuUops const& u, uint64_t seg, bool split, bool read, bool last) {
+    (void)read;
+    VuMacroInst const& inst = u.inst;
+    VuStaticCfg const& cfg = u.cfg;
+    uint64_t n = split ? 1 : inst.Entries();
+    uint64_t base_seg = split ? seg : 0;
+    for (uint64_t i = 0; i < n; ++i) {
+      uint64_t at = base_seg + i;
+      for (uint64_t p = 0; p < 2; ++p) {
+        if (VuUsesSrc(cfg, kSrcVrfP0 + p)) NoteVrfRead(inst.seq, inst.VrfRd(p) + at);
+        if (VuUsesMrfPort(cfg, p)) NoteMrfRead(inst.seq, inst.MrfRd(p) + at);
+      }
+    }
+    if (!split || last) {
+      for (uint64_t p = 0; p < kVuSrfRdPorts; ++p) {
+        if (VuUsesSrc(cfg, kSrcSrfP0 + p)) NoteSrfRead(inst.seq, inst.SrfRd(p));
+      }
+    }
   }
 
   // 起始索引 + 占用 entry 数越过 RF 上界：硬件回绕到 entry 0 继续访问以保证流水

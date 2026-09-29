@@ -21,11 +21,11 @@ inline void PreloadVuGroup(Vu& vu, uint64_t group, uint64_t off,
 }
 
 // 组 1/2：VL = 256 FP32，x 在 entry 0，
-// sigmoid 在 entry 8。MXFP8 scale 向下取整。
+// sigmoid 在 entry 256（写口 p1、读口 p0）。MXFP8 scale 向下取整。
 inline void PreloadVuGate(Vu& vu) {
   uint64_t const type_vl = 256;
-  uint64_t const vrf_wt = (8u << 16) | 0u;
-  uint64_t const vrf_rd = 8u;
+  uint64_t const vrf_wt = (256u << 16) | 0u;
+  uint64_t const vrf_rd = 256u;
   PreloadVuGroup(vu, 1, kVuLuOp, VuMoeOpWord(uint64_t(LuOp::kLdBf16)));
   PreloadVuGroup(vu, 1, kVuVsfuOp,
                  VuMoeOpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));

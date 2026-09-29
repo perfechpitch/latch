@@ -37,9 +37,10 @@ TASK void task_vu_compute(void) {
 
 /* ===== dot core：silu·dot·量化 =====
  *
- * 收成两条宏指令。组 0 留给
- * task_vu_compute，这里用组 1 / 组 2。VL = MOE_SEG_INTER（256）个 FP32，
- * 一个 VRF entry 装 32 个，x 占 entry 0，sigmoid(x) 占 entry 8。
+ * 收成两条宏指令，两个专家拼在一起。组 0 留给
+ * task_vu_compute，这里用组 1 / 组 2。VL = MOE_SEG_INTER * MOE_EXPERTS
+ * （512）个 FP32，一个 VRF entry 装 32 个，x 占 entry 0 起的 16 个，
+ * sigmoid(x) 占 entry 256。
  *
  *   组 1  LU 读 fc1（x）→ 写入 VRF_WT_P0，同时 bypass 进 VSFU 出 sigmoid
  *         → 写入 VRF_WT_P1。一条里 LU 同时供两处，模型没有 DATA_BROADCAST 位，
@@ -50,12 +51,13 @@ TASK void task_vu_compute(void) {
  *
  * MXFP8_SCALE_ROUND 保持 0（向下取整），与参考向量一致。参考那份把自己的
  * 黄金比对配成向上取整，这里不对齐那一位。
- * 两条之间是 VRF 上的 RAW，记分板会串起来，不必再置 MACRO_INST_FENCE。 */
+ * 两条之间是 VRF 上的 RAW，记分板按 4 个 entry 串起来，不必再置
+ * MACRO_INST_FENCE。 */
 
 #if 0
 /* 组 1/2 改由 bundle VUSTATIC 在装载时写，不再每个 token 重配。 */
 #define VRF_X    0u
-#define VRF_SIG  8u   /* ⌈VL / 32⌉，VL = MOE_SEG_INTER */
+#define VRF_SIG  256u /* 写口 p1、读口 p0。x 在 p0 = 0 */
 
 static void vu_static(u32 group, u32 off, u32 data) {
   dsa_write(vu_static_group(group) + off, data);
@@ -90,36 +92,32 @@ static void gate_setup(void) {
 }
 #endif
 
-/* 发一条宏指令。mask 里置位的地址走动态副本。event_en 只给本 task 最后一条。
- * fence 等此前全部宏做完再派发。 */
-static void vu_fire(u32 group, u32 ld, u32 st, u32 mask, u32 event_en,
-                    u32 fence) {
-  if (mask & VU_MASK_LD_ADDR) dsa_write(VU_LD_ADDR, ld);
-  if (mask & VU_MASK_ST_ADDR) dsa_write(VU_ST_ADDR, st);
-  dsa_write(VU_MACRO_INST_TRIGGER,
-            mask | (group << VU_CONFIG_IDX_SHIFT)
-                | (event_en ? VU_EVENT_EN : 0u)
-                | (fence ? VU_MACRO_INST_FENCE : 0u));
-}
-
-/* 每个专家一份：silu(fc1)·fc3，量化成 MXFP8 作为 FC2 输入。
+/* 两个专家拼成两条宏指令：silu(fc1)·fc3，量化成 MXFP8 作为 FC2 输入。
  *
- * 组 1 只动态化 LD（fc1）；组 2 动态化 LD（fc3）与 ST（act）。只在本 task
- * 最后一个专家的组 2 置 EVENT_EN。TASK_RECV_UNIT 配 DSA（只等 DSA）：写完最后
- * 一条 trigger 就 task_done(0) 交还，TS 等最后一条退休的 dsa_done。 */
+ * fc1、fc3 各专家 256 个 BF16，stride 正好接上，所以各读一次 512 个。act 各
+ * 256 个 MXFP8，同样接在一起，写出一次。TYPE_VL 走动态：VL = MOE_SEG_INTER *
+ * MOE_EXPERTS，FP32、RNE。组 1 再动态化 LD（两个专家的 fc1），并置
+ * MACRO_INST_FENCE。组 2 再动态化 LD（两个专家的 fc3）与 ST（act），置
+ * EVENT_EN。TASK_RECV_UNIT 配 DSA（只等 DSA）：写完这条 trigger 就
+ * task_done(0) 交还，TS 等它退休的 dsa_done。 */
 TASK void task_vu_gate(void) {
   u32 base = CMEM_STREAM_BASE + stream_id() * CMEM_STREAM_STRIDE;
   u32 red = base + MOE_RED_OFF + MOE_SW_HEAD_BYTES;
-  u32 e;
+  u32 act = base + MOE_ACT_OFF;
   /* gate_setup(); 静态组由 bundle VUSTATIC / PreloadVuGate 写 */
-  for (e = 0; e < MOE_EXPERTS; ++e) {
-    u32 fc1 = red + e * MOE_PART_STRIDE;
-    u32 fc3 = red + (MOE_EXPERTS + e) * MOE_PART_STRIDE;
-    u32 act = base + MOE_ACT_OFF + e * MOE_ACT_STRIDE;
-    u32 last = (e + 1u == MOE_EXPERTS);
-    vu_fire(1, fc1, 0, VU_MASK_LD_ADDR, 0, 0);
-    vu_fire(2, fc3, act, VU_MASK_LD_ADDR | VU_MASK_ST_ADDR, last, 0);
-  }
+  /* FP32、RNE、不做 NaN/Inf 替换，这几位都是 0，寄存器值就是 VL。 */
+  dsa_write(VU_TYPE_VL, MOE_SEG_INTER * MOE_EXPERTS);
+
+  dsa_write(VU_LD_ADDR, red);
+  dsa_write(VU_MACRO_INST_TRIGGER,
+            (VU_MASK_TYPE_VL | VU_MASK_LD_ADDR) | (1u << VU_CONFIG_IDX_SHIFT) |
+                VU_MACRO_INST_FENCE);
+
+  dsa_write(VU_LD_ADDR, red + MOE_EXPERTS * MOE_PART_STRIDE);
+  dsa_write(VU_ST_ADDR, act);
+  dsa_write(VU_MACRO_INST_TRIGGER,
+            (VU_MASK_TYPE_VL | VU_MASK_LD_ADDR | VU_MASK_ST_ADDR) |
+                (2u << VU_CONFIG_IDX_SHIFT) | VU_EVENT_EN);
   task_done(0);
 }
 

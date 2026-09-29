@@ -16,9 +16,16 @@
 //
 // 14 拍的访问延迟由 Core Mem 那一侧给，本级只按 valid/ready 收发。
 //
+// 读请求最多同时占 kVuLuReqDepth 个名额。名额在发出那一拍占下，要等这一笔读回
+// 的数据被下游消耗才还，不是等响应回到本级。下游一直不收时，先回来的那十几笔
+// 仍占着名额，后面继续发，凑满 32 就停；空出最早那一笔，才能再发下一笔。
+//
 // 不读 LU 的执行分组不必等这次读回来。收下宏指令时把同一份微指令从 issued 口
 // 交给发射级，RF 源和只依赖 RF 的分组可以先走；读回来的段从数据口交给
 // VuVexeNet，按段号并进已经在飞的那一份。
+//
+// 记分板挡的是别的单元要用的寄存器、LU 自己不用时，读请求先发。微指令先压着，
+// 等第一格空出来再交给发射级，VALU 不会提前去读还没写完的 VRF。
 
 #include <deque>
 #include <memory>
@@ -28,6 +35,7 @@
 #include "base/log.h"
 #include "bach/common/numeric/mx.h"
 #include "bach/ip/chip/core/ports.h"
+#include "bach/ip/chip/core/vu/pipe_ctrl.h"
 #include "bach/ip/chip/core/vu/vu_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -54,14 +62,18 @@ class VuLu : public BachModule {
   void AttachIssued(std::shared_ptr<VuUopsPort> p) { issued = std::move(p); }
   MemPort& Cmem() { return *cmem; }
   void AttachCmem(std::shared_ptr<MemPort> p) { cmem = std::move(p); }
+  // 提前发读时问记分板：第一格空了才把微指令交给发射级。
+  void BindScoreboard(VuPipeCtrl& sb) { scoreboard = &sb; }
 
   uint64_t Beats() const { return beat_cnt; }
   uint64_t BusyCycles() const { return busy_cnt; }
-  // CM 端口反压住本级的拍数。
+  // 读请求发不出去的拍数：CM 口没准备好，或 32 个名额都还被没消耗的数据占着。
   uint64_t StallCycles() const { return stall_cnt; }
+  // 已发出、数据还没被下游消耗的读请求。
+  uint64_t Outstanding() const { return occupied; }
   bool Quiescent() const override {
     return ctxs.empty() && !holding && ready_q.empty() && issued_q.empty() &&
-           !issued_hold;
+           hold_q.empty() && !issued_hold && occupied == 0;
   }
 
  protected:
@@ -71,6 +83,7 @@ class VuLu : public BachModule {
     Drain();
     Collect();
     Issue();
+    ReleaseIssue();
     Accept();
     DriveIssued();
     if (!mem_used) cmem->IdleReq();
@@ -91,7 +104,16 @@ class VuLu : public BachModule {
     // 分段走的那一档：一段多少元素、在 CM 上多少字节、共几段、已经交出去几段。
     // seg_len 为 0 表示本条不分段。
     uint64_t seg_len = 0, seg_bytes = 0, seg_total = 1, seg_done = 0;
+    // 已经记到出口段上、等那段被消耗时再还的请求数。
+    uint64_t credited = 0;
     std::vector<uint8_t> buf, scale_buf;
+  };
+
+  // 出口上的一段，以及它交出去时要还的读请求名额。一段往往还掉一笔；头尾跨在
+  // 128 B 块中间时，还掉的是这一段刚好用完的那些块。
+  struct OutItem {
+    VuFlowPtr flow;
+    uint64_t credits = 0;
   };
 
   // 攒好的段排队往下发，一拍一个。下游没收下就原样压着。
@@ -101,8 +123,11 @@ class VuLu : public BachModule {
       out->Drive(held, out_seq);
       return;
     }
+    LOGCHECK(occupied >= held_credits, "VuLu: 还掉的读请求比占着的多。");
+    occupied -= held_credits;
     holding = false;
     held = VuFlowPtr();
+    held_credits = 0;
     PumpQueue();
   }
 
@@ -128,7 +153,8 @@ class VuLu : public BachModule {
     auto flow = std::make_shared<VuFlow>();
     flow->uops = *uops;
 
-    HandOff(uops);
+    if (uops->hold_issue) hold_q.push_back(uops);
+    else HandOff(uops);
     if (!uops->cfg.lu.Active()) {
       // 本条不读 CM。数据通路上不发空段，发射级自己按 VL 分段。
       return;
@@ -140,6 +166,14 @@ class VuLu : public BachModule {
   // ready 是上一拍的：本拍第一次 Drive 的不能当拍丢掉。
   void HandOff(std::shared_ptr<VuUops> uops) {
     issued_q.push_back(std::move(uops));
+  }
+
+  // 读已经在发。发射级用的寄存器还被占着，就继续压着这份微指令。
+  void ReleaseIssue() {
+    if (hold_q.empty() || scoreboard == nullptr) return;
+    if (!scoreboard->IssueReady(*hold_q.front())) return;
+    HandOff(hold_q.front());
+    hold_q.pop_front();
   }
 
   void DriveIssued() {
@@ -202,7 +236,8 @@ class VuLu : public BachModule {
     if (ctxs.empty()) return;
     Ctx& c = ctxs.back();
     if (c.sent >= c.blocks) return;
-    if (!cmem->Ready()) {
+    // 名额要等这一笔的数据被消耗才还。满了就停在这一笔上，下拍再试。
+    if (occupied >= kVuLuReqDepth || !cmem->Ready()) {
       ++stall_cnt;
       return;
     }
@@ -210,7 +245,19 @@ class VuLu : public BachModule {
     cmem->Read(c.base + c.sent * kVuVrfEntryBytes, kVuVrfEntryBytes, need_scale);
     mem_used = true;
     ++c.sent;
+    ++occupied;
     ++beat_cnt;
+  }
+
+  // 缓冲里 [0, to) 这些字节已经做进即将交出去的段。整块用完的请求记到这段上，
+  // 最后一段把尾巴上没铺满的那一块也还掉。
+  uint64_t CreditsOf(Ctx& c, uint64_t to, bool last) {
+    uint64_t end = last ? c.blocks : to / kVuVrfEntryBytes;
+    if (end > c.blocks) end = c.blocks;
+    if (end < c.credited) end = c.credited;
+    uint64_t n = end - c.credited;
+    c.credited = end;
+    return n;
   }
 
   // 响应按发出的次序回来：记到最早那条还没收齐的上。
@@ -247,7 +294,8 @@ class VuLu : public BachModule {
     }
     c.flow->seg_len = c.flow->uops.inst.Vl();
     Convert(c.flow, body, c);
-    ready_q.push_back(c.flow);
+    ready_q.push_back({c.flow, CreditsOf(c, c.buf.size(), true)});
+    LOGCHECK(c.credited == c.blocks, "VuLu: 整条都交出去了，读请求名额没记全。");
     ctxs.pop_front();
     PumpQueue();
   }
@@ -276,18 +324,23 @@ class VuLu : public BachModule {
       std::vector<uint8_t> body;
       if (from < to) body.assign(c.buf.begin() + from, c.buf.begin() + to);
       Convert(seg, body, c);
-      ready_q.push_back(seg);
+      ready_q.push_back({seg, CreditsOf(c, to, last)});
       ++c.seg_done;
     }
-    if (c.seg_done >= c.seg_total) ctxs.pop_front();
+    if (c.seg_done >= c.seg_total) {
+      LOGCHECK(c.credited == c.blocks, "VuLu: 段都交出去了，读请求名额没记全。");
+      ctxs.pop_front();
+    }
     PumpQueue();
   }
 
   // 队首没人压着就立刻发一个出去。
   void PumpQueue() {
     if (holding || ready_q.empty()) return;
-    held = ready_q.front();
+    OutItem item = std::move(ready_q.front());
     ready_q.pop_front();
+    held = std::move(item.flow);
+    held_credits = item.credits;
     holding = true;
     out_seq = ++emit_seq;
     out->Drive(held, out_seq);
@@ -363,16 +416,21 @@ class VuLu : public BachModule {
   std::shared_ptr<MemPort> cmem;
 
   std::deque<std::shared_ptr<VuUops>> issued_q;
+  std::deque<std::shared_ptr<VuUops>> hold_q;
+  VuPipeCtrl* scoreboard = nullptr;
   bool issued_hold = false;
   uint64_t issued_seq = 0;
 
   VuFlowPtr held;
+  uint64_t held_credits = 0;
   std::deque<Ctx> ctxs;
-  std::deque<VuFlowPtr> ready_q;
+  std::deque<OutItem> ready_q;
   bool holding = false, mem_used = false;
   uint64_t out_seq = 0, last_seq = 0, emit_seq = 0;
   uint64_t beat_cnt = 0, busy_cnt = 0, stall_cnt = 0;
-  // 出口排队最多攒几段就先不收下一条。
+  // 已发出、对应数据还没被下游消耗的读请求。
+  uint64_t occupied = 0;
+  // 出口排队最多攒几段就先不收下一条。跟上面那 32 个请求名额是两回事。
   static constexpr uint64_t kReadyQDepth = 4;
 
   Logic64 beats;
