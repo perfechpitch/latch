@@ -83,7 +83,7 @@ static inline __attribute__((always_inline)) void dte_fields(
     dsa_write(base + DTE_DATA_LEN3, MOE_TOPK_BYTES);
   }
 
-  u32 trans = tmode | (addr_valid << DTE_ADDR_VALID_SHIFT)
+  u32 trans = tmode | (addr_valid << DTE_SEG_VALID_SHIFT)
                     | (mode & (DTE_HW_HEADER_OP | DTE_WR_SHAREMEM_FLAG))
                     | (last ? DTE_ACK_TS_EN : 0u);
   dsa_write(base + DTE_TRANS_MODE, trans);
@@ -134,7 +134,7 @@ static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
     dsa_write(DTE_SM_W_ADDR, flag_addr);
     dsa_write(DTE_SM_W_DATA, 1u);
   }
-  u32 trans = tmode | (addr_valid << DTE_ADDR_VALID_SHIFT)
+  u32 trans = tmode | (addr_valid << DTE_SEG_VALID_SHIFT)
                     | (mode & (DTE_HW_HEADER_OP | DTE_WR_SHAREMEM_FLAG))
                     | DTE_ACK_TS_EN;
   dsa_write(DTE_TRANS_MODE, trans);
@@ -285,7 +285,7 @@ TASK void task_dte_send_concat_s6(void) { send_concat(6); }
 
 /* 不带 ack_ts_en 的那一档 TRANS_MODE：一个 task 发两笔时前一笔用它盖过模板 */
 #define ROW_PART_MODE \
-  (DTE_MODE_CMEM_TO_ROUTER | ((1u << 1) << DTE_ADDR_VALID_SHIFT))
+  (DTE_MODE_CMEM_TO_ROUTER | ((1u << 1) << DTE_SEG_VALID_SHIFT))
 
 /* dot core：行链出核，逐级 reduce。一包是 16 B 头加 concat 区，落点 dst 由下一跳
  * 定：下一颗 chip 的 dot core 落它的 MOE_ROW_IN_OFF，本行 R core 落这个用户那一
@@ -347,7 +347,7 @@ TASK void task_dte_rc_datain(void) {
 
 /* 不带 ack_ts_en 的那一档 TRANS_MODE：一个 task 发两笔时前一笔用它盖过模板 */
 #define RC_PART_MODE \
-  (DTE_MODE_MMEM_TO_ROUTER | ((1u << 1) << DTE_ADDR_VALID_SHIFT))
+  (DTE_MODE_MMEM_TO_ROUTER | ((1u << 1) << DTE_SEG_VALID_SHIFT))
 
 /* 链二的第二步：把那个槽的两份从 Matrix Mem 作为本 core 的两个操作数送进本级
  * Rmem，Rmem 相加后直接发往下一行的 R core，落到那边这个用户那一槽的后一半，与

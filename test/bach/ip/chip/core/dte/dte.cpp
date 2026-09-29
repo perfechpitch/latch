@@ -38,9 +38,13 @@ MessagePtr MakeMsg(uint64_t user, uint64_t path, uint64_t bytes,
   return m;
 }
 
-// 一笔任务的 CFG_TRANS_MODE：低 3 位 route，[6:3] addr_valid，[9] ack_ts_en。
+// 软件侧把“段 i 参与”写成 bit i（bit1=段1），左移 2 落到硬件 [5:3] seg_valid[i-1]，
+// 与 kernel 的 DTE_SEG_VALID_SHIFT 一致。段 0（包头）恒参与，无使能位。
+constexpr uint64_t kSegValidShift = 2;
+
+// 一笔任务的 CFG_TRANS_MODE：低 3 位 route，[5:3] seg_valid（段1~3），[9] ack_ts_en。
 uint64_t TransMode(Route r, uint64_t addr_valid, bool ack = true) {
-  return uint64_t(r) | (addr_valid << kDteAddrValidShift) |
+  return uint64_t(r) | (addr_valid << kSegValidShift) |
          (ack ? kDteAckTsEn : 0);
 }
 
@@ -605,10 +609,10 @@ TEST(BachDte, TriggerSamplesDirectIds) {
         } else if (now == 5) {
           cfg.Drive(kDteRegDataLen1, 256, 3, ids);  // 段 1 长度，字节
         } else if (now == 6) {
-          // transfer_mode = 010（Cmem → Router）+ addr_valid[1]（段 1 参与）
+          // transfer_mode = 010（Cmem → Router）+ seg_valid[0]（段 1 参与）
           // + ack_ts_en（完成后通知 TS）。
           uint64_t trans = uint64_t(Route::kCmToRouter) |
-                           (1u << (kDteAddrValidShift + 1)) | kDteAckTsEn;
+                           (1u << (kSegValidShift + 1)) | kDteAckTsEn;
           cfg.Drive(kDteRegTransMode, trans, 4, ids);
         } else if (now == 7) {
           cfg.Drive(kDteRegTrigger, 0, 5, ids);     // 写 CFG_TRIGGER 提交任务

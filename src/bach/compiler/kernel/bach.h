@@ -87,14 +87,16 @@ static inline u32 dte_ep(u32 ep, u32 off) { return (ep << DTE_EP_SHIFT) | off; }
 #define DTE_TEMP_VALID       (1u << 0)
 #define DTE_TEMP_INDEX_SHIFT 1
 
-/* CFG_TRANS_MODE（10 bit）：[2:0] transfer_mode、[6:3] addr_valid[3:0]、
- * [7] hw_header_op、[8] wr_sharemem_flag、[9] ack_ts_en。 */
+/* CFG_TRANS_MODE（10 bit）：[2:0] transfer_mode、[5:3] seg_valid[2:0]（段1~3；
+ * 段0 恒参与，[6] Reserved）、[7] hw_header_op、[8] wr_sharemem_flag、
+ * [9] ack_ts_en。 */
 #define DTE_MODE_ROUTER_TO_CMEM 0u  /* 000 */
 #define DTE_MODE_ROUTER_TO_MMEM 1u  /* 001 */
 #define DTE_MODE_CMEM_TO_ROUTER 2u  /* 010 */
 #define DTE_MODE_MMEM_TO_ROUTER 3u  /* 011 */
 #define DTE_MODE_MMEM_TO_CMEM   4u  /* 100 */
-#define DTE_ADDR_VALID_SHIFT 3
+/* kernel 的 addr_valid 位 i = 段 i（bit1=段1），左移 2 落到 [5:3] seg_valid[i-1] */
+#define DTE_SEG_VALID_SHIFT 2
 #define DTE_HW_HEADER_OP     (1u << 7)
 #define DTE_WR_SHAREMEM_FLAG (1u << 8)
 #define DTE_ACK_TS_EN        (1u << 9)

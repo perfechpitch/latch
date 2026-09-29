@@ -82,8 +82,8 @@ constexpr uint64_t kDteTempIndexMask = 0x7;
 
 // ── CFG_TRANS_MODE（R/W，10 bit，0x004C）位域 ──
 constexpr uint64_t kDteModeMask = 0x7;              // [2:0] transfer_mode
-constexpr uint64_t kDteAddrValidShift = 3;          // [6:3] addr_valid[3:0]
-constexpr uint64_t kDteAddrValidMask = 0xF;
+constexpr uint64_t kDteSegValidShift = 3;           // [5:3] seg_valid[2:0]（段1~3；段0 恒参与）
+constexpr uint64_t kDteSegValidMask = 0x7;
 constexpr uint64_t kDteWrSharememFlag = 1ull << 8;  // [8] 完成后写 ShareMem
 constexpr uint64_t kDteAckTsEn = 1ull << 9;         // [9] 完成后通知 TS（原 task_last）
 
@@ -283,8 +283,8 @@ class DteRegfile : public BachModule {
     d->path_id = ids.path;
     d->vc = ids.vc;
     d->route = Route(merged.trans_mode & kDteModeMask);
-    uint64_t addr_valid = (merged.trans_mode >> kDteAddrValidShift) &
-                          kDteAddrValidMask;
+    uint64_t seg_valid = (merged.trans_mode >> kDteSegValidShift) &
+                         kDteSegValidMask;
     d->wr_sharemem_flag = (merged.trans_mode & kDteWrSharememFlag) != 0;
     // 进核任务不回 Ack 的档位（B/R core 与 weights 加载阶段），由 SCP 切模式时配。
     // 源文档只有一个「是否通知 TS」的位（ack_ts_en），不通知就把它清 0。
@@ -293,15 +293,22 @@ class DteRegfile : public BachModule {
     d->smem_addr = merged.smem_addr;
     d->smem_data = merged.smem_data;
 
-    // 逐段拷贝配置，按 addr_valid 决定段是否参与，再展开地址/译码端点。
+    // 逐段拷贝配置：段 0（包头）恒参与，段 1~3 由 seg_valid[i-1] 决定是否参与，
+    // 再展开地址/译码端点。段 0 的端点标 header（走 Header Parser / Hmem，不占
+    // payload 数据通道），DataDst/PayloadBytes 这类按端点判断的辅助函数会跳过它。
     for (uint64_t i = 0; i < 4; ++i) {
       Segment s;
-      s.valid = (addr_valid >> i) & 1u;
+      s.valid = (i == 0) || ((seg_valid >> (i - 1)) & 1u);
       s.src = merged.seg[i].src;
       s.dst = merged.seg[i].dst;
       s.stride = merged.seg[i].stride;
       s.len = merged.seg[i].len;
-      if (s.valid) agcu.ExpandOut(s, d->stream_id, d->route);
+      if (i == 0) {
+        s.src_kind = SegEndpoint::kHeader;
+        s.dst_kind = SegEndpoint::kHeader;
+      } else if (s.valid) {
+        agcu.ExpandOut(s, d->stream_id, d->route);
+      }
       d->seg[i] = s;
     }
 
