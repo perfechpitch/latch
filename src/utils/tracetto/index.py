@@ -9,8 +9,9 @@ moe_lpu.tracetto-index/
   .building.<pid>.<xx>/  建索引时的临时目录，建成再 rename 过去
 ```
 
-段记录是**变长**的：`varint(gap)` `varint(dur)` `3 字节标签`。
-- `gap = t0 - prev_t1`（空档不存 —— 段与段之间没有东西就是空档），首个段的 `prev_t1`
+段记录是**变长**的：`varint(zigzag(gap))` `varint(dur)` `3 字节标签`。
+- `gap = t0 - prev_t1`，用 zigzag 折成无符号再存。空档是正的；VU 上几个用户
+  叠在一起时下一段的起点可以早于上一段的末拍，gap 就是负的。首个段的 `prev_t1`
   取它所在块的 `t_base`；
 - `dur = t1 - t0`，恒 ≥ 1；
 - 标签内联定长 3 字节 `u16 user + u8 task`，`(0xFFFF, 0xFF)` 表示“认不出配对”。
@@ -35,10 +36,10 @@ from typing import Dict, List, Optional, Tuple
 
 from . import spans as S
 
-INDEX_FORMAT = 4   # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
-                   #    带上行名（TS-DTE / CORE-DTE …）。索引本体都没变，
-                   #    升版本只是为了把 manifest 里那份展示用的数据换掉 ——
-                   #    复用判据只看波形身份，改展示不会自动重建。
+INDEX_FORMAT = 5   # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
+                   #    带上行名（TS-DTE / CORE-DTE …）。5：段间隔改 zigzag，
+                   #    重叠的段能原样解回来。复用判据只看波形身份，改展示不会
+                   #    自动重建；格式号不对时打开索引会要求重建。
 INDEX_SUFFIX = ".tracetto-index"
 MANIFEST_NAME = "manifest.json"
 CORES_DIR = "cores"
@@ -121,6 +122,15 @@ def build_id(ident: Dict) -> str:
 
 # ── 编码：段 ──
 
+def zigzag_encode(n: int) -> int:
+    """有符号折成无符号。负的 gap（下一段叠在上一段上面）也能放进 varint。"""
+    return (n << 1) if n >= 0 else ((-n - 1) << 1) | 1
+
+
+def zigzag_decode(u: int) -> int:
+    return (u >> 1) if (u & 1) == 0 else -(u >> 1) - 1
+
+
 def encode_varint(n: int, out: bytearray) -> None:
     while True:
         b = n & 0x7F
@@ -176,7 +186,7 @@ def encode_segments(seg_spans: List[List[int]]) -> Tuple[bytes, List[int], List[
         if i % SEG_BLK == 0:
             blk_at.append(i)
             blks.append((prev_t1, t0, len(out)))
-        encode_varint(max(0, t0 - prev_t1), out)
+        encode_varint(zigzag_encode(t0 - prev_t1), out)
         encode_varint(dur, out)
         out += tag_of(user, task)
         prev_t1 = t0 + dur
@@ -192,6 +202,7 @@ def decode_segments(payload, t_base: int, count: int) -> List[List[int]]:
         if off + 2 + TAG_SIZE > len(payload):
             break                    # 切多了（或者上游给了个截断的切片）：能解多少解多少
         gap, off = decode_varint(payload, off)
+        gap = zigzag_decode(gap)
         dur, off = decode_varint(payload, off)
         user, task = tag_read(payload, off)
         off += TAG_SIZE

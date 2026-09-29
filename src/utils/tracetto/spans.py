@@ -179,6 +179,35 @@ def edge_spans(starts: List[dict], dones: List[dict],
     return out
 
 
+def user_spans(starts: List[dict], dones: List[dict],
+               t_end: int) -> List[List[int]]:
+    """每个用户各成一段。几笔叠在一起时不并成一段，身份取起点那一笔。
+
+    起点对上同一 user、同一 task 的下一次完成。同一拍先算完成再算起手。
+    完成没配上起点的只记那一拍；起点没配上完成的延到波形末。
+    """
+    ev = [(e["t"], 1, e) for e in starts] + [(e["t"], 0, e) for e in dones]
+    ev.sort(key=lambda x: (x[0], x[1]))
+    pending: Dict[Tuple[int, int], List[int]] = {}
+    out: List[List[int]] = []
+    for t, kind, e in ev:
+        key = (e["user"], e["task"])
+        if kind == 1:
+            pending.setdefault(key, []).append(t)
+            continue
+        q = pending.get(key)
+        if not q:
+            out.append([t, t + 1, _user_tag(e["user"]), _task_tag(e["task"])])
+            continue
+        t0 = q.pop(0)
+        out.append([t0, t, _user_tag(e["user"]), _task_tag(e["task"])])
+    for (user, task), times in pending.items():
+        for t0 in times:
+            out.append([t0, t_end, _user_tag(user), _task_tag(task)])
+    out.sort(key=lambda s: (s[0], s[1]))
+    return out
+
+
 def pair_chain(spans: List[Tuple[int, int]],
                events: List[dict]) -> List[List[int]]:
     """TS 三行里的任一行（按单元各跑一次）：每笔从下发到它做完 DSA 的全程，
@@ -304,8 +333,10 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
         dsa_starts, dsa_dones = ends_of(DSA_EDGE, u)
-        dsa = edge_spans(dsa_starts, dsa_dones, t_end)
-        core_rows.append(edge_spans(rv_starts, rv_dones, t_end))
+        # 一个核上可以同时压着几个用户。Core 与 DSA 都按用户各画一段，不并成
+        # 最早那笔的长段。TS 用这些 DSA 段去认下发，于是也是每个用户一段。
+        core_rows.append(user_spans(rv_starts, rv_dones, t_end))
+        dsa = user_spans(dsa_starts, dsa_dones, t_end)
         dsa_rows.append(dsa)
         chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
     return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows}

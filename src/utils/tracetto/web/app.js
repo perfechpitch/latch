@@ -203,12 +203,18 @@ function vint(u8, off) {
   do { b = u8[off++]; v |= (b & 0x7F) << shift; shift += 7; } while (b & 0x80);
   return [v, off];
 }
+// 段间隔是 zigzag：正的是空档，负的表示这一段叠在上一段上面。
+function unzigzag(u) {
+  const half = Math.floor(u / 2);
+  return (u & 1) ? -half - 1 : half;
+}
 function decodeSegs(u8, tBase, n) {
   const out = [];
   let off = 0, prev = tBase;
   for (let i = 0; i < n && off + 5 <= u8.length; i++) {
     let gap, dur;
     [gap, off] = vint(u8, off);
+    gap = unzigzag(gap);
     [dur, off] = vint(u8, off);
     const u = u8[off] | (u8[off + 1] << 8), t = u8[off + 2];
     off += 3;

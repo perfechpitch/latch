@@ -290,6 +290,25 @@ def check_labels(prefix):
     expect(S.edge_spans([], [], 80), [], "没有边沿就没有段")
 
 
+def check_user_spans():
+    """Core / DSA：叠在一起的几个用户各成一段，不并成最早那笔的长段。"""
+    starts = [{"t": 4345, "task": 4, "user": 23},
+              {"t": 4375, "task": 4, "user": 24}]
+    dones = [{"t": 4418, "task": 4, "user": 23},
+             {"t": 4493, "task": 4, "user": 24}]
+    expect(S.user_spans(starts, dones, 5000),
+           [[4345, 4418, 23, 4], [4375, 4493, 24, 4]],
+           "两个用户各一段")
+    expect(S.user_spans([{"t": 10, "task": 1, "user": 7}], [], 80),
+           [[10, 80, 7, 1]], "没做完的延到波形末")
+    expect(S.user_spans([], [{"t": 7, "task": 1, "user": 9}], 80),
+           [[7, 8, 9, 1]], "孤立的完成")
+    payload, _blk_at, _blks = index.encode_segments(
+        [[10, 40, 23, 4], [20, 50, 24, 4]])
+    expect(index.decode_segments(payload, 0, 2),
+           [[10, 40, 23, 4], [20, 50, 24, 4]], "重叠的段能原样解回来")
+
+
 def check_chain():
     ev0 = [{"t": 10, "task": 3, "user": 77}]
     ev1 = [{"t": 40, "task": 5, "user": 77}]
@@ -664,6 +683,7 @@ def main():
     with_trace(check_http)
     with_trace(check_labels)
     check_chain()
+    check_user_spans()
     check_window()
     with tempfile.TemporaryDirectory() as d:
         check_scale(d)
