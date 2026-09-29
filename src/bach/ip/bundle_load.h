@@ -65,7 +65,6 @@ struct CorePlan {
   uint64_t datain_pc = 0;
   bool datain_weights = false;
   bool has_datain = false;
-  InboundCfg dtein;                              // 业务模式下进核那一笔
   Route dtein_route = Route::kRouterToCm;        // DTEIN 声明的落点，只用于角色校验
   bool has_dtein = false;
   std::vector<std::pair<uint64_t, uint64_t>> vu_static;  // (vu_off, data)
@@ -247,9 +246,8 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       LOGCHECK(route <= 1,
                "LoadBundle: DTEIN 的 route 只有 0 落 Core Mem、1 落 Matrix Mem。");
       c.dtein_route = route == 0 ? Route::kRouterToCm : Route::kRouterToMm;
-      c.dtein.no_ack = Num(tok[4]) != 0;
-      // tok[5]/tok[6] 是旧的 flag_base / flag_entry_bytes，落点与标志表现在由
-      // kernel 配 CFG 表达，这两个字段读进来就丢。
+      // tok[4] 是旧的 no_ack 位、tok[5]/tok[6] 是旧的 flag_base / flag_entry_bytes，
+      // 回不回 Ack 与落点/标志表现在都由 kernel 配 CFG 表达，这三个字段读进来就丢。
       c.has_dtein = true;
     } else if (tag == "TSRTAB") {
       LOGCHECK(tok.size() == 6, "LoadBundle: TSRTAB 记录要五个字段。");
@@ -354,7 +352,6 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     for (auto const& one : c.path_task) {
       core.GetDte().Tables().PreloadPathTask(one.first, one.second);
     }
-    if (c.has_dtein) core.SetBusinessInboundCfg(c.dtein);
     for (auto const& one : c.vu_static) {
       core.GetVu().Preload(one.first, one.second);
     }

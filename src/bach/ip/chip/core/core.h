@@ -94,23 +94,6 @@ class Core : public BachModule {
   void SetCoreBadMask(uint64_t mask) { router->SetCoreBadMask(mask); }
   bool Bad() const { return router->Bad(); }
 
-  // 业务模式下进核那一笔的配置，对应 bundle 的 DTEIN，SCP 在 core 配置阶段写，
-  // 写入即生效。
-  void SetBusinessInboundCfg(InboundCfg const& in) {
-    business_in = in;
-    dte->SetInbound(in);
-  }
-  // 切进 weights 加载模式：这一阶段进来的是权重，落 Matrix Mem；这一阶段不建
-  // stream 表项，进核那一笔没有可报的对象，不回 Ack，也不置标志。落点由 kernel
-  // 配的 TRANS_MODE 表达，这里只切不回 Ack 的档位。
-  void SetWeightsInbound() {
-    InboundCfg in;
-    in.no_ack = true;
-    dte->SetInbound(in);
-  }
-  // 切回业务模式：按写入的业务模式配置重配。
-  void SetBusinessInbound() { dte->SetInbound(business_in); }
-
   CoreContext const& Context() const { return ctx; }
   // 三个 RV core 都进 wait 后拉高，SCP 据此开放业务接收权限。坏 core 恒为真。
   bool Ready() const {
@@ -539,8 +522,6 @@ class Core : public BachModule {
   }
 
   CoreContext ctx;
-  // 业务模式下进核那一笔的配置。切回业务模式时按它重配。
-  InboundCfg business_in;
   // 三个 DSA 的两个端点各要从一家的访问器上读。u：0 DTE、1 MU、2 VU。
   struct DsaEv {
     uint64_t seq = 0, task = 0, user = 0xFFFFu;

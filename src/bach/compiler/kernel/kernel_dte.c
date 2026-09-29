@@ -104,12 +104,13 @@ static void send_seg(u32 off, u32 bytes) {
  * 那一段进 scale 旁带；mode 带 DTE_WR_SHAREMEM_FLAG 时搬完往 Share Mem 的
  * flag_addr 写 4 B 的 1（置到齐/占用标志）。flag_addr 可以是 0（标志表第 0 项），
  * 所以写不写看 mode，不看地址。落 Core Mem 叠 stream 偏移，落 Matrix Mem 是物理
- * 地址不叠。完成后带 ack_ts_en：普通 core 的 recv_unit=kDsa 等 DSA 这一路；B/R core 的 no_ack 由 SCP
- * 切模式时配，Fire 时压掉这一档。 */
+ * 地址不叠。ack 置位的那一笔带 ack_ts_en、完成后通知 TS；B/R core 与 weights 加载
+ * 阶段进核不建 stream 表项、没有可报的对象，配 0。 */
 static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
                                                                u32 mode,
                                                                u32 flag_addr,
-                                                               u32 topk_idx) {
+                                                               u32 topk_idx,
+                                                               u32 ack) {
   u32 tmode = mode & 0x7u;
   u32 stride = (tmode == DTE_MODE_ROUTER_TO_CMEM) ? CMEM_STREAM_STRIDE : 0u;
   u32 addr_valid = (1u << 1);  /* 段 1 = 数据 */
@@ -136,7 +137,7 @@ static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
   }
   u32 trans = tmode | (addr_valid << DTE_SEG_VALID_SHIFT)
                     | (mode & (DTE_HW_HEADER_OP | DTE_WR_SHAREMEM_FLAG))
-                    | DTE_ACK_TS_EN;
+                    | (ack ? DTE_ACK_TS_EN : 0u);
   dsa_write(DTE_TRANS_MODE, trans);
   dsa_write(DTE_TRIGGER, 0u);
 }
@@ -184,7 +185,7 @@ TASK void task_dte_token_datain(void) {
  * 同一处 MOE_ACT_OFF，scale 随它 */
 TASK void task_dte_fc2in_datain(void) {
   dte_inbound(MOE_ACT_OFF, MOE_ACT_BYTES,
-              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0, 0);
+              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0, 0, 1);
   hdr_pop();
   task_done(0);
 }
@@ -223,7 +224,7 @@ TASK void task_dte_user_init(void) {
   u32 scale = hdr_scale_valid();
   u32 data = data_bytes(size, scale);
   dte_inbound(hdr_dst_addr(), data,
-              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0);
+              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0, 1);
   hdr_pop();
   task_done(0);
 }
@@ -337,7 +338,7 @@ TASK void task_dte_rc_datain(void) {
   u32 landing = hdr_dst_addr();
   dte_inbound(landing, MOE_ROW_BYTES,
               DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
-              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u, 0);
+              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u, 0, 0);
   u32 n = smem_read(RC_MAP_OFF + u * 4u) + 1u;
   smem_write(RC_MAP_OFF + u * 4u, n);
   if (n == rc_need()) rc_fifo_push(u);
@@ -387,7 +388,7 @@ TASK void task_dte_bc_datain(void) {
   dte_inbound(landing, BC_TOKEN_BYTES,
               DTE_MODE_ROUTER_TO_MMEM | DTE_SCALE_VALID | DTE_WR_SHAREMEM_FLAG |
                   DTE_TOPK_VALID,
-              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u, user_id());
+              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u, user_id(), 0);
   hdr_pop();
   task_yield();
 }
@@ -438,7 +439,7 @@ TASK void task_dte_weights_loader(void) {
   u32 scale = hdr_scale_valid();
   u32 data = data_bytes(size, scale);
   dte_inbound(hdr_dst_addr(), data,
-              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0);
+              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0, 0);
   hdr_pop();
   task_yield();
 }

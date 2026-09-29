@@ -236,14 +236,6 @@ std::vector<RcoreHarness::Job> Jobs(
   return all;
 }
 
-// R core 在业务模式下进核那一笔：不回 Ack。落点与搬完置到齐标志的地址由 kernel
-// 配 CFG 表达（TRANS_MODE / SM_W_ADDR/DATA），这里只切 no_ack。
-InboundCfg RcoreInbound() {
-  InboundCfg in;
-  in.no_ack = true;
-  return in;
-}
-
 void LoadKernels(Core& core) {
   core.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
   core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
@@ -263,7 +255,6 @@ std::vector<float> Ramp(float base, float step) {
   EnsureSlots();                                                        \
   ClockPtr clk = MakeClock(0, kPeriod);                                 \
   Core core(clk, "rcore", CoreContext{});                               \
-  core.SetBusinessInboundCfg(RcoreInbound());                           \
   LoadKernels(core);                                                    \
   core.GetRouter().Preload(kInPath, EnterCore());                       \
   core.GetRouter().Preload(kOutPath, ReduceOut());                      \

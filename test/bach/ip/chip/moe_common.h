@@ -253,24 +253,21 @@ constexpr uint64_t kWeightsScale = kWeightsChunk / 32;
 constexpr uint64_t kWeightsUser = 3;
 
 // 把一颗 core 配进 weights 加载阶段。任务链在这之前就由 bundle 配好了，切模式
-// 只动 datain 那一项与进核那一档。
+// 只动 datain 那一项。
 inline void EnterWeightsMode(Core& core) {
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_weights_loader", "dte"),
                                      /*weights_mode=*/true);
   core.GetTs().Cfg().SetTriggerChainEn(false);
   core.GetTs().InitFinish();
   core.GetDte().Tables().PreloadPathTask(kWeightsPath, 0);
-  core.SetWeightsInbound();
 }
 
-// 切回业务：datain 改指 token 搬移那一笔，任务链放行，进核那一笔按 bundle 写入
-// 的业务模式配置落回 Core Mem。
+// 切回业务：datain 改指 token 搬移那一笔，任务链放行。
 inline void EnterBusinessMode(Core& core) {
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_user_init", "dte"),
                                      /*weights_mode=*/false);
   core.GetTs().Cfg().SetTriggerChainEn(true);
   core.GetTs().InitFinish();
-  core.SetBusinessInbound();
 }
 
 // weights 那条 path 的路由表，只铺第一列 chip：从 W 口进来，坐在口上的 core5

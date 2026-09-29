@@ -194,14 +194,6 @@ class BcoreHarness : public BachModule {
   std::vector<Job> jobs;
 };
 
-// B core 在业务模式下进核那一笔：不回 Ack。落点与搬完置 token 槽位标志的地址由
-// kernel 配 CFG 表达（TRANS_MODE / SM_W_ADDR/DATA），这里只切 no_ack。
-InboundCfg BcoreInbound() {
-  InboundCfg in;
-  in.no_ack = true;
-  return in;
-}
-
 void LoadKernels(Core& core) {
   core.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
   core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
@@ -218,7 +210,6 @@ TEST(BachBcore, NothingGoesOutWithoutAToken) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Core core(clk, "bcore", CoreContext{});
-    core.SetBusinessInboundCfg(BcoreInbound());
     LoadKernels(core);
     core.GetRouter().Preload(kOutPath, LeaveCore());
     core.GetDte().Tables().PreloadRtab(kOutPath, LeaveCore());
@@ -245,7 +236,6 @@ TEST(BachBcore, TokensGoOutInArrivalOrder) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Core core(clk, "bcore", CoreContext{});
-    core.SetBusinessInboundCfg(BcoreInbound());
     LoadKernels(core);
     core.GetRouter().Preload(kInPath, EnterCore());
     core.GetRouter().Preload(kOutPath, LeaveCore());
