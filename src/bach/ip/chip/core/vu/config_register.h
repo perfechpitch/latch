@@ -34,6 +34,7 @@
 #include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/vu/regfiles.h"
+#include "bach/ip/chip/core/vu/vu_latency.h"
 #include "bach/ip/chip/core/vu/vu_ports.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
 #include "bach/ip/module_base.h"
@@ -206,19 +207,20 @@ class VuConfigRegister : public BachModule {
     return v;
   }
 
-  bool Quiescent() const override { return !pending; }
+  bool Quiescent() const override { return !TriggerBusy(); }
 
  protected:
   void Step() override {
     rdata_used = false;
     ReturnRead();
-    // 末级先做：先看下游收没收走上一条，再收这一拍的配置写。
+    // 末级先做：先看下游收没收走上一条，再把还在延迟里的 trigger 推一拍，
+    // 然后才收这一拍的配置写。新收下的不在本拍减拍数。
     Drain();
+    AgeDefer();
     for (uint64_t i = 0; i < kVuCfgPathNum; ++i) Serve(i);
     if (!rdata_used) rdata->Idle();
-    // 端口的驱动集中在这里。Serve 里写 trigger 的那一拍才刚把 pending 立起来，
-    // 若在 Drain 那一步驱动，这一条就一拍也没出现在端口上，下一拍的 Drain 又会
-    // 把它当成“已发出且被收走”清掉，宏指令会静默丢掉。
+    // 端口的驱动集中在这里。延迟走完的那一拍才把 pending 立起来并驱动；
+    // 若提前在 Drain 里清掉，这一条就一拍也没出现在端口上，宏指令会静默丢掉。
     Publish();
 
     triggers = trigger_cnt;
@@ -234,21 +236,38 @@ class VuConfigRegister : public BachModule {
     }
   }
 
+  void AgeDefer() {
+    for (DeferredTrig& d : defer) {
+      if (d.left > 0) --d.left;
+    }
+  }
+
   void Publish() {
     if (pending) {
       out->Drive(held, out_seq);
       driving = true;
       return;
     }
+    if (!defer.empty() && defer.front().left == 0) {
+      held = defer.front().inst;
+      out_seq = defer.front().seq;
+      defer.pop_front();
+      pending = true;
+      driving = true;
+      out->Drive(held, out_seq);
+      return;
+    }
     out->Idle();
   }
+
+  bool TriggerBusy() const { return pending || !defer.empty(); }
 
   void Serve(uint64_t i) {
     DsaCfgPort& p = *path[i];
     if (!p.Valid()) {
       // 没有请求时 ready 照给：ready 是接收方上一拍锁存的值，一直拉高才不会
       // 让请求方白等一拍。
-      p.DriveReady(!pending);
+      p.DriveReady(!TriggerBusy());
       return;
     }
     uint64_t addr = p.req_addr.Get();
@@ -261,25 +280,29 @@ class VuConfigRegister : public BachModule {
       ++blocked_cnt;
       return;
     }
-    // 上一条宏指令还没被 ISQ 收走时不能再锁一条：trigger 会覆盖 held。
-    if (we && addr == kVuMacroInstTrigger && pending) {
+    // 上一条还没被 ISQ 收走，或还在 trigger 延迟里，不能再锁一条。
+    if (we && addr == kVuMacroInstTrigger && TriggerBusy()) {
       p.DriveReady(false);
       return;
     }
-    p.DriveReady(true);
 
     // 同一笔写会连着两拍出现在端口上，按序号认它。不能按 (addr, data) 认：
     // macro_inst_trigger 是写一次执行一次，两次写之间没有其他配置也启动两次，
     // 那两笔的地址与数据完全一样。
-    if (p.Seq() == last_seq[i]) return;
-    last_seq[i] = p.Seq();
-    if (we) {
-      Write(addr, v, p.TaskIds());
-      ++write_cnt;
-      return;
+    //
+    // ready 在收下之后再给一次。trigger 一下去这一级就忙，若仍留着收下前的
+    // ready=1，请求方下一拍会把下一条也当成已经收走。
+    if (p.Seq() != last_seq[i]) {
+      last_seq[i] = p.Seq();
+      if (we) {
+        Write(addr, v, p.TaskIds());
+        ++write_cnt;
+      } else {
+        pending_read.push_back({CycleNow() + kDsaReadLatency, ReadReg(addr),
+                                p.Seq()});
+      }
     }
-    pending_read.push_back({CycleNow() + kDsaReadLatency, ReadReg(addr),
-                            p.Seq()});
+    p.DriveReady(!TriggerBusy());
   }
 
   void ReturnRead() {
@@ -508,9 +531,10 @@ class VuConfigRegister : public BachModule {
     inst->task_id = ids.task;
     inst->user_id = ids.user;
 
-    held = inst;
-    pending = true;
-    out_seq = inst->seq;
+    // 拍数从写下这一拍起算，Publish 在减到 0 的那一拍才送到 ISQ。
+    // 引用从这一拍算起：延迟期间改同一组静态配置也要挡住，不能等进了 ISQ。
+    defer.push_back(DeferredTrig{inst, inst->seq, VuLatency::Get().Config()});
+    HoldCfg(inst->cfg_idx);
     ++trigger_cnt;
   }
 
@@ -581,7 +605,14 @@ class VuConfigRegister : public BachModule {
   VuDynParam dyn;
   std::array<uint64_t, kVuCfgGroups> ref{};
 
+  struct DeferredTrig {
+    std::shared_ptr<VuMacroInst> inst;
+    uint64_t seq = 0;
+    uint64_t left = 0;
+  };
+
   std::shared_ptr<VuMacroInst> held;
+  std::deque<DeferredTrig> defer;
   bool pending = false, driving = false;
   uint64_t out_seq = 0, inst_seq = 0, tag_seq = 0;
   uint64_t trigger_cnt = 0, blocked_cnt = 0, write_cnt = 0;

@@ -4,20 +4,15 @@
 // M6 · 执行单元这一段的共同骨架。
 //
 // VALU0 / VALU1 / VALU2 / VSFU / MEXE / SEXE 各是一个独立打拍的模块，本条不动
-// 它的单元当拍透传。各单元的级数设计未给，本轮统一取 4 拍并标为待定；SEXE 是
-// 同一物理单元的三次串行迭代，所以是 3 倍。
+// 它的单元当拍透传。拍数按这条微指令的编码从 VuLatency 取，每种计算可以单独
+// 改；构造时传入的级数只是没覆盖 Latency() 时的退路。
 //
-// 单元之间的先后：硬件上它们并联，谁在谁前由静态配置里的 bypass 连接决定，五个
-// VEXE 之间不限定先后顺序。建模把它们串成一条链 VALU0 → VALU1 → VALU2 → VSFU →
-// MEXE → SEXE，只用来记拍数：一条宏指令的总拍数是用到的单元各自级数之和，与谁
-// 先谁后无关（《Vector Unit DSA》：总周期 = 启动延迟 + Σ(被激活模块的首拍延迟) +
-// (SEG − 1)）。数据按取源关系算：一段进到 VEXE 这一截的第一个单元时，用到的
-// VEXE 单元按 VuVexeOrder 排出的次序一次算完，后面的 VEXE 单元只计级数。MEXE 与
-// SEXE 在 VEXE 之后，照链上的次序各自算。
+// VEXE 五个分组各自收段、各自计数，谁先谁后由 src_sel 决定，不串成固定链。
+// 这一级只提供单组的流水：每拍收一段、走完本计算的拍数、每拍交一段。分组之间
+// 的依赖和并行由 VuVexeNet 排。MEXE 与 SEXE 仍在 VEXE 之后，各走各的拍数。
 //
-// 这一段是流水的：每拍收一个 RF entry，内部走 stages 级，每拍交出一个。MAS 记
-// 的“全吞吐为常态，每周期接受 1 个 VRF entry；跨分组串联只增加首拍填充延迟，
-// 不降低稳态吞吐”就是这个意思。本条不动这个单元时当拍透传，不占级数。
+// 这一段是流水的：每拍收一个 RF entry，内部走该计算的拍数，每拍交出一个。
+// 本条不动这个单元时当拍透传，不占级数。
 //
 // 硬件不提供软件可见的缓冲队列：在飞的条数就等于级数，压不住就往上游报不收。
 
@@ -127,13 +122,14 @@ class VuExeStage : public BachModule {
 
   uint64_t Done() const { return done.Get(); }
 
-  // 本单元是 VEXE 之一：它的结果由 VEXE 这一截的第一个单元按次序一次算好。
+  // 本单元是 VEXE 之一：结果由 VuVexeNet 在该分组开工时算，不在链上透传。
   void SetVexe(bool on) { vexe = on; }
-  // VEXE 这一截的第一个单元挂上这一步：每一段进来先把 VEXE 的结果一次算完。
   void SetEvaluate(std::function<void(VuFlow&)> fn) { evaluate = std::move(fn); }
-  // 按次序算 VEXE 时逐个调各单元的这一格。
   void ComputeNow(VuFlow& f) { Compute(f); }
   bool ActiveFor(VuUops const& u) const { return Active(u); }
+  uint64_t LatencyOf(VuUops const& u) const { return Latency(u); }
+  // VuVexeNet 代跑分组流水时，本拍该分组里还有段，就记一拍 Busy。
+  void ChargeBusy() { ++busy_cnt; }
   // 本单元处于 Busy 状态的累计拍数，Profile 那一档要它。
   uint64_t BusyCycles() const { return busy_cnt; }
   bool Quiescent() const override { return pipe.empty() && !holding; }
@@ -143,6 +139,8 @@ class VuExeStage : public BachModule {
   virtual bool Active(VuUops const& u) const = 0;
   // 算。改 flow 上属于本单元的那一格。
   virtual void Compute(VuFlow& f) = 0;
+  // 本条在这个单元上的首拍。子类按编码从 VuLatency 取；默认用构造时的级数。
+  virtual uint64_t Latency(VuUops const& u) const { (void)u; return stages; }
 
   void Step() override {
     // 先把在飞的推进一级，再收本拍新来的，最后看出口。收在推进之后，所以当拍
@@ -164,6 +162,7 @@ class VuExeStage : public BachModule {
     VuFlowPtr f;
     uint64_t seq = 0;
     uint64_t left = 0;
+    uint64_t lat = 0;  // 收下时的首拍，用来算这条流水还要留多深
   };
 
   void Tick() {
@@ -172,11 +171,28 @@ class VuExeStage : public BachModule {
     }
   }
 
-  void Accept() {
+  // 在飞的段里最长的那条，再加本拍要收的这一条。深度按这个留，短计算不会
+  // 把已经在飞的长计算挤出去，长计算也不会把后面的短计算挡到流水空掉。
+  uint64_t OccupancyCap() const {
+    uint64_t m = 0;
+    for (Slot const& s : pipe) {
+      if (s.lat > m) m = s.lat;
+    }
+    if (in->Valid()) {
+      VuFlowPtr f = in->Flow();
+      if (f) {
+        uint64_t inc = Active(f->uops) ? Latency(f->uops) : 0;
+        if (inc > m) m = inc;
+      }
+    }
+    if (m == 0) m = 1;
     // 上游读的是本级上一拍发布的 ready，所以级数之外要再留一格：压到正好满
     // 才说不收的话，上游那一拍已经不发了，稳态下每两拍就空掉一拍。
-    uint64_t depth = (stages > 0 ? stages : 1) + 1;
-    bool room = pipe.size() < depth;
+    return m + 1;
+  }
+
+  void Accept() {
+    bool room = pipe.size() < OccupancyCap();
     in->DriveReady(room);
     if (!room) return;
     if (!in->Valid() || in->Seq() == last_seq) return;
@@ -190,11 +206,12 @@ class VuExeStage : public BachModule {
     if (evaluate) evaluate(*f);
     if (Active(f->uops)) {
       if (!(vexe && f->vexe_done)) Compute(*f);
-      s.left = stages;
+      s.left = Latency(f->uops);
     } else {
       // 本条不动这个单元：当拍透传，不占级数。
       s.left = 0;
     }
+    s.lat = s.left;
     pipe.push_back(s);
   }
 

@@ -42,6 +42,8 @@ class VuSmux : public BachModule {
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
 
   uint64_t Routed() const { return routed.Get(); }
+  // 发射级在分段时把 RF 源读进 flow。bypass 不在这里取。
+  void LoadRf(VuFlow& f) { Route(f); }
   bool Quiescent() const override { return !holding; }
 
  protected:

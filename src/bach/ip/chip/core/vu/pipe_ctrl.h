@@ -30,6 +30,7 @@
 
 #include "base/log.h"
 #include "bach/ip/chip/core/vu/config_register.h"
+#include "bach/ip/chip/core/vu/vu_latency.h"
 #include "bach/ip/chip/core/vu/vu_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -113,12 +114,19 @@ class VuPipeCtrl : public BachModule {
   uint64_t VrfRdBusy(uint64_t port) const { return vrf_rd_busy[port]; }
   uint64_t VrfWtBusy(uint64_t port) const { return vrf_wt_busy[port]; }
   uint64_t MrfWtBusy() const { return mrf_wt_busy; }
-  bool Quiescent() const override { return live.empty() && !holding; }
+  bool Quiescent() const override {
+    return live.empty() && delay.empty() && !holding;
+  }
 
  protected:
   void Step() override {
-    Drain();
+    // 先松开上一拍已经交出去的输出，再给延迟队列减拍，然后收新的一条。
+    // 新收下的不在本拍减拍数。出口只在 Emit 里驱动，避免同一拍写两次把
+    // 已经发出的微指令盖掉。
+    Release();
+    Age();
     Accept();
+    Emit();
 
     stalls = stall_cnt;
     dispatched = dispatch_cnt;
@@ -133,38 +141,65 @@ class VuPipeCtrl : public BachModule {
     bool cm = false;   // 这一条有没有 CM 访问：CM_FENCE 要等的是这些
   };
 
-  void Drain() {
-    if (!holding) return;
-    if (!out->Ready()) {
+  struct Deferred {
+    std::shared_ptr<VuUops> uops;
+    uint64_t seq = 0;
+    uint64_t left = 0;
+  };
+
+  void Release() {
+    if (holding && out->Ready()) {
+      holding = false;
+      held.reset();
+    }
+  }
+
+  void Age() {
+    for (Deferred& d : delay) {
+      if (d.left > 0) --d.left;
+    }
+  }
+
+  void Emit() {
+    if (holding) {
       out->Drive(held, out_seq);
       return;
     }
-    holding = false;
+    if (!delay.empty() && delay.front().left == 0) {
+      held = delay.front().uops;
+      out_seq = delay.front().seq;
+      delay.pop_front();
+      holding = true;
+      out->Drive(held, out_seq);
+      return;
+    }
+    out->Idle();
+  }
+
+  void Enqueue(std::shared_ptr<VuUops> uops, uint64_t seq) {
+    delay.push_back(Deferred{std::move(uops), seq, VuLatency::Get().Pipe()});
   }
 
   // ready 表示这一拍真的收下了。被 Scoreboard 或 fence 挡住时不能给 ready：
   // 上游看见 ready 就换下一条，被挡住的这一条会静默丢掉。
+  // 输出还压着上一条时不收新的；延迟队列里的不算压着，第二条可以在第一条
+  // 的派发延迟期间进队，Scoreboard 在收下时就已经看见它。
   void Accept() {
-    // 还压着一条时端口已经由 Drain 驱动过了，这里再写一次会静默盖掉它。
-    // 同线程同拍两次写同一个 Latch 不触发断言，那一条就永远发不出去。
     if (holding) {
       in->DriveReady(false);
       return;
     }
     if (!in->Valid()) {
       in->DriveReady(true);
-      out->Idle();
       return;
     }
     if (in->Seq() == last_seq) {
       in->DriveReady(true);
-      out->Idle();
       return;
     }
     auto inst = in->Inst();
     if (!inst) {
       in->DriveReady(true);
-      out->Idle();
       return;
     }
 
@@ -196,10 +231,7 @@ class VuPipeCtrl : public BachModule {
       auto uops = std::make_shared<VuUops>();
       uops->inst = *inst;
       live.push_back({inst->seq, VuFootprint{}, 0, false});
-      held = uops;
-      holding = true;
-      out_seq = inst->seq;
-      out->Drive(held, out_seq);
+      Enqueue(uops, inst->seq);
       return;
     }
     CheckIndexRange(*inst, cfg);
@@ -219,11 +251,8 @@ class VuPipeCtrl : public BachModule {
       if (cfg.VrfWtSrc(p) != kSrcNone) ++vrf_wt_busy[p];
     }
     if (cfg.MrfWtSrc() != kSrcNone) ++mrf_wt_busy;
-    held = uops;
-    holding = true;
-    out_seq = inst->seq;
     ++dispatch_cnt;
-    out->Drive(held, out_seq);
+    Enqueue(uops, inst->seq);
   }
 
   bool AnyCmPending() const {
@@ -237,7 +266,6 @@ class VuPipeCtrl : public BachModule {
     in->DriveReady(false);
     ++stall_cnt;
     ++kind;
-    out->Idle();
   }
 
   // 这一条要用哪几个执行单元，一位一个（位号见 VuUnit）。
@@ -600,6 +628,7 @@ class VuPipeCtrl : public BachModule {
   std::shared_ptr<VuUopsPort> out;
 
   std::deque<LiveInst> live;
+  std::deque<Deferred> delay;
   std::shared_ptr<VuUops> held;
   bool holding = false;
   uint64_t out_seq = 0, last_seq = 0;

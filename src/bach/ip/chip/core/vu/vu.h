@@ -5,12 +5,13 @@
 //
 // 一条宏指令走的路：
 //   config_register 收配置写，写 trigger 锁成一条 → ISQ 排队，在飞数不到两条就
-//   放行 → pipe_ctrl 展开成逐单元的微指令并查依赖 → LU 从 Core Mem 读入 →
-//   SMUX 备好 RF 源 → 执行单元一段 → DMUX 写回 RF 或交给 SU → SU 写回 Core
-//   Mem → Retire 报 dsa_done 并释放静态配置组的引用。
+//   放行 → pipe_ctrl 展开成逐单元的微指令并查依赖 → LU 从 Core Mem 读入，同时
+//   把微指令交给发射级按段读 RF → VEXE 五个分组按 src_sel 各自流水、汇合后进
+//   MEXE → SEXE → DMUX 写回 RF 或交给 SU → SU 写回 Core Mem → Retire 报
+//   dsa_done 并释放静态配置组的引用。
 //
-// 执行单元那一段串成 VALU0 → VALU1 → VALU2 → VSFU → MEXE → SEXE 一条链，本条不
-// 动的单元当拍透传。
+// 不读 LU 的分组不用等 CM 响应。MEXE 与 SEXE 仍在 VEXE 之后；本条不动的那一级
+// 当拍透传。
 //
 // 十四个模块由装配统一驱动（tick=false）：VRF / MRF / SRF 是存储阵列不是模块，
 // SMUX 读、DMUX 写，两级在同一个协程里按固定次序跑，读写顺序确定。tick=true 时
@@ -31,6 +32,7 @@
 #include "bach/ip/chip/core/vu/sexe.h"
 #include "bach/ip/chip/core/vu/su.h"
 #include "bach/ip/chip/core/vu/valu.h"
+#include "bach/ip/chip/core/vu/vexe_net.h"
 #include "bach/ip/chip/core/vu/vsfu.h"
 
 namespace latch {
@@ -53,6 +55,11 @@ class Vu {
                                          i, gid, false);
     }
     vsfu = std::make_unique<VuVsfu>(clock, "vsfu", gid, false);
+    issue = std::make_unique<VuIssue>(clock, "issue", *smux, gid, false);
+    net = std::make_unique<VuVexeNet>(
+        clock, "vexe",
+        std::array<VuValu*, 3>{valu[0].get(), valu[1].get(), valu[2].get()},
+        *vsfu, gid, false);
     mexe = std::make_unique<VuMexe>(clock, "mexe", gid, false);
     sexe = std::make_unique<VuSexe>(clock, "sexe", gid, false);
     dmux = std::make_unique<VuDmux>(clock, "dmux", regs, gid, false);
@@ -118,11 +125,8 @@ class Vu {
     dmux->RunStep();
     sexe->RunStep();
     mexe->RunStep();
-    vsfu->RunStep();
-    valu[2]->RunStep();
-    valu[1]->RunStep();
-    valu[0]->RunStep();
-    smux->RunStep();
+    net->RunStep();
+    issue->RunStep();
     lu->RunStep();
     pipe->RunStep();
     isq->RunStep();
@@ -131,8 +135,7 @@ class Vu {
 
   bool Quiescent() const {
     return cfg_reg->Quiescent() && isq->Quiescent() && pipe->Quiescent() &&
-           lu->Quiescent() && smux->Quiescent() && valu[0]->Quiescent() &&
-           valu[1]->Quiescent() && valu[2]->Quiescent() && vsfu->Quiescent() &&
+           lu->Quiescent() && issue->Quiescent() && net->Quiescent() &&
            mexe->Quiescent() && sexe->Quiescent() && dmux->Quiescent() &&
            su->Quiescent();
   }
@@ -156,36 +159,25 @@ class Vu {
       up->AttachOut(p);
       down->AttachIn(p);
     };
-    chain(lu, smux);
-    chain(smux, valu[0]);
-    chain(valu[0], valu[1]);
-    chain(valu[1], valu[2]);
-    chain(valu[2], vsfu);
-    chain(vsfu, mexe);
+    auto handoff = std::make_shared<VuUopsPort>(clk);
+    lu->AttachIssued(handoff);
+    issue->AttachIn(handoff);
+
+    auto segs = std::make_shared<VuFlowPort>(clk);
+    issue->AttachOut(segs);
+    net->AttachIn(segs);
+
+    auto lu_data = std::make_shared<VuFlowPort>(clk);
+    lu->AttachOut(lu_data);
+    net->AttachLu(lu_data);
+
+    auto vexe_out = std::make_shared<VuFlowPort>(clk);
+    net->AttachOut(vexe_out);
+    mexe->AttachIn(vexe_out);
     chain(mexe, sexe);
     chain(sexe, dmux);
     chain(dmux, su);
     chain(su, retire);
-
-    // VEXE 这一截：结果在第一个单元按取源次序一次算完，链上各单元只计级数。
-    for (auto& v : valu) v->SetVexe(true);
-    vsfu->SetVexe(true);
-    valu[0]->SetEvaluate([this](VuFlow& f) { EvalVexe(f); });
-  }
-
-  // 用到的 VEXE 单元按取源关系排好次序逐个算。取源成环的配置在 pipe_ctrl 就按
-  // CFG_ERROR 拦下了，走到这里的都排得出来。
-  void EvalVexe(VuFlow& f) {
-    if (f.vexe_done) return;
-    std::array<uint64_t, kVuVexeNum> order{};
-    uint64_t n = 0;
-    if (!VuVexeOrder(f.uops.cfg, f.uops.inst.Bf16(), order, n)) return;
-    for (uint64_t k = 0; k < n; ++k) {
-      VuExeStage& st = order[k] < 3 ? static_cast<VuExeStage&>(*valu[order[k]])
-                                    : static_cast<VuExeStage&>(*vsfu);
-      if (st.ActiveFor(f.uops)) st.ComputeNow(f);
-    }
-    f.vexe_done = true;
   }
 
   ClockPtr clk;
@@ -199,6 +191,8 @@ class Vu {
   std::unique_ptr<VuSmux> smux;
   std::array<std::unique_ptr<VuValu>, 3> valu;
   std::unique_ptr<VuVsfu> vsfu;
+  std::unique_ptr<VuIssue> issue;
+  std::unique_ptr<VuVexeNet> net;
   std::unique_ptr<VuMexe> mexe;
   std::unique_ptr<VuSexe> sexe;
   std::unique_ptr<VuDmux> dmux;

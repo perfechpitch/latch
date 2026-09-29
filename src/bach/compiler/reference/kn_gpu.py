@@ -1,5 +1,7 @@
-"""KN 拆分那一段在 GPU 上的实现：本机有 CUDA 时 `vectors.py` 用它，结果与纯
-Python 那一份逐 bit 相同。
+"""KN 拆分那一段在 GPU 上的实现：本机既装了 CUDA、卡的算力又在当前 torch 编译
+支持的范围内时，`vectors.py` 用它，结果与纯 Python 那一份逐 bit 相同。判断条件
+见 `available()`——只看 `cuda.is_available()` 会在「有卡但这个 torch 跑不动它」
+的机器上误判。
 
 与纯 Python 那一份是同一套运算，只是把逐元素的循环换成张量上的逐元素运算，一批
 token 一起算。逐 bit 相同靠四条：
@@ -28,8 +30,17 @@ F32_MAX_BITS = n.F32_MAX
 
 
 def available():
-    """本机能不能用 GPU 算这一段。"""
-    return torch.cuda.is_available()
+    """本机能不能用 GPU 算这一段。
+
+    光看 `cuda.is_available()` 不够：卡在、torch 也带 CUDA，但卡的算力不在这个
+    torch 编译支持的列表里时，kernel 根本编不出来，一调就报
+    `CUDA error: no kernel image is available for execution on the device`。
+    所以还要把算力对上 `get_arch_list()`，对不上就回退纯 Python。
+    """
+    if not torch.cuda.is_available():
+        return False
+    tag = "sm_%d%d" % torch.cuda.get_device_capability(0)
+    return any(a.startswith(tag) for a in torch.cuda.get_arch_list())
 
 
 # ── 格式 ──

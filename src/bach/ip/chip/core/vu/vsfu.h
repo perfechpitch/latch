@@ -22,6 +22,7 @@
 #include <string>
 
 #include "bach/ip/chip/core/vu/exe_base.h"
+#include "bach/ip/chip/core/vu/vu_latency.h"
 
 namespace latch {
 namespace bach {
@@ -36,11 +37,31 @@ class VuVsfu : public VuExeStage {
   uint64_t Busy0() const { return busy0_; }
   uint64_t Busy1() const { return busy1_; }
 
+  // 只算其中一个单元。两个单元各自独立开工，由 VuVexeNet 按取源关系排。
+  void ComputeUnit(uint64_t which, VuFlow& f) {
+    f.vsfu[which] = VuOperand();
+    if (which == 1 && f.uops.inst.Bf16()) return;
+    if (!VuVsfuOn(f.uops.cfg, which)) return;
+    Run(which, f);
+    if (f.uops.inst.Bf16() && which == 0) {
+      ++busy0_;
+      ++busy1_;
+    } else if (which == 0) {
+      ++busy0_;
+    } else {
+      ++busy1_;
+    }
+  }
+
  protected:
   bool Active(VuUops const& u) const override {
     if (VuVsfuOn(u.cfg, 0)) return true;
     // BF16 下两个 VSFU 拼接成一个逻辑单元，VSFU1 的字段被忽略。
     return !u.inst.Bf16() && VuVsfuOn(u.cfg, 1);
+  }
+
+  uint64_t Latency(VuUops const& u) const override {
+    return VuLatency::Get().VsfuStage(u.cfg, u.inst.Bf16());
   }
 
   void Compute(VuFlow& f) override {

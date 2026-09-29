@@ -4,8 +4,8 @@
 // M6 · SEXE。
 //
 // 7 条标量浮点指令。物理上只有一组，SEXE0 / SEXE1 / SEXE2 是同一物理单元在一条
-// 宏指令内的 3 次串行迭代，所以本模块的级数是别的单元的 3 倍，三次迭代在这
-// 一段里依次算完。
+// 宏指令内的 3 次串行迭代。本模块的拍数是激活的几次各自拍数之和，三次迭代在
+// 这一段里依次算完。
 //
 // 迭代之间天然链式依赖：SEXE0 可取 VALU1 的输出或 SRF_rd_p4/p5，SEXE1 可取
 // SEXE0 的输出或 SRF_rd_p6，SEXE2 可取 SEXE1 的输出或 SRF_rd_p7。SEXE1 与
@@ -19,6 +19,7 @@
 #include <string>
 
 #include "bach/ip/chip/core/vu/exe_base.h"
+#include "bach/ip/chip/core/vu/vu_latency.h"
 
 namespace latch {
 namespace bach {
@@ -27,12 +28,16 @@ class VuSexe : public VuExeStage {
  public:
   VuSexe(ClockPtr clock, const std::string& name, uint64_t parent = 0,
          bool tick = true)
-      : VuExeStage(clock, name, kVuExeStages * 3, parent, tick) {}
+      : VuExeStage(clock, name, 1, parent, tick) {}
 
  protected:
   bool Active(VuUops const& u) const override {
     return u.cfg.sexe[0].Active() || u.cfg.sexe[1].Active() ||
            u.cfg.sexe[2].Active();
+  }
+
+  uint64_t Latency(VuUops const& u) const override {
+    return VuLatency::Get().SexeChain(u.cfg);
   }
 
   void Compute(VuFlow& f) override {

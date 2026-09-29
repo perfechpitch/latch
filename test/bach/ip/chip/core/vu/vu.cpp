@@ -177,10 +177,12 @@ class DoneSink : public BachModule {
     uint64_t stream_id = 0, task_id = 0, event = 0;
   };
   std::vector<Rec> got;
+  uint64_t at = 0;
 
  protected:
   void Step() override {
     if (port.Valid()) {
+      if (got.empty()) at = CycleNow();
       got.push_back({port.stream_id.Get(), port.task_id.Get(), port.event.Get()});
     }
   }
@@ -1722,4 +1724,105 @@ TEST(Vu, ReduceMatchesPythonReference) {
               numeric::BitsOf(c.want))
         << "VL=" << c.vl;
   }
+}
+
+// 并行的两路取较长的那一路。VALU0 与 VALU2 都是加法、都只读 VRF，首拍各 2，
+// 墙钟是 2。VALU1 接在 VALU0 后面再加一次，墙钟是 2+2。两条宏指令的配置写笔数
+// 相同，完成拍数应差 2。
+TEST(Vu, ParallelGroupsTakeLongerPath) {
+  auto preload = [](Rig& rig) {
+    rig.vu->Regfiles().WriteVrf(0, std::vector<float>(32, 1.0f), false,
+                                numeric::RoundMode::kRne);
+    rig.vu->Regfiles().WriteVrf(1, std::vector<float>(32, 2.0f), false,
+                                numeric::RoundMode::kRne);
+  };
+  auto common = [](Rig& rig) {
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(32, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(0, 1));
+  };
+
+  Rig serial;
+  preload(serial);
+  common(serial);
+  serial.WriteStatic(0, kVuValu0Op,
+                     OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcVrfP1));
+  serial.WriteStatic(0, kVuValu1Op,
+                     OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcValu0));
+  serial.WriteStatic(0, kVuPrfOp, PrfWord(0, kSrcValu1, 0, 0));
+  serial.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, 4));
+  serial.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  serial.Run(400);
+  uint64_t serial_cycles = serial.sink->at;
+  ASSERT_GT(serial_cycles, 0u);
+  EXPECT_EQ(numeric::BitsOf(serial.vu->Regfiles().ReadVrf(4, 1, false)[0]),
+            numeric::BitsOf(4.0f));
+
+  Rig parallel;
+  preload(parallel);
+  common(parallel);
+  parallel.WriteStatic(0, kVuValu0Op,
+                       OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcVrfP1));
+  parallel.WriteStatic(0, kVuValu2Op,
+                       OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcVrfP1));
+  parallel.WriteStatic(0, kVuPrfOp, PrfWord(kSrcValu0, kSrcValu2, 0, 0));
+  parallel.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(4, 5));
+  parallel.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  parallel.Run(400);
+  uint64_t parallel_cycles = parallel.sink->at;
+  ASSERT_GT(parallel_cycles, 0u);
+  EXPECT_EQ(numeric::BitsOf(parallel.vu->Regfiles().ReadVrf(4, 1, false)[0]),
+            numeric::BitsOf(3.0f));
+  EXPECT_EQ(numeric::BitsOf(parallel.vu->Regfiles().ReadVrf(5, 1, false)[0]),
+            numeric::BitsOf(3.0f));
+  EXPECT_EQ(serial_cycles, parallel_cycles + 2u);
+}
+
+// VALU0 只读 VRF，和 LU 的读同时走。VALU1 要等两路都到。VALU0 的 2 拍盖在 LU 的
+// 读延迟里，完成拍数应与「只有 VALU1 等 LU」相同，而不是再多出 VALU0 的 2 拍。
+TEST(Vu, IndependentGroupOverlapsLoad) {
+  auto arm = [](Rig& rig, bool with_valu0) {
+    std::vector<float> in(32, 1.0f);
+    rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+    rig.vu->Regfiles().WriteVrf(0, std::vector<float>(32, 2.0f), false,
+                                numeric::RoundMode::kRne);
+    rig.vu->Regfiles().WriteVrf(1, std::vector<float>(32, 3.0f), false,
+                                numeric::RoundMode::kRne);
+    rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+    rig.WriteStatic(0, kVuSuOp, OpWord(uint64_t(SuOp::kStFp32), kSrcValu1));
+    if (with_valu0) {
+      rig.WriteStatic(0, kVuValu0Op,
+                      OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcVrfP1));
+      rig.WriteStatic(0, kVuValu1Op,
+                      OpWord(uint64_t(ValuOp::kFaddVv), kSrcLu, kSrcValu0));
+    } else {
+      rig.WriteStatic(0, kVuValu0Op, OpWord(0));
+      rig.WriteStatic(0, kVuValu1Op,
+                      OpWord(uint64_t(ValuOp::kFaddVv), kSrcVrfP0, kSrcLu));
+    }
+    rig.WriteStatic(0, kVuPrfOp, PrfWord(0, 0, 0, 0));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                    TypeVlWord(32, false, numeric::RoundMode::kRne));
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+    rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(0, 1));
+    rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+  };
+
+  Rig only_lu;
+  arm(only_lu, false);
+  only_lu.Run(400);
+  uint64_t lu_cycles = only_lu.sink->at;
+  ASSERT_GT(lu_cycles, 0u);
+  EXPECT_EQ(numeric::BitsOf(Fp32Of(only_lu.stmem->Peek(kDstAddr, 4))[0]),
+            numeric::BitsOf(3.0f));
+
+  Rig overlapped;
+  arm(overlapped, true);
+  overlapped.Run(400);
+  uint64_t both_cycles = overlapped.sink->at;
+  ASSERT_GT(both_cycles, 0u);
+  EXPECT_EQ(numeric::BitsOf(Fp32Of(overlapped.stmem->Peek(kDstAddr, 4))[0]),
+            numeric::BitsOf(6.0f));
+  EXPECT_EQ(both_cycles, lu_cycles);
 }

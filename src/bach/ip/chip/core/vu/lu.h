@@ -15,6 +15,10 @@
 // 就把这笔 Load 丢弃、请求不发出；模型照发不误，见 vu.md 的“取舍”一节）。
 //
 // 14 拍的访问延迟由 Core Mem 那一侧给，本级只按 valid/ready 收发。
+//
+// 不读 LU 的执行分组不必等这次读回来。收下宏指令时把同一份微指令从 issued 口
+// 交给发射级，RF 源和只依赖 RF 的分组可以先走；读回来的段从数据口交给
+// VuVexeNet，按段号并进已经在飞的那一份。
 
 #include <deque>
 #include <memory>
@@ -37,6 +41,7 @@ class VuLu : public BachModule {
       : BachModule(clock, name, parent, tick),
         in(std::make_shared<VuUopsPort>(clock)),
         out(std::make_shared<VuFlowPort>(clock)),
+        issued(std::make_shared<VuUopsPort>(clock)),
         cmem(std::make_shared<MemPort>(clock)),
         beats(clock) {}
 
@@ -44,6 +49,9 @@ class VuLu : public BachModule {
   void AttachIn(std::shared_ptr<VuUopsPort> p) { in = std::move(p); }
   VuFlowPort& Out() { return *out; }
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
+  // 收下一条宏指令时把微指令再交一份给发射级，与本级的读并行。
+  VuUopsPort& Issued() { return *issued; }
+  void AttachIssued(std::shared_ptr<VuUopsPort> p) { issued = std::move(p); }
   MemPort& Cmem() { return *cmem; }
   void AttachCmem(std::shared_ptr<MemPort> p) { cmem = std::move(p); }
 
@@ -52,7 +60,8 @@ class VuLu : public BachModule {
   // CM 端口反压住本级的拍数。
   uint64_t StallCycles() const { return stall_cnt; }
   bool Quiescent() const override {
-    return ctxs.empty() && !holding && ready_q.empty();
+    return ctxs.empty() && !holding && ready_q.empty() && issued_q.empty() &&
+           !issued_hold;
   }
 
  protected:
@@ -63,6 +72,7 @@ class VuLu : public BachModule {
     Collect();
     Issue();
     Accept();
+    DriveIssued();
     if (!mem_used) cmem->IdleReq();
 
     bool busy = !ctxs.empty();
@@ -118,13 +128,31 @@ class VuLu : public BachModule {
     auto flow = std::make_shared<VuFlow>();
     flow->uops = *uops;
 
+    HandOff(uops);
     if (!uops->cfg.lu.Active()) {
-      // 本条不读 CM，排到出口队列里直接往下走。
-      ready_q.push_back(flow);
-      PumpQueue();
+      // 本条不读 CM。数据通路上不发空段，发射级自己按 VL 分段。
       return;
     }
     Plan(flow);
+  }
+
+  // 发射级与读并行。口上的 valid 不写会回落成上一拍，所以每拍都 Drive 或 Idle。
+  // ready 是上一拍的：本拍第一次 Drive 的不能当拍丢掉。
+  void HandOff(std::shared_ptr<VuUops> uops) {
+    issued_q.push_back(std::move(uops));
+  }
+
+  void DriveIssued() {
+    if (issued_hold && issued->Ready()) {
+      issued_hold = false;
+      issued_q.pop_front();
+    }
+    if (!issued_hold && !issued_q.empty()) {
+      issued->Drive(issued_q.front(), ++issued_seq);
+      issued_hold = true;
+      return;
+    }
+    if (!issued_hold) issued->Idle();
   }
 
   // 算这一条要读哪几个 128 B 块。
@@ -331,7 +359,12 @@ class VuLu : public BachModule {
 
   std::shared_ptr<VuUopsPort> in;
   std::shared_ptr<VuFlowPort> out;
+  std::shared_ptr<VuUopsPort> issued;
   std::shared_ptr<MemPort> cmem;
+
+  std::deque<std::shared_ptr<VuUops>> issued_q;
+  bool issued_hold = false;
+  uint64_t issued_seq = 0;
 
   VuFlowPtr held;
   std::deque<Ctx> ctxs;

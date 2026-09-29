@@ -121,7 +121,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 <text x="422.0" y="803.5" font-size="8.5" fill="#475569">　bit0 LU · bit1 VALU1 · bit2 MEXE · bit3～5 SEXE0/1/2</text>
 <rect x="760" y="380" width="300" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="772" y="401" font-size="11" fill="#111827" font-weight="600">VALU0（29 条独有）</text>
-<text x="772.0" y="418.0" font-size="8.5" fill="#475569">加减乘 · 最值 · MACC · 除法（非全吞吐）</text>
+<text x="772.0" y="418.0" font-size="8.5" fill="#475569">加减乘 · 最值 · MACC · 除法（20～30，暂定 20）</text>
 <text x="772.0" y="431.5" font-size="8.5" fill="#475569">符号注入 · 比较生成 Mask · vfclass</text>
 <text x="772.0" y="445.0" font-size="8.5" fill="#475569">vfmerge · 标量广播 / 搬入</text>
 <rect x="760" y="500" width="300" height="86.5" rx="4" fill="#f8fafc" stroke="#374151"/>
@@ -278,6 +278,8 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F15a | 静态配置组每组 23 个寄存器：前 12 个是没有动态副本的 `LU_op` / `SU_op` / `VALU0-2_op` / `VSFU_op` / `MEXE_op` / `SEXE0-2_op` / `mask_op` / `PRF_op`，后 11 个是动态参数寄存器的静态副本、与动态版本逐位相同，组内偏移 = 对应动态寄存器地址 + `0x2C` |
 | F15b | `STATIC_DYNAMIC_MASK` 的 7 个有效位各控制哪个参数：bit[0] `TYPE_VL`、bit[1] `LD_addr`、bit[2] `ST_addr`、bit[3] `VRF_rd_index`、bit[4] `VRF_wt_index`、bit[5] MRF 读写两个索引、bit[6] SRF 读写四个索引；bit[7] 保留。位为 1 取动态副本，为 0 取所属静态组里的那一份。全部 `*_op` / `mask_op` / `PRF_op` 没有动态副本，不在覆盖范围内 |
 | F16 | 把宏指令展开成各执行单元的微指令 |
+| F16a | 一条宏指令描述的是「从哪读、经过哪些执行单元、写到哪」的一张完整**单向数据流图**，不是单条运算。pipe_ctrl 的职责是把这张图展开成各模块的微指令，并保证图上各级的启动次序与流控正确 |
+| F16b | 数据流图沿 `LU / 寄存器堆 → VEXE → MEXE / SEXE → SU / 寄存器堆` 单向推进，同一条宏指令内不允许回流；VEXE 一级**可以整级跳过**：MEXE 的源可取 VALU0 的掩码输出、也可取 LU 的 `ld.mask` 结果，SEXE 的源可取 VALU1 的归约输出、也可取 LU 的 `ld.s.fp32` 结果。计算一级也可整级跳过：`SU_op.SRC_SEL` 取 LU 的输出时，Load 的数据不经执行单元与寄存器堆直接写出 CM，构成 Load → Store 级联，此时要求 `SU_op.OPCODE` 与 `LU_op.OPCODE` 相同（即两侧数据类型一致）。**反向回喂不存在**：MEXE / SEXE 的输出不能当 VEXE 的源；算法上需要反向回喂时，由软件拆成两条宏指令、经寄存器堆传递并由 Scoreboard 保证次序 |
 | F17 | Scoreboard 对 VRF / MRF / SRF 实时读写状态追踪，检测 RAW / WAR / WAW |
 | F18 | 重叠执行：前后宏指令无数据依赖、无执行资源冲突时，后续宏指令无需等前一条完全结束即可重叠发射微操作，最多两条相邻宏指令重叠 |
 | F19 | CM 访存依赖不追踪。存在冲突的宏指令之间须由软件置 `MACRO_INST_FENCE = 1`（等此前全部宏指令完成）或 `CM_FENCE = 1`（只等前序宏指令的 CM 访问——LU 读的数据已取回、SU 写已写响应齐——纯计算的前序不等待） |
@@ -316,15 +318,16 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 
 | 编号 | 功能 |
 | - | - |
-| F37 | VALU0（29 条独有）：加减乘、最值、MACC、除法 `vfdiv.vv`（非全吞吐，约 20～30 cycle）、符号注入、比较生成 Mask、`vfclass`、`vfmerge`、标量广播 / 搬入 |
+| F37 | VALU0（29 条独有）：加减乘、最值、MACC、除法 `vfdiv.vv`（范围 20～30 cycle，暂定 20；发起间隔未给，模型仍每拍收一段）、符号注入、比较生成 Mask、`vfclass`、`vfmerge`、标量广播 / 搬入 |
 | F38 | VALU1（6 条独有）：加减乘、最值、跨元素归约（求和 / 最大 / 最小）、Top-16 排序（同时输出 16 个 INT16 索引）、标量广播 / 搬出。归约与 Top-K 的输出是 NaN / Inf 替换与上报的收口位置之一 |
-| F39 | VALU2（4 条独有）：加减乘、最值、标量广播、`vmv.v.v` 向量直通缓冲、`vswap2.v` 相邻偶奇对交换、两条 slide（`vfslide1up.vf` / `vfslide1down.vf`）。后三条只搬 element 的位置，不做数值运算 |
-| F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。源不能取自身的输出；自定义拟合函数暂定不实现 |
+| F39 | VALU2（4 条独有）：加减乘、最值、标量广播、`vmv.v.v` 向量直通缓冲、`vswap2.v` 相邻偶奇对交换、两条 slide（`vfslide1up.vf` / `vfslide1down.vf`）。后四条只搬 element 的位置，不做数值运算、不改数据格式、不产生舍入，**也不参与 NaN / Inf 检测与替换**。`vfslide1up.vf` 在 index 0 补填充标量，`vfslide1down.vf` 在 index VL−1 补填充标量，延迟与同单元其余编码相同。`vmv.v.v` 当延迟对齐缓冲用时只贡献 VALU2 的**首拍延迟** |
+| F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。各函数延迟一致，范围 4～8 拍，暂定 8 拍、完全流水。源不能取自身的输出；自定义拟合函数暂定不实现 |
 | F40a | VSFU 有 `VSFU0` 与 `VSFU1` 两个功能一致的单元，`VSFU_op` 低 16-bit 配 VSFU0、高 16-bit 配 VSFU1，`src_sel` 的 `0x05` / `0x06` 分别是两者的输出。FP32 精度下两者独立工作，BF16 精度下两者拼接成一个逻辑单元、共同处理 64 element/cycle，此时 VSFU1 的两个字段被忽略、`0x06` 也不可再作为来源 |
-| F40b | 除 SEXE 外，每个执行单元在单条宏指令里只能被调用 1 次 |
-| F40c | 四个 VEXE（VALU0 / VALU1 / VALU2 / VSFU）之间不限定先后顺序，任意一个都可以取另一个的输出作为源，数据流不可回环。计算次序按取源关系定：被取的在前，互不相干的按 VALU0、VALU1、VALU2、VSFU 排。两个 VEXE 互取对方输出置 `CFG_ERROR`。一条宏指令在 VEXE 这一段的拍数是用到的单元各自级数之和，与次序无关 |
-| F41 | MEXE（15 条）：Mask 逻辑运算（and / nand / andn / xor / or / nor / orn / xnor）、`vcpop.m`、`vfirst.m`、`vmsbf/vmsif/vmsof.m`、`vmiuset.mv` / `vmiset.mv`（掩码走 src1、16 个 INT16 索引走 src2，按索引清 / 置 Mask 位，配合 Top-K 做迭代查找） |
-| F42 | SEXE（7 条）：fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）。物理上只有一组，SEXE0/1/2 是同一物理单元在一条宏指令内的 3 次串行迭代 |
+| F40b | 除 SEXE 外，每个执行单元在单条宏指令里只能被调用 1 次：LU、SU、VALU0 / VALU1 / VALU2、MEXE 各 1 次；**VSFU0 与 VSFU1 各 1 次、合计 2 次**（FP32 下两个可各配一次，BF16 下拼接为一个逻辑单元、最多 1 次）。SEXE 是唯一允许多次调用的执行单元，最多 3 次 |
+| F40c | VEXE 内部分为**五个可并行工作的执行分组**：VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1。五个分组共享 SMUX 的源操作数网络与 DMUX 的结果分发，但**各自独立接收微指令、独立流控**——各有独立的 valid/ready 与 done/err，任一分组反压不影响其他分组。「可并行工作」指五个分组是并列资源、可同时对不同的段推进。分组之间不限定先后，下一级用 `src_sel` 取上一级的输出（bypass），不经过 DMUX。数据流不可回环：不能取自身输出，两个分组不能互取对方的输出，违反置 `CFG_ERROR`。DMUX 只把结果分到寄存器堆或 SU |
+| F40d | 单条宏指令的总周期 = 启动延迟 + **这条数据流上串联各级的首拍延迟之和** + (SEG − 1)。第三项是向量流水的稳态吞吐。第二项只沿依赖链相加：Softmax 的 Macro-1 是 VALU0 → VSFU → VALU1 → SEXE，四段相加。广播出去的两条并行通路不把两路延迟加在一起，墙钟时间取较长的那一路，短的那一路用 `vmv.v.v` 补齐（F22）。各模块首拍见第 7 节。五个 VEXE 分组的延迟彼此不同；MEXE、SEXE 在 VEXE 下游。规范给的是范围，模型在范围内取暂定值，两者都见第 7 节，代码里按计算覆盖 |
+| F41 | MEXE（15 条）：Mask 逻辑运算（and / nand / andn / xor / or / nor / orn / xnor）、`vcpop.m`、`vfirst.m`、`vmsbf/vmsif/vmsof.m`、`vmiuset.mv` / `vmiset.mv`（掩码走 src1、16 个 INT16 索引走 src2，按索引清 / 置 Mask 位，配合 Top-K 做迭代查找）。位运算范围 1～2 拍、暂定 2；提取范围 2～4 拍、暂定 2。前缀与按索引改位没单列，先与提取的暂定值相同 |
+| F42 | SEXE（7 条）：fadd / fsub / fmul / fdiv / fsqrt / frsqrt / frcp（.s）。物理上只有一组，SEXE0/1/2 是同一物理单元在一条宏指令内的 3 次串行迭代。一次迭代范围 2～4 拍、暂定 2，`fdiv` / `fsqrt` 更长，总延迟按次相加 |
 | F43 | SEXE 迭代之间天然链式依赖：SEXE1 的操作数可来自 SEXE0，SEXE2 可来自 SEXE1，因此第 2、3 次迭代只需 1 个额外的 SRF 读端口 |
 | F44 | SEXE 操作数来源有四处：SRF 读端口、VALU1 的归约输出、LU 的 `ld.s.fp32` 结果、前一次 SEXE 迭代的结果。不支持立即数，也不能取 MEXE 为源，因为 MEXE 的标量输出是整数而 SEXE 只有浮点通路。SEXE1 / SEXE2 各只有 1 个 SRF 读端口，两个操作数中最多 1 个取自 SRF、且至少 1 个取自前一次迭代 |
 | F45 | bit 级归约顺序：LANES 内归约再 ⌈log2 SEG⌉ 级累加，参考实现必须用同一顺序 |
@@ -397,7 +400,7 @@ mem 级间 latch     级间 latch 各执行单元之间的微操作与数据    
 
 ## 5　流水线总览
 
-VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好整张计算图的通路，从 CM 读入、多级流水计算、写回 CM 的全过程由硬件自己走完。第 1 层图按发射、取数、算、写回四段画，各执行单元的级数设计未给，图上标 D变长。
+VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令描述的是「从哪读、经过哪些执行单元、写到哪」的一张完整**单向数据流图**，从 CM 读入、多级流水计算、写回 CM 的全过程由硬件自己走完。**VEXE 内的各执行单元是五个并列的分组，次序由静态配置里各消费者的 `src_sel` 决定、不是硬接死的**（F16b、F40c）。第 1 层图按发射、取数、算、写回四段画，各执行单元的首拍延迟各不相同、随配置而变，图上标 D变长——具体值见第 7 节那张表（F40d）。
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 678 522" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -462,7 +465,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
   <text x="458" y="342" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="362" font-size="11" fill="#111827">退休与 dsa_done</text>
   <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
-  <text x="20" y="438" font-size="10.5" fill="#374151">M6 里 VALU0 / VALU1 / VALU2 / VSFU / MEXE / SEXE 的级数各不相同，设计未给值，本轮各取 4 拍（待定）；SEXE0/1/2 是同一物理单元的三次串行迭代，因此是 3 倍。各级是流水的：每拍收一段、每拍交一段，级数只决定首拍延迟。</text>
+  <text x="20" y="438" font-size="10.5" fill="#374151">M6 的首拍：规范给范围，模型在范围内取暂定值（加减 2、乘 4、最值/比较/搬运 3、MACC 5、除法 20、VSFU 8、MEXE 2、SEXE 一次迭代 2），范围与暂定值见第 7 节，代码里可按计算改。SEXE0/1/2 是同一物理单元的三次串行迭代，拍数按次相加。各级是流水的：每拍收一段、每拍交一段，拍数只决定首拍延迟。</text>
   <text x="20" y="466" font-size="10.5" fill="#374151">一条宏指令内多条并行通路经过的执行分组级数不同，合并点的两个源操作数会不同拍到达，配平是软件的责任：差一级用 VALU2 的 vmv.v.v 对齐，差得多就拆成多条宏指令。</text>
   <text x="20" y="494" font-size="10.5" fill="#374151">CM 访存依赖硬件不追踪，靠 MACRO_INST_FENCE（等此前全部）或 CM_FENCE（只等 CM 访问）；建模时若默认硬件会挡，结果会偏乐观。</text>
 </svg>
@@ -710,6 +713,8 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令一次配好�
 </svg>
 ```
 
+图上把 M6 画成一个方框、标「各自算一拍组」，是为了对齐第 1 层图的四段画法。框内是 VEXE 的五个分组（VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1）以及下游的 MEXE、SEXE。五个分组之间不限定先后，下一级用 `src_sel` 取输出；MEXE / SEXE 在 VEXE 下游（F16b、F40c）。SEXE 是同一个物理单元的三次迭代，不是第六个并列分组。`D变长` 指各分组首拍延迟彼此不同、随激活了哪些模块而变，具体值见第 7 节那张表（F40d）。
+
 ### M7 · DMUX 结果路由
 
 ```svg
@@ -837,7 +842,7 @@ CM 数据信号        1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 �
 CM 访问延迟        VU 侧 14T
 内部计算精度        FP32 或 BF16，单条宏指令内不支持混合精度
 片内寄存器          VRF 64 KB（128 B/entry × 512 entry，2R2W）· MRF 4 KB（2R1W）· SRF 256 B（4 B × 64 entry，8 逻辑读 / 6 逻辑写）
-执行单元           VEXE（VALU0 / VALU1 / VALU2 / VSFU）· MEXE · SEXE
+执行单元           VEXE（VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1）· MEXE · SEXE
 宏指令配置          8 组静态配置模板 + 12 个动态参数寄存器；8 组模板由编译侧算好，boot 期经 ctrl_noc 的 cfg 口写入
 宏指令重叠          最多两条相邻
 ISQ 深度           8（待定）
@@ -847,6 +852,33 @@ ISQ 深度           8（待定）
 Top-K              K 固定为 16
 VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍；st.mask 要求 8 的整数倍；vswap2.v 要求偶数
 ```
+
+### 各子模块与执行分组的首拍延迟
+
+无反压条件下，从输入 valid 有效到输出 valid 有效。前面的区间是规范给的范围，括注「暂定」的是当前模型在这个区间里取的值，按计算可改（`VuLatency`）。
+
+| 模块 / 计算分组 | 延迟（cycle） | 说明 |
+| - | - | - |
+| `config_register` | 1～2（暂定 2） | 寄存器写入与动态参数打包，与计算流水线并行，不占用流水线周期 |
+| ISQ | 1 | 队列非空且 pipe_ctrl 就绪时 1 拍出队；队列满时回压 `config_register` |
+| pipe_ctrl | 2～4（暂定 3） | 静态配置解析 + Scoreboard 依赖检查 + 微指令派发；依赖未满足时按依赖等待 |
+| LU | 14 | 与参数框的 CM 访问延迟是同一段，取 14T。请求拆分、地址生成、读往返、格式转换都算在这 14 拍里，不再另加 |
+| SMUX / DMUX | 1 | 纯路由，不改变数据内容；广播不额外增加延迟 |
+| VALU 加 / 减 | 2～4（暂定 2） | 全吞吐，每周期接受 1 个 entry。加减乘原来同一档 2～4，现把乘单独取出 |
+| VALU 乘 | 2～4（暂定 4） | 全吞吐 |
+| VALU MIN/MAX、符号注入、比较 / 分类、合并、搬运 | 2～3（暂定 3） | 全吞吐；比较 / 分类的结果为 Mask，经 MRF 单写口回写。符号注入、分类、合并与最值 / 比较 / 搬运同一档 |
+| VALU0 MACC | 4～6（暂定 5） | 全吞吐，需要 3 个源操作数 |
+| VALU0 除法 | 20～30（暂定 20） | 非全吞吐，VALU 中最长的一档；发起间隔未给，模型仍每拍收一段。能用倒数 + 乘法替代时应优先替代 |
+| VALU1 归约 | 4（占位） | 公式是 LANES 内归约 + ⌈log2 SEG⌉ 级累加，系数未给；结果为标量，经 SRF 虚拟写口 p1 暂存 |
+| VALU1 Top-16 排序 | 4（占位） | 与 SEG 成正比，系数未给；逐段维护 16 项有序表，输出 16 个极值及其 INT16 索引 |
+| VSFU0 / VSFU1 特殊函数 | 4～8（暂定 8） | 查表 + 多项式拟合；**各函数延迟一致**，完全流水。两个 VSFU 串起来时相加，并行时取较长一路 |
+| MEXE 掩码逻辑 | 1～2（暂定 2） | 位运算，MRF entry 宽 64 bit |
+| MEXE `vcpop.m` / `vfirst.m` | 2～4（暂定 2） | 结果为标量，可直供 SU 的 Scalar Store 或写入 SRF。前缀与按索引改位没单列，先与这一档的暂定值相同 |
+| SEXE 单次迭代 | 2～4（暂定 2）；`fdiv` / `fsqrt` 更长 | 物理上只有一个 SEXE，SEXE0 → SEXE1 → SEXE2 串行迭代，**延迟按次累加**。`fdiv` / `fsqrt` 的额外拍数未给，先与这一档的暂定值相同 |
+| SU | 14 | 与 LU 一样，就是 CM 访问延迟 14T。格式转换、请求拆分、写往返和等写响应都算在这 14 拍里，不再另加 |
+| VRF / MRF / SRF 访问 | 1 | 同步读写，索引由配置寄存器给出 |
+
+单条宏指令的总周期 = 启动延迟 + 这条数据流上串联各级的首拍延迟之和 + (SEG − 1)。第三项是向量流水的稳态吞吐。第二项只沿依赖链相加：Softmax 的 Macro-1 串联 VALU0 → VSFU → VALU1 → SEXE，是三条宏指令里填充开销最大的一条。广播出去的两条并行通路取较长的那一路，短的那一路用 `vmv.v.v` 补齐，不把两路延迟相加。
 
 ### Profile 计数器的 32 个地址与口径
 
@@ -905,6 +937,8 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | status / macro_inst_left / Profile 软件写无效不报错 | F10 | `readonly_status` |
 | RF 后门通路与宏指令异步，由软件保证不冲突 | F11 | `rf_backdoor` |
 | Scoreboard 检测 RAW / WAR / WAW | F17 | `scoreboard_dep` |
+| 宏指令即数据流图，pipe_ctrl 展开成各模块微指令 | F16a | `LoadStoreRoundTrip` |
+| 单向数据流：可整级跳过，MEXE / SEXE 不能回喂 VEXE | F16b | pipe_ctrl 合法性检查（无单独用例） |
 | 最多两条相邻宏指令重叠 | F18 | `macro_overlap_two` |
 | 相邻两条的 LU 读接着发，最多两条同时在读 | F29a | `lu_read_overlap` |
 | 写响应齐后才退休 | F29b | `su_wait_write_rsp` |
@@ -923,6 +957,8 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | VL 的三处粒度要求 | F49d | `vl_granularity` |
 | mask_op 的四种来源，一个 MRF 读端口只服务一个消费者 | F21、F35 | `mask_sources` |
 | VSFU0 / VSFU1 两个单元：FP32 各自独立，BF16 拼接 | F40a | `vsfu_pair` |
+| 五个分组各自 valid/ready，按取源关系各自推进 | F40c | `ParallelGroupsTakeLongerPath` |
+| 串联填充按首拍相加；并行支路取较长一路 | F40d | `ParallelGroupsTakeLongerPath`、`IndependentGroupOverlapsLoad` |
 | VALU2 的 vswap2 与两条 slide 只搬位置 | F39 | `valu2_move` |
 | CM 一次固定 1024 bit，不支持 burst | F27 | `cm_no_burst` |
 | 跨 128 B 边界的拆分与重组由 LU / SU 完成 | F28 | `cross_128b` |
@@ -948,7 +984,7 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
   * 追踪 CM 冲突要在 DSA 里维护地址范围的重叠判断，成本高
   * 交给软件显式隔离：要等此前全部宏指令完成就置 `MACRO_INST_FENCE`，只求 CM 上的顺序就置 `CM_FENCE`（代价更小，纯计算的前序不等待）。建模时若默认硬件会挡，结果会偏乐观
 * **为什么归一化用求倒数加向量乘标量而不是向量除法**
-  * 避免全吞吐的向量流水去等约 20～30 cycle 的除法
+  * 避免全吞吐的向量流水去等约 20～30 cycle 的除法（模型暂定 20）
 * **为什么执行单元之间不提供软件可见的缓冲队列**
   * 提供队列就要提供队列的调度与观测，接口面积大
   * 只提供 bypass 与广播，配平交给软件：级数差一级用 `vmv.v.v` 对齐，差得多就拆成多条宏指令

@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "bach/ip/chip/core/vu/exe_base.h"
+#include "bach/ip/chip/core/vu/vu_latency.h"
 
 namespace latch {
 namespace bach {
@@ -38,6 +39,10 @@ class VuValu : public VuExeStage {
  protected:
   bool Active(VuUops const& u) const override {
     return ValuSupports(idx, ValuOp(u.cfg.valu[idx].opcode));
+  }
+
+  uint64_t Latency(VuUops const& u) const override {
+    return VuLatency::Get().Valu(ValuOp(u.cfg.valu[idx].opcode));
   }
 
   void Compute(VuFlow& f) override {

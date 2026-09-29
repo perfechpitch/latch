@@ -15,6 +15,7 @@
 #include <string>
 
 #include "bach/ip/chip/core/vu/exe_base.h"
+#include "bach/ip/chip/core/vu/vu_latency.h"
 
 namespace latch {
 namespace bach {
@@ -28,6 +29,10 @@ class VuMexe : public VuExeStage {
  protected:
   bool Active(VuUops const& u) const override {
     return u.cfg.mexe.Active();
+  }
+
+  uint64_t Latency(VuUops const& u) const override {
+    return VuLatency::Get().Mexe(MexeOp(u.cfg.mexe.opcode));
   }
 
   void Compute(VuFlow& f) override {

@@ -161,8 +161,7 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
       start_user = inst->user_id;
     }
     task_open = !inst->event_en;
-    // 压进来就算引用了这一组静态配置，配置写从这一刻起被阻塞。
-    cfg_reg.HoldCfg(inst->cfg_idx);
+    // 静态组的引用在 config_register 收下 trigger 时已经加上，这里不再加。
   }
 
   void Publish() {
