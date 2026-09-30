@@ -2118,3 +2118,135 @@ TEST(Vu, LuIssuesAheadOfVrfRaw) {
         << i;
   }
 }
+
+// F49a：没有 SU 也按 RF entry 逐段流。第一段的 VSFU 结果在后续读请求还没发完时
+// 就已经写进 VRF。32 段刚好打满 LU 的在途名额，整段一份的话写回时读请求已经发完。
+TEST(Vu, VsfuStartsOnFirstSegment) {
+  constexpr uint64_t kEntries = 32;
+  constexpr uint64_t kN = kEntries * 32;
+  constexpr uint64_t kSig = 64;
+  Rig rig;
+  std::vector<float> in(kN, 1.0f);
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(in));
+  rig.WriteStatic(0, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(0, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
+  rig.WriteStatic(0, kVuPrfOp, PrfWord(kSrcLu, kSrcVsfu0, 0, 0));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kN, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, kSig));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigEventEn));
+
+  float want = numeric::ClampNanInf(1.0f / (1.0f + std::exp(-1.0f)));
+  uint32_t want_bits = numeric::BitsOf(want);
+
+  struct Watch : BachModule {
+    Watch(ClockPtr c, Vu& v, MemStub& m, uint32_t sig_bits)
+        : BachModule(c, "watch"), vu(v), mem(m), bits(sig_bits) {}
+    void Step() override {
+      if (reads_at != 0) return;
+      float got = vu.Regfiles().ReadVrf(kSig, 1, false)[0];
+      if (numeric::BitsOf(got) == bits) reads_at = mem.reads;
+    }
+    Vu& vu;
+    MemStub& mem;
+    uint32_t bits = 0;
+    uint64_t reads_at = 0;
+  };
+  Watch watch(rig.clk, *rig.vu, *rig.ldmem, want_bits);
+  rig.Run(900);
+
+  EXPECT_GT(watch.reads_at, 0u);
+  EXPECT_LT(watch.reads_at, kEntries);
+  ASSERT_EQ(rig.sink->got.size(), 1u);
+  for (uint64_t e = 0; e < kEntries; ++e) {
+    float got = rig.vu->Regfiles().ReadVrf(kSig + e, 1, false)[0];
+    EXPECT_EQ(numeric::BitsOf(got), want_bits) << e;
+  }
+}
+
+// 组 2 的 st.mxfp8 也按段流：记分板第一格（entry 3）放开后 VALU0 就开工，
+// 不必等最后一段写进 VRF。SU 在前四段凑满 128 B 时就发第一笔写，此时 VALU1
+// 后面的段还在流水里。
+TEST(Vu, Mxfp8ValuStartsOnFirstGrain) {
+  constexpr uint64_t kEntries = 8;
+  constexpr uint64_t kN = kEntries * 32;
+  constexpr uint64_t kSig = 8;
+  constexpr uint64_t kY = 0x3000;
+  constexpr float kX = 1.5f;
+  constexpr float kYval = 2.0f;
+
+  Rig rig;
+  std::vector<float> x(kN, kX);
+  x[200] = 8.0f;
+  std::vector<float> y(kN, kYval);
+  rig.ldmem->Poke(kSrcAddr, Fp32Bytes(x));
+  rig.ldmem->Poke(kY, Fp32Bytes(y));
+
+  rig.WriteStatic(1, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(1, kVuVsfuOp, OpWord(uint64_t(VsfuOp::kSigmoid), kSrcLu));
+  rig.WriteStatic(1, kVuPrfOp, PrfWord(kSrcLu, kSrcVsfu0, 0, 0));
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kN, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
+  rig.WriteStatic(1, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, kSig));
+
+  rig.WriteStatic(2, kVuLuOp, OpWord(uint64_t(LuOp::kLdFp32)));
+  rig.WriteStatic(2, kVuValu0Op,
+                  OpWord(uint64_t(ValuOp::kFmulVv), kSrcVrfP0, kSrcVrfP1));
+  rig.WriteStatic(2, kVuValu1Op,
+                  OpWord(uint64_t(ValuOp::kFmulVv), kSrcValu0, kSrcLu));
+  rig.WriteStatic(2, kVuSuOp, OpWord(uint64_t(SuOp::kStMxfp8), kSrcValu1));
+  rig.WriteStatic(2, kVuPrfOp, PrfWord(0, 0, 0, 0));
+  rig.WriteStatic(2, kVuStaticDupOffset + kVuTypeVl,
+                  TypeVlWord(kN, false, numeric::RoundMode::kRne));
+  rig.WriteStatic(2, kVuStaticDupOffset + kVuLdAddr, kY);
+  rig.WriteStatic(2, kVuStaticDupOffset + kVuStAddr, kDstAddr);
+  rig.WriteStatic(2, kVuStaticDupOffset + kVuVrfRdIndex, IndexWord(0, kSig));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(1));
+  rig.Write(kVuMacroInstTrigger, TriggerWord(2, 0, kVuTrigEventEn));
+
+  float sig = numeric::ClampNanInf(1.0f / (1.0f + std::exp(-kX)));
+  uint32_t sig_bits = numeric::BitsOf(sig);
+  std::vector<float> prod(kN);
+  for (uint64_t i = 0; i < kN; ++i) {
+    float s = numeric::ClampNanInf(1.0f / (1.0f + std::exp(-x[i])));
+    prod[i] = x[i] * s * y[i];
+  }
+  std::vector<float> scale =
+      numeric::MakeScale(numeric::DataType::kMxfp8, prod, false);
+  std::vector<uint8_t> want_data = numeric::Encode(
+      numeric::DataType::kMxfp8, prod, scale, numeric::RoundMode::kRne);
+  std::vector<uint8_t> want_scale =
+      numeric::EncodeScale(numeric::DataType::kMxfp8, scale);
+
+  struct Watch : BachModule {
+    Watch(ClockPtr c, Vu& v, MemPort& st, uint32_t bits)
+        : BachModule(c, "watch"), vu(v), store(st), sig_bits(bits) {}
+    void Step() override {
+      float tail = vu.Regfiles().ReadVrf(kSig + kEntries - 1, 1, false)[0];
+      if (numeric::BitsOf(tail) != sig_bits && vu.Valu(0).BusyCycles() > 0) {
+        valu0_before_tail = true;
+      }
+      if (first_wr == 0 && store.req_valid.Get() != 0 &&
+          store.req_we.Get() != 0) {
+        first_wr = CycleNow();
+        valu1_at_wr = vu.Valu(1).BusyCycles();
+      }
+    }
+    Vu& vu;
+    MemPort& store;
+    uint32_t sig_bits = 0;
+    bool valu0_before_tail = false;
+    uint64_t first_wr = 0, valu1_at_wr = 0;
+  };
+  Watch watch(rig.clk, *rig.vu, *rig.st, sig_bits);
+  rig.Run(1200);
+
+  EXPECT_TRUE(watch.valu0_before_tail);
+  EXPECT_GT(watch.first_wr, 0u);
+  EXPECT_GT(rig.vu->Valu(1).BusyCycles(), watch.valu1_at_wr);
+  EXPECT_EQ(rig.stmem->Peek(kDstAddr, kN), want_data);
+  EXPECT_EQ(rig.stmem->PeekScale(kDstAddr, kN / 32), want_scale);
+  ASSERT_EQ(rig.sink->got.size(), 1u);
+}

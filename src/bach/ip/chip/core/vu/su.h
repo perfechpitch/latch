@@ -105,6 +105,7 @@ class VuSu : public BachModule {
     uint64_t vl = flow->SegLen();
     numeric::RoundMode mode = inst.Round();
 
+    // 这一段自己的 scale。整条的 scale 记在 scale_acc 里，跨段攒块时还用得着。
     scale_bytes.clear();
     // 分段走时这一段落在整条的哪一截：按 CM 上的元素宽度换算。不分段的那一档
     // seg_base 是 0，地址就是整条的起点。
@@ -164,9 +165,11 @@ class VuSu : public BachModule {
       acc.assign(head, 0);
       acc_from = head;
       blk_idx = 0;
+      scale_acc.clear();
     }
     acc.insert(acc.end(), body.begin(), body.end());
-    bool has_scale = !scale_bytes.empty();
+    scale_acc.insert(scale_acc.end(), scale_bytes.begin(), scale_bytes.end());
+    bool has_scale = !scale_acc.empty();
     while (acc.size() >= kVuVrfEntryBytes) {
       PushBlock(kVuVrfEntryBytes, has_scale);
     }
@@ -189,9 +192,8 @@ class VuSu : public BachModule {
       // 的那几段补 0，存储只改有效区间覆盖到的那几组。
       for (uint64_t g = 0; g < 4; ++g) {
         uint64_t at = blk_idx * kVuVrfEntryBytes + g * 32;
-        uint64_t idx = at >= head ? (at - head) / 32 : scale_bytes.size();
-        d->push_back(at >= head && idx < scale_bytes.size() ? scale_bytes[idx]
-                                                            : 0);
+        uint64_t idx = at >= head ? (at - head) / 32 : scale_acc.size();
+        d->push_back(at >= head && idx < scale_acc.size() ? scale_acc[idx] : 0);
       }
     }
     Blk b;
@@ -334,6 +336,8 @@ class VuSu : public BachModule {
   std::vector<uint8_t> acc;
   uint64_t acc_base = 0, acc_from = 0, blk_idx = 0;
   std::vector<uint8_t> scale_bytes;
+  // 本条已经定过阶的 scale，按元素顺序排。一段一块，写出 128 B 时从这里取。
+  std::vector<uint8_t> scale_acc;
 
   Logic64 beats;
 };

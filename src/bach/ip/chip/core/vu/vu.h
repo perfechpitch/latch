@@ -108,6 +108,7 @@ class Vu {
   VuIsq& Isq() { return *isq; }
   VuPipeCtrl& PipeCtrl() { return *pipe; }
   uint64_t IssueHolds() const { return issue->Holds(); }
+  VuValu& Valu(uint64_t i) { return *valu[i]; }
   VuProfile& Profile() { return *profile; }
   VuRetire& Retire() { return *retire; }
 

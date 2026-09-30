@@ -814,18 +814,23 @@ inline bool ValuSegmentable(uint64_t which, ValuOp op) {
   }
 }
 
-// 这一条宏指令能不能拆成段逐段流过。
+// 这一条宏指令能不能拆成段逐段流过（F49a）。
 //
-// 拆的收益在 Load 与 Store 重叠上，所以两头都得是向量、且本条用到的每个单元都
-// 逐元素算。拆不了的整条走一份。
+// 一段是一个 RF entry。LU 凑齐一段就往下交，执行单元每拍收一段，没有 SU 也一样。
+// 跨 element 的运算、标量、掩码、MEXE、SEXE，以及按整条读 scale 的 ld.mxfp8，
+// 整条走一份（F49b）。st.mxfp8 的 scale 一块 32 个元素，与 FP32 的一段对齐，
+// 定阶不跨段，所以写出仍逐段流，凑满 128 B 再发一笔写。
 inline bool VuCanSegment(VuUops const& u) {
   LuOp lu = LuOp(u.cfg.lu.opcode);
   SuOp su = SuOp(u.cfg.su.opcode);
-  if (!u.cfg.lu.Active() || !u.cfg.su.Active()) return false;
-  if (lu == LuOp::kLdMask || lu == LuOp::kLdSFp32) return false;
-  if (su == SuOp::kStMask || su == SuOp::kStSFp32) return false;
-  // MXFP8 的块 scale 按整条定阶，拆段之后每段自己定阶就不是同一个数了。
-  if (lu == LuOp::kLdMxfp8 || su == SuOp::kStMxfp8) return false;
+  if (u.cfg.lu.Active() &&
+      (lu == LuOp::kLdMask || lu == LuOp::kLdSFp32 || lu == LuOp::kLdMxfp8)) {
+    return false;
+  }
+  if (u.cfg.su.Active() &&
+      (su == SuOp::kStMask || su == SuOp::kStSFp32)) {
+    return false;
+  }
   if (u.cfg.mexe.Active()) return false;
   for (VuOpReg const& r : u.cfg.sexe) {
     if (r.Active()) return false;
