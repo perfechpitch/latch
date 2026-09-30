@@ -151,7 +151,7 @@
 * 哪些 task 该硬化进 TS，界线尚未定下
   * 原文的设想：“所有与用户和 core mem 分配无关的 task，都可以采用硬化 task 在 TS 的方式（包括 broadcast 重发），只有与用户强相关的任务链才会在 stream 表里创建和工作”
 * ~~reduce 任务（32 KB）拆成多笔 8 KB 由 TS 并行发射，方案可能改到 DTE 内做多笔，届时 TS 不再需要 `TASK_REDUCE_ISS`~~ 已定：TS MAS 现版划掉 `reduce_num`，一笔 reduce 在链上拆成几项逐级 reduce 任务
-* ~~dataout 任务后续可能由 DTE 直接与 Router 交互检查 credit，不经 TS~~ 已定反向：TS 查 RouterTable 与 stream 资源、有资源才下发，DTE 只查 VC 通路上的 flit credit
+* ~~dataout 任务后续可能由 DTE 直接与 Router 交互检查 credit，不经 TS~~ 已定反向：TS 查 RouterTable 与 stream 资源、有资源才下发，DTE dispatch 时不查 VC credit，本地反压由 CoreStation 的 DteReady 在 flit 层兜住
 * TS 直接配置启动 DTE DSA 的方案待定
 * ~~`TASK_DSA_EN` 位域在 MAS 里已划删除线，取消之后 TS 靠什么区分“只调 RV core”与“调 DSA”的 task，MAS 没写~~ 已定：由 `TASK_RECV_UNIT` 区分
 * Core Mem 里给 P2P 阻塞缓冲留多大、开哪几个方向（最多 3 个），与给 broadcast 留的空间怎么分

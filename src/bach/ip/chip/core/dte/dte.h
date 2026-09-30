@@ -126,10 +126,6 @@ class Dte {
 
   // ── 配置面 ──
   Hmem& Tables() { return *hmem; }
-  // 出核前查 VC 通路上的 flit credit。装配层接到 Xbar 每拍发布的那个电平上。
-  void AttachVcLevel(std::shared_ptr<CreditLevelPort> p) {
-    commit->AttachVcLevel(std::move(p));
-  }
 
   // ── 观测 ──
   HeaderParser& Parser() { return *parser; }

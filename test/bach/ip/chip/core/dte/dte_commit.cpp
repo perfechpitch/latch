@@ -1,9 +1,10 @@
 // Commit：所有任务（进核 + 出核）统一从 RV core 的配置入口来，进中央 TaskQueue
 // （深度 16）再按通道资源 dispatch。
 //
-// 三样一起拿（Lane 读/写槽 + Completion RS）从 Fire 时刻移到 dispatch 时刻；出核
-// 任务还要看 VC credit；不同通道的任务可乱序下发（队头堵在 VC 上时后面的进核任务
-// 先行）；中央 TaskQueue 满 16 反压 RV core；出核要发的那个包在这里造好。
+// 三样一起拿（Lane 读/写槽 + Completion RS）从 Fire 时刻移到 dispatch 时刻；链路
+// 级 VC credit 不在这里查（由 CoreStation 的 DteReady 在 flit 层端到端反压兜住）；
+// 不同通道的任务可乱序下发；中央 TaskQueue 满 16 反压 RV core；出核要发的那个包
+// 在这里造好。
 
 #include <gtest/gtest.h>
 
@@ -63,15 +64,6 @@ RouteEntry Forward(uint64_t flow) {
   RouteEntry e;
   e.flow_dir = flow;
   e.operation = Operation::kForward;
-  return e;
-}
-
-RouteEntry Reduce(uint64_t flow) {
-  RouteEntry e;
-  e.flow_dir = flow;
-  e.op_type = OpType::kReduce;
-  e.operation = Operation::kReduce1;
-  e.reduce_in_mask = 0b011;
   return e;
 }
 
@@ -201,75 +193,6 @@ TEST(BachDteCommit, NoAdmitUntilAllThreeAreThere) {
   RT::Reset();
   EXPECT_EQ(before, 0u) << "三样没齐之前一笔都不放";
   EXPECT_EQ(after, 1u) << "齐了之后放行";
-}
-
-// 不同通道的任务可乱序下发：队头那个出核任务堵在 VC credit 上时，后面到的那笔
-// 进核任务（不查 VC）照样先行 dispatch。
-TEST(BachDteCommit, VcBlockedHeadDoesNotBlockLaterInbound) {
-  std::vector<uint64_t> users;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.hmem->PreloadRtab(9, Forward(kFlowRight));
-    // 往右那条 VC 通路一个空位都没有：电平口不驱，读出来全是 0。
-    auto level = std::make_shared<CreditLevelPort>(clk);
-    b.commit->AttachVcLevel(level);
-    CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    // 出核那笔先来，堵在 VC credit；进核那笔后到，不同通道，乱序先走。
-    h.jobs = {{2, Outbound(52, 9, 256)}, {4, Inbound(41, 7, 512)}};
-    clk->Continue(60 * kPeriod);
-    RT::JoinAll();
-    for (auto const& a : h.admits) users.push_back(a.user);
-  }
-  RT::Reset();
-  ASSERT_EQ(users.size(), 1u);
-  EXPECT_EQ(users[0], 41u) << "进核任务不受队头出核任务的 VC 阻塞，乱序先走";
-}
-
-// 同一通道内按序（F18）：队头那笔堵在 VC credit 上时，后面落同一通道的任务即使
-// 自己的 VC 通路发得出也不越过它；别的通道的任务照样先行。
-TEST(BachDteCommit, VcBlockedHeadHoldsItsOwnLane) {
-  std::vector<uint64_t> users;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.hmem->PreloadRtab(9, Forward(kFlowRight));
-    b.hmem->PreloadRtab(10, Forward(0));  // 不往任何方向发，VC 这一关总能过
-    auto level = std::make_shared<CreditLevelPort>(clk);
-    b.commit->AttachVcLevel(level);
-    CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    // vc 0 与 vc 4 落同一个出核通道，vc 1 落另一个。
-    h.jobs = {{2, Outbound(52, 9, 256, 0)},
-              {4, Outbound(53, 10, 256, 4)},
-              {6, Outbound(54, 10, 256, 1)}};
-    clk->Continue(60 * kPeriod);
-    RT::JoinAll();
-    for (auto const& a : h.admits) users.push_back(a.user);
-  }
-  RT::Reset();
-  ASSERT_EQ(users.size(), 1u) << "同一通道的那笔要等队头，只有别的通道那笔能走";
-  EXPECT_EQ(users[0], 54u);
-}
-
-// Reduce 包与其他出核包一样只看 VC credit：本级 Rmem 资源由 TS 在下发前申请，
-// DTE 这一侧不另记 credit。
-TEST(BachDteCommit, ReducePacketNeedsOnlyVcCredit) {
-  uint64_t admitted = 0;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.hmem->PreloadRtab(9, Reduce(kFlowRight));
-    CommitHarness h(clk, *b.commit, b.lanes, b.rs);
-    h.jobs = {{2, Outbound(52, 9, 1024)}};
-    clk->Continue(40 * kPeriod);
-    RT::JoinAll();
-    admitted = h.admits.size();
-  }
-  RT::Reset();
-  EXPECT_EQ(admitted, 1u) << "VC 通路收得下就放行";
 }
 
 // 中央 TaskQueue 满 16 就反压 RV core：Lane 一直不放行，任务只进不 dispatch，

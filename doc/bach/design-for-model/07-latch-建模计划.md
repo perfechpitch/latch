@@ -533,7 +533,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏 core 的 Router 在透传档，不做溢流转存，只能留在 VC，因此 path 规划要保证这一段不会长期阻塞 | `RouterTable.stall_way` 与 CoreMem 重发 |
 | 7 | P2P 传输阻塞时把数据落进 Core Mem 的 P2P 阻塞缓冲，下游 credit 释放后再续传 | TS 的 P2P 阻塞缓冲映射表 |
 | 8 | DTE 的 Commit 配对接纳：RD、WR 两个 TaskQueue 项与 Completion RS 项同时拿到才收，不产生读已开始、写没有落脚点的半任务 | DTE 的 Commit |
-| 9 | DTE 的出核任务先在 `PendingTaskQ` 等到资源授权，再去 Commit 申请那三样，等资源的任务不占 Completion RS | DTE 的 PendingTaskQ |
+| 9 | DTE 的出核任务先进中央 TaskQueue，dispatch 时才一起去 Commit 申请那三样（Lane 读/写 TaskQueue + Completion RS），等在队列里的任务不占 Completion RS | DTE 的 Commit 中央 TaskQueue |
 | 10 | EP 组间派遣：所有 R core 都有余量才派遣一个用户，派时各减一，链尾返回后各加一 | 入口桩的 LPU Dispatch |
 | 11 | 一条“广播 + P2P + 广播”的路径上，各 core 的 Core Mem 能容纳的用户数**沿数据流方向不能变少**：一致或前窄后宽。满足这一条时 User N 的回程一定排在 User N+4 的去程之前，不会成环 | 编译侧的 `cmem_part` 分配，模型在 boot 期校验 |
 | 12 | ReduceBuffer 不得当流控缓存用。Reduce 结果发不出去时进本 core 的 Core Mem，不许压在 ReduceBuffer 里 | ReduceModule 的输出准入 |
@@ -550,7 +550,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 跑的过程中每拍都成立，破坏了就是死锁的前兆，比跑完之后查 credit 守恒早得多：
 
-1. **资源的持有与等待不成环**：任何一个模块在等某个资源时，不得同时持有该资源的上游还要用的资源。Commit 的配对接纳与 PendingTaskQ 排在 Commit 之前，是这一条在 DTE 上的两个落点
+1. **资源的持有与等待不成环**：任何一个模块在等某个资源时，不得同时持有该资源的上游还要用的资源。Commit 的配对接纳与中央 TaskQueue 排在 Commit 之前，是这一条在 DTE 上的两个落点
 2. **每个等待都有唤醒源**：`unit_waits` 里的每条等待区间都能配上一个把它唤醒的事件。等待归因表里的 reason 分依赖与资源两类，资源类的唤醒源是对应的 release 或 grant，依赖类的唤醒源是对应的完成事件
 3. **没有任何一路请求被无限期饿死**：同优先级按先到先得排队，stream_table 的六类写口把回收类排在生成类之前，Xbar 每拍重新 RoundRobin
 

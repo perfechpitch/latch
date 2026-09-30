@@ -95,7 +95,7 @@ Router 一个走法一份，图与逐步执行各自独立，八个模块的拓�
 
 * [`09-router-reduce-工作细节.html`](09-router-reduce-工作细节.html)：39 步。逐级 reduce：六级流水线、建上下文与读改写累加、结果 flit 的操作数加完就回注 Xbar、Reduce Done 按用户号把 TS 里的当前任务置完成。
 * [`09-router-broadcast-工作细节.html`](09-router-broadcast-工作细节.html)：38 步。一次搬运逐跳复制：`flow_dir` 多位有效、`path_core_mask` 决定进不进本 core、全有或全无的准入、ST 阶段 1 到 N 复制、阻塞重传。
-* [`09-router-corein-工作细节.html`](09-router-corein-工作细节.html)：37 步。进 core 与出 core 两条并行通路：三态准入、HeaderFIFO 与 in_core_fifo、Header 就绪通知 TS、DTE 查 VC credit 后发整包。
+* [`09-router-corein-工作细节.html`](09-router-corein-工作细节.html)：37 步。进 core 与出 core 两条并行通路：三态准入、HeaderFIFO 与 in_core_fifo、Header 就绪通知 TS、DTE 不查 VC credit 直接发整包。
 * [`09-router-reissue-工作细节.html`](09-router-reissue-工作细节.html)：36 步。`stall_way` 转存：RC 阶段按包判断、Bypass 拆成进 core 加出 core 两段、`overflow_reinject` 标记、同 VC 保序、重注入时才结账。
 * [`09-router-bypass-工作细节.html`](09-router-bypass-工作细节.html)：34 步。直通与 credit 旁路：VC credit 两级记账、坏 core 的透传档、release 不查表不进 Xbar 只按 CSR 的静态方向 Mask 转发。
 

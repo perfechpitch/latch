@@ -505,7 +505,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **出 core**
 
-9. DataOut DTE 按 PathID 查自己那份 RouterTable 得到 VC 号。下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE 这一侧只查这条 VC 通路上的 flit credit，不够就在 PendingTaskQ 等，够了就经 `out_core_data_ch` 发出整包。CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁。进 core 与出 core 两条路完全并行，互不共享仲裁状态。
+9. DataOut DTE 按 PathID 查自己那份 RouterTable 得到 VC 号。下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE 这一侧 dispatch 时不查 VC credit，本地 DTE↔Router 的 VC 反压由 CoreStation 的 DteReady 在 flit 层兜住，经 `out_core_data_ch` 发出整包。CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁。进 core 与出 core 两条路完全并行，互不共享仲裁状态。
 
 **Reduce**
 
@@ -518,7 +518,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 直通（Bypass） | 上游 Router 的 `<方向>_data_in_ch` | RouterStation → CrossBar → 出口 RouterStation 的 output buffer / Packet Shifter | 下游该 VC 的 credit；目标方向需要 Stream 时查本级的下游 Stream 映射表 | 下一个 Router；flit 离开本级 VC 即还上游 VC credit |
 | 多播 | 同上，flow_dir 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
 | 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
-| 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | DTE 查这条 VC 通路的 flit credit；下游 Stream / Rmem 资源由 TS 在下发前查好 | 下一个 Router；发完向 TS 返回 UserID + PathID |
+| 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | DTE dispatch 时不查 VC credit（本地反压由 CoreStation 的 DteReady 在 flit 层兜住）；下游 Stream / Rmem 资源由 TS 在下发前查好 | 下一个 Router；发完向 TS 返回 UserID + PathID |
 | Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Rmem 资源由 TS 在下发前申请；输出时查目标 VC credit，`reduceNeedMask` 置位的方向还查下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
@@ -580,7 +580,7 @@ DTE 取数这一步分三段，只有两头带地址：
 
 * DTE 内按 Router 一个方向的 VC 数各有一个 Buffer，某个 VC 阻塞只阻塞对应的那个 Buffer
 * DTE 发数据到 Router 时与 CoreStation 有 credit 协议，保证 VC 有容量才发
-* 下游的 Stream 与 Rmem 资源由 TS 在下发任务前查好，不在 DTE 这一级；DTE 查 VC credit 不够时，任务在 `PendingTaskQ` 等待
+* 下游的 Stream 与 Rmem 资源由 TS 在下发任务前查好，不在 DTE 这一级；DTE dispatch 时不查 VC credit，本地反压由 CoreStation 的 DteReady 在 flit 层兜住
 * DTE 中也要有一份 RouterTable，按 PathID 查到本跳的 VC 号
 * 进 Core 与出 Core 的数据通路**完全并行**，互不共享数据通路仲裁状态
 
@@ -590,7 +590,7 @@ Reduce 包从 core 出发这一段的本级资源由 TS 管，进了 ReduceModul
 
 * TS 为每个用户记一份本级 Rmem 的 credit，不向 Router 申请：reduce 任务下发一笔就占掉，ReduceModule 做完这一笔报回来才还；一笔 reduce 拆成链上几项时，一项做完再下发下一项
 * DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC
-* DTE 搬 Reduce 包与其他出核包一样只查 VC 通路上的 flit credit
+* DTE 搬 Reduce 包与其他出核包一样 dispatch 时不查 VC credit，本地反压由 CoreStation 的 DteReady 在 flit 层兜住
 * ReduceModule 做完一笔任务、结果全部交付后经 `rmem2ts_done_ch` 向 TS 报完成，TS 据此推进这个用户的下一笔 reduce 任务
 * ReduceModule 之间按用户、按任务走：`reduceNeedMask` 置位时，一笔任务头一次向某个方向发之前要取得那个方向这个用户的准入，这笔任务后面的 Packet 与 flit 复用这次准入，逐 flit 只受 VC credit 约束；下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，上游据此放开这个用户在那个方向的资源
 * 表项的删除：收到本级 core 某个 UserID 的 Retire 后本地分区回收；相邻下游各方向在途任务的 release 都回来之后，才删掉这个用户的映射给其他用户用
@@ -763,7 +763,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <rect x="195" y="564" width="120" height="66" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="203" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">本 core 的 DTE</text>
 <text x="203" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 credit 由 TS 按用户记</text>
-<text x="203" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">DTE 只查 VC credit</text>
+<text x="203" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">DTE 不查 VC credit</text>
 <rect x="195" y="638" width="120" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
 <text x="203" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">本级由 TS 申请</text>
 <text x="203" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">链上逐项顺序申请</text>

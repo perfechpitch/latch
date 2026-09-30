@@ -1063,7 +1063,7 @@ const RUN_B=[
   ref:'mu.md 接口　06“EP6+TP8 的运行时”　03-reduce“切 K 才需要归约”'},
 
  {t:'算 FFN ④　第二层归约：部分和在 ReduceModule 逐跳累加，汇到 dot core',
-  d:['task 2 是逐级 reduce 任务（<code>TASK_TYPE = 4</code>，配了 <code>TASK_CREDIT_EN</code>），要的是本级 Rmem 的 credit，TS 为每个用户记一份，不向 Router 申请：拆成链上几项时逐项下发，一项做完才还 credit、发下一项；DTE 只查 VC credit。',
+  d:['task 2 是逐级 reduce 任务（<code>TASK_TYPE = 4</code>，配了 <code>TASK_CREDIT_EN</code>），要的是本级 Rmem 的 credit，TS 为每个用户记一份，不向 Router 申请：拆成链上几项时逐项下发，一项做完才还 credit、发下一项；DTE dispatch 时不查 VC credit（本地反压由 CoreStation 的 DteReady 在 flit 层兜住）。',
      'DTE 把部分和作为 Reduce 包送进 Router，包头 <code>operation = reduce</code>、带 <code>reduce_seq</code>；Xbar 导向 ReduceModule，进入后锁定到尾 flit。',
      'ReduceModule 按 UserID 找上下文：进出包都是 BF16，第一份分配并按 FP32 写入，后续方向读出、FP32 累加、写回，<b>流着加，链上没有同步点</b>；一笔任务交付后向上游 release 一次。',
      'chip 内归约链按逻辑槽位 6 → 5 → 4 → 0 → 1 → 2 → 3 → 7 走，链尾落进 dot core（每颗 chip 的逻辑 core7）的 Core Mem。右图画中间列 chip：core8 → core7 → core6 → core5 → core0 → core1 → core2 → core3 → core4 → core9，core7、core2 是坏 core，只透传，不进 ReduceModule。',

@@ -188,10 +188,6 @@ class Router {
   Retire& GetRetire() { return *retire; }
   CreditMonitor& GetMonitor() { return *monitor; }
   RouterStation& Station(uint64_t i) { return *stations.at(i); }
-  // Xbar 每拍发布的各方向各 VC 可发标志。DTE 出核前读它。
-  std::shared_ptr<CreditLevelPort> CreditLevelPtr() const {
-    return xbar->LevelPtr();
-  }
 
   // tick 关掉时由外层每拍调一次。顺序照“末级先做”：先让下游把东西收走，
   // 上游本拍腾出来的位置才用得上。模块之间的信号都打拍，所以这个顺序只影响

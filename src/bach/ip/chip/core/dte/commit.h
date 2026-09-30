@@ -6,12 +6,13 @@
 // 对齐飞书《DTE DSA》：所有任务（进核 + 出核）统一从 RV core 的配置入口来。RV core
 // 配好寄存器写 CFG_TRIGGER 后，Regfile 把快照出的 Descriptor 送进中央 TaskQueue
 // （深度 16，保存“已快照、尚未 dispatch”的完整 TaskDesc，不同通道的任务可乱序
-// 下发）；Commit 再按目标通道的读/写 TaskQueue 槽、Completion RS 槽、出核的 VC
-// credit 从队头 dispatch。
+// 下发）；Commit 再按目标通道的读/写 TaskQueue 槽、Completion RS 槽从队头
+// dispatch。
 //
 // “三样一起拿”的语义从 Fire 时刻移到 dispatch 时刻：dispatch 时检查目标 Lane 的
 // 读侧 + 写侧 TaskQueue 项与 Completion RS 项，任一侧没有空间就整体保持（挡住
-// “读已开始、写没落脚点”的半任务）；出核任务还要先看这条 VC 通路发不发得出。
+// “读已开始、写没落脚点”的半任务）。链路级 VC credit 不在这里查：由 CoreStation
+// 的 DteReady 在 flit 层端到端反压兜住。
 //
 // 反压：中央 TaskQueue 满（16）就不收 Regfile 送来的 Descriptor，Regfile 据此拉低
 // dsa_cfg 的 req_ready 反压 RV core。
@@ -27,7 +28,6 @@
 #include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/memory/banked_mem.h"
 #include "bach/ip/chip/core/mu/gen_ep_info.h"
-#include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
 
 namespace latch {
@@ -48,11 +48,6 @@ class Commit : public BachModule {
   DescPort& FromRv() { return *from_rv; }
   std::shared_ptr<DescPort> FromRvPtr() const { return from_rv; }
   void RebindRv(std::shared_ptr<DescPort> p) { from_rv = std::move(p); }
-
-  // Xbar 每拍发布各方向各 VC 还发不发得出，出核任务 dispatch 之前读它。
-  void AttachVcLevel(std::shared_ptr<CreditLevelPort> p) {
-    vc_level = std::move(p);
-  }
 
   // 出核造包时从 MU 的 topK_ep_table 把 topK 读出来附回要发的包。装配层把 MU 的
   // GenEpInfo 指过来。
@@ -122,10 +117,9 @@ class Commit : public BachModule {
   }
 
   // 从队头往后扫，dispatch 第一个目标通道就绪的任务。不同通道的任务可乱序下发：
-  // 队头那个出核任务还堵在 VC credit 上时，后面别的通道的任务可以先行。同一通道
-  // 内按序：一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都
-  // 不发。三样一起拿：读侧 TaskQueue、写侧 TaskQueue、Completion RS；出核任务再
-  // 查 VC credit。
+  // 队头那个任务堵在通道资源上时，后面别的通道的任务可以先行。同一通道内按序：
+  // 一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都不发。三样一起拿：
+  // 读侧 TaskQueue、写侧 TaskQueue、Completion RS。
   void TryDispatch() {
     if (holding) return;
     // 上一拍刚发过一笔就空一拍：对方收下那一笔之后才把它算进 ready，这一拍读到
@@ -141,17 +135,6 @@ class Commit : public BachModule {
       uint64_t lane = d.Lane();
       if (lane >= to_lane.size()) continue;
       if (blocked & (1ull << lane)) continue;
-
-      // 出核任务 dispatch 之前实时检查这条 VC 通路上的 flit credit。下游 Stream
-      // 资源与本级 Rmem 资源不在这里查，TS 下发之前已经申请到；Reduce 包也一样。
-      // 进核任务不走这条通路，不查。
-      if (!IsInbound(d.route)) {
-        RouteEntry const& e = hmem.Rtab(d.path_id);
-        if (!VcOk(d, e)) {
-          blocked |= 1ull << lane;
-          continue;
-        }
-      }
 
       // Lane 的 ready 已经把读写两侧的 TaskQueue 都算进去了。
       if (!to_lane[lane]->Ready() || !to_rs->Ready()) {
@@ -230,16 +213,6 @@ class Commit : public BachModule {
     d.msg = m;
   }
 
-  // 这一笔要往哪几个方向发，那几个方向的这个 VC 都还发得出才算够。
-  bool VcOk(Descriptor const& d, RouteEntry const& e) const {
-    if (!vc_level) return true;
-    for (uint64_t o = 0; o < kR2RNum; ++o) {
-      if (((e.flow_dir >> o) & 1u) == 0) continue;
-      if (!vc_level->VcOk(o, d.vc)) return false;
-    }
-    return true;
-  }
-
   // 发出去，直到两边都收下。一次握手最少两拍，接收方按序号认。两边的 ready 是
   // 收下这一拍的请求之后算的，TryDispatch 发一笔之后又空一拍，所以读到 ready 时
   // 发过的每一笔都已算进去，发一拍就算送到。
@@ -264,7 +237,6 @@ class Commit : public BachModule {
   Hmem& hmem;
   BankedMem* cmem_sync = nullptr;
   GenEpInfo* mu_topk_ep = nullptr;
-  std::shared_ptr<CreditLevelPort> vc_level;
   std::shared_ptr<DescPort> from_rv;
   std::vector<std::shared_ptr<AdmitPort>> to_lane;
   std::shared_ptr<AdmitPort> to_rs;

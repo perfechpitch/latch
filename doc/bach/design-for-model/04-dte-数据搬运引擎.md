@@ -366,7 +366,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 
 两侧的名字沿用原来那套：进核通道的两侧叫 `RD_CH0` 与 `WR_CH0`，出核通道的两侧叫 `RD_CH1` 与 `WR_CH1`。**出核现在有四个通道实例，每个实例各有一套**，下文讲逐拍行为时说的是其中一个实例。
 
-出核前查什么也跟着分了工：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查好，**DTE 这一侧只查 VC 通路上的 flit credit**，不够就在中央 TaskQueue 里等。
+出核前查什么也跟着分了工：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查好，**DTE 这一侧 dispatch 时不查 VC credit**——DTE 到 Router 那一条本地链路的 VC 反压逐拍变化，由 CoreStation 的 `DteReady()` 在 flit 层端到端兜住，dispatch 时再查是冗余。
 
 > **取舍**：通道按 VC 切而不是按读写方向切，是《MU / DTE 需求整理和遗留问题分析》的结论。按方向切挡不住“一个 VC 阻塞导致其他 VC 的包也发不出去”这条死锁路径，因为所有出核任务共用同一条出口。
 >
@@ -1061,7 +1061,7 @@ Router 与 core 之间**不做独立的桥接模块**，按耦合关系把逻辑
   * 解析包信息，搬完按 flit 释放 VC credit
 * **出去的方向**：DTE 侧按 VC0～3 多线程调度维护多个 VC buffer
   * 用它吸收整包流量，完成 core 与 Router 之间的协议转换
-  * 出去之前只查这条 VC 通路上的 flit credit，发往本 core ReduceModule 的 Reduce 包也一样；本级 Rmem 资源由 TS 在下发前申请
+  * 出去这一侧 dispatch 时不查 VC credit，发往本 core ReduceModule 的 Reduce 包也一样：本地 DTE↔Router 的 VC 反压由 CoreStation 的 DteReady 在 flit 层兜住；本级 Rmem 资源由 TS 在下发前申请
   * 两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 routing table 定，但这两类由 TS 在下发前查，不在 DTE 这一级
 * **credit 回程**：解析本级 Router 各方向传进来的 core credit release，按其中的 action 信息决定是否同步更新 core 内的 stream 表状态
   * DTE 里存的这份叫 `stream_cache`，是 Router 那张 stream 表的**只读副本**，3 方向各 16 项 `{valid, user_id}`
@@ -1117,7 +1117,7 @@ stall_cycles  = cycles(valid && !ready)
 最终落地的是两者的合成：
 
 * **通道结构取方案二**：DTE 开 4 个出核通道对应 4 个 VC，某个 VC 阻塞只堵对应那条通道
-* **资源检查取方案一**：TS 查 RouterTable 与 stream 资源，有资源才下发；DTE 只查 VC 通路上的 flit credit
+* **资源检查取方案一**：TS 查 RouterTable 与 stream 资源，有资源才下发；DTE dispatch 时连 VC credit 也不查，本地 DTE↔Router 的 VC 反压由 CoreStation 的 DteReady 在 flit 层兜住
 * **软件约束也取方案一**：TS 里的任务要足够小，下发到 DTE 后不用 RV core 再拆
 
 这么合是因为两个方案各自的短板正好互补。方案二把资源检查全放进 DTE，DTE 就要在 PendingQ 里做拆包，拆出来的小任务数量不确定，会把 TaskQueue 填满、堵住后面那笔释放资源的任务，死锁只是换了个位置。方案一用“任务足够小”这条软件约束避开了拆包，但它的出口仍是按 Buffer 而不是按通道切的，DTE 侧没有乱序执行能力。取通道结构加软件约束，两头都避掉了。

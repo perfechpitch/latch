@@ -474,8 +474,6 @@ class Core : public BachModule {
   void WireRouterToDte() {
     dte->AttachFromRouter(router->ToDtePtr());
     dte->AttachToRouter(router->FromDtePtr());
-    // 出核任务发数据之前读 Xbar 发布的 VC credit 电平。
-    dte->AttachVcLevel(router->CreditLevelPtr());
   }
 
   // 三块存储的各个 master 口。Matrix Mem 对三个 RV core 都不可见，VU 也读不到。

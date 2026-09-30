@@ -321,7 +321,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F31 | 请求发出后保持到 TS 拉 `ready`。TS 的 trigger 入口占满时本笔请求原地保持，CoreStation 不发下一笔，也不清 HeaderFIFO 的队头。请求不允许丢弃：丢一笔 trigger 就等于丢一个 token |
 | F32 | DTE RV core 经 `cm_lsq` 映射到 Router I/O reg 的地址段读包头生成搬运任务，读完向指定地址写 1 把包头弹出，CoreStation 映射出下一个包头。Router 侧的 `hdr_rd` 是这条通路的从端，core 内不另设第二条读包头的通路 |
 | F33 | 被反压时保持 valid、当前 Header、Payload、首尾 flit 标志与有效字节信息不变，传输位置不得前移；反压解除后从同一 flit 继续握手，保证包不丢拍、不重拍、不跨包、不串包 |
-| F34 | 出 core：DTE 按 PathID 查自己那份 RouterTable 得到 VC 号；下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE 只查这条 VC 通路上的 flit credit，够了就经 `out_core_data_ch` 发出整包；CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁 |
+| F34 | 出 core：DTE 按 PathID 查自己那份 RouterTable 得到 VC 号；下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE dispatch 时不查 VC credit（本地反压由 CoreStation 的 DteReady 在 flit 层兜住），经 `out_core_data_ch` 发出整包；CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁 |
 | F35 | 进 core 与出 core 两条数据通路完全并行，互不共享数据通路仲裁状态 |
 
 ### ReduceModule

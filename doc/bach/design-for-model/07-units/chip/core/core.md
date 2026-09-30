@@ -130,7 +130,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
 <text x="1116.0" y="608.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
 <text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 288 B（16 项 × {core_mask, sw_header}）· Fast LUT 待评估</text>
-<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · PendingTaskQ</text>
+<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · 中央 TaskQueue</text>
 <text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
 <rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
 <text x="336" y="751" font-size="11" fill="#111827" font-weight="600">Matrix Mem</text>

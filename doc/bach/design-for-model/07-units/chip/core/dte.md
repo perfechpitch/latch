@@ -79,8 +79,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="1192.0" y="215.5" font-size="8.5" fill="#475569">这条规则挡住“读已经开始、写还没有落脚点”的半任务</text>
 <text x="1192.0" y="229.0" font-size="8.5" fill="#475569">地址展开在 Regfile Fire 时已算好，dispatch 只分配 commit_seq</text>
 <text x="1192.0" y="242.5" font-size="8.5" fill="#475569">中央 TaskQueue 从队头往后扫，dispatch 第一个三样齐的任务：</text>
-<text x="1192.0" y="256.0" font-size="8.5" fill="#475569">　出核任务 dispatch 前还要查 VC credit</text>
-<text x="1192.0" y="269.5" font-size="8.5" fill="#475569">　等 credit 的任务不占 Lane TaskQueue / Completion RS 项</text>
+<text x="1192.0" y="256.0" font-size="8.5" fill="#475569">　dispatch 不查链路级 VC credit：本地 DTE↔Router 的反压由</text>
+<text x="1192.0" y="269.5" font-size="8.5" fill="#475569">　CoreStation 的 DteReady 在 flit 层端到端兜住</text>
 <polygon points="599,44 710,44 701,74 590,74" fill="#f8fafc" stroke="#374151"/>
 <text x="650.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_done → TS</text>
 <polygon points="1289,44 1400,44 1391,74 1280,74" fill="#f8fafc" stroke="#374151"/>
@@ -149,11 +149,11 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <rect x="560" y="960" width="400" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="572" y="981" font-size="11" fill="#111827" font-weight="600">出核前的资源与流控</text>
 <text x="572.0" y="998.0" font-size="8.5" fill="#475569">RouterTable 副本：按 PathID 查到 VC 与资源需求，软件写，三方一致</text>
-<text x="572.0" y="1011.5" font-size="8.5" fill="#475569">Reduce 包与其他出核包一样只查 VC credit</text>
+<text x="572.0" y="1011.5" font-size="8.5" fill="#475569">dispatch 不查 VC credit：本地 DTE↔Router 的反压由 CoreStation 的 DteReady 在 flit 层端到端兜住</text>
 <text x="572.0" y="1025.0" font-size="8.5" fill="#475569">　本级 Rmem 资源由 TS 在下发前申请</text>
-<text x="572.0" y="1038.5" font-size="8.5" fill="#475569">　VC credit 不够就在中央 TaskQueue 里等</text>
+<text x="572.0" y="1038.5" font-size="8.5" fill="#475569">　VC 没位置时由 flit 层反压那一拍，不在中央 TaskQueue 里整笔等</text>
 <text x="572.0" y="1052.0" font-size="8.5" fill="#475569">　ReduceModule 每完成一次 Reduce 并把 flit 发给下游就还一个</text>
-<text x="572.0" y="1065.5" font-size="8.5" fill="#475569">中央 TaskQueue：已快照、尚未 dispatch 的任务在这里等（出核 dispatch 前查 credit）</text>
+<text x="572.0" y="1065.5" font-size="8.5" fill="#475569">中央 TaskQueue：已快照、尚未 dispatch 的任务在这里等（dispatch 只查三样资源）</text>
 <text x="572.0" y="1079.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4：按 VC0～3 多线程调度，单 VC 阻塞只阻塞该 buffer</text>
 <text x="572.0" y="1092.5" font-size="8.5" fill="#475569">进方向只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化</text>
 <text x="572.0" y="1106.0" font-size="8.5" fill="#475569">业务层 credit 分方向，先查 routing table 定方向再取 credit</text>
@@ -275,7 +275,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | F9 | 一个高层任务必须同时拿到三样才接纳：目标通道读侧的 TaskQueue 项、写侧的 TaskQueue 项、Completion RS 项 |
 | F10 | 任一侧没有空间时 Commit 整体保持，队列里后面别的通道的任务可以先行（不同通道可乱序下发）。这条规则挡住“读已经开始、写还没有落脚点”的半任务 |
 | F11 | dispatch 时给这笔分配内部序号（commit_seq）；进核那一笔的 gpu_id / token_id 由 Header Parser 记进 Hmem，出核那一笔造好要发出去的包。逐段地址展开与端点译码已在 Regfile Fire 算好 |
-| F12 | 中央 TaskQueue 从队头往后扫，一次 dispatch 一笔三样齐的任务，dispatch 过一笔之后空一拍再扫；队头那个出核任务堵在 VC credit 上时，后面别的通道的任务可以先行（不同通道可乱序下发） |
+| F12 | 中央 TaskQueue 从队头往后扫，一次 dispatch 一笔三样齐的任务，dispatch 过一笔之后空一拍再扫；队头那个出核任务堵在通道资源（Lane 读/写 TaskQueue + Completion RS）上时，后面别的通道的任务可以先行（不同通道可乱序下发） |
 | F12a | Commit 与目标通道、Completion RS 之间的接纳：两边的 ready 在收下这一拍送来的任务之后算，Commit 读到 ready 时它发过的每一笔都已算进去，所以发一拍就算送到，不等对方回一个收下。Commit 因此最多每两拍 dispatch 一笔 |
 | F13 | 只有一个任务入口：所有任务（进核 + 出核）都由 RV core 配 CFG + trigger 起，在 Commit 的中央 TaskQueue 汇成同一套内部任务模型 |
 | F14 | RV core 侧的配置序列：逐段写 19 项任务配置寄存器（0x004~0x04C，段 i 一组 `CFG_ADDRi_SRC` / `CFG_ADDRi_DST` / `CFG_STRIDEi` / `CFG_DATA_LENi`，加 `CFG_SM_W_ADDR` / `CFG_SM_W_DATA` / `CFG_TRANS_MODE`），一条指令写一个，最后写 `CFG_TRIGGER`（0x0000）提交任务。必须最后写 Trigger |
@@ -360,19 +360,19 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 
 ### 出核前的资源与流控
 
-**分工**：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查：TS 查 RouterTable 与对应的 stream 资源，有资源才把任务下发下来；**DTE 这一侧只查 VC 通路上的 flit credit**，发往本 core ReduceModule 的 Reduce 包也一样（F56）。这样划分是因为业务层资源以 stream 为单位、生命期跨整条任务链，而 flit credit 是逐拍变化的，只有真正要发数据的那一刻才知道够不够。
+**分工**：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查：TS 查 RouterTable 与对应的 stream 资源，有资源才把任务下发下来；**DTE 这一侧 dispatch 时不查 VC credit**，发往本 core ReduceModule 的 Reduce 包也一样。业务层资源以 stream 为单位、生命期跨整条任务链，只能在 TS 下发前查好；而 DTE 到 Router 那一条本地链路的 VC 反压逐拍变化、真正发 flit 那一刻才知道，由 CoreStation 的 `DteReady()`（每个 VC 都还有一格才拉高）在 flit 层端到端兜住，dispatch 时再查是冗余。
 
 **`stream_cache`**：DTE 里另存一份 Router 那张 stream 表的副本（`User Resource Cache Table`），3 方向各 16 项 `{valid, user_id}`，形状与 Router 的 `stream_tab[d]` 一致。它是**只跟随、不分配**的：真正建表项只有 Router 能做（F53 的分工），这份副本靠 Router 各方向送回的 `stream_credit_vld` 与 release 里的 action 位同步（F62），用处是包要重发时本地先记账（F63），以及判断某个包该不该重注入。
 
 | 编号 | 功能 |
 | - | - |
 | F52 | DTE 内维护一份 RouterTable 副本，按 PathID 查到 VC 与资源需求；软件负责写入并保证与 Router、ReduceModule 三方一致 |
-| F53 | 发数据之前实时检查该任务所属 VC 通路上的 flit credit，不够就让任务在中央 TaskQueue 里等；下游 Stream / Rmem 资源不在这里查，TS 下发之前已经申请到 |
-| F54 | 中央 TaskQueue 排在 dispatch **之前**：RV core 配好任务后 Descriptor 先进中央 TaskQueue；dispatch 时出核任务查 VC credit，credit 不够的留在队列里等。等 credit 的任务因此不占 Lane TaskQueue 项，也不占 Completion RS 项 |
+| F53 | dispatch 时不查 VC credit：DTE 到 Router 那一条本地链路的 VC 反压逐拍变化，由 CoreStation 的 `DteReady()`（每个 VC 都还有一格才拉高）在 flit 层端到端兜住，真正发 flit 时哪个 VC 没位置就停发那一拍；下游 Stream / Rmem 资源不在这里查，TS 下发之前已经申请到 |
+| F54 | 中央 TaskQueue 排在 dispatch **之前**：RV core 配好任务后 Descriptor 先进中央 TaskQueue；dispatch 时只查三样资源（Lane 读/写 TaskQueue 项 + Completion RS 项），不查 VC credit，三样不齐的整笔留在队列里等 |
 | F55 | 中央 TaskQueue 满（16）时拉低 `dsa_cfg` 的 `req_ready`，反压 DTE RV core，该 RV core 不能参与下一个用户的搬运 |
 | F55a | 五个通道对每块存储的读与写各只有一个 master 口，由 DMA_XBAR 轮转仲裁。读与写各走各的口、各有各的轮转，一拍可以同时发一读一写。通道在入口各占几格，按序号把请求放进来；`req_ready` 报的是那几格还收不收得下 |
 | F55b | 四个出核通道对 Router 只有一个 `out_core_data_ch`，同样轮转仲裁。授权粘在一个通道上直到它把带 `tlast` 的那一拍发完，一个包的几拍中间不会插进别的包 |
-| F56 | Reduce 包与其他出核包一样只查 VC 通路上的 flit credit；本级 Rmem 的 credit 由 TS 按用户记，有 credit 才下发 reduce 任务 |
+| F56 | Reduce 包与其他出核包一样 dispatch 时不查 VC credit；本级 Rmem 的 credit 由 TS 按用户记，有 credit 才下发 reduce 任务 |
 | F59 | 出方向按 VC0～3 多线程调度维护多个 VC buffer，某个 VC 阻塞只阻塞对应的那个 buffer；用它吸收整包流量，完成 core 与 Router 之间的协议转换 |
 | F60 | 进方向 Router 与 core 之间只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化完成；DTE 侧感知单 VC buffer 的缓存状态并据此启动搬运，解析包信息，搬完按 flit 释放 VC credit |
 | F61 | 业务层 credit 只有一类：下游那个 core 的 coremem credit，分方向，方向由 routing table 定，由 TS 在下发前查（见 TS 一节“credit 与退休”）。DTE 只负责 credit 回程：把 Router 各方向送回来的 release 解析出来更新本地的表 |
@@ -414,7 +414,6 @@ port out_core_data_ch (master, AXI-Stream-Like, clk)  // DTE → CoreStation：�
 port router_credit (slave, 电平 + 脉冲, clk)          // Router 侧回来的三类信息
   in  stream_credit_vld[2:0] · stream_credit_user[2:0][15:0]
   in  reduce_release_vld · reduce_release_user[15:0]
-  in  vc_credit[3:0][7:0]
 port dsa_cfg (slave, valid/ready, clk)                // DTE RV core 的 dsa_iss，身份随这笔请求走
   in  req_valid · req_we · req_addr[13:0] · req_wdata[31:0]
   in  stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · vcid[1:0]  // dsaw 发出那一拍从 CSR 抄下
@@ -456,7 +455,7 @@ mem rtab_copy        FF 阵列   64 项，RouterTable 的外部副本           
 mem path_task_map    FF 阵列   64 × task_id[5:0]，按 path_id 索引                      1R1W  boot 期由软件配          复位 0
 mem inbound_cfg      FF        {route, no_ack, flag_base, flag_entry_bytes}            1R1W  SCP 在 core 配置阶段写（bundle 的 DTEIN），weights 加载与业务模式各配一次  复位 0
 mem stream_cache     FF 阵列   3 方向 × 16 项 × {valid, user_id[15:0]}                 1R1W  Router 的 User Resource Allocation Table 的 cache，只跟随不分配  复位空
-mem central_taskq    FIFO      16 × TaskDesc                                           1W1R  中央 TaskQueue，收 Regfile Fire 出的“已快照、未 dispatch”任务；dispatch 时查通道资源，满则拉低 dsa_cfg 的 req_ready  复位空
+mem central_taskq    FIFO      16 × TaskDesc                                           1W1R  中央 TaskQueue，收 Regfile Fire 出的“已快照、未 dispatch”任务；dispatch 时查三样资源（Lane 读/写槽 + Completion RS），满则拉低 dsa_cfg 的 req_ready  复位空
 mem out_vc_buf[4]    FIFO      每 VC 一个，深度按整包容量                              1W1R  某 VC 阻塞只阻塞该 buffer  复位空
 mem cfg_file         FF 阵列   19 项 × 32 bit（4 段 × {src,dst,stride,len} + SM_W_ADDR/DATA + TRANS_MODE）+ 19 bit dirty 掩码  1RW  显式写过的字段覆盖模板；Trigger Fire 后清 dirty  复位 0
 mem template[8]      FF 阵列   8 套 × 19 项 × 32 bit，每套 128 B 对齐（0x1000~0x1FFF）    1RW   RV core 写；temp_valid 时以它为底、Cfg Reg File 覆盖  复位 0
@@ -891,11 +890,11 @@ stall_cycles  = cycles(valid && !ready)
   <text x="673" y="41" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
   <text x="250" y="61" font-size="12" fill="#111827">中央 TaskQueue · 所有任务先排队，dispatch 时拿授权</text>
   <text x="250" y="83" font-size="10.5" fill="#475569">1. e = rtab_copy[path_id]，取这条 path 是不是 Reduce；VC 取 desc.vcid</text>
-  <text x="250" y="103" font-size="10.5" fill="#475569">2. 出核查 vc_credit[desc.vcid] 够不够整包；下游 stream / Rmem 资源不查，TS 下发前已拿到</text>
-  <text x="250" y="123" font-size="10.5" fill="#475569">3. reduce 包同样只看 VC credit，本级 Rmem 资源 TS 下发前已拿到</text>
-  <text x="250" y="143" font-size="10.5" fill="#475569">4. 不够 → 留在队列，不进 M2；router_credit 到 → 再 dispatch 进 M2</text>
+  <text x="250" y="103" font-size="10.5" fill="#475569">2. dispatch 只查三样资源：Lane 读/写 TaskQueue 槽 + Completion RS 槽，都齐才放行</text>
+  <text x="250" y="123" font-size="10.5" fill="#475569">3. 不查 VC credit：本地 DTE↔Router 反压由 CoreStation 的 DteReady 在 flit 层兜住</text>
+  <text x="250" y="143" font-size="10.5" fill="#475569">4. 下游 stream / Rmem 资源不查，TS 下发前已拿到（reduce 包与其他出核包同一套）</text>
   <text x="250" y="163" font-size="10.5" fill="#475569">5. stream_credit_vld 回来时按 action 更新 stream_cache；重发前本地先记账</text>
-  <text x="250" y="187" font-size="10" fill="#9ca3af">队头出核任务堵在 credit 上时，后面别的通道的任务可以先行</text>
+  <text x="250" y="187" font-size="10" fill="#9ca3af">队头出核任务堵在三样资源上时，后面别的通道的任务可以先行</text>
   <text x="250" y="205" font-size="10" fill="#9ca3af">central_taskq 满 → dsa_cfg.req_ready = 0；stream_cache 只跟随，不分配</text>
   <path d="M188 49 L231 49" stroke="#475569" marker-end="url(#are9)" fill="none"/>
   <path d="M188 111 L231 111" stroke="#475569" marker-end="url(#are9)" fill="none"/>
@@ -993,10 +992,10 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | shareMem 写：搬入置 valid、搬出置 invalid | F50、F51 | `sharemem_flag` |
 | 搬入那一笔的标志项按落点算，不逐笔由软件配 | F51a | `inbound_flag_index` |
 | 三份 RouterTable 副本一致 | F52 | `dte_rtab_copy` |
-| dispatch 前查通道资源，没拿到就在中央 TaskQueue 等 | F53 | `central_taskq` |
-| 中央 TaskQueue 排在 dispatch 之前，等资源的任务不占 Lane 队列 / Completion RS | F54 | `dispatch_before_lane` |
+| dispatch 只查三样资源（Lane 读/写槽 + Completion RS），不查 VC credit | F53 | `central_taskq` |
+| 中央 TaskQueue 排在 dispatch 之前，三样不齐的整笔不占 Lane 队列 / Completion RS | F54 | `dispatch_before_lane` |
 | 中央 TaskQueue 满反压 Regfile（拉低 req_ready），不影响已入队的任务 | F55 | `central_q_backpressure` |
-| Reduce 包只查 VC credit，本级 Rmem 资源由 TS 申请 | F56 | `dte_reduce_vc_only` |
+| Reduce 包与其他出核包一样 dispatch 不查 VC credit，本级 Rmem 资源由 TS 申请 | F56 | `dte_reduce_vc_only` |
 | 出方向 4 个 VC buffer，单 VC 阻塞不影响其他 | F59 | `dte_vc_buffers` |
 | 进方向单 VC，搬完按 flit 释放 VC credit | F60 | `dte_single_vc_in` |
 | 业务层 credit 分方向，先查 routing table | F61 | `credit_by_direction` |
