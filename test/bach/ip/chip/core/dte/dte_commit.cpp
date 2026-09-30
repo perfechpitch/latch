@@ -47,6 +47,10 @@ std::shared_ptr<Descriptor> Outbound(uint64_t user, uint64_t path,
   d->path_id = path;
   d->stream_id = 1;
   d->task_id = 2;
+  // 段 0 = 包头（计算 core 落 Hmem），出核造包时从 Hmem 读回 gpu_id / token_id。
+  d->seg[0].valid = true;
+  d->seg[0].is_header = true;
+  d->seg[0].src_kind = SegEndpoint::kHeader;
   // 段 1 = 数据，出核造包时按 PayloadBytes() 汇总长度。
   d->seg[1].valid = true;
   d->seg[1].src_kind = SegEndpoint::kCmem;

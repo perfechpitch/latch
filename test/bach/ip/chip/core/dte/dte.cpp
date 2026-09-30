@@ -15,6 +15,7 @@
 #include "base/clock.h"
 #include "base/runtime.h"
 #include "bach/ip/chip/core/dte/dte.h"
+#include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/memory/core_mem.h"
 
 using namespace latch;
@@ -46,6 +47,11 @@ constexpr uint64_t kSegValidShift = 2;
 uint64_t TransMode(Route r, uint64_t addr_valid, bool ack = true) {
   return uint64_t(r) | (addr_valid << kSegValidShift) |
          (ack ? kDteAckTsEn : 0);
+}
+
+// 段 0（包头）落 header_table（计算 core）的地址：端点 tag 0x4，低位给 stream_id。
+uint64_t HeaderAddr(uint64_t stream) {
+  return (uint64_t(SegEndpoint::kHeader) << kEpShift) | stream;
 }
 
 // 扮演 Router 的 CoreStation：按脚本在指定拍送一串整包（每个包可多拍）。反压时
@@ -177,7 +183,8 @@ RvCfgDriver::Task InboundTask(uint64_t stream, uint64_t task, uint64_t user,
   t.task = task;
   t.user = user;
   t.path = 0;
-  t.wr = {{kDteRegAddr1Dst, dst},
+  t.wr = {{kDteRegAddr0Dst, HeaderAddr(stream)},
+          {kDteRegAddr1Dst, dst},
           {kDteRegDataLen1, len},
           {kDteRegTransMode, TransMode(Route::kRouterToCm, 1u << 1)},
           {kDteRegTrigger, 0}};
@@ -315,6 +322,96 @@ TEST(BachDte, InboundRouterToCoreMem) {
   EXPECT_EQ(dones, 1u);    // exactly-once：只报一次
 }
 
+// 包头落哪块存储由段 0（包头）地址的端点 tag 决定：计算 core 配 header_table
+// （tag 0x4）落 Hmem，B/R core 配 Core Mem 地址（tag 0x0）落 Core Mem。这里验
+// 计算 core 那一路：进核第一拍收下时把 core_mask / Hardware Used / gpu_id /
+// token_id 按 stream_id 落进 Hmem。
+TEST(BachDte, HeaderLandsInHmemForComputeCore) {
+  uint64_t mask = 0, used = 0, gpu = 0, token = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
+    RvCfgDriver rv(clk, dte,
+                   {InboundTask(/*stream=*/5, /*task=*/9, /*user=*/11,
+                                /*dst=*/0x100, /*len=*/512)},
+                   2);
+    auto m = MakeMsg(11, 0, 512, /*stream=*/5, /*task=*/9);
+    m->path_core_mask = 0xF1;
+    m->gpu_id = 13;
+    m->token_id = 27;
+    FrameFeeder feed(clk, dte, {{20, m}});
+    MemSide memside(clk, mem);
+    TsSide ts(clk, dte);
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    HmemEntry const& e = dte.Tables().Entry(5);
+    mask = e.core_mask;
+    used = e.hardware_used;
+    gpu = e.gpu_id;
+    token = e.token_id;
+  }
+  RT::Reset();
+  EXPECT_EQ(mask, 0xF1u);
+  EXPECT_EQ(used, 1u);
+  EXPECT_EQ(gpu, 13u);
+  EXPECT_EQ(token, 27u);
+}
+
+// B/R core 那一路：段 0（包头）地址配 Core Mem 地址（tag 0x0，stride 0 = 纯物理
+// 地址），落库走 Core Mem 的同步 Poke，48 B 序列化块按 HeaderToBytes 往返。
+TEST(BachDte, HeaderLandsInCoreMemForBroadcastCore) {
+  constexpr uint64_t kAt = 0x1000;
+  ByteBlock got;
+  HmemEntry want;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
+    CoreMem cmem(clk, "cmem");
+    dte.AttachCmemRd(cmem.PortPtr(kCmemDteRd));
+    dte.AttachCmemWr(cmem.PortPtr(kCmemDteWr));
+    dte.AttachCmemSync(&cmem);
+    auto mm_rd = std::make_shared<MemPort>(clk);
+    auto mm_wr = std::make_shared<MemPort>(clk);
+    dte.AttachMmemRd(mm_rd);
+    dte.AttachMmemWr(mm_wr);
+
+    RvCfgDriver::Task t;
+    t.stream = 0;
+    t.task = 0;
+    t.user = 11;
+    t.path = 0;
+    t.wr = {{kDteRegAddr0Dst, kAt},   // 段 0 包头落 Core Mem（tag 0x0）
+            {kDteRegAddr1Dst, 0x200},
+            {kDteRegDataLen1, 512},
+            {kDteRegTransMode, TransMode(Route::kRouterToCm, 1u << 1)},
+            {kDteRegTrigger, 0}};
+    RvCfgDriver rv(clk, dte, {t}, 2);
+
+    auto m = MakeMsg(11, 0, 512);
+    m->path_core_mask = 0x3;
+    m->gpu_id = 7;
+    m->token_id = 21;
+    FrameFeeder feed(clk, dte, {{20, m}});
+    MemSide memside(clk, {mm_rd, mm_wr});
+    TsSide ts(clk, dte);
+    clk->Continue(300 * kPeriod);
+    RT::JoinAll();
+    got = cmem.Peek(kAt, kHeaderCtxBytes);
+    want.core_mask = 0x3;
+    want.hardware_used = 1;
+    want.gpu_id = 7;
+    want.token_id = 21;
+  }
+  RT::Reset();
+  EXPECT_EQ(got, HeaderToBytes(want));
+}
+
 // 带 scale 的包：payload 是 MXFP8 数据后面接 scale。数据段落 Core Mem，scale 段
 // 落同一段地址的 scale 旁带，每 32 B 数据一个。分段由 CFG_ADDR2_DST 的端点 tag
 // （0x2 = scale）决定，不再看包头的 scale_valid。
@@ -344,7 +441,8 @@ TEST(BachDte, InboundScaleLandsInScaleSideband) {
     t.task = 0;
     t.user = 11;
     t.path = 0;
-    t.wr = {{kDteRegAddr1Dst, kAt},
+    t.wr = {{kDteRegAddr0Dst, HeaderAddr(0)},
+            {kDteRegAddr1Dst, kAt},
             {kDteRegDataLen1, kData},
             {kDteRegAddr2Dst, (uint64_t(SegEndpoint::kScale) << kEpShift) | kAt},
             {kDteRegDataLen2, scale.size()},
@@ -386,7 +484,8 @@ TEST(BachDte, HeaderOnlyTask) {
     t.task = 0;
     t.user = 12;
     t.path = 0;
-    t.wr = {{kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
+    t.wr = {{kDteRegAddr0Dst, HeaderAddr(0)},
+            {kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
             {kDteRegTrigger, 0}};
     RvCfgDriver rv(clk, dte, {t}, 2);
     FrameFeeder feed(clk, dte, {{20, MakeMsg(12, 0, 0)}});
@@ -458,7 +557,8 @@ TEST(BachDte, CommitNeedsAllThreeResources) {
       t.task = i;
       t.user = 100 + i;
       t.path = 0;
-      t.wr = {{kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
+      t.wr = {{kDteRegAddr0Dst, HeaderAddr(i % 8)},
+              {kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
               {kDteRegTrigger, 0}};
       tasks.push_back(t);
     }
@@ -603,19 +703,21 @@ TEST(BachDte, TriggerSamplesDirectIds) {
         uint64_t now = CycleNow();
         DsaCfgPort& cfg = dte.Cfg();
         if (now == 3) {
-          cfg.Drive(kDteRegAddr1Src, 0, 1, ids);    // 段 1 源地址
+          cfg.Drive(kDteRegAddr0Src, HeaderAddr(6), 1, ids);  // 段 0 包头源地址
         } else if (now == 4) {
-          cfg.Drive(kDteRegAddr1Dst, 0, 2, ids);    // 段 1 目的地址
+          cfg.Drive(kDteRegAddr1Src, 0, 2, ids);    // 段 1 源地址
         } else if (now == 5) {
-          cfg.Drive(kDteRegDataLen1, 256, 3, ids);  // 段 1 长度，字节
+          cfg.Drive(kDteRegAddr1Dst, 0, 3, ids);    // 段 1 目的地址
         } else if (now == 6) {
+          cfg.Drive(kDteRegDataLen1, 256, 4, ids);  // 段 1 长度，字节
+        } else if (now == 7) {
           // transfer_mode = 010（Cmem → Router）+ seg_valid[0]（段 1 参与）
           // + ack_ts_en（完成后通知 TS）。
           uint64_t trans = uint64_t(Route::kCmToRouter) |
                            (1u << (kSegValidShift + 1)) | kDteAckTsEn;
-          cfg.Drive(kDteRegTransMode, trans, 4, ids);
-        } else if (now == 7) {
-          cfg.Drive(kDteRegTrigger, 0, 5, ids);     // 写 CFG_TRIGGER 提交任务
+          cfg.Drive(kDteRegTransMode, trans, 5, ids);
+        } else if (now == 8) {
+          cfg.Drive(kDteRegTrigger, 0, 6, ids);     // 写 CFG_TRIGGER 提交任务
         } else {
           cfg.Idle();
         }

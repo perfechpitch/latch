@@ -90,6 +90,10 @@ constexpr uint64_t kEpDataMask = (1ull << kEpShift) - 1;
 // 退化为纯物理地址；route 100（Mmem→Cmem）源端不叠 stride（Mmem 侧软件给物理地址）。
 struct Segment {
   bool valid = false;
+  // 段 0 恒为包头：永远不占 payload 数据通道。它的端点译码只决定这段包头落哪块
+  // 存储——tag 0x4 落 header_table（计算 core 用 Hmem），tag 0x0 落 Core Mem
+  // （B/R core 用 Core Mem）。其余段 false。
+  bool is_header = false;
   uint64_t src = 0;      // CFG_ADDRi_SRC（软件基址）/ 进核包头落点
   uint64_t dst = 0;      // CFG_ADDRi_DST
   uint64_t stride = 0;   // CFG_STRIDEi
@@ -147,7 +151,7 @@ struct Descriptor {
   uint64_t PayloadBytes() const {
     uint64_t n = 0;
     for (auto const& s : seg) {
-      if (!s.valid) continue;
+      if (!s.valid || s.is_header) continue;
       if (s.src_kind == SegEndpoint::kCmem ||
           s.src_kind == SegEndpoint::kMmem ||
           s.src_kind == SegEndpoint::kScale ||
@@ -162,7 +166,7 @@ struct Descriptor {
   uint64_t PayloadDataBytes() const {
     uint64_t n = 0;
     for (auto const& s : seg) {
-      if (!s.valid) continue;
+      if (!s.valid || s.is_header) continue;
       if (s.src_kind == SegEndpoint::kCmem ||
           s.src_kind == SegEndpoint::kMmem ||
           s.src_kind == SegEndpoint::kScale) {
@@ -223,8 +227,9 @@ struct Descriptor {
   // dst_addr 当纯偏移用，tag 是本地存储译码的约定，不进包）。
   uint64_t DataDst() const {
     for (auto const& s : seg) {
-      if (s.valid && (s.src_kind == SegEndpoint::kCmem ||
-                      s.src_kind == SegEndpoint::kMmem)) {
+      if (s.valid && !s.is_header &&
+          (s.src_kind == SegEndpoint::kCmem ||
+           s.src_kind == SegEndpoint::kMmem)) {
         return s.dst & kEpDataMask;
       }
     }

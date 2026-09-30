@@ -288,20 +288,20 @@ class DteRegfile : public BachModule {
     d->smem_addr = merged.smem_addr;
     d->smem_data = merged.smem_data;
 
-    // 逐段拷贝配置：段 0（包头）恒参与，段 1~3 由 seg_valid[i-1] 决定是否参与，
-    // 再展开地址/译码端点。段 0 的端点标 header（走 Header Parser / Hmem，不占
-    // payload 数据通道），DataDst/PayloadBytes 这类按端点判断的辅助函数会跳过它。
+    // 逐段拷贝配置：段 0（包头）恒参与，段 1~3 由 seg_valid[i-1] 决定是否参与。
+    // 每段都按地址译码端点，段 0 也走这一步：CFG_ADDR0 的地址 tag 决定包头落
+    // header_table（0x4，计算 core）还是 Core Mem（0x0，B/R core）。段 0 打
+    // is_header，永远不占 payload 数据通道，DataDst/PayloadBytes 这类按端点判断的
+    // 辅助函数会跳过它。
     for (uint64_t i = 0; i < 4; ++i) {
       Segment s;
       s.valid = (i == 0) || ((seg_valid >> (i - 1)) & 1u);
+      s.is_header = (i == 0);
       s.src = merged.seg[i].src;
       s.dst = merged.seg[i].dst;
       s.stride = merged.seg[i].stride;
       s.len = merged.seg[i].len;
-      if (i == 0) {
-        s.src_kind = SegEndpoint::kHeader;
-        s.dst_kind = SegEndpoint::kHeader;
-      } else if (s.valid) {
+      if (s.valid) {
         agcu.ExpandOut(s, d->stream_id, d->route);
       }
       d->seg[i] = s;

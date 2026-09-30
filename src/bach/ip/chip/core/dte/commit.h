@@ -25,6 +25,7 @@
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/common/flit.h"
 #include "bach/ip/chip/core/dte/hmem.h"
+#include "bach/ip/chip/core/memory/banked_mem.h"
 #include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
@@ -56,6 +57,9 @@ class Commit : public BachModule {
   // 出核造包时从 MU 的 topK_ep_table 把 topK 读出来附回要发的包。装配层把 MU 的
   // GenEpInfo 指过来。
   void AttachMuTopkEp(GenEpInfo* ep) { mu_topk_ep = ep; }
+  // 出核造包时从 Core Mem 同步读包头上下文（B/R core 的包头落 Core Mem）。装配层
+  // 把 Core Mem 的 BankedMem 指过来。
+  void AttachCmemSync(BankedMem* m) { cmem_sync = m; }
 
   // dispatch 一笔后往这几个口上发：每个 Lane 一个，Completion RS 一个。
   void AddLanePort(std::shared_ptr<AdmitPort> p) {
@@ -197,7 +201,14 @@ class Commit : public BachModule {
     // 收方按这一项把包搬进它的存储。软件配 DTE 数据段的 CFG_ADDRi_DST 时配的就是
     // 收方那一侧的落点，本地这一笔用不着它。
     m->dst_addr = d.DataDst();
-    HmemEntry const& h = hmem.Entry(d.stream_id);
+    // 出核包头上下文从落库处读回：计算 core 在 Hmem（按 stream_id），B/R core 在
+    // Core Mem（段 0 源端地址）。gpu_id / token_id 是模型的包身份，随包往返。
+    HmemEntry h;
+    if (d.seg[0].src_kind == SegEndpoint::kHeader) {
+      h = hmem.Entry(d.stream_id);
+    } else {
+      h = BytesToHeader(cmem_sync->Peek(d.seg[0].src_addr, kHeaderCtxBytes));
+    }
     m->gpu_id = h.gpu_id;
     m->token_id = h.token_id;
     // 带 scale 的包：数据后面接 scale。包长把 payload 各段都算上，topK 也算进去
@@ -251,6 +262,7 @@ class Commit : public BachModule {
   }
 
   Hmem& hmem;
+  BankedMem* cmem_sync = nullptr;
   GenEpInfo* mu_topk_ep = nullptr;
   std::shared_ptr<CreditLevelPort> vc_level;
   std::shared_ptr<DescPort> from_rv;

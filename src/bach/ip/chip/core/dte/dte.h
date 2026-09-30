@@ -31,6 +31,7 @@
 #include "bach/ip/chip/core/dte/lane.h"
 #include "bach/ip/chip/core/dte/out_arb.h"
 #include "bach/ip/chip/core/dte/regfile.h"
+#include "bach/ip/chip/core/memory/banked_mem.h"
 #include "bach/ip/chip/core/mu/gen_ep_info.h"
 
 namespace latch {
@@ -51,8 +52,7 @@ class Dte {
     out_buf = std::make_unique<DteBuffer>(clock, "out_buf",
                                           kDteBufFlits * (kLaneNum - 1),
                                           kLaneNum - 1, gid, false);
-    parser = std::make_unique<HeaderParser>(clock, "parser", *hmem, gid,
-                                            false);
+    parser = std::make_unique<HeaderParser>(clock, "parser", gid, false);
     commit = std::make_unique<Commit>(clock, "commit", *hmem, gid,
                                       false);
     out_arb = std::make_unique<DteOutArb>(clock, "out_arb", gid,
@@ -102,6 +102,13 @@ class Dte {
   void AttachMuTopkEp(GenEpInfo* ep) {
     mu_topk_ep = ep;
     commit->AttachMuTopkEp(ep);
+  }
+  // 包头上下文落 Core Mem（B/R core）时要用 Core Mem 的同步 Poke/Peek。装配层把
+  // Core Mem 的 BankedMem 指过来，转给 Commit 与五个 Lane。
+  void AttachCmemSync(BankedMem* m) {
+    cmem_sync = m;
+    commit->AttachCmemSync(m);
+    for (auto& l : lanes) l->AttachCmemSync(m);
   }
   // 对每块存储的读与写各一个口，五个通道在 DMA_XBAR 里仲裁。
   void AttachCmemRd(std::shared_ptr<MemPort> p) {
@@ -168,6 +175,9 @@ class Dte {
     lanes[kInCh]->AttachPayload(parser->PayloadPtr());
     // topK 旁带写进 MU 的那条数据线只给进核通道。
     if (mu_topk) lanes[kInCh]->AttachMuTopk(mu_topk);
+    // 包头上下文落 Hmem（计算 core）要用 Hmem，五个 Lane 都指过去；Core Mem 那
+    // 一半（B/R core）由 AttachCmemSync 在装配层把 BankedMem 指过来时再穿下去。
+    for (auto& l : lanes) l->AttachHmem(*hmem);
 
     // 每个通道在 DMA_XBAR 上各占一份存储口，四个出核通道各占出核仲裁的一份。
     for (uint64_t i = 0; i < kLaneNum; ++i) {
@@ -199,6 +209,7 @@ class Dte {
   std::vector<std::unique_ptr<Lane>> lanes;
   std::shared_ptr<MuTopkPort> mu_topk;
   GenEpInfo* mu_topk_ep = nullptr;
+  BankedMem* cmem_sync = nullptr;
 };
 
 }  // namespace bach

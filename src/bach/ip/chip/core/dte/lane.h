@@ -38,7 +38,9 @@
 #include "base/log.h"
 #include "bach/ip/chip/core/dte/buffer.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
+#include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/dte/task_queue.h"
+#include "bach/ip/chip/core/memory/banked_mem.h"
 #include "bach/ip/chip/core/mu/mu_ports.h"
 #include "bach/ip/chip/core/ports.h"
 #include "bach/ip/chip/core/router/router_ports.h"
@@ -109,6 +111,11 @@ class Lane : public BachModule {
   // topK 旁带写进 MU 的那条数据线。只有进核通道收到，出核通道恒为空。
   void AttachMuTopk(std::shared_ptr<MuTopkPort> p) { mu_topk = std::move(p); }
 
+  // 包头上下文落库要用的两样：Hmem（计算 core 按 stream_id 存），Core Mem 的
+  // 同步访问（B/R core 按段 0 地址 Poke/Peek 那 48B）。装配层在 Dte 构造后指过来。
+  void AttachHmem(Hmem& h) { hmem = &h; }
+  void AttachCmemSync(BankedMem* m) { cmem_sync = m; }
+
   bool Quiescent() const override {
     return q[kRd].Empty() && q[kWr].Empty() && !ctx[kRd].busy &&
            !ctx[kWr].busy && drain_q[kRd].empty() && drain_q[kWr].empty();
@@ -162,7 +169,7 @@ class Lane : public BachModule {
   static uint64_t RdLen(Descriptor const& d, uint64_t i) {
     if (i >= 4) return 0;
     Segment const& s = d.seg[i];
-    if (!s.valid || !PayloadSeg(s.src_kind)) return 0;
+    if (!s.valid || s.is_header || !PayloadSeg(s.src_kind)) return 0;
     return s.len;
   }
 
@@ -172,6 +179,27 @@ class Lane : public BachModule {
       if (RdLen(d, i) != 0) return true;
     }
     return false;
+  }
+
+  // 进核：包头上下文落库。计算 core 落 Hmem（按 stream_id 索引），B/R core 落
+  // Core Mem（段 0 目的端地址，stride=0 即纯物理地址）。上下文在 Message 里，随每
+  // 拍一起带进来，这里取第一拍那份。软件包头 sw_header 模型里没有写通路，恒 0。
+  void StoreHeader(Descriptor const& d, MessagePtr const& m) {
+    if (!m) return;
+    if (d.seg[0].dst_kind == SegEndpoint::kHeader) {
+      HmemEntry& h = hmem->Entry(d.stream_id);
+      h.core_mask = m->path_core_mask;
+      h.hardware_used = 1;
+      h.gpu_id = m->gpu_id;
+      h.token_id = m->token_id;
+    } else {
+      HmemEntry h;
+      h.core_mask = m->path_core_mask;
+      h.hardware_used = 1;
+      h.gpu_id = m->gpu_id;
+      h.token_id = m->token_id;
+      cmem_sync->Poke(d.seg[0].dst_addr, HeaderToBytes(h));
+    }
   }
 
   // 读回来的一块填进要发出去的那个包，按已填字节数排在后面。
@@ -283,6 +311,7 @@ class Lane : public BachModule {
       ctx[h].filled = 0;
       ctx[h].sent_first = false;
       ctx[h].topk_pending = false;
+      ctx[h].hdr_stored = false;
       q[h].Pop();
     }
   }
@@ -413,6 +442,13 @@ class Lane : public BachModule {
     if (buffer.Empty(idx) || buffer.Front(idx).tag != TagOf(c.desc)) return;
     BufBeat const& b = buffer.Front(idx);
 
+    // 进核任务收下第一拍就落包头上下文（出核不落：包头出核时从落库处读回）。
+    // 计算 core 落 Hmem、B/R core 落 Core Mem，看段 0 端点。
+    if (!Outbound() && !c.hdr_stored) {
+      StoreHeader(c.desc, b.msg);
+      c.hdr_stored = true;
+    }
+
     if (Outbound() && c.desc.route != Route::kMmToCm) {
       // 出核：发给 Router。这一档的出口是 Router TX。带 topK 的包，最后一拍 payload
       // 之后还要补一笔 256 B 的 topK 拍，所以最后一拍 payload 不打 last，留着给
@@ -443,7 +479,7 @@ class Lane : public BachModule {
     uint64_t seg = 0, seg_off = 0;
     while (seg < 4) {
       Segment const& s = c.desc.seg[seg];
-      if (s.valid && WrSeg(s.dst_kind)) {
+      if (s.valid && !s.is_header && WrSeg(s.dst_kind)) {
         if (pos < seg_off + s.len) break;
         seg_off += s.len;
       }
@@ -495,6 +531,9 @@ class Lane : public BachModule {
   std::shared_ptr<AdmitPort> admit;
   std::shared_ptr<MuTopkPort> mu_topk;
   std::shared_ptr<HalfDonePort> rd_done, wr_done;
+  // 包头上下文落库：计算 core 写 Hmem，B/R core 写 Core Mem（同步 Poke）。
+  Hmem* hmem = nullptr;
+  BankedMem* cmem_sync = nullptr;
 
   std::array<TaskQueue, kHalfNum> q;
   std::array<ActiveCtx, kHalfNum> ctx;

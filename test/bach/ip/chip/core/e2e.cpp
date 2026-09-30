@@ -235,8 +235,8 @@ TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
   EXPECT_EQ(cmds, 1u);       // TS 下发了这一笔给 DTE RV core
   EXPECT_GT(insts, 0u);      // RV core 真的跑了 kernel
   // 本核第一个任务先配八套 DTE 模板（60 笔）；datain 本身照包头配一笔带 scale 的
-  // 进核搬运：段 1、段 2 各三项，TRANS_MODE，trigger（8 笔）
-  EXPECT_EQ(regw, 68u);
+  // 进核搬运：段 0 包头一项、段 1、段 2 各三项，TRANS_MODE，trigger（9 笔）
+  EXPECT_EQ(regw, 69u);
   EXPECT_EQ(trigs, 1u);      // datain 自己起一笔进核搬运
   EXPECT_EQ(admits, 1u);     // 搬运只起了一笔
   EXPECT_GT(grants, 0u);     // 数据真的落进了 Core Mem

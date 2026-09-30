@@ -1,11 +1,12 @@
 // 进核那一路的数据通路单元：Header Parser。
 //
 // 对齐飞书《DTE DSA》后，进核是配置驱动，Header Parser 不再生成 Descriptor，只做
-// 三件事：把包头上下文（core_mask / Hardware Used / gpu_id / token_id）存进 Header
-// Table、逐拍转发 payload、按帧边界判定与合法性检查（非法包头直接断言）。
+// 三件事：把包头上下文（core_mask / Hardware Used / gpu_id / token_id）随 Message
+// 转发给进核通道（落库由 Lane 按段 0 端点做，见 dte_lane / dte 里的包头测试）、
+// 逐拍转发 payload、按帧边界判定与合法性检查（非法包头直接断言）。
 //
-// 覆盖：包头落 Header Table、payload 一个字节不剥、靠上一帧 TLAST 认帧边界、纯
-// 包头帧、非法 Header 断言、连续几帧各得一个帧号。
+// 覆盖：payload 一个字节不剥、靠上一帧 TLAST 认帧边界、纯包头帧、非法 Header
+// 断言、连续几帧各得一个帧号、包头上下文随 Message 原样带下去。
 
 #include <gtest/gtest.h>
 
@@ -16,7 +17,6 @@
 #include "base/clock.h"
 #include "base/runtime.h"
 #include "bach/ip/chip/core/dte/header_parser.h"
-#include "bach/ip/chip/core/dte/hmem.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -50,8 +50,8 @@ class ParserHarness : public BachModule {
     MessagePtr msg;
   };
 
-  ParserHarness(ClockPtr c, HeaderParser& target, Hmem& tables)
-      : BachModule(c, "harness"), hp(target), hmem(tables) {}
+  ParserHarness(ClockPtr c, HeaderParser& target)
+      : BachModule(c, "harness"), hp(target) {}
 
   std::vector<Beat> beats;
   // 这一拍之前下游不收 payload。
@@ -110,7 +110,6 @@ class ParserHarness : public BachModule {
   }
 
   HeaderParser& hp;
-  Hmem& hmem;
   uint64_t cursor = 0;
   bool driving = false;
   uint64_t last_pl_seq = 0;
@@ -131,16 +130,16 @@ std::vector<ParserHarness::Beat> Frame(uint64_t at, MessagePtr const& m) {
 
 }  // namespace
 
-// 包头上下文落 Header Table：硬件改的 core_mask 与 Hardware Used，加上 DPU 写的
-// gpu_id / token_id，按 stream_id 索引。
-TEST(BachHeaderParser, HeaderIsStoredToTheHeaderTable) {
-  uint64_t mask = 0, used = 0, gpu = 0, token = 0;
+// 包头上下文随 Message 原样带下去：硬件改的 core_mask 与 Hardware Used 落库在
+// Lane（见 dte 里的包头测试），这里只验 Header Parser 不剥掉 gpu_id / token_id 与
+// path_core_mask，进核通道拿到的是同一份 Message。
+TEST(BachHeaderParser, HeaderContextIsForwardedOnTheMessage) {
+  MessagePtr got;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
+    HeaderParser hp(clk, "hp", 0, false);
+    ParserHarness h(clk, hp);
     auto m = MakeMsg(41, 7, 512, /*stream=*/5, /*task=*/9);
     m->path_core_mask = 0xF1;
     m->gpu_id = 13;
@@ -148,17 +147,13 @@ TEST(BachHeaderParser, HeaderIsStoredToTheHeaderTable) {
     h.beats = Frame(2, m);
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
-    HmemEntry const& e = hmem.Entry(5);
-    mask = e.core_mask;
-    used = e.hardware_used;
-    gpu = e.gpu_id;
-    token = e.token_id;
+    if (!h.payloads.empty()) got = h.payloads.front().msg;
   }
   RT::Reset();
-  EXPECT_EQ(mask, 0xF1u);
-  EXPECT_EQ(used, 1u);
-  EXPECT_EQ(gpu, 13u);
-  EXPECT_EQ(token, 27u);
+  ASSERT_TRUE(got);
+  EXPECT_EQ(got->path_core_mask, 0xF1u);
+  EXPECT_EQ(got->gpu_id, 13u);
+  EXPECT_EQ(got->token_id, 27u);
 }
 
 // payload 一个字节都不剥：一帧四拍都交下去，每一拍的起点按 256 B 递增。
@@ -168,9 +163,8 @@ TEST(BachHeaderParser, PayloadIsForwardedBeatByBeat) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
+    HeaderParser hp(clk, "hp", 0, false);
+    ParserHarness h(clk, hp);
     h.beats = Frame(2, MakeMsg(41, 7, 1024, 0, 0));
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
@@ -197,9 +191,8 @@ TEST(BachHeaderParser, TlastMarksTheFrameBoundary) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
+    HeaderParser hp(clk, "hp", 0, false);
+    ParserHarness h(clk, hp);
     auto a = Frame(2, MakeMsg(41, 7, 512, 0, 0));
     h.beats = a;
     auto b = Frame(2 + a.size(), MakeMsg(42, 7, 512, 1, 0));
@@ -223,9 +216,8 @@ TEST(BachHeaderParser, HeaderOnlyFrameIsOneBeat) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
+    HeaderParser hp(clk, "hp", 0, false);
+    ParserHarness h(clk, hp);
     auto m = MakeMsg(41, 7, 0, 0, 0);
     h.beats = {{2, 0, /*last=*/true, m}};
     auto next = Frame(20, MakeMsg(42, 7, 256, 1, 0));
@@ -243,9 +235,8 @@ TEST(BachHeaderParser, HeaderOnlyFrameIsOneBeat) {
 static void FeedOversizedFrame() {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
-  Hmem hmem(clk, "hmem", 0, false);
-  HeaderParser hp(clk, "hp", hmem, 0, false);
-  ParserHarness h(clk, hp, hmem);
+  HeaderParser hp(clk, "hp", 0, false);
+  ParserHarness h(clk, hp);
   auto bad = MakeMsg(41, 7, 64, 0, 0);
   bad->size = kMaxTaskBytes + 1;   // 长度超过上限
   h.beats = {{2, 256, false, bad}, {3, 256, true, bad}};
@@ -265,9 +256,8 @@ TEST(BachHeaderParser, NothingIsStrippedFromTheRouterSide) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
+    HeaderParser hp(clk, "hp", 0, false);
+    ParserHarness h(clk, hp);
     sent = MakeMsg(41, 7, 256, 0, 0);
     sent->reduce_seq = 4;
     h.beats = Frame(2, sent);
@@ -288,9 +278,8 @@ TEST(BachHeaderParser, FramesGetDistinctFrameNumbers) {
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    Hmem hmem(clk, "hmem", 0, false);
-    HeaderParser hp(clk, "hp", hmem, 0, false);
-    ParserHarness h(clk, hp, hmem);
+    HeaderParser hp(clk, "hp", 0, false);
+    ParserHarness h(clk, hp);
     for (uint64_t k = 0; k < 3; ++k) {
       auto one = Frame(2 + k * 10, MakeMsg(41 + k, 7, 256, k, 9));
       h.beats.insert(h.beats.end(), one.begin(), one.end());

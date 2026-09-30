@@ -32,6 +32,14 @@ static inline __attribute__((always_inline)) void dte_fire(u32 tpl) {
   dsa_write(DTE_TRIGGER, DTE_TEMP_VALID | (tpl << DTE_TEMP_INDEX_SHIFT));
 }
 
+/* 包头（段 0）地址。段 0 恒参与，端点由地址高 4 bit 译码选落点（见 bach.h
+ * DTE_EP_*）：计算 core 打 header tag 落 Hmem（低 28 bit 给 stream_id）；B/R core
+ * 写 Core Mem 纯地址（tag 0），它们的数据都进 Matrix Mem，Core Mem 让给包头、按
+ * 用户分一块（64 B，够 48 B 包头上下文）。 */
+#define CMEM_HDR_STRIDE 0x40u
+static inline u32 dte_hdr_h(void) { return dte_ep(DTE_EP_HDR, stream_id()); }
+static inline u32 dte_hdr_cmem(u32 user) { return user * CMEM_HDR_STRIDE; }
+
 /* 一笔搬运：段 1 装数据，可再带一段 scale（段 2），最后写 CFG_TRANS_MODE 与
  * CFG_TRIGGER。寄存器落在 Config 区（0x0000~0x004C），照《DTE DSA》的地址空间。
  * len 是数据段的字节数，CFG_DATA_LEN 直接收字节，不再按 8 B 格折算。mode 的低
@@ -91,6 +99,7 @@ static inline __attribute__((always_inline)) void dte_fields(
 
 static void dte_move(u32 src, u32 dst, u32 len, u32 mode, u32 last) {
   dte_fields(DTE_CFG, src, dst, len, mode, last, 0);
+  dsa_write(DTE_ADDR0_SRC, dte_hdr_h());  /* 段 0 = 包头，出核从 Hmem 读回 */
   dsa_write(DTE_TRIGGER, 0u);
 }
 
@@ -110,10 +119,12 @@ static inline __attribute__((always_inline)) void dte_inbound(u32 dst, u32 len,
                                                                u32 mode,
                                                                u32 flag_addr,
                                                                u32 topk_idx,
-                                                               u32 ack) {
+                                                               u32 ack,
+                                                               u32 hdr) {
   u32 tmode = mode & 0x7u;
   u32 stride = (tmode == DTE_MODE_ROUTER_TO_CMEM) ? CMEM_STREAM_STRIDE : 0u;
   u32 addr_valid = (1u << 1);  /* 段 1 = 数据 */
+  dsa_write(DTE_ADDR0_DST, hdr);  /* 段 0 = 包头，地址 tag 选 Hmem / Core Mem */
   dsa_write(DTE_ADDR1_DST, dst);
   dsa_write(DTE_STRIDE1, stride);
   dsa_write(DTE_DATA_LEN1, len);
@@ -175,6 +186,7 @@ static inline __attribute__((always_inline)) void tpl_once(void) {
  * 按 stream_id 写进 MU 的 topK_ep_table。其余字段都在模板里 */
 TASK void task_dte_token_datain(void) {
   tpl_once();
+  dsa_write(DTE_ADDR0_DST, dte_hdr_h());
   dsa_write(DTE_ADDR3_DST, dte_ep(DTE_EP_TOPK, stream_id()));
   dte_fire(TPL_IN_TOKEN);
   hdr_pop();
@@ -185,13 +197,14 @@ TASK void task_dte_token_datain(void) {
  * 同一处 MOE_ACT_OFF，scale 随它 */
 TASK void task_dte_fc2in_datain(void) {
   dte_inbound(MOE_ACT_OFF, MOE_ACT_BYTES,
-              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0, 0, 1);
+              DTE_MODE_ROUTER_TO_CMEM | DTE_SCALE_VALID, 0, 0, 1, dte_hdr_h());
   hdr_pop();
   task_done(0);
 }
 
 /* 不带 scale 的进核：落点与长度每笔写，其余在模板里 */
 static void in_cm(u32 dst, u32 len) {
+  dsa_write(DTE_ADDR0_DST, dte_hdr_h());
   dsa_write(DTE_ADDR1_DST, dst);
   dsa_write(DTE_DATA_LEN1, len);
   dte_fire(TPL_IN_CM);
@@ -224,7 +237,8 @@ TASK void task_dte_user_init(void) {
   u32 scale = hdr_scale_valid();
   u32 data = data_bytes(size, scale);
   dte_inbound(hdr_dst_addr(), data,
-              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0, 1);
+              DTE_MODE_ROUTER_TO_CMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0, 1,
+              dte_hdr_h());
   hdr_pop();
   task_done(0);
 }
@@ -254,12 +268,14 @@ TASK void task_dte_send_act(void) {
  * 都写 dot core 上收归约结果的那一处，Router 归约时照抄首份分量的包头，链尾交回
  * dot core 的那一份就落在那里。这笔任务由 Router 报完成 */
 TASK void task_dte_send_part(void) {
+  dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
   dte_fire(TPL_SEND_PART);
   task_done(0);
 }
 
 /* dot core：FC2 输入广播给本 chip 另外 7 个计算 core，scale 随它走，落在各自同一处 */
 TASK void task_dte_send_fc2in(void) {
+  dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
   dte_fire(TPL_SEND_FC2IN);
   task_done(0);
 }
@@ -267,6 +283,7 @@ TASK void task_dte_send_fc2in(void) {
 /* 计算 core：把 FC2 第 s 段发给 dot core，落点是 concat 区第 s 段。按槽位变化，
  * 每个槽位一个入口 */
 static void send_concat(u32 s) {
+  dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
   dsa_write(DTE_ADDR1_SRC, moe_concat(s));
   dsa_write(DTE_ADDR1_DST, moe_concat(s));
   dte_fire(TPL_SEND_CONCAT);
@@ -295,11 +312,13 @@ TASK void task_dte_send_concat_s6(void) { send_concat(6); }
  * 包头都写 dst，只有后一笔带 ack_ts_en。这笔任务由 Router 报完成 */
 static void send_row(u32 add, u32 dst) {
   if (add) {
+    dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
     dsa_write(DTE_ADDR1_SRC, MOE_ROW_IN_OFF);
     dsa_write(DTE_ADDR1_DST, dst);
     dsa_write(DTE_TRANS_MODE, ROW_PART_MODE);
     dte_fire(TPL_SEND_ROW);
   }
+  dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
   dsa_write(DTE_ADDR1_DST, dst);
   dte_fire(TPL_SEND_ROW);
   task_done(0);
@@ -338,7 +357,8 @@ TASK void task_dte_rc_datain(void) {
   u32 landing = hdr_dst_addr();
   dte_inbound(landing, MOE_ROW_BYTES,
               DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
-              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u, 0, 0);
+              RC_FLAG_OFF + (landing / RC_HALF_BYTES) * 4u, 0, 0,
+              dte_hdr_cmem(u));
   u32 n = smem_read(RC_MAP_OFF + u * 4u) + 1u;
   smem_write(RC_MAP_OFF + u * 4u, n);
   if (n == rc_need()) rc_fifo_push(u);
@@ -359,7 +379,9 @@ TASK void task_dte_rc_reduce(void) {
   u32 slot = smem_read(RC_SLOT_OFF + stream_id() * 4);
   u32 head = smem_read(RC_HEAD_OFF);
   u32 dst = rc_land(user_id(), 1);
+  u32 hdr = dte_hdr_cmem(user_id());
   if (head == 0u) {
+    dsa_write(DTE_ADDR0_SRC, hdr);
     dsa_write(DTE_ADDR1_SRC, dte_ep(DTE_EP_MMEM, rc_land(slot, 0)));
     dsa_write(DTE_ADDR1_DST, dst);
     dsa_write(DTE_TRANS_MODE, RC_PART_MODE);
@@ -368,6 +390,7 @@ TASK void task_dte_rc_reduce(void) {
   } else {
     dsa_write(DTE_ADDR1_SRC, dte_ep(DTE_EP_MMEM, rc_land(slot, 0)));
   }
+  dsa_write(DTE_ADDR0_SRC, hdr);
   dsa_write(DTE_ADDR1_DST, dst);
   dte_fire(TPL_RC_SEND);
   task_done(0);
@@ -388,7 +411,8 @@ TASK void task_dte_bc_datain(void) {
   dte_inbound(landing, BC_TOKEN_BYTES,
               DTE_MODE_ROUTER_TO_MMEM | DTE_SCALE_VALID | DTE_WR_SHAREMEM_FLAG |
                   DTE_TOPK_VALID,
-              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u, user_id(), 0);
+              BC_FLAG_OFF + (landing / BC_TOKEN_BYTES) * 4u, user_id(), 0,
+              dte_hdr_cmem(user_id()));
   hdr_pop();
   task_yield();
 }
@@ -397,6 +421,7 @@ TASK void task_dte_bc_datain(void) {
 /* 源在 Matrix Mem、带 scale 与 topK：数据与 scale 两段的源和落点按格子写，topK 按
  * 这一格的 user_id 从表里取，其余在模板里 */
 static inline __attribute__((always_inline)) void bc_move(u32 src, u32 dst) {
+  dsa_write(DTE_ADDR0_SRC, dte_hdr_cmem(user_id()));
   dsa_write(DTE_ADDR1_SRC, dte_ep(DTE_EP_MMEM, src));
   dsa_write(DTE_ADDR1_DST, dst);
   dsa_write(DTE_ADDR2_SRC, dte_ep(DTE_EP_SCALE, src & 0x0FFFFFFFu));
@@ -439,7 +464,8 @@ TASK void task_dte_weights_loader(void) {
   u32 scale = hdr_scale_valid();
   u32 data = data_bytes(size, scale);
   dte_inbound(hdr_dst_addr(), data,
-              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0, 0);
+              DTE_MODE_ROUTER_TO_MMEM | (scale ? DTE_SCALE_VALID : 0u), 0, 0, 0,
+              dte_hdr_h());
   hdr_pop();
   task_yield();
 }

@@ -172,7 +172,7 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 <text x="1372" y="981" font-size="11" fill="#111827" font-weight="600">Hmem</text>
 <text x="1372.0" y="998.0" font-size="8.5" fill="#475569">Hmem = 16 项 × {core_mask 2 B, hardware_used 1 B, sw_header 16 B}：</text>
 <text x="1372.0" y="1011.5" font-size="8.5" fill="#475569">　硬件包头与软件包头合并成一张表，按 stream_id 索引</text>
-<text x="1372.0" y="1025.0" font-size="8.5" fill="#475569">　软件只配一个地址；包头统一存 Hmem</text>
+<text x="1372.0" y="1025.0" font-size="8.5" fill="#475569">　软件配的地址本身选落点：计算 core 落 Hmem，B/R core 落 Core Mem</text>
 <text x="1372.0" y="1038.5" font-size="8.5" fill="#475569">path_id 随配置写送来，size 由 RV core 配寄存器；</text>
 <text x="1372.0" y="1052.0" font-size="8.5" fill="#475569">　不再有 path_id_table 与 task_len_table</text>
 <text x="1372.0" y="1065.5" font-size="8.5" fill="#475569">硬件只改 core_mask 与 hardware_used，RV core 改软件包头</text>
@@ -332,8 +332,8 @@ DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命�
 | - | - |
 | F36 | 一次搬运的对象是一个 MSG 包，进了 core 就按内容归到 4 个段位、各落各的存储：段 0 绑定包头，段 1~3 通用、内容由软件约定装 data / scale / topK。每个段落的存储由该段地址高 4 bit tag 译码决定（0x0 Cmem 数据 / 0x1 Mmem 数据 / 0x2 scale 旁带 / 0x3 topK_table / 0x4 header_table） |
 | F37 | topK 段由地址译码命中 `topK_table`（tag 0x3），进核落地时经旁带 `mu_topk` 写进 MU 的 `topK_ep_table`（256 B 一拍、整笔只写一次），出核时从表里取出附回包里。表下标取 topK 段地址的端内偏移：计算 core 是 `stream_id`，B core 是 `user_id`。DTE 与 MU 之间有这一条直连通路，不再走 `cmem_wr` 的独立 topK 区 |
-| F38 | 包头**统一合并成一张表**存 Hmem（Header Table，地址 0x3000~0x3FFF），16 项按 `stream_id` 索引，每项 `{core_mask 2 B, hardware_used 1 B, sw_header 16 B}`，软件只配一个地址。计算 core 的 data 落 Core Mem 按 stream 分片，scale 落 Core Mem 的 scale 旁带，topK 经旁带写 MU（F37） |
-| F39 | B core / R core 上：包头同样进 Hmem 那张表（F38），不另开 Core Mem 空间。data 落 Matrix Mem，它的 scale 随它存进 Matrix Mem 的 scale 部分（F49a）；topK 同样由 topK 段译码命中后经旁带写 MU（F37），DTE 不再把它存进 Core Mem 或 Matrix Mem 的独立 topK 区 |
+| F38 | 包头落在哪块存储由段 0 地址高 4 bit tag 译码决定（与段 1~3 同一条译码，F36）：计算 core 打 header tag（0x4）落 Hmem（Header Table，地址 0x3000~0x3FFF），16 项按 `stream_id` 索引，每项 `{core_mask 2 B, hardware_used 1 B, sw_header 16 B}`；B/R core 写 Core Mem 纯地址（tag 0）、按用户分一块，不进 Hmem。软件配的地址本身选落点。计算 core 的 data 落 Core Mem 按 stream 分片，scale 落 Core Mem 的 scale 旁带，topK 经旁带写 MU（F37） |
+| F39 | B core / R core 上：包头进 Core Mem（F38），按用户分一块、不占 Hmem 那张表——它们的用户数多，Hmem 装不下。data 落 Matrix Mem，它的 scale 随它存进 Matrix Mem 的 scale 部分（F49a）；topK 同样由 topK 段译码命中后经旁带写 MU（F37），DTE 不再把它存进 Core Mem 或 Matrix Mem 的独立 topK 区 |
 | F40 | **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 随配置写送来（TS 下发 task 时已经写进 RV 的 CSR，`dsaw` 发出时抄进请求），`size` 由 RV core 配寄存器给，或按 `data_len` 算出来 |
 | F41 | 包头分工：硬件只改硬件包头（`core_mask` 与 `hardware_used`），RV core 改软件包头 |
 | F42 | 每段长度由各自的 `CFG_DATA_LENi`（字节）定：段 0 是包头（18 B），段 1~3 装 data / scale / topK 的内容由软件约定，data 段配 data 字节数、scale 段配 scale 字节数、topK 是旁带长度记 0（内容随包整笔写 MU）。各段落哪块存储由地址译码决定，长度不再按方向盖不同范围 |
@@ -975,7 +975,7 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 | MM → CM 的 route mask 只允许 CoreMem | F34 | `wr1_route_mask` |
 | topK 经旁带写进 MU 的 topK_ep_table | F37 | `topk_to_mu` |
 | 一个包进核拆成四份分开存 | F36、F39 | `packet_split_four` |
-| 包头两张表合并成 288 B，按 stream_id 索引 | F38 | `hmem_merged` |
+| 包头落点由段 0 地址 tag 选：计算 core 合并进 Hmem 288 B、按 stream_id 索引，B/R core 进 Core Mem 按用户分块 | F38 | `hmem_merged` |
 | path_id 随配置写送来、size 由 RV core 配，不再有查找表 | F40 | `no_lut_table` |
 | 每段长度由各自的 CFG_DATA_LENi 配，不再按方向盖不同范围 | F42 | `data_len_scope` |
 | hw_header_op 决定存不存包头 | F43 | `hw_header_op` |

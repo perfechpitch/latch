@@ -6,8 +6,8 @@
 // 对齐飞书《DTE DSA》：进核是配置驱动——任务由 RV core 配 CFG 寄存器 + trigger 起，
 // 落点由软件配 CFG_ADDRx_DST；Header Parser 只在包头阶段使能，负责帧边界判定、
 // 合法性检查，把包头上下文（core_mask / Hardware Used / 软件包头 / gpu_id /
-// token_id）存进 Header Table，再逐拍转发 payload 给进核通道的读侧。它不再生成
-// Descriptor。
+// token_id）随 Message 一起转发给进核通道的读侧，由 Lane 按段 0 端点落库（计算
+// core 落 Hmem、B/R core 落 Core Mem）。它不再生成 Descriptor，也不再直接写表。
 //
 // 首拍固定是 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖
 // Start-of-Frame 信号。一帧一任务，不允许任务间交织。TLAST 标识最后一个 Payload
@@ -22,7 +22,6 @@
 
 #include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
-#include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -31,10 +30,9 @@ namespace bach {
 
 class HeaderParser : public BachModule {
  public:
-  HeaderParser(ClockPtr clock, const std::string& name, Hmem& tables,
+  HeaderParser(ClockPtr clock, const std::string& name,
                uint64_t parent = 0, bool tick = true)
       : BachModule(clock, name, parent, tick),
-        hmem(tables),
         from_router(std::make_shared<CoreDataPort>(clock)),
         payload(std::make_shared<PayloadPort>(clock)),
         parsed(clock),
@@ -107,17 +105,9 @@ class HeaderParser : public BachModule {
       return;
     }
 
-    // 首拍是 Header。
+    // 首拍是 Header。包头上下文（core_mask / Hardware Used / gpu_id / token_id）随
+    // Message 一起转给进核通道，Lane 按段 0 端点落库，这里不再写表。
     LOGCHECK(Legal(d), "HeaderParser: 非法包头（没带 Message 或长度超过 32 KB）。");
-
-    // 存包头上下文进 Header Table：硬件改的 core_mask 与 Hardware Used，加上 DPU
-    // 写的那一对自定义包头 gpu_id / token_id（进核那一笔记在这里，出核造包时原样
-    // 带回）。软件包头 sw_header 由 RV core 通过配置改，这里不碰。
-    HmemEntry& h = hmem.Entry(d.msg->stream_id);
-    h.core_mask = d.msg->path_core_mask;
-    h.hardware_used = 1;
-    h.gpu_id = d.msg->gpu_id;
-    h.token_id = d.msg->token_id;
 
     ++parse_pending;
     byte_count = d.msg->size;
@@ -143,7 +133,6 @@ class HeaderParser : public BachModule {
     return true;
   }
 
-  Hmem& hmem;
   std::shared_ptr<CoreDataPort> from_router;
   std::shared_ptr<PayloadPort> payload;
 

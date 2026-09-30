@@ -41,6 +41,9 @@ struct ActiveCtx {
   uint64_t part = 0;
   // 出核：最后一拍 payload 发完、还欠一笔 topK 拍没发。发完才置 issue_done。
   bool topk_pending = false;
+  // 进核：这一笔的包头上下文落库没有（收下第一拍时落一次；落 Hmem 还是 Core Mem
+  // 看段 0 端点）。
+  bool hdr_stored = false;
 };
 
 class TaskQueue {

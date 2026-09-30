@@ -16,6 +16,7 @@
 #include "base/clock.h"
 #include "base/runtime.h"
 #include "bach/ip/chip/core/dte/agcu.h"
+#include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/dte/lane.h"
 #include "bach/ip/chip/core/memory/core_mem.h"
 #include "bach/ip/chip/core/memory/matrix_mem.h"
@@ -47,6 +48,13 @@ std::shared_ptr<Descriptor> Task(uint64_t commit_seq, Route route,
   uint64_t mm_tag = uint64_t(SegEndpoint::kMmem) << kEpShift;
   uint64_t sc_tag = uint64_t(SegEndpoint::kScale) << kEpShift;
   bool from_mm = route == Route::kMmToRouter || route == Route::kMmToCm;
+  // 段 0 = 包头（计算 core 落 Hmem）：镜像 regfile Fire 的“段 0 恒参与”，地址打
+  // header tag（0x4），端点译码到 kHeader。出核读/写两侧都跳过它，不占 payload。
+  uint64_t hdr_tag = uint64_t(SegEndpoint::kHeader) << kEpShift;
+  d->seg[0].valid = true;
+  d->seg[0].is_header = true;
+  d->seg[0].src = hdr_tag | stream;
+  d->seg[0].dst = hdr_tag | stream;
   d->seg[1].valid = true;
   d->seg[1].src = from_mm ? (src | mm_tag) : src;
   d->seg[1].dst = dst;
@@ -530,6 +538,8 @@ TEST(BachDteLane, InboundTopkDrivesTheMuPortOnce) {
     Lane ln(clk, "lane", kInCh, buf, 0, false);
     CoreMem cmem(clk, "cmem");
     ln.AttachCmem(cmem.PortPtr(kCmemDteWr));
+    Hmem hmem(clk, "hmem", 0, false);
+    ln.AttachHmem(hmem);   // 段 0 包头落 Hmem（计算 core）
     auto topk_port = std::make_shared<MuTopkPort>(clk);
     ln.AttachMuTopk(topk_port);
     auto payload_port = std::make_shared<PayloadPort>(clk);

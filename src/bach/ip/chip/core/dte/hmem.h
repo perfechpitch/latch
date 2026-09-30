@@ -10,8 +10,9 @@
 // {core_mask 2 B, Hardware Used 1 B, sw_header 16 B}，软件只配一个地址。硬件只改
 // 硬件包头的 core_mask 与 Hardware Used，RV core 改软件包头。
 //
-// 对齐后包头段（段 0）统一走 header_table（端点 tag 0x4），不再区分计算 core 与
-// B/R core 各自存哪。
+// 包头段（段 0）落哪块存储由段 0 地址的端点译码决定：计算 core 配 header_table
+// （端点 tag 0x4）落这里；B/R core 配 Core Mem 地址（端点 tag 0x0）落 Core Mem，
+// 不落这里（见 dte_types.h 的 is_header 与 lane/commit 里的分支）。
 //
 // stream_cache 是 Router 那张 stream 表的副本，只跟随、不分配：真正建表项只有
 // Router 能做，这份靠 Router 各方向送回的 credit release 同步，用处是包要重发
@@ -23,6 +24,7 @@
 #include "base/log.h"
 #include "bach/ip/chip/core/router/router_table.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
+#include "bach/ip/chip/core/ports.h"
 #include "bach/ip/module_base.h"
 
 namespace latch {
@@ -37,6 +39,44 @@ struct HmemEntry {
   // 桩按它认这是哪个 GPU 的第几个 token，中途丢掉就分不清了。
   uint64_t gpu_id = 0, token_id = 0;
 };
+
+// 包头上下文落 Core Mem（B/R core）时的字节块大小与序列化。
+//
+// 计算 core 的包头存 Hmem（按 stream_id 索引）；B/R core 的包头存 Core Mem（段 0
+// 目的端地址，stride=0 即纯物理地址）。落 Core Mem 时把 HmemEntry 五个字段序列化
+// 成一块：core_mask 8B + hardware_used 8B + sw_header 16B + gpu_id 8B + token_id
+// 8B = 48B，按小端。真实硬件只存 18B 的保存信息（core_mask 2B + Hardware Used 1B
+// + sw_header 16B），gpu_id / token_id 是模型的包身份边带，一并借这块往返。
+constexpr uint64_t kHeaderCtxBytes = 48;
+
+inline ByteBlock HeaderToBytes(HmemEntry const& h) {
+  ByteBlock b(kHeaderCtxBytes, 0);
+  auto put = [&b](uint64_t off, uint64_t v, uint64_t n) {
+    for (uint64_t i = 0; i < n; ++i) b[off + i] = uint8_t((v >> (8 * i)) & 0xFFu);
+  };
+  put(0, h.core_mask, 8);
+  put(8, h.hardware_used, 8);
+  for (uint64_t i = 0; i < h.sw_header.size(); ++i) b[16 + i] = h.sw_header[i];
+  put(32, h.gpu_id, 8);
+  put(40, h.token_id, 8);
+  return b;
+}
+
+inline HmemEntry BytesToHeader(ByteBlock const& b) {
+  HmemEntry h;
+  if (b.size() < kHeaderCtxBytes) return h;
+  auto get = [&b](uint64_t off, uint64_t n) {
+    uint64_t v = 0;
+    for (uint64_t i = 0; i < n; ++i) v |= uint64_t(b[off + i]) << (8 * i);
+    return v;
+  };
+  h.core_mask = get(0, 8);
+  h.hardware_used = get(8, 8);
+  for (uint64_t i = 0; i < h.sw_header.size(); ++i) h.sw_header[i] = b[16 + i];
+  h.gpu_id = get(32, 8);
+  h.token_id = get(40, 8);
+  return h;
+}
 
 class Hmem : public BachModule {
  public:
