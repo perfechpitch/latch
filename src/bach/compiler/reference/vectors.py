@@ -17,8 +17,13 @@ import numeric_ref as n
 
 try:
     import kn_gpu
-except ImportError:          # 没装 torch：KN 那一段只走纯 Python
+except ImportError:          # 没装 torch：没有 CUDA 这一档
     kn_gpu = None
+
+try:
+    import kn_cpu
+except ImportError:          # 没装 numpy：KN 那一段只走纯 Python
+    kn_cpu = None
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vectors")
 
@@ -578,9 +583,16 @@ def rcore_add(row, prev):
 def kn_chip(token, group, chip):
     """一颗 chip 上的整段：8 个 core 的部分和沿 chip 内归约链归约进 dot core，dot
     core 做 silu·dot·量化并广播，8 个 core 各算 FC2 一段，在 dot core 上拼成 6144
-    个 BF16。返回各步的中间量。有 CUDA 时在 GPU 上算，结果逐 bit 相同。"""
-    if gpu() is not None:
-        return gpu().chips([token], group)[0][0][chip]
+    个 BF16。返回各步的中间量。实现按 CUDA、NumPy、纯 Python 的顺序选，结果逐
+    bit 相同。"""
+    eng = fast()
+    if eng is not None:
+        return eng.chips([token], group)[0][0][chip]
+    return kn_chip_py(token, group, chip)
+
+
+def kn_chip_py(token, group, chip):
+    """kn_chip 的纯 Python 实现，按 tile 逐次截回 FP32。"""
     parts = [kn_part(token, group, chip, s) for s in range(KN_SLOTS)]
     red = router_reduce([parts[s] for s in KN_CHIP_CHAIN])
     act = kn_gate(red)
@@ -589,17 +601,48 @@ def kn_chip(token, group, chip):
             "concat": b"".join(fc2)}
 
 
-# GPU 那一份：本机有 CUDA 时第一次用到才建，权重解码后留在显存里给后面复用。
+# 批量实现：按 CUDA、NumPy、纯 Python 的顺序选。前两档的权重解码后留着复用。
 GPU_STATE = {"ready": False, "gpu": None}
+CPU_STATE = {"ready": False, "cpu": None}
 
 
 def gpu():
-    """KN 那一段的 GPU 实现；没有 CUDA 时是 None，走纯 Python。"""
+    """KN 那一段的 GPU 实现；没有 CUDA 时是 None。"""
     if not GPU_STATE["ready"]:
         GPU_STATE["ready"] = True
         if kn_gpu is not None and kn_gpu.available():
             GPU_STATE["gpu"] = kn_gpu.KnGpu(sys.modules[__name__])
     return GPU_STATE["gpu"]
+
+
+def cpu():
+    """KN 那一段的 NumPy 实现；没装 numpy 时是 None。"""
+    if not CPU_STATE["ready"]:
+        CPU_STATE["ready"] = True
+        if kn_cpu is not None:
+            CPU_STATE["cpu"] = kn_cpu.KnCpu(sys.modules[__name__])
+    return CPU_STATE["cpu"]
+
+
+def fast():
+    """按 CUDA、NumPy、纯 Python 的顺序选 KN 实现。
+
+    有 CUDA 返回 GPU 引擎，否则有 NumPy 返回 CPU 引擎。两档都没有时返回 None，
+    调用处走纯 Python。三档结果逐 bit 相同。
+    """
+    eng = gpu()
+    if eng is not None:
+        return eng
+    return cpu()
+
+
+def engine_name():
+    """fast() 这次选中的那一档：CUDA、NumPy、纯 Python。"""
+    if gpu() is not None:
+        return "CUDA"
+    if cpu() is not None:
+        return "NumPy"
+    return "纯 Python"
 
 
 def kn_header(note, extra):
@@ -686,14 +729,20 @@ def write_moe_two_groups(path):
 def kn_rows(token, groups):
     """几个 EP 组：每组两行，每行 4 颗 chip 的结果沿行链归约进本行 R core，各行的
     R core 逐行相加。返回每颗 chip 的中间量、每行的行链结果与每个 R core 的结果。
-    有 CUDA 时在 GPU 上算，结果逐 bit 相同。"""
-    if gpu() is not None:
-        return gpu().rows([token], groups)[0]
+    实现按 CUDA、NumPy、纯 Python 的顺序选，结果逐 bit 相同。"""
+    eng = fast()
+    if eng is not None:
+        return eng.rows([token], groups)[0]
+    return kn_rows_py(token, groups)
+
+
+def kn_rows_py(token, groups):
+    """kn_rows 的纯 Python 实现。"""
     chips, rows, rcores = [], [], []
     prev = None
     for g in range(groups):
         for layer in range(2):
-            ones = [kn_chip(token, g, layer * 4 + col) for col in range(4)]
+            ones = [kn_chip_py(token, g, layer * 4 + col) for col in range(4)]
             chips.append(ones)
             row = router_reduce([o["concat"] for o in ones])
             rows.append(row)
@@ -760,10 +809,12 @@ def moe_lpu_tokens_lines(outs):
 
 def write_moe_lpu_tokens(path, count=MOE_LPU_TOKENS):
     """48 颗 chip 上连续跑 count 个 token，各 token 内容不同、topK 相同，每个只留
-    出口上的结果。有 CUDA 时整批在 GPU 上一起算。"""
-    if gpu() is not None:
-        res = gpu().rows([kn_token(k) for k in range(count)], MOE_LPU_GROUPS,
-                         keep=False)
+    出口上的结果。整批按 CUDA、NumPy、纯 Python 的顺序选一种算法，结果逐 bit
+    相同。"""
+    eng = fast()
+    if eng is not None:
+        res = eng.rows([kn_token(k) for k in range(count)], MOE_LPU_GROUPS,
+                       keep=False)
         outs = [r[2][-1] for r in res]
     else:
         outs = [kn_lpu_out(k) for k in range(count)]
@@ -784,8 +835,7 @@ SLOW = ("moe_group.txt", "moe_lpu.txt", "moe_lpu_tokens.txt")
 
 def main(skip_slow=False):
     os.makedirs(OUT_DIR, exist_ok=True)
-    print("比对向量（KN 那一段走 %s）：" %
-          ("GPU" if gpu() is not None else "纯 Python"))
+    print("比对向量（KN 那一段走 %s）：" % engine_name())
     write_scalar(os.path.join(OUT_DIR, "scalar.txt"))
     write_block(os.path.join(OUT_DIR, "block.txt"))
     write_accum(os.path.join(OUT_DIR, "accum.txt"))

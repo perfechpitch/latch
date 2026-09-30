@@ -8,6 +8,7 @@
 // 这一份跑得久，与单 token 那一份各自一个目标，方便单独跑。
 
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
 #include <set>
 
@@ -24,6 +25,22 @@ constexpr uint64_t kTokens = 32;
 // 记波形的 chip 数，从第 0 颗数起。
 constexpr uint64_t kTraceChips = kLpuChips;
 
+// 仓库里没有现成的 moe_lpu_tokens.txt 时生成一份。顺序是 CUDA、NumPy、纯 Python。
+bool GenerateMoeLpuTokens() {
+  std::string ref =
+      std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/reference";
+  std::string out = ref + "/vectors/moe_lpu_tokens.txt";
+  std::string cmd =
+      "python3 -c '"
+      "import sys; sys.path.insert(0, \"" +
+      ref +
+      "\"); import vectors; "
+      "print(\"  比对向量走 %s\" % vectors.engine_name(), flush=True); "
+      "vectors.write_moe_lpu_tokens(\"" +
+      out + "\")'";
+  return std::system(cmd.c_str()) == 0;
+}
+
 }  // namespace
 
 // 32 个 token 各一个用户号，第 k 个的 user_id 就是 k（也是 R core 槽号）。出口上
@@ -33,6 +50,10 @@ TEST(BachMoeLpu, ThirtyTwoTokens) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 200000;
   Vectors want = ReadVectors("moe_lpu_tokens.txt");
+  if (want.Empty()) {
+    ASSERT_TRUE(GenerateMoeLpuTokens()) << "比对向量没生成出来";
+    want = ReadVectors("moe_lpu_tokens.txt");
+  }
   ASSERT_FALSE(want.Empty())
       << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
 
