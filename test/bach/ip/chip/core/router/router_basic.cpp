@@ -124,7 +124,7 @@ RouteEntry ForwardRight(bool need_stream, bool enters_core = false) {
   e.nxt_vc = {0, 0, 0, 0, 0};
   e.path_core_mask_enable = false;
   e.path_core_bypass = !enters_core;
-  e.stream_need = need_stream ? kFlowRight : 0;
+  e.stream_need = need_stream ? static_cast<uint64_t>(kFlowRight) : 0;
   e.operation = Operation::kForward;
   e.stall_way = false;
   return e;

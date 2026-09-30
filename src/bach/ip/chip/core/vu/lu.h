@@ -29,6 +29,7 @@
 
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -72,7 +73,7 @@ class VuLu : public BachModule {
   // 已发出、数据还没被下游消耗的读请求。
   uint64_t Outstanding() const { return occupied; }
   bool Quiescent() const override {
-    return ctxs.empty() && !holding && ready_q.empty() && issued_q.empty() &&
+    return ctxs.empty() && !held && ready_q.empty() && issued_q.empty() &&
            hold_q.empty() && !issued_hold && occupied == 0;
   }
 
@@ -93,7 +94,7 @@ class VuLu : public BachModule {
     beats = beat_cnt;
     TracePerCycle("busy", busy ? 1 : 0);
     TracePerCycle("segq", ready_q.size());
-    TracePerCycle("hold", holding ? 1 : 0);
+    TracePerCycle("hold", held ? 1 : 0);
   }
 
  private:
@@ -118,16 +119,14 @@ class VuLu : public BachModule {
 
   // 攒好的段排队往下发，一拍一个。下游没收下就原样压着。
   void Drain() {
-    if (!holding) return;
+    if (!held) return;
     if (!out->Ready()) {
-      out->Drive(held, out_seq);
+      out->Drive(held->flow, held->seq);
       return;
     }
-    LOGCHECK(occupied >= held_credits, "VuLu: 还掉的读请求比占着的多。");
-    occupied -= held_credits;
-    holding = false;
-    held = VuFlowPtr();
-    held_credits = 0;
+    LOGCHECK(occupied >= held->credits, "VuLu: 还掉的读请求比占着的多。");
+    occupied -= held->credits;
+    held.reset();
     PumpQueue();
   }
 
@@ -336,14 +335,11 @@ class VuLu : public BachModule {
 
   // 队首没人压着就立刻发一个出去。
   void PumpQueue() {
-    if (holding || ready_q.empty()) return;
+    if (held || ready_q.empty()) return;
     OutItem item = std::move(ready_q.front());
     ready_q.pop_front();
-    held = std::move(item.flow);
-    held_credits = item.credits;
-    holding = true;
-    out_seq = ++emit_seq;
-    out->Drive(held, out_seq);
+    held = Held{std::move(item.flow), item.credits, ++emit_seq};
+    out->Drive(held->flow, held->seq);
   }
 
   void Convert(VuFlowPtr const& f, std::vector<uint8_t> const& body,
@@ -421,12 +417,17 @@ class VuLu : public BachModule {
   bool issued_hold = false;
   uint64_t issued_seq = 0;
 
-  VuFlowPtr held;
-  uint64_t held_credits = 0;
+  // 出口上压着、等下游收下的一段，以及它交出去时要还的读请求名额。
+  struct Held {
+    VuFlowPtr flow;
+    uint64_t credits = 0;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
   std::deque<Ctx> ctxs;
   std::deque<OutItem> ready_q;
-  bool holding = false, mem_used = false;
-  uint64_t out_seq = 0, last_seq = 0, emit_seq = 0;
+  bool mem_used = false;
+  uint64_t last_seq = 0, emit_seq = 0;
   uint64_t beat_cnt = 0, busy_cnt = 0, stall_cnt = 0;
   // 已发出、对应数据还没被下游消耗的读请求。
   uint64_t occupied = 0;

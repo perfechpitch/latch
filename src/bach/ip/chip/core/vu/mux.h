@@ -14,6 +14,7 @@
 // 宏指令。硬件不提供软件可见的缓冲队列，所以这两级都不排队。
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,31 +46,30 @@ class VuSmux : public BachModule {
   uint64_t Routed() const { return routed.Get(); }
   // 发射级在分段时把 RF 源读进 flow。bypass 不在这里取。
   void LoadRf(VuFlow& f) { Route(f); }
-  bool Quiescent() const override { return !holding; }
+  bool Quiescent() const override { return !held; }
 
  protected:
   void Step() override {
     Drain();
     Accept();
     routed = route_cnt;
-    TracePerCycle("hold", holding ? 1 : 0);
+    TracePerCycle("hold", held ? 1 : 0);
   }
 
  private:
   void Drain() {
-    if (!holding) return;
+    if (!held) return;
     if (!out->Ready()) {
-      out->Drive(held, out_seq);
+      out->Drive(held->f, held->seq);
       return;
     }
-    holding = false;
-    held = VuFlowPtr();
+    held.reset();
   }
 
   void Accept() {
-    in->DriveReady(!holding);
-    if (holding || !in->Valid() || in->Seq() == last_seq) {
-      if (!holding) out->Idle();
+    in->DriveReady(!held);
+    if (held || !in->Valid() || in->Seq() == last_seq) {
+      if (!held) out->Idle();
       return;
     }
     VuFlowPtr f = in->Flow();
@@ -79,11 +79,9 @@ class VuSmux : public BachModule {
     }
     last_seq = in->Seq();
     Route(*f);
-    held = f;
-    holding = true;
-    out_seq = in->Seq();
+    held = Held{f, in->Seq()};
     ++route_cnt;
-    out->Drive(held, out_seq);
+    out->Drive(held->f, held->seq);
   }
 
   // 把 RF 上的两个 VRF 读口、两个 MRF 读口与八个 SRF 读口按索引读出来。索引
@@ -130,9 +128,12 @@ class VuSmux : public BachModule {
 
   VuRegfiles& regs;
   std::shared_ptr<VuFlowPort> in, out;
-  VuFlowPtr held;
-  bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0, route_cnt = 0;
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t last_seq = 0, route_cnt = 0;
 
   Logic64 routed;
 };
@@ -154,31 +155,30 @@ class VuDmux : public BachModule {
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
 
   uint64_t Written() const { return written.Get(); }
-  bool Quiescent() const override { return !holding; }
+  bool Quiescent() const override { return !held; }
 
  protected:
   void Step() override {
     Drain();
     Accept();
     written = write_cnt;
-    TracePerCycle("hold", holding ? 1 : 0);
+    TracePerCycle("hold", held ? 1 : 0);
   }
 
  private:
   void Drain() {
-    if (!holding) return;
+    if (!held) return;
     if (!out->Ready()) {
-      out->Drive(held, out_seq);
+      out->Drive(held->f, held->seq);
       return;
     }
-    holding = false;
-    held = VuFlowPtr();
+    held.reset();
   }
 
   void Accept() {
-    in->DriveReady(!holding);
-    if (holding || !in->Valid() || in->Seq() == last_seq) {
-      if (!holding) out->Idle();
+    in->DriveReady(!held);
+    if (held || !in->Valid() || in->Seq() == last_seq) {
+      if (!held) out->Idle();
       return;
     }
     VuFlowPtr f = in->Flow();
@@ -188,10 +188,8 @@ class VuDmux : public BachModule {
     }
     last_seq = in->Seq();
     Writeback(*f);
-    held = f;
-    holding = true;
-    out_seq = in->Seq();
-    out->Drive(held, out_seq);
+    held = Held{f, in->Seq()};
+    out->Drive(held->f, held->seq);
   }
 
   // PRF_op 描述一条宏指令的全部写回行为：VRF 两个写端口与 MRF 唯一写端口用
@@ -251,9 +249,12 @@ class VuDmux : public BachModule {
   VuRegfiles& regs;
   VuPipeCtrl& pipe;
   std::shared_ptr<VuFlowPort> in, out;
-  VuFlowPtr held;
-  bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0, write_cnt = 0;
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t last_seq = 0, write_cnt = 0;
 
   Logic64 written;
 };

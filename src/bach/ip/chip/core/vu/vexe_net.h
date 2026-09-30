@@ -14,6 +14,7 @@
 #include <array>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "bach/ip/chip/core/vu/mux.h"
@@ -45,19 +46,18 @@ class VuIssue : public BachModule {
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
 
   bool Quiescent() const override {
-    return macros.empty() && !holding;
+    return macros.empty() && !held;
   }
 
  protected:
   void Step() override {
     // 上一拍送出的段，下游这拍已经看过。ready 为真就松开，再发下一段。
-    if (holding && out->Ready()) {
-      holding = false;
+    if (held && out->Ready()) {
       held.reset();
     }
     Take();
-    if (!holding) Pump();
-    if (holding) out->Drive(held, out_seq);
+    if (!held) Pump();
+    if (held) out->Drive(held->f, held->seq);
     else out->Idle();
     in->DriveReady(macros.size() < 4);
   }
@@ -105,9 +105,7 @@ class VuIssue : public BachModule {
     }
     smux.LoadRf(*f);
     pipe.NoteSegmentRead(*m.uops, m.next, m.split, f->seg_last);
-    held = std::move(f);
-    holding = true;
-    out_seq = ++emit_seq;
+    held = Held{std::move(f), ++emit_seq};
     ++m.next;
     if (m.next >= m.total) macros.pop_front();
   }
@@ -117,9 +115,13 @@ class VuIssue : public BachModule {
   std::shared_ptr<VuUopsPort> in;
   std::shared_ptr<VuFlowPort> out;
   std::deque<Macro> macros;
-  VuFlowPtr held;
-  bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0, emit_seq = 0, holds = 0;
+  // 出口上压着、等下游收下的那一段。
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t last_seq = 0, emit_seq = 0, holds = 0;
 };
 
 // 五个分组各自流水，汇合后交给 MEXE。
@@ -145,13 +147,12 @@ class VuVexeNet : public BachModule {
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
 
   bool Quiescent() const override {
-    return segs.empty() && pending_lu.empty() && !holding;
+    return segs.empty() && pending_lu.empty() && !held;
   }
 
  protected:
   void Step() override {
-    if (holding && out->Ready()) {
-      holding = false;
+    if (held && out->Ready()) {
       held.reset();
     }
     TakeLu();
@@ -349,19 +350,17 @@ class VuVexeNet : public BachModule {
   }
 
   void Emit() {
-    if (holding) {
-      out->Drive(held, out_seq);
+    if (held) {
+      out->Drive(held->f, held->seq);
       return;
     }
     if (segs.empty() || !Finished(segs.front())) {
       out->Idle();
       return;
     }
-    held = segs.front().f;
+    held = Held{segs.front().f, ++emit_seq};
     segs.pop_front();
-    holding = true;
-    out_seq = ++emit_seq;
-    out->Drive(held, out_seq);
+    out->Drive(held->f, held->seq);
   }
 
   void Charge() {
@@ -381,9 +380,13 @@ class VuVexeNet : public BachModule {
   std::shared_ptr<VuFlowPort> in, lu_in, out;
   std::deque<Seg> segs;
   std::deque<VuFlowPtr> pending_lu;
-  VuFlowPtr held;
-  bool holding = false;
-  uint64_t out_seq = 0, emit_seq = 0, last_seg = 0, last_lu = 0;
+  // 出口上压着、等下游收下的那一段。
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t emit_seq = 0, last_seg = 0, last_lu = 0;
 };
 
 }  // namespace bach

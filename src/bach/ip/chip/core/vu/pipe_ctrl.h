@@ -30,6 +30,7 @@
 #include <array>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -188,7 +189,7 @@ class VuPipeCtrl : public BachModule {
   uint64_t VrfWtBusy(uint64_t port) const { return vrf_wt_busy[port]; }
   uint64_t MrfWtBusy() const { return mrf_wt_busy; }
   bool Quiescent() const override {
-    return live.empty() && delay.empty() && !holding;
+    return live.empty() && delay.empty() && !held;
   }
 
  protected:
@@ -221,8 +222,7 @@ class VuPipeCtrl : public BachModule {
   };
 
   void Release() {
-    if (holding && out->Ready()) {
-      holding = false;
+    if (held && out->Ready()) {
       held.reset();
     }
   }
@@ -234,16 +234,14 @@ class VuPipeCtrl : public BachModule {
   }
 
   void Emit() {
-    if (holding) {
-      out->Drive(held, out_seq);
+    if (held) {
+      out->Drive(held->uops, held->seq);
       return;
     }
     if (!delay.empty() && delay.front().left == 0) {
-      held = delay.front().uops;
-      out_seq = delay.front().seq;
+      held = Held{delay.front().uops, delay.front().seq};
       delay.pop_front();
-      holding = true;
-      out->Drive(held, out_seq);
+      out->Drive(held->uops, held->seq);
       return;
     }
     out->Idle();
@@ -258,7 +256,7 @@ class VuPipeCtrl : public BachModule {
   // 输出还压着上一条时不收新的；延迟队列里的不算压着，第二条可以在第一条
   // 的派发延迟期间进队，Scoreboard 在收下时就已经看见它。
   void Accept() {
-    if (holding) {
+    if (held) {
       in->DriveReady(false);
       return;
     }
@@ -833,9 +831,13 @@ class VuPipeCtrl : public BachModule {
 
   std::deque<LiveInst> live;
   std::deque<Deferred> delay;
-  std::shared_ptr<VuUops> held;
-  bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0;
+  // 出口上压着、等下游收下的那一条微指令。
+  struct Held {
+    std::shared_ptr<VuUops> uops;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t last_seq = 0;
   uint64_t stall_cnt = 0, dispatch_cnt = 0;
   uint64_t fence_stall = 0, cmfence_stall = 0, dep_stall = 0, eu_stall = 0;
   std::array<uint64_t, 2> vrf_rd_busy{}, vrf_wt_busy{};

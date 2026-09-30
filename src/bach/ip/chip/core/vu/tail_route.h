@@ -11,8 +11,10 @@
 // Post 在 VEXE 之后，收下刚交出来的段并送到下一级。下一级本拍已经跑过，下一拍
 // 才看见，这一拍就是级间那一拍，不是被跳过的单元自己的拍。
 
+#include <array>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -66,7 +68,7 @@ class VuTailRoute : public BachModule {
 
   bool Quiescent() const override {
     return arrive.empty() && resume.empty() && in_mexe == 0 && in_sexe == 0 &&
-           !hold[0] && !hold[1] && !hold[2];
+           !held[0] && !held[1] && !held[2];
   }
 
  protected:
@@ -132,15 +134,14 @@ class VuTailRoute : public BachModule {
 
   void Release(Dest d) {
     int i = static_cast<int>(d);
-    if (!hold[i]) return;
+    if (!held[i]) return;
     VuFlowPort& p = OutOf(d);
     if (!p.Ready()) {
-      p.Drive(held[i], held_seq[i]);
+      p.Drive(held[i]->f, held[i]->seq);
       driven[i] = true;
       return;
     }
-    hold[i] = false;
-    held[i] = VuFlowPtr();
+    held[i].reset();
   }
 
   // 更早的段还在 MEXE 或 SEXE 里时，后一段不能从旁边绕到更后面的级，否则会
@@ -157,13 +158,11 @@ class VuTailRoute : public BachModule {
     Beat& b = q.front();
     if (gate && !CanIssue(b)) return false;
     int i = static_cast<int>(b.dest);
-    if (hold[i]) return false;
+    if (held[i]) return false;
     VuFlowPort& p = OutOf(b.dest);
     if (!p.Ready()) return false;
-    hold[i] = true;
-    held[i] = b.f;
-    held_seq[i] = b.seq;
-    p.Drive(held[i], held_seq[i]);
+    held[i] = Held{b.f, b.seq};
+    p.Drive(held[i]->f, held[i]->seq);
     driven[i] = true;
     if (b.dest == Dest::kMexe) ++in_mexe;
     if (b.dest == Dest::kSexe) ++in_sexe;
@@ -182,9 +181,12 @@ class VuTailRoute : public BachModule {
   std::shared_ptr<VuFlowPort> to_mexe, to_sexe, to_dmux;
   std::deque<Beat> arrive;
   std::deque<Beat> resume;
-  VuFlowPtr held[3];
-  uint64_t held_seq[3] = {};
-  bool hold[3] = {};
+  // 出口上压着、等下游收下的那一段（每个方向一格）。
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::array<std::optional<Held>, 3> held;
   bool driven[3] = {};
   uint64_t last_vexe = 0, last_mexe = 0, last_sexe = 0;
   int in_mexe = 0, in_sexe = 0;

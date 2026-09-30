@@ -25,6 +25,7 @@
 // 自启动 core 上 16 条链的 Task 0 连续下发，规则与 MU_Arb、VU_Arb 相同。
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -56,7 +57,7 @@ class DteArb : public BachModule {
 
   uint64_t Issued() const { return issued.Get(); }
 
-  bool Quiescent() const override { return !holding; }
+  bool Quiescent() const override { return !held; }
 
  protected:
   void Step() override {
@@ -65,7 +66,7 @@ class DteArb : public BachModule {
     if (infly && issue->Accepted()) infly.reset();
 
     // 非抢占保持：锁定的这一笔一直发到看见 ACCEPT。
-    if (holding) {
+    if (held) {
       if (cmd->Ready()) {
         Accept();
       } else {
@@ -147,40 +148,32 @@ class DteArb : public BachModule {
     cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
                e.task_recv != RecvUnit::kRvOnly, ++cmd_seq,
                cfg.Route(e.task_path_id).vcid);
-    holding = true;
-    hold_stream = i;
-    hold_task = e.task_id;
-    hold_datain = false;
-    hold_reduce = e.task_type == TaskType::kReduce;
+    held = Held{i, e.task_id, false, e.task_type == TaskType::kReduce};
   }
 
   void LockDatain(DatainHold const& h) {
     cmd->Drive(h.task_pc, h.stream_id, h.task_id, h.user_id, h.path_id,
                /*dsa_en=*/true, ++cmd_seq);
-    holding = true;
-    hold_stream = h.stream_id;
-    hold_task = h.task_id;
-    hold_datain = true;
-    hold_reduce = false;
+    held = Held{h.stream_id, h.task_id, true, false};
   }
 
   void Accept() {
-    holding = false;
+    Held h = *held;
+    held.reset();
     ++issue_pending;
-    if (hold_datain) {
+    if (h.datain) {
       // DataIn 任务只通知 DataIn_task_table 出槽，不改 stream_table 的当前状态。
       um.ReleaseHold();
-      hold_datain = false;
       return;
     }
-    issued_stream = hold_stream;
-    issued_task = hold_task;
+    issued_stream = h.stream;
+    issued_task = h.task;
     auto w = std::make_shared<StreamWrite>();
     w->valid = true;
-    w->stream_id = hold_stream;
+    w->stream_id = h.stream;
     w->set_fsm = true;
     w->fsm = TaskFsm::kInfly;
-    w->take_rmem = hold_reduce;
+    w->take_rmem = h.reduce;
     infly = w;
     infly_fresh = true;
   }
@@ -208,8 +201,14 @@ class DteArb : public BachModule {
   // 还没被表收下的那一笔状态回写。
   std::shared_ptr<StreamWrite> infly;
   bool infly_fresh = false;
-  bool holding = false, hold_datain = false, hold_reduce = false;
-  uint64_t hold_stream = 0, hold_task = 0;
+  // 锁定的一笔：命令与字段保持稳定，直到 RV core 返回 ACCEPT。
+  struct Held {
+    uint64_t stream = 0;
+    uint64_t task = 0;
+    bool datain = false;
+    bool reduce = false;
+  };
+  std::optional<Held> held;
   // 刚发出、表里还没变成 INFLY 的那一笔。
   uint64_t issued_stream = kStreamNum, issued_task = 0;
   uint64_t cmd_seq = 0;

@@ -278,7 +278,7 @@ struct ScriptOp {
   uint64_t req_id;
   std::shared_ptr<std::vector<uint8_t>> wr_data;
   uint64_t wait_resp_min = 0;
-  std::function<bool()> gate;
+  std::function<bool()> gate = nullptr;
 };
 
 class ScriptDriver : public AxiMaster {

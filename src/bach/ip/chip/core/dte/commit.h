@@ -19,6 +19,7 @@
 
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -72,7 +73,7 @@ class Commit : public BachModule {
   uint64_t Stalled() const { return stalled.Get(); }
   uint64_t Queued() const { return queued.Get(); }
 
-  bool Quiescent() const override { return central_q.empty() && !holding; }
+  bool Quiescent() const override { return central_q.empty() && !held; }
 
  protected:
   void Step() override {
@@ -121,7 +122,7 @@ class Commit : public BachModule {
   // 一个通道有任务没发出去，这一拍排在它后面、同一通道的任务都不发。三样一起拿：
   // 读侧 TaskQueue、写侧 TaskQueue、Completion RS。
   void TryDispatch() {
-    if (holding) return;
+    if (held) return;
     // 上一拍刚发过一笔就空一拍：对方收下那一笔之后才把它算进 ready，这一拍读到
     // 的 ready 还没算上它。
     if (just_sent) {
@@ -143,17 +144,16 @@ class Commit : public BachModule {
       }
 
       // 三样齐了才真正 dispatch：地址展开已在 Regfile 的 Fire 里算好。
-      held = std::make_shared<Descriptor>(d);
-      held_lane = lane;
-      holding = true;
+      auto desc = std::make_shared<Descriptor>(d);
       ++admit_seq;
       // 内部序号：所有任务在这里汇成同一套编号，Completion RS 按它 Join。
-      held->commit_seq = admit_seq;
+      desc->commit_seq = admit_seq;
       // 出核任务要发出去的那个包在这里造好（进核任务的包头已由 Header Parser 记进
       // Hmem，这里不再写）。身份要在 erase 之前取，d 就指着要 dispatch 的那一项。
       start_task = d.task_id;
       start_user = d.user_id;
-      if (!held->msg && !IsInbound(held->route)) MakeOutboundMsg(*held);
+      if (!desc->msg && !IsInbound(desc->route)) MakeOutboundMsg(*desc);
+      held = Held{std::move(desc), lane};
       ++admit_cnt;
       ++admit_pending;
       central_q.erase(it);
@@ -218,17 +218,16 @@ class Commit : public BachModule {
   // 发过的每一笔都已算进去，发一拍就算送到。
   void Deliver() {
     for (uint64_t i = 0; i < to_lane.size(); ++i) {
-      if (holding && i == held_lane) {
-        to_lane[i]->Drive(held, admit_seq);
+      if (held && i == held->lane) {
+        to_lane[i]->Drive(held->desc, admit_seq);
       } else {
         to_lane[i]->Idle();
       }
     }
-    if (holding) {
-      to_rs->Drive(held, admit_seq);
-      holding = false;
+    if (held) {
+      to_rs->Drive(held->desc, admit_seq);
+      held.reset();
       just_sent = true;
-      held = std::shared_ptr<Descriptor>();
       return;
     }
     to_rs->Idle();
@@ -240,10 +239,14 @@ class Commit : public BachModule {
   std::shared_ptr<DescPort> from_rv;
   std::vector<std::shared_ptr<AdmitPort>> to_lane;
   std::shared_ptr<AdmitPort> to_rs;
-  std::shared_ptr<Descriptor> held;
-  bool holding = false;
+  // 一笔已 dispatch、正在交付的任务：发给目标 Lane 与 Completion RS，等双方收下。
+  struct Held {
+    std::shared_ptr<Descriptor> desc;
+    uint64_t lane = 0;
+  };
+  std::optional<Held> held;
   bool just_sent = false;  // 上一拍发过一笔
-  uint64_t held_lane = 0, admit_seq = 0;
+  uint64_t admit_seq = 0;
 
   // 中央 TaskQueue：保存“已快照、尚未 dispatch”的完整 TaskDesc。
   std::deque<Descriptor> central_q;

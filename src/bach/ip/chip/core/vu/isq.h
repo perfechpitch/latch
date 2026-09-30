@@ -15,6 +15,7 @@
 
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -111,12 +112,12 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
   };
 
   void Drain() {
-    if (holding) {
+    if (held) {
       if (!out->Ready()) {
-        out->Drive(held, out_seq);
+        out->Drive(held->inst, held->seq);
         return;
       }
-      holding = false;
+      held.reset();
       ++inflight;
     }
     // 在飞数到上限就不再放：最多两条相邻宏指令重叠。
@@ -124,12 +125,11 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
       out->Idle();
       return;
     }
-    held = q.front();
+    auto inst = q.front();
     q.pop_front();
-    holding = true;
-    out_seq = held->seq;
-    out->Drive(held, out_seq);
-    MarkDispatched(held->seq);
+    held = Held{inst, inst->seq};
+    out->Drive(held->inst, held->seq);
+    MarkDispatched(inst->seq);
   }
 
   // 出队是按发射顺序走的，所以最老的那一条没派发的就是刚出去的这一条。
@@ -179,9 +179,13 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
 
   std::deque<std::shared_ptr<VuMacroInst>> q;
   std::deque<Window> window;
-  std::shared_ptr<VuMacroInst> held;
-  bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0;
+  // 出口上压着、等下游收下的那一条。
+  struct Held {
+    std::shared_ptr<VuMacroInst> inst;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t last_seq = 0;
   uint64_t macro_left = 0, inflight = 0, retire_cnt = 0;
   // 收下的宏指令笔数、开始的 task 笔数与最近开始那个 task 的身份，供 Core 层
   // 发波形。task_open：上一条收下的没有置 EVENT_EN，它所在的 task 还没收尾。

@@ -28,6 +28,7 @@
 #include <array>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -219,21 +220,18 @@ class VuConfigRegister : public BachModule {
     AgeDefer();
     for (uint64_t i = 0; i < kVuCfgPathNum; ++i) Serve(i);
     if (!rdata_used) rdata->Idle();
-    // 端口的驱动集中在这里。延迟走完的那一拍才把 pending 立起来并驱动；
+    // 端口的驱动集中在这里。延迟走完的那一拍才把 held 立起来并驱动；
     // 若提前在 Drain 里清掉，这一条就一拍也没出现在端口上，宏指令会静默丢掉。
     Publish();
 
     triggers = trigger_cnt;
     blocked = blocked_cnt;
-    TracePerCycle("pending", pending ? 1 : 0);
+    TracePerCycle("pending", held ? 1 : 0);
   }
 
  private:
   void Drain() {
-    if (pending && driving && out->Ready()) {
-      pending = false;
-      driving = false;
-    }
+    if (held && out->Ready()) held.reset();
   }
 
   void AgeDefer() {
@@ -243,24 +241,20 @@ class VuConfigRegister : public BachModule {
   }
 
   void Publish() {
-    if (pending) {
-      out->Drive(held, out_seq);
-      driving = true;
+    if (held) {
+      out->Drive(held->inst, held->seq);
       return;
     }
     if (!defer.empty() && defer.front().left == 0) {
-      held = defer.front().inst;
-      out_seq = defer.front().seq;
+      held = Held{defer.front().inst, defer.front().seq};
       defer.pop_front();
-      pending = true;
-      driving = true;
-      out->Drive(held, out_seq);
+      out->Drive(held->inst, held->seq);
       return;
     }
     out->Idle();
   }
 
-  bool TriggerBusy() const { return pending || !defer.empty(); }
+  bool TriggerBusy() const { return held || !defer.empty(); }
 
   void Serve(uint64_t i) {
     DsaCfgPort& p = *path[i];
@@ -611,10 +605,14 @@ class VuConfigRegister : public BachModule {
     uint64_t left = 0;
   };
 
-  std::shared_ptr<VuMacroInst> held;
+  // 出口上压着、等下游收下的那一条宏指令。
+  struct Held {
+    std::shared_ptr<VuMacroInst> inst;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
   std::deque<DeferredTrig> defer;
-  bool pending = false, driving = false;
-  uint64_t out_seq = 0, inst_seq = 0, tag_seq = 0;
+  uint64_t inst_seq = 0, tag_seq = 0;
   uint64_t trigger_cnt = 0, blocked_cnt = 0, write_cnt = 0;
   uint64_t status = 0, macro_inst_left = 0, error_code = 0, profile_ctrl = 0;
   uint64_t error_info = 0, snap_addr = 0;

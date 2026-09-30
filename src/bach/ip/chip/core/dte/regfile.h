@@ -31,6 +31,7 @@
 #include <array>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -152,7 +153,7 @@ class DteRegfile : public BachModule {
   // ── 观测 ──
   uint64_t Triggers() const { return trig_cnt; }
   uint64_t Writes() const { return write_cnt; }
-  bool Quiescent() const override { return !holding && pending_read.empty(); }
+  bool Quiescent() const override { return !held && pending_read.empty(); }
 
  protected:
   void Step() override {
@@ -165,22 +166,21 @@ class DteRegfile : public BachModule {
     if (!rdata_used) rdata->Idle();
 
     // 中央 TaskQueue 满时本模块手上压着一笔发不出去，此时不再收新的配置写。
-    cfg->DriveReady(!holding);
+    cfg->DriveReady(!held);
     triggers = trig_cnt;
     writes = write_cnt;
-    TracePerCycle("holding", holding ? 1 : 0);
+    TracePerCycle("holding", held ? 1 : 0);
   }
 
  private:
   void Drain() {
-    if (!holding) return;
+    if (!held) return;
     if (!out->Accepted()) return;
-    holding = false;
-    held = std::shared_ptr<Descriptor>();
+    held.reset();
   }
 
   void TakeCfg() {
-    if (holding) return;
+    if (held) return;
     if (!cfg->Valid() || cfg->Seq() == last_seq) return;
     last_seq = cfg->Seq();
     uint64_t at = cfg->req_addr.Get();
@@ -203,8 +203,8 @@ class DteRegfile : public BachModule {
   }
 
   void Publish() {
-    if (holding) {
-      out->Drive(held, held_seq);
+    if (held) {
+      out->Drive(held->desc, held->seq);
       return;
     }
     out->Idle();
@@ -307,9 +307,7 @@ class DteRegfile : public BachModule {
       d->seg[i] = s;
     }
 
-    held = d;
-    held_seq = out->NextSeq();
-    holding = true;
+    held = Held{d, out->NextSeq()};
     ++trig_cnt;
     dirty = 0;
   }
@@ -329,9 +327,14 @@ class DteRegfile : public BachModule {
   uint64_t dirty = 0;
   std::array<DteConfig, kDteTemplateNum> tpl{};
 
-  std::shared_ptr<Descriptor> held;
-  bool holding = false, rdata_used = false;
-  uint64_t last_seq = 0, held_seq = 0, trig_cnt = 0, write_cnt = 0;
+  // 一笔已组好、等 Commit 收下的 Descriptor。
+  struct Held {
+    std::shared_ptr<Descriptor> desc;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  bool rdata_used = false;
+  uint64_t last_seq = 0, trig_cnt = 0, write_cnt = 0;
 
   Logic64 triggers, writes;
 };

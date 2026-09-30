@@ -13,6 +13,7 @@
 // Scheduler》：同时激活16个用户的自启动任务，进行task仲裁，进行发射）。
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "bach/ip/chip/core/ts/cfg_reg.h"
@@ -42,22 +43,24 @@ class UnitArb : public BachModule {
 
   uint64_t Issued() const { return issued.Get(); }
 
-  bool Quiescent() const override { return !holding; }
+  bool Quiescent() const override { return !held; }
 
  protected:
   void Step() override {
     // 上一笔的 READY → INFLY 回写被表收下了就撤掉，没收下就下一拍补发。
     if (infly && issue->Accepted()) infly.reset();
 
-    if (holding) {
+    if (held) {
       if (cmd->Ready()) {
-        holding = false;
+        uint64_t stream = held->stream;
+        uint64_t task = held->task;
+        held.reset();
         ++issue_pending;
-        issued_stream = hold_stream;
-        issued_task = hold_task;
+        issued_stream = stream;
+        issued_task = task;
         auto w = std::make_shared<StreamWrite>();
         w->valid = true;
-        w->stream_id = hold_stream;
+        w->stream_id = stream;
         w->set_fsm = true;
         w->fsm = TaskFsm::kInfly;
         infly = w;
@@ -89,7 +92,7 @@ class UnitArb : public BachModule {
   }
 
   void Select() {
-    if (holding) return;
+    if (held) return;
     // 上一笔的 READY → INFLY 回写还没被表收下就不挑下一笔：只有一个回写槽，
     // 接着发会把没收下的那一笔盖掉，它的 INFLY 丢了就会被再下发一次。
     if (infly) {
@@ -120,9 +123,7 @@ class UnitArb : public BachModule {
       if (i == issued_stream && e.task_id == issued_task) continue;
       cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
                  e.task_recv != RecvUnit::kRvOnly, ++cmd_seq);
-      holding = true;
-      hold_stream = i;
-      hold_task = e.task_id;
+      held = Held{i, e.task_id};
       return;
     }
     cmd->Idle();
@@ -137,8 +138,13 @@ class UnitArb : public BachModule {
   // 还没被表收下的那一笔状态回写。
   std::shared_ptr<StreamWrite> infly;
   bool infly_fresh = false;
-  bool holding = false;
-  uint64_t hold_stream = 0, hold_task = 0, cmd_seq = 0;
+  // 锁定的一笔：命令与字段保持稳定，直到 RV core 返回 ACCEPT。
+  struct Held {
+    uint64_t stream = 0;
+    uint64_t task = 0;
+  };
+  std::optional<Held> held;
+  uint64_t cmd_seq = 0;
   // 刚发出、表里还没变成 INFLY 的那一笔。
   uint64_t issued_stream = kStreamNum, issued_task = 0;
   uint64_t issue_pending = 0;

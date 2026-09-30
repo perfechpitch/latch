@@ -19,6 +19,7 @@
 
 #include <deque>
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -141,7 +142,7 @@ class CreditMonitor : public BachModule {
     uint64_t user = req->user_id.Get();
     uint64_t task = req->task_id.Get();
     // 同一笔会连着两拍出现在端口上，按 (user, task) 认它。
-    if (seen_once && user == last_user && task == last_task) return;
+    if (last_seen && user == last_seen->user && task == last_seen->task) return;
     Event e;
     e.user_id = user;
     e.stream_id = req->stream_id.Get();
@@ -149,9 +150,7 @@ class CreditMonitor : public BachModule {
     e.path_id = req->path_id.Get();
     e.enqueue_seq = next_seq++;
     q.push_back(e);
-    last_user = user;
-    last_task = task;
-    seen_once = true;
+    last_seen = LastSeen{user, task};
   }
 
   // 多个事件同时满足时按 StreamID 仲裁，选最老的任务通知 TS。
@@ -185,8 +184,12 @@ class CreditMonitor : public BachModule {
   // Step 独占。
   std::deque<Event> q;
   uint64_t next_seq = 0;
-  uint64_t last_user = 0, last_task = 0;
-  bool seen_once = false;
+  // 上一笔收下、还连着两拍出现在端口上的 (user, task)，按它去重。
+  struct LastSeen {
+    uint64_t user = 0;
+    uint64_t task = 0;
+  };
+  std::optional<LastSeen> last_seen;
   uint64_t notified_pending = 0;
 
   Logic64 queued, notified;

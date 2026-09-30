@@ -88,19 +88,6 @@ RouteEntry Relay(uint64_t in_mask, uint64_t dtype = kReduceFp32,
   return e;
 }
 
-// 末端汇聚：算完只交本 core。
-RouteEntry Sink(uint64_t in_mask) {
-  RouteEntry e;
-  e.op_type = OpType::kReduce;
-  e.flow_dir = 0;
-  e.path_core_bypass = false;
-  e.reduce_in_mask = in_mask;
-  e.operation = Operation::kReduce2;
-  e.reduce_data_type = kReduceFp32;
-  e.reduce_outdata_type = kReduceFp32;
-  return e;
-}
-
 // 灌三路输入、扮演 Xbar 给授予、收 done，全在这一个协程里。
 class ReduceHarness : public BachModule {
  public:

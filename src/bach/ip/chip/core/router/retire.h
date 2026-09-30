@@ -21,6 +21,7 @@
 #include <array>
 #include <deque>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -118,11 +119,11 @@ class Retire : public BachModule {
   void TakeRequest() {
     if (!req->Valid()) {
       req->DriveAccepted(false);
-      held = false;
+      held_user.reset();
       return;
     }
     uint64_t user = req->user_id.Get();
-    if (held && user == last_user) {
+    if (held_user && user == *held_user) {
       // 同一笔会连着两拍出现（TS 要等 accepted 打一拍才撤 valid）。valid 掉下
       // 去过再来的是新的一笔：同一个用户在本 core 上先后跑两个 token，就要退休
       // 两次。
@@ -131,8 +132,7 @@ class Retire : public BachModule {
     }
     bcast->Drive(user, ++bcast_seq);
     bcast_driven = true;
-    last_user = user;
-    held = true;
+    held_user = user;
     ++broadcast_pending;
     // 本级这个用户跑完了，往三个方向各还一笔。
     relay_q.push_back({kR2RNum, user});
@@ -195,9 +195,8 @@ class Retire : public BachModule {
   // Step 独占。
   std::array<bool, kR2RNum> drove{};
   std::deque<Relay> relay_q, self_q;
-  uint64_t last_user = 0;
-  // 上一拍收下的那一笔还没撤 valid。
-  bool held = false;
+  // 上一拍收下、还没撤 valid 的那一笔（TS 要等 accepted 打一拍才撤 valid）。
+  std::optional<uint64_t> held_user;
   uint64_t broadcast_pending = 0;
 
   Logic64 broadcast;

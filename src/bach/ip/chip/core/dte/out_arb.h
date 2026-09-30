@@ -16,6 +16,7 @@
 #include <array>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -52,7 +53,7 @@ class DteOutArb : public BachModule {
     for (auto const& q : slot) {
       if (!q.empty()) return false;
     }
-    return !holding;
+    return !held;
   }
 
  protected:
@@ -80,12 +81,13 @@ class DteOutArb : public BachModule {
 
   // 上一拍发出去的被 Router 收下了没有。
   void Drain() {
-    if (!holding) return;
+    if (!held) return;
     if (!out->Ready()) return;
-    holding = false;
+    bool last = held->last;
+    held.reset();
     ++sent_cnt;
     // 带 tlast 的那一拍发完才让出授权。
-    if (held.last) grant = (grant + 1) % kOutNum;
+    if (last) grant = (grant + 1) % kOutNum;
   }
 
   void Collect() {
@@ -100,7 +102,7 @@ class DteOutArb : public BachModule {
   }
 
   void Forward() {
-    if (holding) {
+    if (held) {
       // 上一笔还没被收下：端口不重写，Latch 原样保持，序号不变，接收方按序号
       // 认出是同一笔。
       return;
@@ -113,9 +115,8 @@ class DteOutArb : public BachModule {
       held = slot[i].front();
       slot[i].pop_front();
       grant = i;
-      in_frame = !held.last;
-      holding = true;
-      out->Drive(held.bytes, held.last, held.hdr, held.vc, held.msg);
+      in_frame = !held->last;
+      out->Drive(held->bytes, held->last, held->hdr, held->vc, held->msg);
       return;
     }
     out->Idle();
@@ -126,8 +127,8 @@ class DteOutArb : public BachModule {
   std::array<uint64_t, kOutNum> seen{};
   std::shared_ptr<CoreDataPort> out;
 
-  Beat held;
-  bool holding = false, in_frame = false;
+  std::optional<Beat> held;
+  bool in_frame = false;
   uint64_t grant = 0, sent_cnt = 0;
 
   Logic64 sent;

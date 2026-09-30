@@ -21,6 +21,7 @@
 
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,7 +56,7 @@ class VuSu : public BachModule {
   // CM 端口反压住本级的拍数。
   uint64_t StallCycles() const { return stall_cnt; }
   bool Quiescent() const override {
-    return !busy && !holding && done_q.empty() && wr_q.empty() &&
+    return !busy && !held && done_q.empty() && wr_q.empty() &&
            wait_q.empty();
   }
 
@@ -269,20 +270,17 @@ class VuSu : public BachModule {
   }
 
   void Emit() {
-    if (holding) {
+    if (held) {
       if (!out->Ready()) {
-        out->Drive(held, out_seq);
+        out->Drive(held->f, held->seq);
         return;
       }
-      holding = false;
-      held = VuFlowPtr();
+      held.reset();
     }
     if (!done_q.empty()) {
-      held = done_q.front().f;
-      out_seq = done_q.front().seq;
+      held = Held{done_q.front().f, done_q.front().seq};
       done_q.pop_front();
-      holding = true;
-      out->Drive(held, out_seq);
+      out->Drive(held->f, held->seq);
       return;
     }
     out->Idle();
@@ -326,9 +324,15 @@ class VuSu : public BachModule {
   // 当前这一段已经发出、还没回响应的写。
   uint64_t wr_open = 0;
 
-  VuFlowPtr flow, held;
-  bool busy = false, holding = false, mem_used = false;
-  uint64_t seq = 0, out_seq = 0, last_seq = 0;
+  VuFlowPtr flow;
+  // 出口上压着、等下游收下的那一段。
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  bool busy = false, mem_used = false;
+  uint64_t seq = 0, last_seq = 0;
   uint64_t head = 0, beat_cnt = 0;
   uint64_t busy_cnt = 0, stall_cnt = 0;
   // 按块攒的那一摊：acc 从 acc_base 这个块边界起，acc_from 是块内第一个属于

@@ -99,16 +99,6 @@ RouteEntry Bypass(uint64_t flow) {
   return e;
 }
 
-RouteEntry ReduceEntry(uint64_t in_mask) {
-  RouteEntry e;
-  e.op_type = OpType::kReduce;
-  e.flow_dir = 0;              // 末端汇聚，出方向全不置位
-  e.path_core_bypass = false;  // 0 进核
-  e.reduce_in_mask = in_mask;
-  e.operation = Operation::kReduce2;
-  return e;
-}
-
 }  // namespace
 
 // A2：中间核只做 bypass，不占该核的用户坑，cur_credit_require 为 0。

@@ -7,6 +7,12 @@ list(FILTER BACH_TEST_SRCS EXCLUDE REGEX "/build/|/CMakeFiles/")
 foreach(BACH_TEST_SRC ${BACH_TEST_SRCS})
   get_filename_component(TEST_NAME ${BACH_TEST_SRC} NAME_WE)
   add_executable(${TEST_NAME} ${BASE_SRC} ${BACH_TEST_SRC})
+  # dte.cpp 的 t.wr = {{...}}（std::vector<Wr> 空向量的 operator=(initializer_list)
+  # → assign → _M_assign_aux → std::copy 到空 _M_start）在 GCC 13 -O3 内联后触发
+  # -Wnonnull 误报。运行期不会发生（initializer_list 恒非空），按编译误报静默。
+  if(TEST_NAME STREQUAL "dte")
+    target_compile_options(${TEST_NAME} PRIVATE -Wno-nonnull)
+  endif()
   target_include_directories(${TEST_NAME} PUBLIC ${LATCH_ROOT_DIR}/src)
   # 用例之间共用的头按 test/... 引，与 src 那一套路径分开。
   target_include_directories(${TEST_NAME} PUBLIC ${LATCH_ROOT_DIR})

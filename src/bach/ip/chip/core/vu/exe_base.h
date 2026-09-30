@@ -20,6 +20,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/log.h"
@@ -132,7 +133,7 @@ class VuExeStage : public BachModule {
   void ChargeBusy() { ++busy_cnt; }
   // 本单元处于 Busy 状态的累计拍数，Profile 那一档要它。
   uint64_t BusyCycles() const { return busy_cnt; }
-  bool Quiescent() const override { return pipe.empty() && !holding; }
+  bool Quiescent() const override { return pipe.empty() && !held; }
 
  protected:
   // 本条要不要动这个单元。不动就当拍透传。
@@ -148,12 +149,12 @@ class VuExeStage : public BachModule {
     Tick();
     Accept();
     Emit();
-    if (!pipe.empty() || holding) ++busy_cnt;
+    if (!pipe.empty() || held) ++busy_cnt;
     done = done_cnt;
     busy_cycles = busy_cnt;
-    TracePerCycle("busy", (!pipe.empty() || holding) ? 1 : 0);
+    TracePerCycle("busy", (!pipe.empty() || held) ? 1 : 0);
     TracePerCycle("depth", pipe.size());
-    TracePerCycle("hold", holding ? 1 : 0);
+    TracePerCycle("hold", held ? 1 : 0);
   }
 
  private:
@@ -217,21 +218,18 @@ class VuExeStage : public BachModule {
   }
 
   void Emit() {
-    if (holding) {
+    if (held) {
       if (!out->Ready()) {
-        out->Drive(held, out_seq);
+        out->Drive(held->f, held->seq);
         return;
       }
-      holding = false;
-      held = VuFlowPtr();
+      held.reset();
     }
     if (!pipe.empty() && pipe.front().left == 0) {
-      held = pipe.front().f;
-      out_seq = pipe.front().seq;
+      held = Held{pipe.front().f, pipe.front().seq};
       pipe.pop_front();
-      holding = true;
       ++done_cnt;
-      out->Drive(held, out_seq);
+      out->Drive(held->f, held->seq);
       return;
     }
     out->Idle();
@@ -242,9 +240,13 @@ class VuExeStage : public BachModule {
   std::function<void(VuFlow&)> evaluate;
   std::shared_ptr<VuFlowPort> in, out;
   std::deque<Slot> pipe;
-  VuFlowPtr held;
-  bool holding = false;
-  uint64_t out_seq = 0, last_seq = 0, done_cnt = 0;
+  // 出口上压着、等下游收下的那一段。
+  struct Held {
+    VuFlowPtr f;
+    uint64_t seq = 0;
+  };
+  std::optional<Held> held;
+  uint64_t last_seq = 0, done_cnt = 0;
   uint64_t busy_cnt = 0;
 
   Logic64 done, busy_cycles;
