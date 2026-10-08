@@ -187,10 +187,6 @@ static inline u32 dte_ep(u32 ep, u32 off) { return (ep << DTE_EP_SHIFT) | off; }
 #define MOE_FC2_BYTES   (MOE_SEG_EMBED * 2u)
 #define MOE_ROW_BYTES   (MOE_SW_HEAD_BYTES + MOE_SLOTS * MOE_FC2_BYTES)
 
-/* 行链上一颗 chip 送来的那一包：落在本 dot core 这里，摆法同行链那一包。本 core
- * 的行链结果算好后，两包一起作为本 core 的两个操作数送进本级 Rmem 相加 */
-#define MOE_ROW_IN_OFF  0x6800u
-
 _Static_assert(MOE_CONCAT_OFF % 128u == 0, "concat 区各段要按 128 B 对齐");
 _Static_assert(MOE_RED_OFF >= MOE_PART_OFF + MOE_PART_BYTES &&
                    MOE_RED_OFF % 128u == 0,
@@ -200,11 +196,8 @@ _Static_assert(MOE_ACT_OFF >= MOE_RED_OFF + MOE_PART_BYTES &&
                "FC2 输入要放在归约结果之后，并按 128 B 对齐");
 _Static_assert(MOE_ROW_OFF >= MOE_ACT_OFF + MOE_ACT_BYTES,
                "行链那一包要放在 FC2 输入之后");
-_Static_assert(MOE_ROW_IN_OFF >= MOE_ROW_OFF + MOE_ROW_BYTES &&
-                   MOE_ROW_IN_OFF % 128u == 0,
-               "上一颗 chip 送来的那一包要放在行链那一包之后，并按 128 B 对齐");
-_Static_assert(MOE_ROW_IN_OFF + MOE_ROW_BYTES <= CMEM_STREAM_STRIDE,
-               "行链的两包要放得进一个 stream 的 Core Mem");
+_Static_assert(MOE_ROW_OFF + MOE_ROW_BYTES <= CMEM_STREAM_STRIDE,
+               "本 chip 的行链包要放得进一个 stream 的 Core Mem");
 
 static inline u32 moe_concat(u32 s) {
   return MOE_CONCAT_OFF + s * MOE_FC2_BYTES;

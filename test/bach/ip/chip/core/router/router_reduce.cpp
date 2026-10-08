@@ -308,6 +308,74 @@ TEST(BachReduce, UpstreamPartWaitsInTheContext) {
   EXPECT_EQ(emit_at, 1u);
 }
 
+// 行链（task 14）先占住用户分区后，chip 内归约（task 2）的两个操作数都到齐，
+// 仍不能进入。行链的本地分量若依赖 task 2，二者就会互等；RMW 不改变任务边界。
+TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
+  ReduceModule::State state;
+  uint64_t results = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(7, Relay(0b011));
+    b.tab->Preload(3, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 1, Part(40, 7, 14, 100.0f)},
+              {6, 0, Part(40, 3, 2, 10.0f)},
+              {8, 1, Part(40, 3, 2, 32.0f)}};
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    state = b.rm->Inspect();
+    results = h.out_values.size();
+  }
+  RT::Reset();
+  EXPECT_EQ(results, 0u);
+  ASSERT_EQ(state.tasks.size(), 1u);
+  EXPECT_EQ(state.tasks[0].user_id, 40u);
+  EXPECT_EQ(state.tasks[0].path_id, 7u);
+  EXPECT_EQ(state.tasks[0].reduce_seq, 14u);
+  EXPECT_EQ(state.tasks[0].in_done_mask, 0b010u);
+  EXPECT_EQ(state.tasks[0].expect_mask, 0b011u);
+  for (uint64_t lane : {0u, 1u}) {
+    EXPECT_EQ(state.input_depth[lane], 1u);
+    ASSERT_TRUE(state.input_heads[lane].msg);
+    EXPECT_EQ(state.input_heads[lane].msg->user_id, 40u);
+    EXPECT_EQ(state.input_heads[lane].msg->path_id, 3u);
+    EXPECT_EQ(state.input_heads[lane].msg->reduce_seq, 2u);
+  }
+}
+
+// 上游保证 task 2 先完成时，同一个用户分区可继续做 task 14，两笔结果分别计算。
+TEST(BachReduce, EarlierTaskCompletesBeforeLaterTaskEnters) {
+  std::vector<float> values;
+  std::vector<uint64_t> seqs;
+  ReduceModule::State state;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(3, Relay(0b011));
+    b.tab->Preload(7, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 0, Part(40, 3, 2, 10.0f)},
+              {6, 1, Part(40, 3, 2, 32.0f)},
+              {20, 1, Part(40, 7, 14, 100.0f)},
+              {40, 0, Part(40, 7, 14, 23.0f)}};
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    values = h.out_values;
+    seqs = h.done_seqs;
+    state = b.rm->Inspect();
+  }
+  RT::Reset();
+  ASSERT_EQ(values.size(), 2u);
+  EXPECT_FLOAT_EQ(values[0], 42.0f);
+  EXPECT_FLOAT_EQ(values[1], 123.0f);
+  EXPECT_EQ(seqs, (std::vector<uint64_t>{2, 14}));
+  EXPECT_TRUE(state.tasks.empty());
+  EXPECT_EQ(state.input_depth, (std::array<uint64_t, 3>{0, 0, 0}));
+}
+
 // 上下文保护：当前任务的结果还没全部发出时，同一个 user 的下一笔不得覆盖它。
 // 挡住的那个包留在输入缓冲里，前一笔的结果发完之后再进来。
 TEST(BachReduce, NextPacketOfTheSameUserDoesNotOverwrite) {

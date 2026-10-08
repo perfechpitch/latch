@@ -12,6 +12,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from gen_hwconfig import build_topo     # noqa: E402
+from hwconfig import moe               # noqa: E402
 
 TOPO = HERE / "topo"
 
@@ -32,7 +33,7 @@ def kinds_of(lines):
 def check_one(path):
     """跑一份拓扑描述，返回失败原因，全过则返回 None。"""
     try:
-        _, lines = build_topo(path)
+        plan, lines = build_topo(path)
     except (ValueError, KeyError) as err:
         return f"展开失败：{err}"
 
@@ -55,6 +56,22 @@ def check_one(path):
 
     if build_topo(path)[1] != lines:
         return "两次跑出来不一致"
+
+    # 行链的上游分量直接进入 Rmem；本地只发一包，所有跳的任务边界一致。
+    for chip, col in enumerate(plan.cols):
+        key = (chip, moe.dot_core_of(col))
+        entry = plan.entries[key][moe.ROW_PATH]
+        if not entry.path_core_bypass or entry.operation == moe.OP_FORWARD:
+            return f"{key} 行链分量没有直接进入 Rmem"
+        if entry.flow_dir & (moe.FLOW_REDUCE1 | moe.FLOW_REDUCE2):
+            return f"{key} 行链仍按本 core 多操作数发包"
+        if moe.ROW_PATH in plan.path_task[key]:
+            return f"{key} 行链仍配置了进核搬运任务"
+        row = plan.chains[key][-1]
+        if (row.idx != moe.DOT_ROW_TASK or row.path_id != moe.ROW_PATH or
+                row.sym != ("dte", "task_dte_send_row") or
+                row.task_type != "REDUCE" or not row.credit_en):
+            return f"{key} 行链任务边界或本地发包配置不一致"
     return None
 
 

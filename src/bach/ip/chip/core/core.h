@@ -431,6 +431,35 @@ class Core : public BachModule {
 
   // Router 与 TS 之间的四条控制线。
   void WireRouterToTs() {
+    // Core 统一驱动子模块；归约只接收本核已准入用户，并在首 flit 授予时预留数据区。
+    router->GetXbar().SetReduceAdmission([this](Message const& m) {
+      bool admitted = ts->Cfg().SelfStartCore() ||
+                      router->GetXbar().StreamHolds(kOutCore, m.user_id);
+      uint64_t done = 0;
+      StreamEntry const* current = nullptr;
+      for (uint64_t s = 0; s < kStreamNum; ++s) {
+        auto const& e = ts->Table().Peek(s);
+        if (e.valid && e.user_id_vld && e.user_id == m.user_id) {
+          admitted = true;
+          done = e.done_bitmap;
+          current = &e;
+          break;
+        }
+      }
+      if (!admitted) return false;
+      for (uint64_t t = 0; t < kTaskChainNum; ++t) {
+        auto const& task = ts->Cfg().Task(t);
+        if (!task.valid || !task.IsReduce() || (done & (1ull << t))) continue;
+        uint64_t path = task.path_id;
+        if (current && (current->task_id == t ||
+                        (current->pid_pending && current->task_id + 1 == t))) {
+          path = current->task_path_id;
+        }
+        return m.reduce_seq == t && m.path_id == path &&
+               router->GetReduce().CanAcceptHead(m);
+      }
+      return false;
+    }, [this](Message const& m) { router->GetReduce().ReserveHead(m); });
     ts->AttachTrigger(router->TriggerPtr());
     ts->AttachCreditReq(router->CreditReqPtr());
     ts->AttachCreditGrant(router->CreditGrantPtr());

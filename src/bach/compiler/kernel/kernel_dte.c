@@ -225,9 +225,6 @@ TASK void task_dte_concat_datain_s4(void) { in_cm(moe_concat(4), MOE_FC2_BYTES);
 TASK void task_dte_concat_datain_s5(void) { in_cm(moe_concat(5), MOE_FC2_BYTES); }
 TASK void task_dte_concat_datain_s6(void) { in_cm(moe_concat(6), MOE_FC2_BYTES); }
 
-/* 行链上一颗 chip 送来的那一包进核：落在 MOE_ROW_IN_OFF */
-TASK void task_dte_row_datain(void) { in_cm(MOE_ROW_IN_OFF, MOE_ROW_BYTES); }
-
 /* ===== 单 core 用例的几笔 ===== */
 
 /* 单 core 用例的进核：没有编译期定死的长度与落点，照包头配一笔 */
@@ -301,36 +298,15 @@ TASK void task_dte_send_concat_s6(void) { send_concat(6); }
 #error "task_dte_send_concat_s0～s6 按 8 个槽位、dot core 在槽位 7 写死，要跟着改"
 #endif
 
-/* 不带 ack_ts_en 的那一档 TRANS_MODE：一个 task 发两笔时前一笔用它盖过模板 */
-#define ROW_PART_MODE \
-  (DTE_MODE_CMEM_TO_ROUTER | ((1u << 1) << DTE_SEG_VALID_SHIFT))
-
-/* dot core：行链出核，逐级 reduce。一包是 16 B 头加 concat 区，落点 dst 由下一跳
- * 定：下一颗 chip 的 dot core 落它的 MOE_ROW_IN_OFF，本行 R core 落这个用户那一
- * 槽的前一半。行首只送本 core 那一包；其余几颗先送上一颗 chip 落在本 core 的那
- * 一包，再送本 core 那一包，两包作为本 core 的两个操作数进本级 Rmem 相加，两笔
- * 包头都写 dst，只有后一笔带 ack_ts_en。这笔任务由 Router 报完成 */
-static void send_row(u32 add, u32 dst) {
-  if (add) {
-    dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
-    dsa_write(DTE_ADDR1_SRC, MOE_ROW_IN_OFF);
-    dsa_write(DTE_ADDR1_DST, dst);
-    dsa_write(DTE_TRANS_MODE, ROW_PART_MODE);
-    dte_fire(TPL_SEND_ROW);
-  }
+/* dot core：只把本 chip 的 concat 包送进本级 Rmem，与 Router 收到的上游分量
+ * 原位累加。各跳沿用本行 R core 的落点，中间 dot core 直接收进 Rmem；最终
+ * 结果落到 R core 中这个用户槽的前一半。这笔任务由 Router 报完成 */
+TASK void task_dte_send_row(void) {
   dsa_write(DTE_ADDR0_SRC, dte_hdr_h());
-  dsa_write(DTE_ADDR1_DST, dst);
+  dsa_write(DTE_ADDR1_DST, rc_land(user_id(), 0));
   dte_fire(TPL_SEND_ROW);
   task_done(0);
 }
-/* 行首，下一跳是本行 R core，或者这一行只有一颗 chip、结果从 E 口出去 */
-TASK void task_dte_send_row(void) { send_row(0, rc_land(user_id(), 0)); }
-/* 行首，下一跳是下一颗 chip 的 dot core */
-TASK void task_dte_send_row_next(void) { send_row(0, MOE_ROW_IN_OFF); }
-/* 不是行首，下一跳是本行 R core，或者这一行没有 R core、结果从 E 口出去 */
-TASK void task_dte_add_row(void) { send_row(1, rc_land(user_id(), 0)); }
-/* 不是行首，下一跳是下一颗 chip 的 dot core */
-TASK void task_dte_add_row_next(void) { send_row(1, MOE_ROW_IN_OFF); }
 
 /* 把一个已经 ready 的 user_id 写入软件用户 FIFO 的尾。队满就等链二把队头弹走。 */
 static void rc_fifo_push(u32 u) {
@@ -505,4 +481,3 @@ static void tpl_setup(void) {
 
 /* firmware 的入口还会调它；模型不跑 firmware，模板由 tpl_once 配 */
 void kernel_init(void) {}
-

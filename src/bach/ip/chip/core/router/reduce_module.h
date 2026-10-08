@@ -145,7 +145,7 @@ class ReduceModule : public BachModule {
   void RetireUser(uint64_t user) {
     auto it = ctx.find(user);
     if (it == ctx.end()) return;
-    if (it->second.busy) {
+    if (it->second.busy || it->second.reserved) {
       it->second.retired = true;
       return;
     }
@@ -155,11 +155,54 @@ class ReduceModule : public BachModule {
   bool HoldsUser(uint64_t user) const { return ctx.count(user) != 0; }
   uint64_t ContextUsed() const { return ctx.size(); }
 
+  bool CanAcceptHead(Message const& m) const {
+    uint64_t bytes = ElemsOf(m.size, rtab.Lookup(copy, m.path_id).reduce_data_type) * 4;
+    LOGCHECK(bytes <= kReduceCtxBytes, "ReduceModule: 超过 32 KiB。");
+    auto it = ctx.find(m.user_id);
+    if (it == ctx.end()) return ctx.size() < kReduceCtxNum;
+    auto const& c = it->second;
+    if (c.busy || c.reserved) return c.reduce_seq == m.reduce_seq && c.path_id == m.path_id;
+    return !c.retired;
+  }
+  void ReserveHead(Message const& m) {
+    LOGCHECK(CanAcceptHead(m), "ReduceModule: 未获准入。");
+    auto& c = ctx[m.user_id];
+    if (c.busy || c.reserved) return;
+    c.reserved = true;
+    c.reduce_seq = m.reduce_seq;
+    c.path_id = m.path_id;
+  }
+
   // 正在做的任务有几笔：从首份输入进来到结果尾 flit 交付。
   uint64_t OutQueued() const { return out_q.size(); }
   uint64_t Accepted() const { return accepted.Get(); }
   uint64_t Emitted() const { return emitted.Get(); }
   uint64_t Stalled() const { return stalled.Get(); }
+
+  struct TaskState {
+    uint64_t user_id, path_id, reduce_seq, expect_mask, in_done_mask;
+  };
+  struct State {
+    std::vector<TaskState> tasks;
+    std::array<FlitView, 3> input_heads{};
+    std::array<uint64_t, 3> input_depth{};
+  };
+  // 停钟并 JoinAll 后查看未完成任务与输入队头；运行中的其他协程不能读这些容器。
+  State Inspect() const {
+    State s;
+    for (auto const& item : ctx) {
+      Ctx const& c = item.second;
+      if (c.busy) {
+        s.tasks.push_back({item.first, c.path_id, c.reduce_seq,
+                           c.expect_mask, c.in_done_mask});
+      }
+    }
+    for (uint64_t r = 0; r < 3; ++r) {
+      s.input_depth[r] = in_buf[r].size();
+      if (!in_buf[r].empty()) s.input_heads[r] = in_buf[r].front();
+    }
+    return s;
+  }
 
   bool Quiescent() const override {
     for (auto const& b : in_buf) {
@@ -204,6 +247,7 @@ class ReduceModule : public BachModule {
 
   // 一个用户的本地分区，以及它正在做的那一笔任务。
   struct Ctx {
+    bool reserved = false;
     bool busy = false;               // 有一笔任务在做：首份输入进来到结果尾 flit 交付
     uint64_t path_id = 0;
     uint64_t reduce_seq = 0;
@@ -266,7 +310,7 @@ class ReduceModule : public BachModule {
     }
 
     // 上下文保护：当前任务的结果全部发出之前，同一 User 的下一笔任务不得进来。
-    if (c.busy && c.reduce_seq != f.msg->reduce_seq) {
+    if ((c.busy || c.reserved) && c.reduce_seq != f.msg->reduce_seq) {
       ++stalled_pending;
       return;
     }
@@ -279,6 +323,7 @@ class ReduceModule : public BachModule {
       if (!c.busy) {
         // 首份输入开始这笔任务，把 expect_mask 一并记下，本任务做完前不再重查。
         c.busy = true;
+        c.reserved = false;
         c.path_id = f.msg->path_id;
         c.reduce_seq = f.msg->reduce_seq;
         c.expect_mask = e.reduce_in_mask;

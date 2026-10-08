@@ -793,6 +793,7 @@ def write_moe_lpu(path):
 
 # 同一个 LPU 上连续跑的那一份有几个 token。
 MOE_LPU_TOKENS = 32
+MOE_LPU_LONG_TOKENS = 128
 
 
 def kn_lpu_out(k):
@@ -830,7 +831,7 @@ def write(path, lines):
 # 一次要跑很久的那几份。一颗 chip 的参考实现要算几秒，8 颗与 48 颗那三份自检默认
 # 跳过：同一段代码在 moe_chip.txt 与 moe_two_groups.txt 上已经查过，跳的只是这三份
 # 的新鲜度。
-SLOW = ("moe_group.txt", "moe_lpu.txt", "moe_lpu_tokens.txt")
+SLOW = ("moe_group.txt", "moe_lpu.txt", "moe_lpu_tokens.txt", "moe_lpu_tokens_128.txt")
 
 
 def main(skip_slow=False):
@@ -848,6 +849,8 @@ def main(skip_slow=False):
         write_moe_group(os.path.join(OUT_DIR, "moe_group.txt"))
         write_moe_lpu(os.path.join(OUT_DIR, "moe_lpu.txt"))
         write_moe_lpu_tokens(os.path.join(OUT_DIR, "moe_lpu_tokens.txt"))
+        write_moe_lpu_tokens(os.path.join(OUT_DIR, "moe_lpu_tokens_128.txt"),
+                             MOE_LPU_LONG_TOKENS)
 
 
 if __name__ == "__main__":

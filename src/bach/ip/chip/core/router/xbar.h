@@ -164,6 +164,11 @@ class Xbar : public BachModule {
   bool StreamHolds(uint64_t o, uint64_t user) const {
     return stream_tab.at(o).count(user) != 0;
   }
+  void SetReduceAdmission(std::function<bool(Message const&)> check,
+                          std::function<void(Message const&)> reserve) {
+    reduce_admission = std::move(check);
+    reduce_reserve = std::move(reserve);
+  }
   // 这个方向还剩多少 Core Mem credit，单位 1 KB。
   uint64_t CoreCredit(uint64_t o) const { return core_credit[o]; }
   void SetCoreCredit(uint64_t o, uint64_t kb) { core_credit[o] = kb; }
@@ -351,6 +356,10 @@ class Xbar : public BachModule {
     for (uint64_t k = 0; k < vcs.size(); ++k) {
       std::deque<XbarReqView>& q = in_q[in][vcs[k]];
       XbarReqView const& v = q.front();
+      constexpr uint64_t reduce_mask = (1ull << kOutReduce0) |
+          (1ull << kOutReduce1) | (1ull << kOutReduce2);
+      if (v.head && (v.out_mask & reduce_mask) && reduce_admission && v.msg &&
+          !reduce_admission(*v.msg)) continue;
 
       // 多播全有全无：先看所有目标出口是不是都空着、资源都够。另一个入口的包
       // 正占着这个出口的这个 VC 时只能等，不算资源不够，不走转存。
@@ -393,6 +402,9 @@ class Xbar : public BachModule {
         continue;
       }
 
+      if (v.head && (v.out_mask & reduce_mask) && reduce_reserve && v.msg) {
+        reduce_reserve(*v.msg);
+      }
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
         taken[o] = true;
@@ -570,6 +582,8 @@ class Xbar : public BachModule {
   std::array<uint64_t, kR2RNum> core_credit{};
   std::array<std::map<uint64_t, uint64_t>, kR2RNum> taken_kb;
   bool force_ready = false;
+  std::function<bool(Message const&)> reduce_admission;
+  std::function<void(Message const&)> reduce_reserve;
   bool overflow_used = false;
   bool pass_through = false;
   std::array<uint64_t, kXbarOutNum> sent_total{};

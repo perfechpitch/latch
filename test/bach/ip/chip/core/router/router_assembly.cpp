@@ -480,6 +480,47 @@ TEST(BachRouterAsm, SelfPartTakesTheLaneFlowDirNames) {
       << "上游那一份与本 core 那一份都进了 ReduceModule";
 }
 
+// 行链：上游从 left 直接进入 Rmem，本地从 bit0 进入。用户分区已有一份数据时，
+// 后到的分量原位累加；两种到达顺序都只输出一包，且不会触发进核搬运。
+TEST(BachRouterAsm, RowPartsAccumulateDirectlyInRmemInEitherOrder) {
+  for (bool own_first : {false, true}) {
+    SCOPED_TRACE(own_first ? "本地先到" : "上游先到");
+    uint64_t got = 0, first_at = 0, headers = 0, held = 0;
+    std::vector<uint8_t> payload;
+    {
+      EnsureSlots();
+      ClockPtr clk = MakeClock(0, kPeriod);
+      Router rt(clk, "router", RouterCfg{});
+      rt.Preload(7, ReduceRelay(0b011));
+      auto up = MakeMsg(7, 77);
+      up->reduce_seq = 14;
+      up->payload = ReducePayload(7.0f);
+      up->size = up->payload.size();
+      auto own = MakeMsg(7, 77);
+      own->reduce_seq = 14;
+      own->payload = ReducePayload(5.0f);
+      own->size = own->payload.size();
+
+      Pusher p0(clk, rt.InWire(kLeft), {{own_first ? 50u : 2u, up, kReduceVc}});
+      SelfPartSide side(clk, rt, own_first ? 2 : 50, own);
+      Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+      clk->Continue(100 * kPeriod);
+      RT::JoinAll();
+      got = down.got;
+      first_at = down.first_at;
+      headers = rt.GetCoreStation().HeaderDepth();
+      held = rt.GetReduce().ContextUsed();
+      payload = down.last_payload;
+    }
+    RT::Reset();
+    EXPECT_EQ(got, 1u);
+    EXPECT_GT(first_at, 50u) << "等待另一份分量，已有数据留在用户分区";
+    EXPECT_EQ(headers, 0u);
+    EXPECT_EQ(held, 1u);
+    EXPECT_FLOAT_EQ(ReduceValueOf(payload), 12.0f);
+  }
+}
+
 // 中继累加：收齐后按 flow_dir 往右发。
 TEST(BachRouterAsm, ReduceRelayForwardsDownstream) {
   uint64_t got = 0;
