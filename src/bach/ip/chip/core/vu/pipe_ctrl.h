@@ -177,6 +177,12 @@ class VuPipeCtrl : public BachModule {
 
   uint64_t Stalls() const { return stall_cnt; }
   uint64_t Dispatched() const { return dispatch_cnt; }
+  // 开 task 的那条宏指令真正发行进流水那一拍起的笔数与身份，Core 层发
+  // dsa_task_dispatch 用。比 dispatch_cnt 宽一档：非法配置的那条也计 —— 它照常走一个
+  // 空微指令并退休，不计的话 VU-DSA-ISQ 那一行就没有终点。
+  uint64_t TaskDispatched() const { return task_dispatch_cnt; }
+  uint64_t TaskDispatchTask() const { return task_task; }
+  uint64_t TaskDispatchUser() const { return task_user; }
   bool UnitsReady() const { return !in->Valid() || in->Ready(); }
   // Profile 按成因分开记：Fence 串行化、CM_FENCE 等前序 CM 访问、Scoreboard 数据
   // 依赖、执行分组结构冒险。四项相加即“有空位却没派发”的分解。
@@ -299,6 +305,13 @@ class VuPipeCtrl : public BachModule {
 
     in->DriveReady(true);
     last_seq = in->Seq();
+    // 真正发行进流水就是这一拍（后面那条非法配置的路也走这里：它发一个空微指令下去
+    // 并照常退休，波形上「发行」这一天照样成立）。
+    if (inst->task_start) {
+      ++task_dispatch_cnt;
+      task_task = inst->task_id;
+      task_user = inst->user_id;
+    }
 
     if (!Legal(*inst, cfg)) {
       // 非法配置在调度阶段被拦下：置 CFG_ERROR、不派发给执行单元。MAS 要求
@@ -839,6 +852,8 @@ class VuPipeCtrl : public BachModule {
   std::optional<Held> held;
   uint64_t last_seq = 0;
   uint64_t stall_cnt = 0, dispatch_cnt = 0;
+  // 发行进流水的那些里，属于某个 task 第一条的笔数与身份，波形用。
+  uint64_t task_dispatch_cnt = 0, task_task = 0, task_user = 0;
   uint64_t fence_stall = 0, cmfence_stall = 0, dep_stall = 0, eu_stall = 0;
   std::array<uint64_t, 2> vrf_rd_busy{}, vrf_wt_busy{};
   uint64_t mrf_wt_busy = 0;

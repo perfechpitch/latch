@@ -160,6 +160,11 @@ class VuIsq : public BachModule, public VuSnapshotWindow {
       start_task = inst->task_id;
       start_user = inst->user_id;
     }
+    // 与 config_register 的判定必须一致：它在 trigger 那一拍按「上一条 trigger 置了
+    // EVENT_EN」提前判出这一条是不是 task 的开头，波形上 dsa_start 与 dsa_task_trigger
+    // 两条信号要靠同一个口径才对得上。漂了就在这里当场报。
+    LOGCHECK(inst->task_start == !task_open,
+             "VU: trigger 侧与 ISQ 侧的 task 起点判定不一致");
     task_open = !inst->event_en;
     // 静态组的引用在 config_register 收下 trigger 时已经加上，这里不再加。
   }

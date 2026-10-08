@@ -340,9 +340,17 @@ class Core : public BachModule {
   // 身份与 ts_task / ts_user 同宽：task 8 bit、user 16 bit，本拍没有就填
   // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
   // 这里填的是各单元侧存下来的那一份：都是 trigger 写带进来的 user。
+  //
+  // VU 另有两拍单独发：一个 task 的第一条宏指令被 config_register 收下 trigger 那一拍
+  // （dsa_task_trigger），以及同一条真正发行进执行流水那一拍（dsa_task_dispatch），
+  // 也就是 VU-DSA-ISQ 那一行的两端；这两拍之间隔的就是「收下了为什么还不算」。
+  // 只有 VU 有，位掩码上永远只抬 bit2。判据见 config_register.h 的 Trigger() 与
+  // pipe_ctrl.h 的 Accept()。
   void EmitDsa() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
+    uint64_t trig_mask = 0, trig_task = 0, trig_user = 0;
+    uint64_t disp_mask = 0, disp_task = 0, disp_user = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       DsaEv s = DsaStartOf(u);
       if (s.seq != dsa_start_seq[u]) {
@@ -358,6 +366,20 @@ class Core : public BachModule {
         done_task |= (d.task & 0xFFu) << (8 * u);
         done_user |= (d.user & 0xFFFFu) << (16 * u);
       }
+      DsaEv t = DsaTaskTriggerOf(u);
+      if (t.seq != dsa_task_trig_seq[u]) {
+        dsa_task_trig_seq[u] = t.seq;
+        trig_mask |= 1ull << u;
+        trig_task |= (t.task & 0xFFu) << (8 * u);
+        trig_user |= (t.user & 0xFFFFu) << (16 * u);
+      }
+      DsaEv p = DsaTaskDispatchOf(u);
+      if (p.seq != dsa_task_disp_seq[u]) {
+        dsa_task_disp_seq[u] = p.seq;
+        disp_mask |= 1ull << u;
+        disp_task |= (p.task & 0xFFu) << (8 * u);
+        disp_user |= (p.user & 0xFFFFu) << (16 * u);
+      }
     }
     TracePerCycle("dsa_start", start_mask);
     TracePerCycle("dsa_start_task", start_task);
@@ -365,6 +387,12 @@ class Core : public BachModule {
     TracePerCycle("dsa_done", done_mask);
     TracePerCycle("dsa_done_task", done_task);
     TracePerCycle("dsa_done_user", done_user);
+    TracePerCycle("dsa_task_trigger", trig_mask);
+    TracePerCycle("dsa_task_trigger_task", trig_task);
+    TracePerCycle("dsa_task_trigger_user", trig_user);
+    TracePerCycle("dsa_task_dispatch", disp_mask);
+    TracePerCycle("dsa_task_dispatch_task", disp_task);
+    TracePerCycle("dsa_task_dispatch_user", disp_user);
   }
 
   // 三个 RV core 各自对一笔 task 的执行时间，两个端点各发三个信号。
@@ -583,10 +611,27 @@ class Core : public BachModule {
             vu->Retire().MacroDoneUser()};
   }
 
+  // VU 那条 task 起点宏指令的两端：trigger 被 config_register 收下、以及它真正发行
+  // 进执行流水。只有 VU（u == 2）有，另两位恒 0 —— 0 这个值也正好是它们初始的 seq，
+  // 于是永远不抬那两位。
+  DsaEv DsaTaskTriggerOf(uint64_t u) {
+    if (u != 2) return {};
+    VuConfigRegister& c = vu->ConfigRegister();
+    return {c.TaskTriggers(), c.TaskTriggerTask(), c.TaskTriggerUser()};
+  }
+
+  DsaEv DsaTaskDispatchOf(uint64_t u) {
+    if (u != 2) return {};
+    VuPipeCtrl& p = vu->PipeCtrl();
+    return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser()};
+  }
+
   // 三条发射通路上一次见到的 seq，EmitIssue() 用它认新下发的那一笔。
   std::array<uint64_t, 3> issue_seq{};
   // 三个 DSA 上一次见到的起/完笔数，EmitDsa() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> dsa_start_seq{}, dsa_done_seq{};
+  // 同上，VU 那条 task 起点宏指令的 trigger / 发行笔数。
+  std::array<uint64_t, 3> dsa_task_trig_seq{}, dsa_task_disp_seq{};
   // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
   // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。

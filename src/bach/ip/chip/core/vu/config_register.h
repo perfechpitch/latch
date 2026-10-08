@@ -177,6 +177,11 @@ class VuConfigRegister : public BachModule {
   }
   VuDynParam const& Dyn() const { return dyn; }
   uint64_t Triggers() const { return trigger_cnt; }
+  // 开 task 的那条 trigger 的笔数与身份，Core 层发 dsa_task_trigger 用。判据见
+  // Trigger()：与 ISQ 的 task_open 同构，Accept() 里有一句 LOGCHECK 钉着。
+  uint64_t TaskTriggers() const { return task_trigger_cnt; }
+  uint64_t TaskTriggerTask() const { return trig_task; }
+  uint64_t TaskTriggerUser() const { return trig_user; }
   uint64_t BlockedWrites() const { return blocked_cnt; }
   // 配置通路上生效的寄存器写次数。
   uint64_t Writes() const { return write_cnt; }
@@ -517,6 +522,14 @@ class VuConfigRegister : public BachModule {
     inst->seq = ++inst_seq;
     inst->tag = ++tag_seq & 0xFFu;
 
+    // 这一条是不是它那个 task 的第一条：上一条 trigger 置了 EVENT_EN，或者这是第一条
+    // trigger。trigger 收下的次序与 ISQ 收下的次序一致（config_register 一次只锁一条，
+    // 过了延迟就交给 ISQ），所以这里比 ISQ 早两拍也能判准 —— isq.h 的 Accept() 里有一句
+    // LOGCHECK 把两处口径钉在一起。
+    inst->task_start = !any_trig || prev_event_en;
+    any_trig = true;
+    prev_event_en = inst->event_en;
+
     // STREAM_ID_OVERRIDE = 0 时用这笔 trigger 写带进来的 stream_id（dsaw 发出
     // 那一拍从 CSR 抄下的）；= 1 时改用 trigger 里的 STREAM_ID 字段。task_id
     // 与 user_id 不在这个寄存器里，始终取写上带的那一份。
@@ -530,6 +543,11 @@ class VuConfigRegister : public BachModule {
     defer.push_back(DeferredTrig{inst, inst->seq, VuLatency::Get().Config()});
     HoldCfg(inst->cfg_idx);
     ++trigger_cnt;
+    if (inst->task_start) {
+      ++task_trigger_cnt;
+      trig_task = inst->task_id;
+      trig_user = inst->user_id;
+    }
   }
 
   // 一组静态模板 23 个寄存器：前 12 个是没有动态副本的 *_op / mask_op /
@@ -614,6 +632,10 @@ class VuConfigRegister : public BachModule {
   std::deque<DeferredTrig> defer;
   uint64_t inst_seq = 0, tag_seq = 0;
   uint64_t trigger_cnt = 0, blocked_cnt = 0, write_cnt = 0;
+  // task 起点的 trigger：笔数、最近一笔的身份，以及判「这条是不是 task 的第一条」
+  // 要的两样（收过没有、上一条的 EVENT_EN）。判据见 Trigger()。
+  uint64_t task_trigger_cnt = 0, trig_task = 0, trig_user = 0;
+  bool any_trig = false, prev_event_en = false;
   uint64_t status = 0, macro_inst_left = 0, error_code = 0, profile_ctrl = 0;
   uint64_t error_info = 0, snap_addr = 0;
   uint64_t vrf_err_info = 0, mrf_err_info = 0, srf_err_info = 0;

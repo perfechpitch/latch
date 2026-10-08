@@ -668,6 +668,11 @@ struct VuMacroInst {
   uint64_t cfg_idx = 0;
   uint64_t mask = 0;      // STATIC_DYNAMIC_MASK
   bool event_en = false;
+  // 这一条是不是它那个 task 的第一条。trigger 收下那一拍由 config_register 判出来
+  // （上一条 trigger 置了 EVENT_EN，或这是第一条），随指令一路带到 pipe_ctrl。
+  // 波形上 VU-DSA-ISQ 量「trigger → 真正发行」、VU-DSA 从「真正发行」起算，
+  // 两行认的都是这一条。
+  bool task_start = false;
   bool sid_override = false;
   bool fence = false;     // MACRO_INST_FENCE：等此前全部宏指令完成才派发
   bool cm_fence = false;  // CM_FENCE：等前序宏指令的 CM 访问完成才派发
