@@ -1,35 +1,21 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_DTE_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_DTE_
 
-// DTE DSA 这一组八类模块的装配。
+// DTE DSA 的装配：三个模块——Hmem（表）、Mover（数据通路）、DteRegfile（配置前端）。
 //
-// 自身没有 Cycle()：构造各模块、把 Commit dispatch 的任务接到 Lane 与 Completion RS
-// 上、把 Header Parser 收下的 Payload 接进进核通道。
+// 原来那八类模块（Lane / Buffer / Xbar / OutArb / Commit / CompletionRs /
+// HeaderParser / TaskQueue）各自独立协程、靠 valid/ready/seq 多拍握手拼流水线的
+// 结构，收敛成 Mover 一个模块按任务顺序逐拍推进（见 mover.h 的说明）。Regfile 的
+// 配置入口不变，只把它的输出 DescPort 对端从 Commit 换成 Mover。
 //
-// 里面装了几件：
-//   HeaderParser   1 个，Router 入站帧的数据通路单元（存包头 + 转发 payload）
-//   DteRegfile     1 个，RV core 写的软件配置寄存器，写 trigger 起一笔任务
-//   Commit         1 个，中央 TaskQueue + 按通道资源 dispatch
-//   Hmem           1 个，含 RouterTable 副本、stream_cache
-//   Lane           5 个：in_ch 加 out_ch[0..3]
-//   DteXbar        1 个，五个通道与两块存储之间的仲裁
-//   DteOutArb      1 个，四个出核通道与 Router 那一个口之间的仲裁
-//   DteBuffer      2 个：inbound 与 outbound
-//   CompletionRs   1 个，把劈开的两半合回来
-//
-// 对外：进出核接 Router 的 CoreStation，访存经 DMA_XBAR 接三块存储，配置口接
-// DTE RV core 的 dsa_iss，完成上报接 TS。
+// 自身没有 Cycle()：构造三个模块、把 Regfile 起的任务接给 Mover。外层每拍调一次
+// RunStep()，整个 DTE 只占外层那一个协程（同 Mu）。
 
 #include <memory>
 #include <string>
-#include <vector>
 
-#include "bach/ip/chip/core/dte/commit.h"
-#include "bach/ip/chip/core/dte/dma_xbar.h"
-#include "bach/ip/chip/core/dte/completion_rs.h"
-#include "bach/ip/chip/core/dte/header_parser.h"
-#include "bach/ip/chip/core/dte/lane.h"
-#include "bach/ip/chip/core/dte/out_arb.h"
+#include "bach/ip/chip/core/dte/hmem.h"
+#include "bach/ip/chip/core/dte/mover.h"
 #include "bach/ip/chip/core/dte/regfile.h"
 #include "bach/ip/chip/core/memory/banked_mem.h"
 #include "bach/ip/chip/core/mu/gen_ep_info.h"
@@ -42,170 +28,106 @@ class Dte {
   Dte(ClockPtr clock, const std::string& name, uint64_t parent = 0)
       : clk(clock) {
     const uint64_t gid = TraceGroup(name, parent);
-    // 都不自己挂时钟：外层每拍调一次 RunStep()，按末级先做的次序逐个走一遍，
-    // 整个 DTE 只占外层那一个协程（同 Mu）。
+    // 都不自己挂时钟：外层每拍调一次 RunStep()，按末级先做的次序逐个走一遍。
     hmem = std::make_unique<Hmem>(clock, "hmem", gid, false);
-    // 一个通道一份 Buffer：进核那块归 in_ch，出核那块四个出核通道各一份，
-    // 各自 kDteBufFlits 项，不是四个分一份。
-    in_buf = std::make_unique<DteBuffer>(clock, "in_buf", kDteBufFlits,
-                                         1, gid, false);
-    out_buf = std::make_unique<DteBuffer>(clock, "out_buf",
-                                          kDteBufFlits * (kLaneNum - 1),
-                                          kLaneNum - 1, gid, false);
-    parser = std::make_unique<HeaderParser>(clock, "parser", gid, false);
-    commit = std::make_unique<Commit>(clock, "commit", *hmem, gid,
-                                      false);
-    out_arb = std::make_unique<DteOutArb>(clock, "out_arb", gid,
-                                          false);
-    reg = std::make_unique<DteRegfile>(clock, "regfile", agcu, gid,
-                                       false);
-    comp = std::make_unique<CompletionRs>(clock, "comp", gid, false);
-    xbar = std::make_unique<DteXbar>(clock, "xbar", gid, false);
-    for (uint64_t i = 0; i < kLaneNum; ++i) {
-      DteBuffer& b = (i == kInCh) ? *in_buf : *out_buf;
-      lanes.push_back(std::make_unique<Lane>(
-          clock, "lane" + std::to_string(i), i, b, gid, false));
-    }
-    Wire();
+    mover = std::make_unique<Mover>(clock, "mover", *hmem, gid, false);
+    reg = std::make_unique<DteRegfile>(clock, "regfile", agcu, gid, false);
+    // 寄存器组起的任务走 DescPort 交给 Mover。
+    mover->RebindRv(reg->OutPtr());
   }
 
   // ── 对外 ──
-  CoreDataPort& FromRouter() { return parser->FromRouter(); }
+  CoreDataPort& FromRouter() { return mover->FromRouter(); }
   void AttachFromRouter(std::shared_ptr<CoreDataPort> p) {
-    parser->AttachFromRouter(std::move(p));
+    mover->AttachFromRouter(std::move(p));
   }
-  // 四个出核通道共用 Router 那一个口，在 DteOutArb 里仲裁。
-  CoreDataPort& ToRouter() { return out_arb->Out(); }
+  CoreDataPort& ToRouter() { return mover->ToRouter(); }
   void AttachToRouter(std::shared_ptr<CoreDataPort> p) {
-    out_arb->AttachOut(std::move(p));
+    mover->AttachToRouter(std::move(p));
   }
   DsaCfgPort& Cfg() { return reg->Cfg(); }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return reg->CfgPtr(); }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return reg->RdataPtr(); }
-  DescPort& FromRv() { return commit->FromRv(); }
-  DonePort& ToTs() { return comp->ToTs(); }
-  void AttachToTs(std::shared_ptr<DonePort> p) { comp->AttachToTs(std::move(p)); }
+  DescPort& FromRv() { return mover->FromRv(); }
+  DonePort& ToTs() { return mover->ToTs(); }
+  void AttachToTs(std::shared_ptr<DonePort> p) { mover->AttachToTs(std::move(p)); }
   // shareMem 表项写，接 Share Mem 的 DTE DSA 口。
-  MemPort& SmemWr() { return comp->SmemWr(); }
-  std::shared_ptr<MemPort> SmemWrPtr() const { return comp->SmemWrPtr(); }
+  MemPort& SmemWr() { return mover->SmemWr(); }
+  std::shared_ptr<MemPort> SmemWrPtr() const { return mover->SmemWrPtr(); }
   void AttachSmemWr(std::shared_ptr<MemPort> p) {
-    comp->AttachSmemWr(std::move(p));
+    mover->AttachSmemWr(std::move(p));
   }
-  // topK 旁带写进 MU 的那条数据线。只接给进核通道。装配层在 Dte 构造之后才把这条
-  // 线接过来，所以这里要直接穿给进核 Lane（Wire() 里那次只覆盖构造前就有线的情形）。
+  // topK 旁带写进 MU 的那条数据线。
   void AttachMuTopk(std::shared_ptr<MuTopkPort> p) {
-    mu_topk = p;
-    lanes[kInCh]->AttachMuTopk(std::move(p));
+    mover->AttachMuTopk(std::move(p));
   }
-  // 出核造包时从 MU 的 topK_ep_table 读 topK 的入口。装配层把 MU 的 GenEpInfo
-  // 指过来，转给 Commit 用。
-  void AttachMuTopkEp(GenEpInfo* ep) {
-    mu_topk_ep = ep;
-    commit->AttachMuTopkEp(ep);
-  }
-  // 包头上下文落 Core Mem（B/R core）时要用 Core Mem 的同步 Poke/Peek。装配层把
-  // Core Mem 的 BankedMem 指过来，转给 Commit 与五个 Lane。
-  void AttachCmemSync(BankedMem* m) {
-    cmem_sync = m;
-    commit->AttachCmemSync(m);
-    for (auto& l : lanes) l->AttachCmemSync(m);
-  }
-  // 对每块存储的读与写各一个口，五个通道在 DMA_XBAR 里仲裁。
-  void AttachCmemRd(std::shared_ptr<MemPort> p) {
-    xbar->AttachCmemRd(std::move(p));
-  }
-  void AttachCmemWr(std::shared_ptr<MemPort> p) {
-    xbar->AttachCmemWr(std::move(p));
-  }
-  void AttachMmemRd(std::shared_ptr<MemPort> p) {
-    xbar->AttachMmemRd(std::move(p));
-  }
-  void AttachMmemWr(std::shared_ptr<MemPort> p) {
-    xbar->AttachMmemWr(std::move(p));
-  }
+  // 出核造包时从 MU 的 topK_ep_table 读 topK 的入口。
+  void AttachMuTopkEp(GenEpInfo* ep) { mover->AttachMuTopkEp(ep); }
+  // 包头上下文落 Core Mem（B/R core）时要用 Core Mem 的同步 Poke/Peek。
+  void AttachCmemSync(BankedMem* m) { mover->AttachCmemSync(m); }
+  // 对每块存储的读与写各一个口。
+  void AttachCmemRd(std::shared_ptr<MemPort> p) { mover->AttachCmemRd(std::move(p)); }
+  void AttachCmemWr(std::shared_ptr<MemPort> p) { mover->AttachCmemWr(std::move(p)); }
+  void AttachMmemRd(std::shared_ptr<MemPort> p) { mover->AttachMmemRd(std::move(p)); }
+  void AttachMmemWr(std::shared_ptr<MemPort> p) { mover->AttachMmemWr(std::move(p)); }
 
   // ── 配置面 ──
   Hmem& Tables() { return *hmem; }
 
   // ── 观测 ──
-  HeaderParser& Parser() { return *parser; }
+  // 原来那几个观测访问器（Parser/Committer/Completion/OutArb/OutBuf）现在都指向
+  // Mover 的同一组计数，用轻量视图保留同名方法，core.h 与测试不用改就能读。
+  struct CommitView {
+    Mover const& m;
+    uint64_t Admitted() const { return m.Admitted(); }
+    uint64_t RvAdmitted() const { return m.RvAdmitted(); }
+    uint64_t StartTask() const { return m.StartTask(); }
+    uint64_t StartUser() const { return m.StartUser(); }
+    uint64_t Stalled() const { return m.Stalled(); }
+  };
+  struct CompletionView {
+    Mover const& m;
+    uint64_t Reported() const { return m.Reported(); }
+    uint64_t DoneTask() const { return m.DoneTask(); }
+    uint64_t DoneUser() const { return m.DoneUser(); }
+    uint64_t Joined() const { return m.Joined(); }
+    uint64_t Used() const { return m.Used(); }
+  };
+  struct ParserView {
+    Mover const& m;
+    uint64_t Parsed() const { return m.Parsed(); }
+  };
+  struct OutArbView {
+    Mover const& m;
+    uint64_t Sent() const { return m.Sent(); }
+  };
+  struct OutBufView {
+    Mover const& m;
+    uint64_t Occupancy() const { return m.Occupancy(); }
+  };
+
   DteRegfile& Regfile() { return *reg; }
-  DteOutArb& OutArb() { return *out_arb; }
-  Commit& Committer() { return *commit; }
-  CompletionRs& Completion() { return *comp; }
-  DteBuffer& OutBuf() { return *out_buf; }
+  CommitView Committer() { return CommitView{*mover}; }
+  CompletionView Completion() { return CompletionView{*mover}; }
+  ParserView Parser() { return ParserView{*mover}; }
+  OutArbView OutArb() { return OutArbView{*mover}; }
+  OutBufView OutBuf() { return OutBufView{*mover}; }
 
   void RunStep() {
     hmem->RunStep();
-    comp->RunStep();
-    xbar->RunStep();
-    out_arb->RunStep();
-    for (auto& l : lanes) l->RunStep();
-    in_buf->RunStep();
-    out_buf->RunStep();
-    commit->RunStep();
-    parser->RunStep();
     reg->RunStep();
+    mover->RunStep();
   }
 
-  bool Quiescent() const {
-    for (auto const& l : lanes) {
-      if (!l->Quiescent()) return false;
-    }
-    return parser->Quiescent() && commit->Quiescent() && comp->Quiescent() &&
-           in_buf->Quiescent() && out_buf->Quiescent() && reg->Quiescent() &&
-           xbar->Quiescent() && out_arb->Quiescent();
-  }
+  bool Quiescent() const { return mover->Quiescent() && reg->Quiescent(); }
 
  private:
-  void Wire() {
-    // Commit dispatch 一笔后，把它分发给归属的 Lane 与 Completion RS。两处都走
-    // 端口：一根线两端是同一个对象，各自的协程只碰自己的队列。
-    for (auto& l : lanes) commit->AddLanePort(l->AdmitPtr());
-    comp->AttachAdmit(commit->RsPortPtr());
-
-    // 寄存器组起的任务走 DescPort 交给 Commit 的中央 TaskQueue。
-    commit->RebindRv(reg->OutPtr());
-
-    // Payload 走端口交给进核通道的 RD 侧。
-    lanes[kInCh]->AttachPayload(parser->PayloadPtr());
-    // topK 旁带写进 MU 的那条数据线只给进核通道。
-    if (mu_topk) lanes[kInCh]->AttachMuTopk(mu_topk);
-    // 包头上下文落 Hmem（计算 core）要用 Hmem，五个 Lane 都指过去；Core Mem 那
-    // 一半（B/R core）由 AttachCmemSync 在装配层把 BankedMem 指过来时再穿下去。
-    for (auto& l : lanes) l->AttachHmem(*hmem);
-
-    // 每个通道在 DMA_XBAR 上各占一份存储口，四个出核通道各占出核仲裁的一份。
-    for (uint64_t i = 0; i < kLaneNum; ++i) {
-      lanes[i]->AttachCmem(xbar->LaneCmem(i));
-      lanes[i]->AttachMmem(xbar->LaneMmem(i));
-    }
-    for (uint64_t i = 0; i < DteOutArb::kOutNum; ++i) {
-      lanes[kOutCh0 + i]->AttachToRouter(out_arb->LanePort(i));
-    }
-
-    // 五个通道的两侧完成都汇到 Completion RS。同一拍多个 Join 命中时全部写进
-    // Done Pending，由它串行化。
-    for (auto& l : lanes) {
-      comp->AddSource(l->RdDonePtr(), l->WrDonePtr());
-    }
-  }
-
   ClockPtr clk;
   Agcu agcu;
 
   std::unique_ptr<Hmem> hmem;
-  std::unique_ptr<DteBuffer> in_buf, out_buf;
-  std::unique_ptr<HeaderParser> parser;
+  std::unique_ptr<Mover> mover;
   std::unique_ptr<DteRegfile> reg;
-  std::unique_ptr<DteXbar> xbar;
-  std::unique_ptr<DteOutArb> out_arb;
-  std::unique_ptr<Commit> commit;
-  std::unique_ptr<CompletionRs> comp;
-  std::vector<std::unique_ptr<Lane>> lanes;
-  std::shared_ptr<MuTopkPort> mu_topk;
-  GenEpInfo* mu_topk_ep = nullptr;
-  BankedMem* cmem_sync = nullptr;
 };
 
 }  // namespace bach

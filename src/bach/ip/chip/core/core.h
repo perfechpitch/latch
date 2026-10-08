@@ -530,7 +530,7 @@ class Core : public BachModule {
 
   DsaEv DsaStartOf(uint64_t u) {
     if (u == 0) {
-      Commit& c = dte->Committer();
+      auto c = dte->Committer();
       return {c.RvAdmitted(), c.StartTask(), c.StartUser()};
     }
     if (u == 1) {
@@ -543,7 +543,7 @@ class Core : public BachModule {
 
   DsaEv DsaDoneOf(uint64_t u) {
     if (u == 0) {
-      CompletionRs& c = dte->Completion();
+      auto c = dte->Completion();
       return {c.Reported(), c.DoneTask(), c.DoneUser()};
     }
     if (u == 1) {

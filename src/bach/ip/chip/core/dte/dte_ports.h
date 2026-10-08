@@ -56,76 +56,6 @@ class DescPort : public Logic {
   uint64_t issue_seq = 0;
 };
 
-// Header Parser → 进核通道的 RD 侧：Payload 那些拍。
-//
-// 不能让 Parser 直接往 Lane 的 buffer 里塞：那是两个模块的协程同时改同一个
-// 容器，单线程下看着能跑，多线程下就是段错误。一切跨模块的搬运都走端口。
-class PayloadPort : public Logic {
- public:
-  // frame 是 Header Parser 给这一帧编的号，进核那一路按它认“这几拍属于哪一
-  // 帧”。off 是这一拍的数据在整包 payload 里的起点：一包拆成几拍进来，写存储
-  // 时要按这个起点切出本拍那一段。
-  Logic64 valid, frame, bytes, off, last, ready, seq;
-  LogicPtr<Message> msg;
-
-  explicit PayloadPort(ClockPtr c)
-      : valid(c), frame(c), bytes(c), off(c), last(c), ready(c), seq(c),
-        msg(c) {
-    Fields(valid, frame, bytes, off, last, ready, seq, msg);
-  }
-
-  void Drive(uint64_t frame_seq, uint64_t n, uint64_t at, bool is_last,
-             MessagePtr const& m) {
-    valid = 1;
-    frame = frame_seq;
-    bytes = n;
-    off = at;
-    last = is_last ? 1 : 0;
-    msg = m;
-    seq = ++issue_seq;
-  }
-  void Idle() {
-    valid = 0;
-    frame = 0;
-    bytes = 0;
-    off = 0;
-    last = 0;
-    msg = MessagePtr();
-  }
-  void DriveReady(bool ok) { ready = ok ? 1 : 0; }
-  bool Valid() const { return valid.Get() != 0; }
-  bool Ready() const { return ready.Get() != 0; }
-  uint64_t Seq() const { return seq.Get(); }
-
- private:
-  uint64_t issue_seq = 0;
-};
-
-// 一侧完成的上报：Lane → Completion RS。
-class HalfDonePort : public Logic {
- public:
-  Logic64 valid, commit_seq, half, drained;
-
-  explicit HalfDonePort(ClockPtr c)
-      : valid(c), commit_seq(c), half(c), drained(c) {
-    Fields(valid, commit_seq, half, drained);
-  }
-
-  void Drive(uint64_t seq, uint64_t which, bool is_drained) {
-    valid = 1;
-    commit_seq = seq;
-    half = which;
-    drained = is_drained ? 1 : 0;
-  }
-  void Idle() {
-    valid = 0;
-    commit_seq = 0;
-    half = 0;
-    drained = 0;
-  }
-  bool Valid() const { return valid.Get() != 0; }
-};
-
 // DSA → RV core 的 dsa_rq：读寄存器的返回，异步、脉冲。
 //
 // 读不支持同步返回，所以下发与返回是两条线：dsa_iss 发出去时把目的寄存器编号
@@ -151,42 +81,6 @@ class DsaRdataPort : public Logic {
   bool Valid() const { return valid.Get() != 0; }
   uint64_t Rdata() const { return rdata.Get(); }
   uint64_t Seq() const { return seq.Get(); }
-};
-
-// Commit 准入一笔任务后，把它分发给这一笔归属的 Lane 与 Completion RS。
-//
-// 早先 Commit 是直接调它们的方法往对方的队列里放的，那是一个模块的协程去改另
-// 一个模块的容器：单线程下看着能跑，多线程下几百轮里会段错误一次。跨模块的
-// 搬运一律走端口。
-//
-// ready 是“下一拍一定收得下”的承诺：接收方按当前空位算，而往它队列里放东西的
-// 只有 Commit 一家，所以承诺在下一拍仍然成立。“三样一起拿”因此还是原样：
-// 三个口的 ready 都为真才发，谁没准备好就一起等。
-class AdmitPort : public Logic {
- public:
-  Logic64 valid, ready, seq;
-  LogicPtr<Descriptor> desc;
-
-  explicit AdmitPort(ClockPtr c) : valid(c), ready(c), seq(c), desc(c) {
-    Fields(valid, ready, seq, desc);
-  }
-
-  void Drive(std::shared_ptr<Descriptor> d, uint64_t n) {
-    valid = 1;
-    desc = std::move(d);
-    seq = n;
-  }
-  void Idle() {
-    valid = 0;
-    desc = std::shared_ptr<Descriptor>();
-    seq = seq.Get();
-  }
-  void DriveReady(bool ok) { ready = ok ? 1 : 0; }
-
-  bool Valid() const { return valid.Get() != 0; }
-  bool Ready() const { return ready.Get() != 0; }
-  uint64_t Seq() const { return seq.Get(); }
-  std::shared_ptr<Descriptor> Desc() const { return desc.Get(); }
 };
 
 // DTE RV core 的 dsa_iss 配置口。
