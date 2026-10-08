@@ -12,11 +12,12 @@ const MIN_SPAN = 8;
 const MAX_LANES = 200;           // 一次最多请求几条行，与服务端的 MAX_LANES 对齐
 const PAD = 1.5;                 // 请求窗口在视图两边各留的比例
 
-// 九种颜色，按下标取：0~2 是 TS-DTE / TS-MU / TS-VU 三行，3~8 是另外六行。
-// 颜色只跟“行”与“单元”走，不跟 user 走 —— 用户上千个，按 user 上色必然撞色，
-// 撞了反而认不出来；谁是谁看段上的 User_id 字。
+// 十种颜色，按下标取：0~2 是 TS-DTE / TS-MU / TS-VU 三行，3~9 是另外七行
+// （最后一个是 VU-DSA-ISQ，取灰调，与前面九个都分得开）。颜色只跟“行”与“单元”
+// 走，不跟 user 走 —— 用户上千个，按 user 上色必然撞色，撞了反而认不出来；
+// 谁是谁看段上的 User_id 字。张数与 spans.SLOT_UNITS 一一对应，别只改一处。
 const PALETTE = ["#1a7f37", "#0a66c2", "#8250df", "#d4a72c", "#cf222e",
-                 "#0d8e6b", "#a04100", "#3192aa", "#df3079"];
+                 "#0d8e6b", "#a04100", "#3192aa", "#df3079", "#6e7781"];
 
 const $ = (id) => document.getElementById(id);
 const cv = $("lane-canvas");
@@ -24,7 +25,7 @@ const ctx = cv.getContext("2d");
 const scroll = $("scroll");
 
 const S = {
-  build: null, t_end: 1, rows: [], row_parts: [], lanes_per_core: 9,
+  build: null, t_end: 1, rows: [], row_parts: [], lanes_per_core: 10,
   chips: [], lane_n: [], missing: [],
   entries: [], expanded: new Set(), collapsedChips: new Set(),
   view: { t0: 0, t1: 1 }, cache: new Map(), sel: null, hover: null,
@@ -333,7 +334,7 @@ function draw() {
   if (!drew) {
     ctx.fillStyle = "#8b95a5";
     ctx.font = "13px system-ui, sans-serif";
-    ctx.fillText("左边点开一颗 chip、再点一个 core，这里就出它那九行", 12, 34);
+    ctx.fillText("左边点开一颗 chip、再点一个 core，这里就出它那十行", 12, 34);
   }
   $("legend").textContent = `${Math.round(S.view.t0)} ～ ${Math.round(S.view.t1)} 拍`
     + `　滚轮缩放 · 拖拽平移 · F 看全`;

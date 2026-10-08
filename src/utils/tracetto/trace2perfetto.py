@@ -7,23 +7,23 @@
 chrome://tracing。
 
 **与 tracetto 显示的是同一份数据**：段与标签都走 `spans.py` 里那套（`core_spans`
-折段、`ROWS` 那九行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
+折段、`ROWS` 那十行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
 
 两边的对应关系（Perfetto 只有“process → thread”两级，tracetto 是
-“chip → core → 九行”三级，压掉最上面一级）：
+“chip → core → 十行”三级，压掉最上面一级）：
 
     pid  = 一个派角色的 core，名字写成 `chip0.core1`，左栏能直接搜
-    tid  = 那条 core 的九行之一，名字就是行名（TS-DTE / DTE-Core / …）
+    tid  = 那条 core 的十行之一，名字就是行名（TS-DTE / DTE-Core / …）
     X 事件 = 一个段，`User_id 77 CORE-MU 5 813拍`
 
-**顺序**：进程按 chip 升序、再按 core 升序，每个进程里九行按 tracetto 的行序。
+**顺序**：进程按 chip 升序、再按 core 升序，每个进程里十行按 tracetto 的行序。
 这两层各自再发一条排序键（`process_sort_index` / `thread_sort_index`）钉死 ——
 **Perfetto 是按名字排轨道的，不按 pid / tid**（实测：不发键时 chip10 跑到 chip2
 前面、TS 掉到第五行），而名字的字典序本来就排不对。试过把序号写进名字里（`chip00`
 / `1 TS`）来代替这两组键，也不行，所以键留着（258 KB）。
 
 **颜色**：Perfetto 是**按段上的名字上色**的，所以“哪一行”必须写进那段字里 ——
-单元名带前缀（`TS-DTE` / `CORE-DTE` / `DSA-DTE` …），九个槽的名字两两不同，九行
+单元名带前缀（`TS-DTE` / `CORE-DTE` / `DSA-DTE` …），十个槽的名字两两不同，十行
 才分得开。不给 cname（只能填十来个具名色，里面近似的不少）、也不给 cat（不参与
 上色）。
 
@@ -57,13 +57,13 @@ from tracetto.reader import TraceReader   # noqa: E402
 
 # 段上印的单元名与 tracetto 共用一张表（spans.SLOT_UNITS）：每个颜色槽一个名字，
 # 带着行前缀（TS-DTE / CORE-DTE / DSA-DTE …）。Perfetto 按段上的名字上色，九个槽
-# 名字两两不同，九行才分得开 —— 原来 TS 行的 DTE 段与 DTE-Core 行的段都叫
+# 名字两两不同，十行才分得开 —— 原来 TS 行的 DTE 段与 DTE-Core 行的段都叫
 # `User_id x DTE y`，就撞成了一个色。
 
 
 def label_of(unit: str, seg) -> str:
     """段上那行字，与 tracetto 逐字一致：`User_id 77 CORE-DTE 5 813拍`。
-    单元名里带着行号（TS- / CORE- / DSA-），Perfetto 按名字上色，靠它把九行分开。"""
+    单元名里带着行号（TS- / CORE- / DSA-），Perfetto 按名字上色，靠它把十行分开。"""
     t0, t1, user, task = seg
     if user < 0 or task < 0:
         return "?"
@@ -87,7 +87,7 @@ def build(prefix: str) -> dict:
                 if key in core_sig:
                     ordered.append((chip, core, key))
 
-        # 元数据：每个 core 一个进程名，九行各一条 thread_name。
+        # 元数据：每个 core 一个进程名，十行各一条 thread_name。
         #
         # 顺序靠这两组排序键钉死：**Perfetto 是按名字排轨道的，不按 pid / tid**
         # （实测：不给键时 chip10 跑到 chip2 前面、TS 掉到第五行）。而名字的字典序
@@ -112,7 +112,7 @@ def build(prefix: str) -> dict:
         # 想按 core 找一段也能直接 grep。组内按时间升序。
         #
         # 整场没跑过的行不补占位：Perfetto 只画有事件的轨道，那些行会整条不出现
-        # （moe_lpu 上 2856 条轨道里有 108 条），这一点与 tracetto 的固定九行不同。
+        # （moe_lpu 上 2856 条轨道里有 108 条），这一点与 tracetto 的固定十行不同。
         spans_cnt = 0
         for ordinal, (_chip, _core, key) in enumerate(ordered):
             pid = ordinal + 1

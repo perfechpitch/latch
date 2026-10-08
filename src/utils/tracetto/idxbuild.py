@@ -1,6 +1,6 @@
 """建索引：按 core 并行、原子发布、复用没变的。
 
-- **按 core 切**：一个 core 的六个信号 → 九条行是天然不可分的单位（`core_spans` 要这六个），
+- **按 core 切**：一个 core 的六个信号 → 十条行是天然不可分的单位（`core_spans` 要这六个），
   408 个 core 就是 408 个任务；先拿每个 core 的事件数当权重，降序动态派发，免得一个重
   core 拖尾。
 - **用 spawn 不用 fork**：`/api/reload` 触发的重建是在服务已经起了线程之后，fork 只继承
@@ -30,7 +30,7 @@ STALE_SECONDS = 3600
 
 
 def _write_one(reader: TraceReader, job) -> Tuple[int, List[int]]:
-    """解一个 core 的九条行，写成 `cores/<idx>.bin`。"""
+    """解一个 core 的十条行，写成 `cores/<idx>.bin`。"""
     _prefix, core_idx, sigs, t_end, cores_dir, lane_base = job
     rows = S.lanes_of(S.core_spans(reader, sigs, t_end))
     (Path(cores_dir) / f"{core_idx:05d}.bin").write_bytes(

@@ -5,7 +5,7 @@
 ```
 moe_lpu.tracetto-index/
   manifest.json          格式版本 + 波形身份 + 树 + 每条行的段数
-  cores/<core_idx>.bin   一个 core 九条行放一个文件（一个 core 的九条行永远一起被看）
+  cores/<core_idx>.bin   一个 core 十条行放一个文件（一个 core 的十条行永远一起被看）
   .building.<pid>.<xx>/  建索引时的临时目录，建成再 rename 过去
 ```
 
@@ -36,16 +36,22 @@ from typing import Dict, List, Optional, Tuple
 
 from . import spans as S
 
-INDEX_FORMAT = 5   # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
+INDEX_FORMAT = 9   # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
                    #    带上行名（TS-DTE / CORE-DTE …）。5：段间隔改 zigzag，
-                   #    重叠的段能原样解回来。复用判据只看波形身份，改展示不会
-                   #    自动重建；格式号不对时打开索引会要求重建。
+                   #    重叠的段能原样解回来。6：VU 那条 DSA 拆成两行（VU-DSA-ISQ
+                   #    在前），十条通道 —— 每条 core 的头里 lane_off 从 9 个变 10 个。
+                   #    7：那一行改名（VU-DSA-START → VU-DSA-ISQ），行名在 manifest 里。
+                   #    8：TS 那三行改成量「下发 → RV core 起跑」。
+                   #    9：TS 那三行回退成「下发 → DSA 做完」（8 那一版已撤），
+                   #    通道里的段又变了 —— 号只能往前走，退回去会让 8 的旧索引被当成好的。
+                   #    复用判据只看波形身份，改展示不会自动重建；格式号不对时打开
+                   #    索引会要求重建。
 INDEX_SUFFIX = ".tracetto-index"
 MANIFEST_NAME = "manifest.json"
 CORES_DIR = "cores"
 
 CORE_MAGIC = b"TCTC"
-CORE_HDR_FMT = "<4sHHIIQ" + "Q" * S.LANES_PER_CORE  # magic, format, flags, core_idx, nlanes, t_end, lane_off[9]
+CORE_HDR_FMT = "<4sHHIIQ" + "Q" * S.LANES_PER_CORE  # magic, format, flags, core_idx, nlanes, t_end, lane_off[N]（N = LANES_PER_CORE）
 LANE_FMT = "<IIQQBBHIQIIQQQ"                       # 见下
 LANE_HDR_SIZE = struct.calcsize(LANE_FMT)
 BLK_FMT = "<QQQ"                                   # t_base, t0_first, 字节偏移
@@ -247,7 +253,7 @@ def encode_l1(seg_spans: List[List[int]], t_end: int) -> Tuple[bytes, int, int]:
 
 def encode_core(core_idx: int, lane_spans: List[List[List[int]]],
                 lane_base: int, t_end: int) -> bytes:
-    """一个 core 的九条行 → 一个完整文件的字节。"""
+    """一个 core 的十条行 → 一个完整文件的字节。"""
     n_lanes = S.LANES_PER_CORE
     if len(lane_spans) != n_lanes:
         raise ValueError(f"core {core_idx} 只给了 {len(lane_spans)} 条行")
@@ -313,7 +319,7 @@ class LaneView:
 
 
 class CoreFile:
-    """一个 core 的索引文件：头 + 九条行的头 + 按窗口切一段字节出来。"""
+    """一个 core 的索引文件：头 + 十条行的头 + 按窗口切一段字节出来。"""
 
     def __init__(self, path: Path):
         self.path = path

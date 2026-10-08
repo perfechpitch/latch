@@ -1,4 +1,4 @@
-"""从波形里推出每个 core 的九条派生行。
+"""从波形里推出每个 core 的十条派生行。
 
 波形是逐拍采样的，一个信号只在值变化时记一笔。所以“某一位连续为 1”就是它相邻两笔之间
 的那段，段的拍数是两个时间戳之差。段的形状统一是 `[t0, t1, user, task]`，`user` / `task`
@@ -41,27 +41,42 @@ SIG_DSA_START_USER = "dsa_start_user"
 SIG_DSA_DONE = "dsa_done"
 SIG_DSA_DONE_TASK = "dsa_done_task"
 SIG_DSA_DONE_USER = "dsa_done_user"
+# VU 那条 task 起点宏指令的两端，比 DSA 那对更靠前：起点是 config_register 收下
+# trigger 那一拍，终点是同一条真正发行进执行流水那一拍。只有 VU 有，位掩码上只抬
+# bit2，另两位恒 0。
+SIG_TASK_TRIG = "dsa_task_trigger"
+SIG_TASK_TRIG_TASK = "dsa_task_trigger_task"
+SIG_TASK_TRIG_USER = "dsa_task_trigger_user"
+SIG_TASK_DISP = "dsa_task_dispatch"
+SIG_TASK_DISP_TASK = "dsa_task_dispatch_task"
+SIG_TASK_DISP_USER = "dsa_task_dispatch_user"
 
-# 两对边沿，每组六条：起点的位掩码 / task / user，终点的位掩码 / task / user。
+# 三对边沿，每组六条：起点的位掩码 / task / user，终点的位掩码 / task / user。
 RV_EDGE = (SIG_RV_START, SIG_RV_START_TASK, SIG_RV_START_USER,
            SIG_RV_DONE, SIG_RV_DONE_TASK, SIG_RV_DONE_USER)
 DSA_EDGE = (SIG_DSA_START, SIG_DSA_START_TASK, SIG_DSA_START_USER,
             SIG_DSA_DONE, SIG_DSA_DONE_TASK, SIG_DSA_DONE_USER)
+# VU 那一对：trigger 收下 → 真正发行。
+TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
+                   SIG_TASK_DISP, SIG_TASK_DISP_TASK, SIG_TASK_DISP_USER)
 
-READ_SIGS = (SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE + DSA_EDGE
+READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
+             DSA_EDGE + TASK_START_EDGE)
 # 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。
-NEW_SIGS = (SIG_TS_USER,) + RV_EDGE + DSA_EDGE
+NEW_SIGS = (SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE
 
-# 索引里一个 core 的九条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
-# 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。
+# 索引里一个 core 的十条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
+# 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
+# 追加在末尾，前面九条的通道号才不动（旧波形、旧断言都按号认）。
 LANES = (
     ("TS · DTE", "chain", 0), ("TS · MU", "chain", 1), ("TS · VU", "chain", 2),
     ("DTE_Core", "core", 0), ("VU_Core", "core", 2), ("MU_Core", "core", 1),
     ("DTE_DSA", "dsa", 0), ("VU_DSA", "dsa", 2), ("MU_DSA", "dsa", 1),
+    ("VU_DSA_ISQ", "vuisq", 2),
 )
 LANES_PER_CORE = len(LANES)
 
-# 画面上一个 core 的九行：(显示名, ((通道号, 颜色号), ...))。颜色一共九种。
+# 画面上一个 core 的十行：(显示名, ((通道号, 颜色号), ...))。颜色一共十种。
 #
 # TS 按设计文档拆成三行，DTE / MU / VU 各取一条通道。拆开之前是三条通道叠在同一
 # 格里靠颜色分 —— 那靠的是“实测三者在时间上从不重叠”（moe_lpu 全波形 1531756 个
@@ -80,6 +95,9 @@ ROWS = (
     ("MU-Core", ((5, 5),)),
     ("MU-DSA", ((8, 6),)),
     ("VU-Core", ((4, 7),)),
+    # VU 的 DSA 那一行拆成两段：VU-DSA-ISQ 是「trigger 收下 → 真正发行进执行流水」，
+    # VU-DSA 是「真正发行 → EVENT_EN 退休」。两行首尾相接，起点那一拍是同一个。
+    ("VU-DSA-ISQ", ((9, 9),)),
     ("VU-DSA", ((7, 8),)),
 )
 ROW_NAMES = tuple(name for name, _ in ROWS)
@@ -91,7 +109,8 @@ ROW_NAMES = tuple(name for name, _ in ROWS)
 # 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后九个槽的
 # 名字两两不同。顺序与 ROWS 里的颜色槽一致。
 SLOT_UNITS = ("TS-DTE", "TS-MU", "TS-VU",
-              "CORE-DTE", "DSA-DTE", "CORE-MU", "DSA-MU", "CORE-VU", "DSA-VU")
+              "CORE-DTE", "DSA-DTE", "CORE-MU", "DSA-MU", "CORE-VU", "DSA-VU",
+              "DSA-ISQ-VU")
 
 
 def row_parts() -> List[List[dict]]:
@@ -307,7 +326,8 @@ def trace_t_end(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> int
 
 def core_spans(reader: TraceReader, sigs: Dict[str, int],
                t_end: int) -> Dict[str, List[List[List[int]]]]:
-    """一个 core 的九条行。键是 `core` / `dsa` / `chain`，各三个单元一个 list。"""
+    """一个 core 的十条行。键是 `core` / `dsa` / `chain` / `vuisq`，各三个单元一个
+    list（`vuisq` 只有 VU 那条有数据，另两条恒空）。"""
 
     def ev(name: str) -> Tuple[list, list]:
         sid = sigs.get(name)
@@ -329,6 +349,7 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     core_rows: List[List[List[int]]] = []
     dsa_rows: List[List[List[int]]] = []
     chain_rows: List[List[List[int]]] = []
+    vuisq_rows: List[List[List[int]]] = []
     for u in range(len(UNITS)):
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
@@ -337,13 +358,26 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         # 最早那笔的长段。TS 用这些 DSA 段去认下发，于是也是每个用户一段。
         core_rows.append(user_spans(rv_starts, rv_dones, t_end))
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
-        dsa_rows.append(dsa)
+        if u != 2:
+            dsa_rows.append(dsa)
+            vuisq_rows.append([])
+            chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
+            continue
+        # VU 这一路拆成两段：起点从「ISQ 收下」后移到「真正发行进执行流水」，被切掉
+        # 的那一截（trigger 收下 → 发行）归 `vuisq` 那一行。发行那对边沿既是新行的
+        # 终点，也是 DSA 行的新起点，两行因此首尾相接。
+        trig_starts, disp_starts = ends_of(TASK_START_EDGE, u)
+        vuisq_rows.append(user_spans(trig_starts, disp_starts, t_end))
+        dsa_rows.append(user_spans(disp_starts, dsa_dones, t_end))
+        # TS 那三行的配对输入仍用「ISQ 收下」起的这一段：换成发行起会让 chain 的贪心
+        # 认领跟着动，而 TS 那几行这次不动。
         chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
-    return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows}
+    return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows,
+            "vuisq": vuisq_rows}
 
 
 def lanes_of(spans: Dict[str, List[List[List[int]]]]) -> List[List[List[int]]]:
-    """core_spans 的产物 → 一个 core 的九条通道，顺序与 `LANES` 一致。"""
+    """core_spans 的产物 → 一个 core 的十条通道，顺序与 `LANES` 一致。"""
     return [spans[group][u] for _, group, u in LANES]
 
 
