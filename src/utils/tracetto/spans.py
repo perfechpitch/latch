@@ -1,4 +1,4 @@
-"""从波形里推出每个 core 的十条派生行。
+"""从波形里推出每个 core 的十一条派生行。
 
 波形是逐拍采样的，一个信号只在值变化时记一笔。所以“某一位连续为 1”就是它相邻两笔之间
 的那段，段的拍数是两个时间戳之差。段的形状统一是 `[t0, t1, user, task]`，`user` / `task`
@@ -10,9 +10,13 @@
 各家把完成报回去那一拍。一条边沿事件带 8 bit 的 task 与 16 bit 的 user，本拍没有事件
 的那一路填占位（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。
 
-TS 那三行不是一对边沿：DTE 仍是「下发 → DTE DSA 完成」，MU / VU 换成了「TaskCtrl 把
-这一步装进 stream → 这一路的 RV core 接下它」—— 后者两端来自形状完全不同的两种信号
-（起点是单调计数器 + 标量身份，终点是位掩码 + 按位打包），所以配对按 (user, task)。
+TS 那一族（TS-DTE-DATAIN / TS-DTE / TS-MU / TS-VU）量的都是**「这一步在 TS 里等了多久」**：
+起点是它进入 TS、可以被下发那一刻，终点是这一路的 RV core 接下它（`rv_start`）。
+DTE 那一路有两类任务（主线 + Router 触发的搬入），所以拆成两行 —— 主线那刻是「装进
+stream」，搬入那刻是「被下发」，见 `dte_spans()`。
+
+起点那一侧是**单调计数器 + 标量身份**（不是位掩码），终点那一侧是位掩码 + 按位打包，
+形状完全不同，所以配对一律按 (user, task)。
 """
 
 from __future__ import annotations
@@ -84,28 +88,33 @@ READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
 # 这里 —— TS-MU / TS-VU 现在要读它们，老波形缺了那两行就是空的，得让人看见。
 NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
 
-# 索引里一个 core 的十条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
+# 索引里一个 core 的十一条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
-# 追加在末尾，前面九条的通道号才不动（旧波形、旧断言都按号认）。
+# 追加在末尾，前面十条的通道号才不动（旧波形、旧断言都按号认）。注意**通道号与行号
+# 不是一回事**：行序是纯呈现层，见下面的 ROWS。
 LANES = (
     ("TS · DTE", "chain", 0), ("TS · MU", "chain", 1), ("TS · VU", "chain", 2),
     ("DTE_Core", "core", 0), ("VU_Core", "core", 2), ("MU_Core", "core", 1),
     ("DTE_DSA", "dsa", 0), ("VU_DSA", "dsa", 2), ("MU_DSA", "dsa", 1),
     ("VU_DSA_ISQ", "vuisq", 2),
+    ("DTE_DATAIN", "datain", 0),
 )
 LANES_PER_CORE = len(LANES)
 
-# 画面上一个 core 的十行：(显示名, ((通道号, 颜色号), ...))。颜色一共十种。
+# 画面上一个 core 的十一行：(显示名, ((通道号, 颜色号), ...))。颜色一共十一种。
 #
-# TS 按设计文档拆成三行，DTE / MU / VU 各取一条通道。拆开之前是三条通道叠在同一
-# 格里靠颜色分 —— 那靠的是“实测三者在时间上从不重叠”（moe_lpu 全波形 1531756 个
-# 忙拍里 0 拍重叠）；即便如此，一眼答“哪一路在忙”仍要先认色，分开画就不用。其余
-# 六行各取一条通道，现在每行都只有一条 —— 多通道叠一行的机制（row_parts 一行列多
-# 个 part）留着，索引与前端都不用动它。
+# TS 那一族行都量「这一步在 TS 里等了多久」，按起点分：DTE 拆成主线（TS-DTE）与
+# Router 触发的搬入（TS-DTE-DATAIN）两行，MU / VU 各一行。DTE-DATAIN 摆在 TS-DTE
+# **正上方**，读起来连得上。拆开之前是几条通道叠在同一格里靠颜色分 —— 那靠的是
+# “实测它们在时间上从不重叠”；即便如此，一眼答“哪一路在忙”仍要先认色，分开画就不
+# 用。其余几行各取一条通道，现在每行都只有一条 —— 多通道叠一行的机制（row_parts
+# 一行列多个 part）留着，索引与前端都不用动它。
 #
 # 颜色只按“行”与“单元”分，与 user 无关：同一个颜色下可以有很多个 user，谁是谁
 # 靠段上的 User_id 字认。用户数上千，按 user 上色必然撞色，撞了反而更认不出来。
 ROWS = (
+    # 摆在 TS-DTE 上方：同一族里先看「Router 送来的」再看「主线自己的」。
+    ("TS-DTE-DATAIN", ((10, 10),)),
     ("TS-DTE", ((0, 0),)),
     ("TS-MU", ((1, 1),)),
     ("TS-VU", ((2, 2),)),
@@ -125,11 +134,11 @@ ROW_NAMES = tuple(name for name, _ in ROWS)
 # 段上印的单元名：把“哪一行”也写进去（TS-DTE / CORE-DTE / DSA-DTE …）。
 #
 # 不只是好看：Perfetto 那种按名字上色的工具，名字一样就同一个颜色。原来 TS 那一行
-# 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后九个槽的
-# 名字两两不同。顺序与 ROWS 里的颜色槽一致。
+# 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后十一个槽的
+# 名字两两不同。顺序与 ROWS 里的颜色槽一致（按颜色号索引，不是按行序）。
 SLOT_UNITS = ("TS-DTE", "TS-MU", "TS-VU",
               "CORE-DTE", "DSA-DTE", "CORE-MU", "DSA-MU", "CORE-VU", "DSA-VU",
-              "DSA-ISQ-VU")
+              "DSA-ISQ-VU", "DATAIN-DTE")
 
 
 def row_parts() -> List[List[dict]]:
@@ -303,40 +312,56 @@ def step_chain(load: List[dict], issue: List[dict],
     return user_spans(started, rv_starts, t_end)
 
 
-def pair_chain(spans: List[Tuple[int, int]],
-               events: List[dict]) -> List[List[int]]:
-    """**现在只剩 TS-DTE 这一行在用**：每笔从下发到它做完 DSA 的全程，所以段起点
-    前移到配对的下发那一刻。TS-MU / TS-VU 已经换成「装进 stream → rv_start」，不走
-    这里 —— 那两行的起点是 TaskCtrl 装进去那一拍，直接按身份配对，不需要贪心认领。
+def dte_spans(load: List[dict], issue: List[dict], rv_starts: List[dict],
+              t_end: int) -> Tuple[List[List[int]], List[List[int]]]:
+    """TS-DTE 那两行：一趟队列把 DTE 的下发分成主线与 Router 触发的搬入。
 
-    一笔 task 的 DSA 活儿会碎成好几段 —— 真波形上这是常态。所以认领不是“一段对一
-    笔”：按时间序贪心，每个下发事件认领“起点不早于它、还没被认领的”第一个段，
-    再把“下一个下发之前”起头的后续段一并吃进同一段，段 =
-    [下发那一刻, 最后吃进来那一段的末)。认领不上的下发事件丢掉（有的 task 不经过
-    DSA）；没被认领的段退回原区间并标 -1 —— 下发之前就有的那些走这一支。不按下发
-    序号与 ts_done 硬配 —— ts_done 不分路，几笔并发时分不清哪次完成是哪一笔的。
+      主线（TS-DTE）        [TaskCtrl 把它装进 stream 那一刻, 这一路的 rv_start]
+      搬入（TS-DTE-DATAIN） [Router 的数据到了、它被下发那一刻, 这一路的 rv_start]
+
+    **怎么分**：搬入任务（chain 里的 wait_wake 项）是 Router 的数据一到就下发，与主线
+    走到哪无关（`test/bach/README.md`），所以它在**下发那一刻**在 stream 里认领不到自己
+    那一笔；主线任务则必然先装进 stream、再下发。于是走一遍 `load` 的队列、按“认领得上
+    / 认领不上”分就够了。认领规则要求 `load <= 下发`，所以主线那一边的起点天然早于终点，
+    不会出现反向段。
+
+    量的是这一步在 TS 里等的时间（等 credit、等发射通路空出来、等前一笔从 RV core 那边
+    腾出槽位），不含 RV core 与 DSA 的任何时间。
+
+    **配对不能用两次 `user_spans`** —— 那会把同一批 `rv_start` 认领两遍。所以一笔下发
+    只认领一个 `rv_start`，认完再按上面那条分左右。两个队列都**按位置对齐**（同一身份
+    的第 i 次下发对第 i 笔 load / 第 i 个 rv_start），不是“取最早那个还没用掉的” ——
+    后者会漂：一笔 load 若被自己那次下发跳过（晚到），它会一直挂在队首，被很远以后的
+    同身份下发认走，画出一根几千拍的长条。实测 `synth_scaled` 上就这样漂出 909 拍的段。
+
+    配不上下发的 `rv_start`（实测 557 笔）不画在这两行上，它们仍在 `DTE-Core` 那一行里；
+    配不上 `rv_start` 的下发（实测 0 笔）延到波形末，那笔确实还在等。
     """
-    out: List[List[int]] = []
-    used = [False] * len(spans)
-    for i, e in enumerate(events):
-        # 下一笔下发的那一刻就是这一笔的吸收上界：它之后起头的碎段归下一笔。
-        nxt = events[i + 1]["t"] if i + 1 < len(events) else None
-        end = None
-        for j, (t0, t1) in enumerate(spans):
-            if used[j] or t0 < e["t"]:
-                continue
-            # 段按起点升序，撞上下一笔那一刻之后就不用再看了：后面都归下一笔。
-            if nxt is not None and t0 >= nxt:
-                break
-            used[j] = True
-            end = t1
-        if end is not None:
-            out.append([e["t"], end, e["user"], e["task"]])
-    for j, (t0, t1) in enumerate(spans):
-        if not used[j]:
-            out.append([t0, t1, -1, -1])
-    out.sort(key=lambda s: s[0])
-    return out
+    loads: Dict[Tuple[int, int], List[int]] = {}
+    for e in load:
+        loads.setdefault((e["user"], e["task"]), []).append(e["t"])
+    rvs: Dict[Tuple[int, int], List[int]] = {}
+    for e in rv_starts:
+        rvs.setdefault((e["user"], e["task"]), []).append(e["t"])
+
+    main: List[List[int]] = []
+    datain: List[List[int]] = []
+    for e in issue:
+        key = (e["user"], e["task"])
+        rq = rvs.get(key)
+        while rq and rq[0] < e["t"]:
+            rq.pop(0)          # 早于这次下发的（波形开头就在飞）不认
+        end = rq.pop(0) if rq else t_end
+        lq = loads.get(key)
+        t0 = lq.pop(0) if lq else None
+        if t0 is not None and t0 <= e["t"]:
+            main.append([t0, end, _user_tag(e["user"]), _task_tag(e["task"])])
+        else:
+            datain.append([e["t"], end, _user_tag(e["user"]),
+                           _task_tag(e["task"])])
+    main.sort(key=lambda s: (s[0], s[1]))
+    datain.sort(key=lambda s: (s[0], s[1]))
+    return main, datain
 
 
 def delta_ticks(ts: list, vs: list) -> List[int]:
@@ -403,8 +428,9 @@ def trace_t_end(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> int
 
 def core_spans(reader: TraceReader, sigs: Dict[str, int],
                t_end: int) -> Dict[str, List[List[List[int]]]]:
-    """一个 core 的十条行。键是 `core` / `dsa` / `chain` / `vuisq`，各三个单元一个
-    list（`vuisq` 只有 VU 那条有数据，另两条恒空）。"""
+    """一个 core 的十一条行。键是 `core` / `dsa` / `chain` / `datain` / `vuisq`，
+    各三个单元一个 list（`vuisq` 只有 VU 那条、`datain` 只有 DTE 那条有数据，
+    另两条恒空）。"""
 
     def ev(name: str) -> Tuple[list, list]:
         sid = sigs.get(name)
@@ -436,6 +462,7 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     core_rows: List[List[List[int]]] = []
     dsa_rows: List[List[List[int]]] = []
     chain_rows: List[List[List[int]]] = []
+    datain_rows: List[List[List[int]]] = []
     vuisq_rows: List[List[List[int]]] = []
     for u in range(len(UNITS)):
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
@@ -445,13 +472,16 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         core_rows.append(user_spans(rv_starts, rv_dones, t_end))
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
-        # TS 这一行：MU / VU 从「TaskCtrl 把这一步装进 stream」到「这一路的 RV core
-        # 接下它」；DTE 仍是旧口径 [下发, DTE DSA 完成]（用 DSA 段去认下发），这次
-        # 没动它。两者的配对方式也不同 —— 前者两端都带身份，后者要贪心认领。
+        # TS 那几行都是「这一步在 TS 里等了多久」：起点是它进入 TS、可以被下发那一刻，
+        # 终点是这一路的 RV core 接下它。终点都一样（rv_start）；起点按主线 / Router
+        # 触发的搬入分：MU / VU 只有主线，DTE 两样都有，所以 DTE 拆成两行。
         if u == 0:
-            chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
+            dte_main, dte_datain = dte_spans(load, issue, rv_starts, t_end)
+            chain_rows.append(dte_main)
+            datain_rows.append(dte_datain)
         else:
             chain_rows.append(step_chain(load, issue, rv_starts, t_end))
+            datain_rows.append([])
         if u != 2:
             dsa_rows.append(dsa)
             vuisq_rows.append([])
@@ -463,11 +493,11 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         vuisq_rows.append(user_spans(trig_starts, disp_starts, t_end))
         dsa_rows.append(user_spans(disp_starts, dsa_dones, t_end))
     return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows,
-            "vuisq": vuisq_rows}
+            "datain": datain_rows, "vuisq": vuisq_rows}
 
 
 def lanes_of(spans: Dict[str, List[List[List[int]]]]) -> List[List[List[int]]]:
-    """core_spans 的产物 → 一个 core 的十条通道，顺序与 `LANES` 一致。"""
+    """core_spans 的产物 → 一个 core 的十一条通道，顺序与 `LANES` 一致。"""
     return [spans[group][u] for _, group, u in LANES]
 
 
