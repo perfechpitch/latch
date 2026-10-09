@@ -34,7 +34,7 @@ core 底下列的不是 `cmcm_q` 那些信号，而是十三条派生行：
 | `X-Core` | 这一路 RV core 执行一笔 task 的那几拍（`rv_start`→`rv_done`）。每个用户各一段，时间上可以重叠 |
 | `MU-DSA-ISQ` / `VU-DSA-ISQ` | 一笔任务从**被单元收下**到**真正发行进执行通路**的那一段 —— 收下了为什么还不算，看这一行。MU 的收下是写 `TASK_TRIGGER` 被 `regfile` 锁成一笔，VU 的是 `config_register` 收到那条宏指令 |
 | `X-DSA` | 这一路 DSA 真正发行之后手上一直有活的那几拍，到单元把完成报回去为止。每个用户各一段，时间上可以重叠。DTE 那一路有**两个**终点，见下 |
-| `MU-DSA-CALC` | 只有 MU 有。这笔任务**在矩阵执行单元里进出所跨的那一段**（第一个真正产出的 prim 进 → 最后一个 prim 被取走）。**它不是切分，是嵌在 `MU-DSA` 里面的子区间** |
+| `MU-DSA-CALC` | 只有 MU 有。这笔任务**在矩阵执行单元里进出所跨的那一段**（第一个 tile 进 → 最后一个 tile 的后一拍），量的是真实 MAC 时间。**它不是切分，是嵌在 `MU-DSA` 里面的子区间** |
 
 TS 那一族量的都是「这一步在 TS 里等了多久」，终点都是这一路的 `rv_start`，所以每一行都跟
 下面 `X-Core` 那一行首尾相接、不重叠。DTE 拆成两行是因为它既有主线又有 Router 触发的搬入：
@@ -158,7 +158,7 @@ moe_lpu.tracetto-index/
 | DSA | `dsa_start` / `dsa_start_task` / `dsa_start_user`、`dsa_done` / `dsa_done_task` / `dsa_done_user` |
 | DTE 那个不报的完成 | `dsa_done_noack` / `dsa_done_noack_task` / `dsa_done_noack_user` —— 只有 DTE 抬 bit0 |
 | 一笔任务在单元里的两端 | `dsa_task_trigger` / `dsa_task_trigger_task` / `dsa_task_trigger_user`（被收下）、`dsa_task_dispatch` / `dsa_task_dispatch_task` / `dsa_task_dispatch_user`（真正发行）|
-| MU 那段计算的两端 | `dsa_calc_start` / `dsa_calc_start_task` / `dsa_calc_start_user`（第一个 prim 进矩阵执行单元）、`dsa_calc_done` / `dsa_calc_done_task` / `dsa_calc_done_user`（最后一个 prim 被取走）|
+| MU 那段计算的两端 | `dsa_calc_start` / `dsa_calc_start_task` / `dsa_calc_start_user`（第一个 tile 进矩阵执行单元）、`dsa_calc_done` / `dsa_calc_done_task` / `dsa_calc_done_user`（最后一个 tile 的后一拍）|
 
 边沿的起点是各家“过门槛”那一拍（DTE 过 Commit 准入、MU 进 issue_q、VU 被 ISQ 收下；
 RV core 是执行器接下队头那笔），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
@@ -189,17 +189,15 @@ MU 抬 bit1、VU 抬 bit2，DTE 恒 0：
 
 `MU-DSA-ISQ` / `VU-DSA-ISQ` 取这两拍，`MU-DSA` / `VU-DSA` 从后一拍起算。
 
-最后那一对（`dsa_calc_start` / `dsa_calc_done`）**只有 MU 抬 bit1**，量的是这笔任务的 prim
-在矩阵执行单元里进出所跨的一段：
+最后那一对（`dsa_calc_start` / `dsa_calc_done`）**只有 MU 抬 bit1**，量的是这笔任务的
+真实 MAC 时间（`kblock × 专家数 × nblock` 拍），不把 10 级流水深度算进去：
 
-- `dsa_calc_start` = 它第一个**真正产出**的 prim 进 exe 那一拍。**不是「第一个 tile」** ——
-  一笔任务按 tile 走 `kblock × 专家数 × nblock` 遍，但一列算完那一遍才产 prim，前面几段 K 只累加，
-  所以模型里 `MatrixExe::Issue()` 特意返回「这一遍有没有真的产出 prim」，波形判据认的是它。
-- `dsa_calc_done` = 它最后一个 prim 被从流水线**取走**那一拍（取走之后那一格才真的空出来，
-  `exe.inflight` 就是 `pipe.size()`）。不是 `ready_at` —— 那只说明结果算完、可用。
+- `dsa_calc_start` = 它第一个 **tile** 进 exe 那一拍（`computed == 0`）。
+- `dsa_calc_done` = 它最后一个 tile 的**后一拍**。最后一个 tile 那一拍只记身份、置 pending，
+  下一个 `Ctrl::Step()` 开头才补计数，好让段长按 tile 数闭合（而不是少一拍）。
 
-两个点都是**定义式**的，与 tile 怎么切无关，也不绑流水线深度那个常数；越界那一笔一个 prim 都不产，
-两端都不计（它没有计算阶段）。`MU-DSA-CALC` 取这两拍，整段落在 `MU-DSA` 里面。
+两个点都按 tile 数走，与流水线深度那个常数无关；越界那一笔不经过正常计算，两端都不计
+（它没有计算阶段）。`MU-DSA-CALC` 取这两拍，整段落在 `MU-DSA` 里面。
 
 波形里缺 `ts_user`、边沿信号或「装进 stream」那几条时，启动会提醒缺哪几条，缺的那些行是空的。
 

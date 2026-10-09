@@ -523,9 +523,9 @@ def check_rows(prefix):
     # 第 11 条通道：MU 的「收下 → 真正发行」。
     expect(rows[11], [[36, 46, 77, 5]], "MU_DSA_ISQ（收下 → 真正发行）")
     expect(rows[11][0][1], rows[8][0][0], "MU 两行首尾相接")
-    # 第 12 条通道：MU 的「prim 在矩阵执行单元里进出」。与上面几行不同 —— 它**不是
-    # 切分，而是嵌在 MU-DSA 里的子区间**：整段落在 [46, 70] 里面，两头都不贴边。
-    expect(rows[12], [[52, 64, 77, 5]], "MU_DSA_CALC（第一个 prim 进 → 最后一个 prim 出）")
+    # 第 12 条通道：MU 的「tile 在矩阵执行单元里进出」（真实 MAC 时间）。与上面几行不同
+    # —— 它**不是切分，而是嵌在 MU-DSA 里的子区间**：整段落在 [46, 70] 里面，两头都不贴边。
+    expect(rows[12], [[52, 64, 77, 5]], "MU_DSA_CALC（第一个 tile 进 → 最后一个 tile 后一拍）")
     expect_true(rows[8][0][0] < rows[12][0][0] and rows[12][0][1] < rows[8][0][1],
                 "MU-DSA-CALC 严格嵌在 MU-DSA 里面（不是首尾相接）")
     expect(S.LANES[5][0], "MU_Core", "第 5 条通道是 MU_Core")

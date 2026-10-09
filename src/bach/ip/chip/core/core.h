@@ -350,10 +350,9 @@ class Core : public BachModule {
   // Ctrl::Load()，以及 vu/config_register.h 的 Trigger() 与 vu/pipe_ctrl.h 的 Accept()。
   //
   // 另有 dsa_calc_start / dsa_calc_done：一笔任务在矩阵执行单元里进出所跨那一段的两端
-  // （只有 MU 有，恒抬 bit1）。起点是它第一个真产出的 prim 进 exe —— 注意不是「第一个
-  // tile」，一列算完那一遍才产 prim，所以要看 Issue() 的返回值；终点是最后一个 prim 被
-  // 取走那一拍（取走之后流水线那一格才真的空出来）。判据见 mu/mu.h 的 Ctrl::Compute()
-  // 与 Ctrl::Store()。
+  // （只有 MU 有，恒抬 bit1）。起点是第一个 tile 进 exe、终点是最后一个 tile 的后一拍，
+  // 量的是这笔任务的真实 MAC 时间（kblock × 专家数 × nblock 拍），不把 10 级流水深度
+  // 算进去。判据见 mu/mu.h 的 Ctrl::Compute()。
   void EmitDsa() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
@@ -688,7 +687,7 @@ class Core : public BachModule {
   }
 
   // 一笔任务在矩阵执行单元里进出所跨那一段的两端，只有 MU（u == 1）有：起点是它
-  // 第一个真产出的 prim 进 exe，终点是最后一个 prim 被取走。另两位恒 0。
+  // 第一个 tile 进 exe，终点是最后一个 tile 的后一拍。另两位恒 0。
   DsaEv DsaCalcStartOf(uint64_t u) {
     if (u != 1) return {};
     return {mu->CalcStartCnt(), mu->CalcStartTask(), mu->CalcStartUser()};

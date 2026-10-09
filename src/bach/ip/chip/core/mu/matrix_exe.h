@@ -68,8 +68,8 @@ class MatrixExe : public BachModule {
   // 不分块一样。w_ep 是这个专家的 topK 权重，只在几个专家合并成一份时用。
   // 返回这一次有没有真的产出 prim。一笔任务按 tile 走 kblock × 专家数 × nblock 遍，
   // 但**只有一列算完那一遍才产出 prim**（下面两处提前返回），所以 prim 数 ≠ tile 数。
-  // 调用方要认「这一笔的第一个/最后一个 prim」，必须看这个返回值，不能拿 tile 序号
-  // 硬套。判据见 mu.h 的 Ctrl::Compute()。
+  // 波形上的计算段（MU-DSA-CALC）现在按 tile 走，不需要再认第一个/最后一个 prim，
+  // 调用方可忽略这个返回值；它仍是一遍有没有产出 prim 的判据。
   bool Issue(MuTaskCfg const& cfg, std::vector<uint8_t> const& token,
              std::vector<uint8_t> const& weight,
              std::vector<uint8_t> const& scale,

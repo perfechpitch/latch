@@ -195,9 +195,9 @@ class Mu {
     uint64_t DispatchTask() const { return dispatch_task; }
     uint64_t DispatchUser() const { return dispatch_user; }
     // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
-    // dsa_calc_done 用。起点是第一个真产出的 prim 进 exe（不是第一个 tile —— 一列
-    // 算完那一遍才产 prim），终点是最后一个 prim 被取走。越界那一笔一个 prim 都不产，
-    // 两端都不计：它没有计算阶段。
+    // dsa_calc_done 用。起点是第一个 tile 进 exe、终点是最后一个 tile 的后一拍，量的是
+    // 这笔任务的真实 MAC 时间（kblock × 专家数 × nblock 拍），不把 10 级流水深度算进去。
+    // 越界那一笔不经过正常计算，两端都不计：它没有计算阶段。
     uint64_t CalcStartCnt() const { return calc_start_cnt; }
     uint64_t CalcStartTask() const { return calc_start_task; }
     uint64_t CalcStartUser() const { return calc_start_user; }
@@ -207,6 +207,13 @@ class Mu {
 
    protected:
     void Step() override {
+      // 上一拍算到最后一个 tile 时只记了身份、置 pending，这一拍开头才补 calc_done：
+      // 段长按 tile 数闭合（最后一个 tile 的后一拍 − 第一个 tile = kblock × 专家数 ×
+      // nblock），而不是少一拍。
+      if (calc_done_pending) {
+        ++calc_done_cnt;
+        calc_done_pending = false;
+      }
       // Drain 的推进排在最前：这一拍先把上一拍进的那一步走掉，外面才看得到
       // 每一步各占一拍。
       StepDrain();
@@ -341,18 +348,23 @@ class Mu {
       uint64_t ne = f->cfg.Experts();
       uint64_t ki = f->computed % kb;
       uint64_t ei = (f->computed / kb) % ne;
-      bool made = mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
-                                ki + 1 == kb, ei == 0, ei + 1 == ne,
-                                mu.WeightOf(*f, ei));
-      // 这一笔的头一个**真正产出**的 prim 进执行单元，就是它「算起来了」那一拍。
-      // 不能拿 f->computed == 0 判：一列算完那一遍才产 prim，前面几段 K 只累加，
-      // 所以第一个 tile 未必产 prim（Issue() 的返回值说的就是这个）。
-      if (made && f->prim_out == 0) {
+      mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0, ki + 1 == kb,
+                    ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
+      // 这一笔的头一个 tile 进执行单元，就是它「算起来了」那一拍。真实的 MAC 时间
+      // 按 tile 数走（每个 tile 一拍），不把 10 级流水深度算进去：起点取第一个 tile，
+      // 终点取最后一个 tile 的后一拍，段长就是 kblock × 专家数 × nblock 拍。
+      if (f->computed == 0) {
         ++calc_start_cnt;
         calc_start_task = f->cfg.task_id;
         calc_start_user = f->cfg.user_id;
       }
-      if (made) ++f->prim_out;
+      // 最后一个 tile：这一拍只记身份、置 pending，下一个 Step() 开头再补 calc_done，
+      // 好让段长按 tile 数闭合而不是少一拍。
+      if (f->computed + 1 == f->total) {
+        calc_done_task = f->cfg.task_id;
+        calc_done_user = f->cfg.user_id;
+        calc_done_pending = true;
+      }
       ++f->computed;
       f->stage = MuStage::kComputing;
     }
@@ -363,14 +375,6 @@ class Mu {
       if (f == nullptr || !mu.stq->HasRoom()) return;
       MatrixExe::Result r = mu.exe->TakeResult();
       mu.stq->Push(r.addr, r.out, r.cfg.out_bf16);
-      // 这一笔的最后一个 prim 被取走那一拍 —— 取走之后流水线上那一格才真的空出来
-      // （exe.inflight 就是 pipe.size()，只在 TakeResult() 里降）。一个 prim 产出一列，
-      // 所以 stored 数到 OutTotal() 就是它的 prim 全部出完。判据见 MU-DSA-CALC。
-      if (f->stored + 1 == f->OutTotal()) {
-        ++calc_done_cnt;
-        calc_done_task = f->cfg.task_id;
-        calc_done_user = f->cfg.user_id;
-      }
       ++f->stored;
       f->stage = MuStage::kStoring;
     }
@@ -417,9 +421,11 @@ class Mu {
     uint64_t done_cnt = 0, done_task = 0, done_user = 0;
     // 真正发行（第一个 tile 开始发起访存）的笔数与身份，同上。
     uint64_t dispatch_cnt = 0, dispatch_task = 0, dispatch_user = 0;
-    // 这一笔的第一个 prim 进矩阵执行单元、最后一个 prim 被取走那一拍的笔数与身份。
+    // 这一笔的第一个 tile 进矩阵执行单元、最后一个 tile 后一拍那一拍的笔数与身份。
     uint64_t calc_start_cnt = 0, calc_start_task = 0, calc_start_user = 0;
     uint64_t calc_done_cnt = 0, calc_done_task = 0, calc_done_user = 0;
+    // 最后一个 tile 已算完、等下一拍补 calc_done 的标志。
+    bool calc_done_pending = false;
   };
 
   ClockPtr clk;

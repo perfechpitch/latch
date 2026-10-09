@@ -75,9 +75,9 @@ SIG_TASK_TRIG_USER = "dsa_task_trigger_user"
 SIG_TASK_DISP = "dsa_task_dispatch"
 SIG_TASK_DISP_TASK = "dsa_task_dispatch_task"
 SIG_TASK_DISP_USER = "dsa_task_dispatch_user"
-# 一笔任务在矩阵执行单元里进出所跨那一段的两端。只有 MU 有（恒抬 bit1）：起点是它
-# 第一个**真正产出**的 prim 进 exe —— 不是第一个 tile，一列算完那一遍才产 prim；
-# 终点是最后一个 prim 被取走那一拍（取走之后流水线那一格才真的空出来）。
+# 一笔任务在矩阵执行单元里进出所跨那一段的两端。只有 MU 有（恒抬 bit1）：起点是
+# 第一个 tile 进 exe、终点是最后一个 tile 的后一拍，量的是这笔任务的真实 MAC 时间
+# （kblock × 专家数 × nblock 拍），不把 10 级流水深度算进去。
 SIG_CALC_START = "dsa_calc_start"
 SIG_CALC_START_TASK = "dsa_calc_start_task"
 SIG_CALC_START_USER = "dsa_calc_start_user"
@@ -96,7 +96,7 @@ NOACK_EDGE = (SIG_DSA_NOACK, SIG_DSA_NOACK_TASK, SIG_DSA_NOACK_USER)
 # MU / VU 那一对：收下 → 真正发行。
 TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
                    SIG_TASK_DISP, SIG_TASK_DISP_TASK, SIG_TASK_DISP_USER)
-# MU 那一对：第一个 prim 进执行单元 → 最后一个 prim 取走。**这不是一段的切分，而是
+# MU 那一对：第一个 tile 进执行单元 → 最后一个 tile 后一拍。**这不是一段的切分，而是
 # 嵌在 MU-DSA 里的子区间** —— 画面上它整段落在 MU-DSA 里面。
 CALC_EDGE = (SIG_CALC_START, SIG_CALC_START_TASK, SIG_CALC_START_USER,
              SIG_CALC_DONE, SIG_CALC_DONE_TASK, SIG_CALC_DONE_USER)
@@ -152,7 +152,7 @@ ROWS = (
     ("MU-DSA-ISQ", ((11, 11),)),
     ("MU-DSA", ((8, 6),)),
     # 与上面几行不同：**这不是切分，是嵌在 MU-DSA 里面的子区间** —— 量的是这笔任务的
-    # prim 在矩阵执行单元里进出所跨的那一段，整段落在 MU-DSA 里面。
+    # tile 在矩阵执行单元里进出所跨的那一段（真实 MAC 时间），整段落在 MU-DSA 里面。
     ("MU-DSA-CALC", ((12, 12),)),
     ("VU-Core", ((4, 7),)),
     # VU 的 DSA 那一行拆成两段：VU-DSA-ISQ 是「trigger 收下 → 真正发行进执行流水」，
