@@ -341,16 +341,26 @@ class Core : public BachModule {
   // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
   // 这里填的是各单元侧存下来的那一份：都是 trigger 写带进来的 user。
   //
-  // VU 另有两拍单独发：一个 task 的第一条宏指令被 config_register 收下 trigger 那一拍
-  // （dsa_task_trigger），以及同一条真正发行进执行流水那一拍（dsa_task_dispatch），
-  // 也就是 VU-DSA-ISQ 那一行的两端；这两拍之间隔的就是「收下了为什么还不算」。
-  // 只有 VU 有，位掩码上永远只抬 bit2。判据见 config_register.h 的 Trigger() 与
-  // pipe_ctrl.h 的 Accept()。
+  // 每个单位另有「收下」与「真正发行」两拍单独发：dsa_task_trigger 是单元把这一笔
+  // 收进自己的配置入口那一拍（MU 写 TASK_TRIGGER 被 regfile 锁成一笔、VU 被
+  // config_register 收下 trigger），dsa_task_dispatch 是它真正发行进执行通路那一拍
+  // （MU 第一个 tile 开始发起访存、VU 宏指令进流水）。也就是 MU-DSA-ISQ / VU-DSA-ISQ
+  // 那两行的两端；这两拍之间隔的就是「收下了为什么还不算」。
+  // MU 抬 bit1、VU 抬 bit2，DTE 恒 0。判据见 mu/regfile.h 的 WriteReg 与 mu/mu.h 的
+  // Ctrl::Load()，以及 vu/config_register.h 的 Trigger() 与 vu/pipe_ctrl.h 的 Accept()。
+  //
+  // 另有 dsa_calc_start / dsa_calc_done：一笔任务在矩阵执行单元里进出所跨那一段的两端
+  // （只有 MU 有，恒抬 bit1）。起点是它第一个真产出的 prim 进 exe —— 注意不是「第一个
+  // tile」，一列算完那一遍才产 prim，所以要看 Issue() 的返回值；终点是最后一个 prim 被
+  // 取走那一拍（取走之后流水线那一格才真的空出来）。判据见 mu/mu.h 的 Ctrl::Compute()
+  // 与 Ctrl::Store()。
   void EmitDsa() {
     uint64_t start_mask = 0, start_task = 0, start_user = 0;
     uint64_t done_mask = 0, done_task = 0, done_user = 0;
     uint64_t trig_mask = 0, trig_task = 0, trig_user = 0;
     uint64_t disp_mask = 0, disp_task = 0, disp_user = 0;
+    uint64_t calcmask = 0, calctask = 0, calcuser = 0;
+    uint64_t cendmask = 0, cendtask = 0, cenduser = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       DsaEv s = DsaStartOf(u);
       if (s.seq != dsa_start_seq[u]) {
@@ -380,6 +390,20 @@ class Core : public BachModule {
         disp_task |= (p.task & 0xFFu) << (8 * u);
         disp_user |= (p.user & 0xFFFFu) << (16 * u);
       }
+      DsaEv cs = DsaCalcStartOf(u);
+      if (cs.seq != dsa_calc_start_seq[u]) {
+        dsa_calc_start_seq[u] = cs.seq;
+        calcmask |= 1ull << u;
+        calctask |= (cs.task & 0xFFu) << (8 * u);
+        calcuser |= (cs.user & 0xFFFFu) << (16 * u);
+      }
+      DsaEv ce = DsaCalcDoneOf(u);
+      if (ce.seq != dsa_calc_done_seq[u]) {
+        dsa_calc_done_seq[u] = ce.seq;
+        cendmask |= 1ull << u;
+        cendtask |= (ce.task & 0xFFu) << (8 * u);
+        cenduser |= (ce.user & 0xFFFFu) << (16 * u);
+      }
     }
     TracePerCycle("dsa_start", start_mask);
     TracePerCycle("dsa_start_task", start_task);
@@ -393,6 +417,12 @@ class Core : public BachModule {
     TracePerCycle("dsa_task_dispatch", disp_mask);
     TracePerCycle("dsa_task_dispatch_task", disp_task);
     TracePerCycle("dsa_task_dispatch_user", disp_user);
+    TracePerCycle("dsa_calc_start", calcmask);
+    TracePerCycle("dsa_calc_start_task", calctask);
+    TracePerCycle("dsa_calc_start_user", calcuser);
+    TracePerCycle("dsa_calc_done", cendmask);
+    TracePerCycle("dsa_calc_done_task", cendtask);
+    TracePerCycle("dsa_calc_done_user", cenduser);
   }
 
   // 三个 RV core 各自对一笔 task 的执行时间，两个端点各发三个信号。
@@ -611,19 +641,42 @@ class Core : public BachModule {
             vu->Retire().MacroDoneUser()};
   }
 
-  // VU 那条 task 起点宏指令的两端：trigger 被 config_register 收下、以及它真正发行
-  // 进执行流水。只有 VU（u == 2）有，另两位恒 0 —— 0 这个值也正好是它们初始的 seq，
-  // 于是永远不抬那两位。
+  // 一笔任务在单元里的两端：被收下、以及真正发行进执行通路。MU 与 VU 各有一对，
+  // 波形上就是它们那两行的「为什么收下了还不算」。DTE（u == 0）恒 0 —— 0 也正好是
+  // 它初始的 seq，于是永远不抬 bit0。
+  //
+  // 同一条信号按位通三位，所以不用新增信号名。两家的「收下」都在单元的配置入口：
+  // MU 是 regfile 把写 TASK_TRIGGER 那一拍锁成一笔，VU 是 config_register 收下
+  // trigger。「真正发行」MU 是第一个 tile 开始发起访存，VU 是宏指令进执行流水。
   DsaEv DsaTaskTriggerOf(uint64_t u) {
+    if (u == 1) {
+      MuRegfile& r = mu->Regfile();
+      return {r.Triggers(), r.AcceptedTask(), r.AcceptedUser()};
+    }
     if (u != 2) return {};
     VuConfigRegister& c = vu->ConfigRegister();
     return {c.TaskTriggers(), c.TaskTriggerTask(), c.TaskTriggerUser()};
   }
 
   DsaEv DsaTaskDispatchOf(uint64_t u) {
+    if (u == 1) {
+      return {mu->DispatchCnt(), mu->DispatchTask(), mu->DispatchUser()};
+    }
     if (u != 2) return {};
     VuPipeCtrl& p = vu->PipeCtrl();
     return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser()};
+  }
+
+  // 一笔任务在矩阵执行单元里进出所跨那一段的两端，只有 MU（u == 1）有：起点是它
+  // 第一个真产出的 prim 进 exe，终点是最后一个 prim 被取走。另两位恒 0。
+  DsaEv DsaCalcStartOf(uint64_t u) {
+    if (u != 1) return {};
+    return {mu->CalcStartCnt(), mu->CalcStartTask(), mu->CalcStartUser()};
+  }
+
+  DsaEv DsaCalcDoneOf(uint64_t u) {
+    if (u != 1) return {};
+    return {mu->CalcDoneCnt(), mu->CalcDoneTask(), mu->CalcDoneUser()};
   }
 
   // 三条发射通路上一次见到的 seq，EmitIssue() 用它认新下发的那一笔。
@@ -632,6 +685,8 @@ class Core : public BachModule {
   std::array<uint64_t, 3> dsa_start_seq{}, dsa_done_seq{};
   // 同上，VU 那条 task 起点宏指令的 trigger / 发行笔数。
   std::array<uint64_t, 3> dsa_task_trig_seq{}, dsa_task_disp_seq{};
+  // 同上，MU 那一段计算的两个端点。
+  std::array<uint64_t, 3> dsa_calc_start_seq{}, dsa_calc_done_seq{};
   // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
   // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。

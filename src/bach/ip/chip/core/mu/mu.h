@@ -123,6 +123,18 @@ class Mu {
   uint64_t DoneCnt() const { return ctrl->DoneCnt(); }
   uint64_t DoneTask() const { return ctrl->DoneTask(); }
   uint64_t DoneUser() const { return ctrl->DoneUser(); }
+  // 真正发行进执行通路那一拍起的笔数与身份，Core 层发 dsa_task_dispatch 用。
+  uint64_t DispatchCnt() const { return ctrl->DispatchCnt(); }
+  uint64_t DispatchTask() const { return ctrl->DispatchTask(); }
+  uint64_t DispatchUser() const { return ctrl->DispatchUser(); }
+  // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
+  // dsa_calc_done 用。
+  uint64_t CalcStartCnt() const { return ctrl->CalcStartCnt(); }
+  uint64_t CalcStartTask() const { return ctrl->CalcStartTask(); }
+  uint64_t CalcStartUser() const { return ctrl->CalcStartUser(); }
+  uint64_t CalcDoneCnt() const { return ctrl->CalcDoneCnt(); }
+  uint64_t CalcDoneTask() const { return ctrl->CalcDoneTask(); }
+  uint64_t CalcDoneUser() const { return ctrl->CalcDoneUser(); }
 
   void RunStep() {
     // DTE 搬运时写进来的 topK 这一拍先收进 topK_ep_table，下面才算得到。
@@ -176,6 +188,22 @@ class Mu {
     uint64_t DoneCnt() const { return done_cnt; }
     uint64_t DoneTask() const { return done_task; }
     uint64_t DoneUser() const { return done_user; }
+    // 真正发行进执行通路那一拍起的笔数与身份，Core 层发 dsa_task_dispatch 用。
+    // 判据见 Load()：这一笔的第一个 tile 开始发起访存。越界那一路也计 —— 它一样
+    // 是从这儿起的，不计的话 MU-DSA-ISQ 那一行就没有终点。
+    uint64_t DispatchCnt() const { return dispatch_cnt; }
+    uint64_t DispatchTask() const { return dispatch_task; }
+    uint64_t DispatchUser() const { return dispatch_user; }
+    // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
+    // dsa_calc_done 用。起点是第一个真产出的 prim 进 exe（不是第一个 tile —— 一列
+    // 算完那一遍才产 prim），终点是最后一个 prim 被取走。越界那一笔一个 prim 都不产，
+    // 两端都不计：它没有计算阶段。
+    uint64_t CalcStartCnt() const { return calc_start_cnt; }
+    uint64_t CalcStartTask() const { return calc_start_task; }
+    uint64_t CalcStartUser() const { return calc_start_user; }
+    uint64_t CalcDoneCnt() const { return calc_done_cnt; }
+    uint64_t CalcDoneTask() const { return calc_done_task; }
+    uint64_t CalcDoneUser() const { return calc_done_user; }
 
    protected:
     void Step() override {
@@ -233,6 +261,14 @@ class Mu {
       MuInflight* f = mu.iq->FirstToLoad();
       if (f == nullptr) return;
       if (!mu.token_ldq->HasRoom() || !mu.weight_ldq->HasRoom()) return;
+      // 这一笔的头一个 tile 真正开始发起访存，就是它「发行」那一拍。写在越界那一路
+      // 之前：越界的任务也是从这儿起的（它只是余下 tile 作废），不计的话
+      // MU-DSA-ISQ 那一行就没有终点。
+      if (f->issued == 0) {
+        ++dispatch_cnt;
+        dispatch_task = f->cfg.task_id;
+        dispatch_user = f->cfg.user_id;
+      }
       MuStep s = f->agu.Next();
       // acu 查越界与对齐。查出来走 Drain & Trap，本轮只留状态位：这一笔的余下
       // tile 全部作废，直接算做完。
@@ -305,8 +341,18 @@ class Mu {
       uint64_t ne = f->cfg.Experts();
       uint64_t ki = f->computed % kb;
       uint64_t ei = (f->computed / kb) % ne;
-      mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
-                    ki + 1 == kb, ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
+      bool made = mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
+                                ki + 1 == kb, ei == 0, ei + 1 == ne,
+                                mu.WeightOf(*f, ei));
+      // 这一笔的头一个**真正产出**的 prim 进执行单元，就是它「算起来了」那一拍。
+      // 不能拿 f->computed == 0 判：一列算完那一遍才产 prim，前面几段 K 只累加，
+      // 所以第一个 tile 未必产 prim（Issue() 的返回值说的就是这个）。
+      if (made && f->prim_out == 0) {
+        ++calc_start_cnt;
+        calc_start_task = f->cfg.task_id;
+        calc_start_user = f->cfg.user_id;
+      }
+      if (made) ++f->prim_out;
       ++f->computed;
       f->stage = MuStage::kComputing;
     }
@@ -317,6 +363,14 @@ class Mu {
       if (f == nullptr || !mu.stq->HasRoom()) return;
       MatrixExe::Result r = mu.exe->TakeResult();
       mu.stq->Push(r.addr, r.out, r.cfg.out_bf16);
+      // 这一笔的最后一个 prim 被取走那一拍 —— 取走之后流水线上那一格才真的空出来
+      // （exe.inflight 就是 pipe.size()，只在 TakeResult() 里降）。一个 prim 产出一列，
+      // 所以 stored 数到 OutTotal() 就是它的 prim 全部出完。判据见 MU-DSA-CALC。
+      if (f->stored + 1 == f->OutTotal()) {
+        ++calc_done_cnt;
+        calc_done_task = f->cfg.task_id;
+        calc_done_user = f->cfg.user_id;
+      }
       ++f->stored;
       f->stage = MuStage::kStoring;
     }
@@ -361,6 +415,11 @@ class Mu {
     uint64_t stq_idle = 0;
     // 宣告完成的笔数与身份，供 Core 层发波形。
     uint64_t done_cnt = 0, done_task = 0, done_user = 0;
+    // 真正发行（第一个 tile 开始发起访存）的笔数与身份，同上。
+    uint64_t dispatch_cnt = 0, dispatch_task = 0, dispatch_user = 0;
+    // 这一笔的第一个 prim 进矩阵执行单元、最后一个 prim 被取走那一拍的笔数与身份。
+    uint64_t calc_start_cnt = 0, calc_start_task = 0, calc_start_user = 0;
+    uint64_t calc_done_cnt = 0, calc_done_task = 0, calc_done_user = 0;
   };
 
   ClockPtr clk;

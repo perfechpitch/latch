@@ -243,11 +243,15 @@ PACKED_SIGS = [
     "rv_done", "rv_done_task", "rv_done_user",
     "dsa_start", "dsa_start_task", "dsa_start_user",
     "dsa_done", "dsa_done_task", "dsa_done_user",
-    # VU 那条 task 起点宏指令的两端：trigger 收下与真正发行。只有 VU 有。列在这里是
-    # 为了别被当成普通波形画成原始通道 —— 这份甘特图还没解它们（tracetto 那边已经
-    # 拆成 VU-DSA-ISQ / VU-DSA 两行）。
+    # 一笔任务在单元里的两端：被收下与真正发行。MU 抬 bit1、VU 抬 bit2，DTE 恒 0。
+    # 列在这里是为了别被当成普通波形画成原始通道 —— 这份甘特图还没解它们
+    # （tracetto 那边已经拆成 MU-DSA-ISQ / MU-DSA 与 VU-DSA-ISQ / VU-DSA 四行）。
     "dsa_task_trigger", "dsa_task_trigger_task", "dsa_task_trigger_user",
     "dsa_task_dispatch", "dsa_task_dispatch_task", "dsa_task_dispatch_user",
+    # 一笔任务在矩阵执行单元里进出所跨那一段的两端，只有 MU 抬 bit1。同上，列在这里
+    # 是为了别被当成普通波形（tracetto 那边已经拆成 MU-DSA-CALC 一行）。
+    "dsa_calc_start", "dsa_calc_start_task", "dsa_calc_start_user",
+    "dsa_calc_done", "dsa_calc_done_task", "dsa_calc_done_user",
 ]
 # 一个 core 取的全部信号：Router 那一组，加 core_out、ts_* 与打包的那几个。后面这些
 # 只在 TS 配过任务的好 core 上有；坏 core 与没配任务的好 core 只有 Router 在用。

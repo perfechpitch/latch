@@ -152,6 +152,10 @@ class MuRegfile : public BachModule {
 
   MuTaskCfg const& Live() const { return live; }
   uint64_t Triggers() const { return triggers.Get(); }
+  // 收下的那一笔的身份，Core 层发 dsa_task_trigger 用。笔数 Triggers() 已经有 ——
+  // 每次写 trigger 锁成一笔就自增一次，反压（DriveReady(!pending)）保证不会丢。
+  uint64_t AcceptedTask() const { return latched.task_id; }
+  uint64_t AcceptedUser() const { return latched.user_id; }
 
   bool Quiescent() const override { return !pending; }
 

@@ -1,4 +1,4 @@
-"""从波形里推出每个 core 的十一条派生行。
+"""从波形里推出每个 core 的十三条派生行。
 
 波形是逐拍采样的，一个信号只在值变化时记一笔。所以“某一位连续为 1”就是它相邻两笔之间
 的那段，段的拍数是两个时间戳之差。段的形状统一是 `[t0, t1, user, task]`，`user` / `task`
@@ -59,38 +59,53 @@ SIG_DSA_START_USER = "dsa_start_user"
 SIG_DSA_DONE = "dsa_done"
 SIG_DSA_DONE_TASK = "dsa_done_task"
 SIG_DSA_DONE_USER = "dsa_done_user"
-# VU 那条 task 起点宏指令的两端，比 DSA 那对更靠前：起点是 config_register 收下
-# trigger 那一拍，终点是同一条真正发行进执行流水那一拍。只有 VU 有，位掩码上只抬
-# bit2，另两位恒 0。
+# 一笔任务在单元里的两端，比 DSA 那对更靠前：起点是单元把它收进自己的配置入口那一拍
+# （MU 写 TASK_TRIGGER 被 regfile 锁成一笔、VU 被 config_register 收下 trigger），
+# 终点是它真正发行进执行通路那一拍（MU 第一个 tile 开始发起访存、VU 宏指令进流水）。
+# MU 抬 bit1、VU 抬 bit2，DTE 恒 0。
 SIG_TASK_TRIG = "dsa_task_trigger"
 SIG_TASK_TRIG_TASK = "dsa_task_trigger_task"
 SIG_TASK_TRIG_USER = "dsa_task_trigger_user"
 SIG_TASK_DISP = "dsa_task_dispatch"
 SIG_TASK_DISP_TASK = "dsa_task_dispatch_task"
 SIG_TASK_DISP_USER = "dsa_task_dispatch_user"
+# 一笔任务在矩阵执行单元里进出所跨那一段的两端。只有 MU 有（恒抬 bit1）：起点是它
+# 第一个**真正产出**的 prim 进 exe —— 不是第一个 tile，一列算完那一遍才产 prim；
+# 终点是最后一个 prim 被取走那一拍（取走之后流水线那一格才真的空出来）。
+SIG_CALC_START = "dsa_calc_start"
+SIG_CALC_START_TASK = "dsa_calc_start_task"
+SIG_CALC_START_USER = "dsa_calc_start_user"
+SIG_CALC_DONE = "dsa_calc_done"
+SIG_CALC_DONE_TASK = "dsa_calc_done_task"
+SIG_CALC_DONE_USER = "dsa_calc_done_user"
 
 # 三对边沿，每组六条：起点的位掩码 / task / user，终点的位掩码 / task / user。
 RV_EDGE = (SIG_RV_START, SIG_RV_START_TASK, SIG_RV_START_USER,
            SIG_RV_DONE, SIG_RV_DONE_TASK, SIG_RV_DONE_USER)
 DSA_EDGE = (SIG_DSA_START, SIG_DSA_START_TASK, SIG_DSA_START_USER,
             SIG_DSA_DONE, SIG_DSA_DONE_TASK, SIG_DSA_DONE_USER)
-# VU 那一对：trigger 收下 → 真正发行。
+# MU / VU 那一对：收下 → 真正发行。
 TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
                    SIG_TASK_DISP, SIG_TASK_DISP_TASK, SIG_TASK_DISP_USER)
+# MU 那一对：第一个 prim 进执行单元 → 最后一个 prim 取走。**这不是一段的切分，而是
+# 嵌在 MU-DSA 里的子区间** —— 画面上它整段落在 MU-DSA 里面。
+CALC_EDGE = (SIG_CALC_START, SIG_CALC_START_TASK, SIG_CALC_START_USER,
+             SIG_CALC_DONE, SIG_CALC_DONE_TASK, SIG_CALC_DONE_USER)
 
 # 「装进 stream」那两条：也是六条，但是计数器不是位掩码，凑不成一对边沿，单独成组。
 STEP_SIGS = (SIG_TS_CREATE, SIG_TS_CREATE_TASK, SIG_TS_CREATE_USER,
              SIG_TS_INSTALL, SIG_TS_INSTALL_TASK, SIG_TS_INSTALL_USER)
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
-             DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
-# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那六条也在
-# 这里 —— TS-MU / TS-VU 现在要读它们，老波形缺了那两行就是空的，得让人看见。
-NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
+             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE)
+# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那些也在
+# 这里 —— TS-MU / TS-VU 与 MU-DSA-CALC 现在要读它们，老波形缺了那些行就是空的。
+NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS +
+            CALC_EDGE)
 
-# 索引里一个 core 的十一条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
+# 索引里一个 core 的十三条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
-# 追加在末尾，前面十条的通道号才不动（旧波形、旧断言都按号认）。注意**通道号与行号
+# 追加在末尾，前面十二条的通道号才不动（旧波形、旧断言都按号认）。注意**通道号与行号
 # 不是一回事**：行序是纯呈现层，见下面的 ROWS。
 LANES = (
     ("TS · DTE", "chain", 0), ("TS · MU", "chain", 1), ("TS · VU", "chain", 2),
@@ -98,10 +113,12 @@ LANES = (
     ("DTE_DSA", "dsa", 0), ("VU_DSA", "dsa", 2), ("MU_DSA", "dsa", 1),
     ("VU_DSA_ISQ", "vuisq", 2),
     ("DTE_DATAIN", "datain", 0),
+    ("MU_DSA_ISQ", "muisq", 1),
+    ("MU_DSA_CALC", "calc", 1),
 )
 LANES_PER_CORE = len(LANES)
 
-# 画面上一个 core 的十一行：(显示名, ((通道号, 颜色号), ...))。颜色一共十一种。
+# 画面上一个 core 的十三行：(显示名, ((通道号, 颜色号), ...))。颜色一共十三种。
 #
 # TS 那一族行都量「这一步在 TS 里等了多久」，按起点分：DTE 拆成主线（TS-DTE）与
 # Router 触发的搬入（TS-DTE-DATAIN）两行，MU / VU 各一行。DTE-DATAIN 摆在 TS-DTE
@@ -121,7 +138,13 @@ ROWS = (
     ("DTE-Core", ((3, 3),)),
     ("DTE-DSA", ((6, 4),)),
     ("MU-Core", ((5, 5),)),
+    # MU 的 DSA 那一行也拆成两段：MU-DSA-ISQ 是「被 regfile 收下 → 真正发行进执行
+    # 通路」，MU-DSA 是「真正发行 → 完成」。与 VU 那两行同构。
+    ("MU-DSA-ISQ", ((11, 11),)),
     ("MU-DSA", ((8, 6),)),
+    # 与上面几行不同：**这不是切分，是嵌在 MU-DSA 里面的子区间** —— 量的是这笔任务的
+    # prim 在矩阵执行单元里进出所跨的那一段，整段落在 MU-DSA 里面。
+    ("MU-DSA-CALC", ((12, 12),)),
     ("VU-Core", ((4, 7),)),
     # VU 的 DSA 那一行拆成两段：VU-DSA-ISQ 是「trigger 收下 → 真正发行进执行流水」，
     # VU-DSA 是「真正发行 → EVENT_EN 退休」。两行首尾相接，起点那一拍是同一个。
@@ -134,11 +157,11 @@ ROW_NAMES = tuple(name for name, _ in ROWS)
 # 段上印的单元名：把“哪一行”也写进去（TS-DTE / CORE-DTE / DSA-DTE …）。
 #
 # 不只是好看：Perfetto 那种按名字上色的工具，名字一样就同一个颜色。原来 TS 那一行
-# 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后十一个槽的
+# 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后十三个槽的
 # 名字两两不同。顺序与 ROWS 里的颜色槽一致（按颜色号索引，不是按行序）。
 SLOT_UNITS = ("TS-DTE", "TS-MU", "TS-VU",
               "CORE-DTE", "DSA-DTE", "CORE-MU", "DSA-MU", "CORE-VU", "DSA-VU",
-              "DSA-ISQ-VU", "DATAIN-DTE")
+              "DSA-ISQ-VU", "DATAIN-DTE", "DSA-ISQ-MU", "DSA-CALC-MU")
 
 
 def row_parts() -> List[List[dict]]:
@@ -428,9 +451,9 @@ def trace_t_end(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> int
 
 def core_spans(reader: TraceReader, sigs: Dict[str, int],
                t_end: int) -> Dict[str, List[List[List[int]]]]:
-    """一个 core 的十一条行。键是 `core` / `dsa` / `chain` / `datain` / `vuisq`，
-    各三个单元一个 list（`vuisq` 只有 VU 那条、`datain` 只有 DTE 那条有数据，
-    另两条恒空）。"""
+    """一个 core 的十三条行。键是 `core` / `dsa` / `chain` / `datain` / `vuisq` /
+    `muisq` / `calc`，各三个单元一个 list（`vuisq` 只有 VU 那条、`muisq` 与 `calc`
+    只有 MU 那条、`datain` 只有 DTE 那条有数据，其余恒空）。"""
 
     def ev(name: str) -> Tuple[list, list]:
         sid = sigs.get(name)
@@ -464,6 +487,8 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     chain_rows: List[List[List[int]]] = []
     datain_rows: List[List[List[int]]] = []
     vuisq_rows: List[List[List[int]]] = []
+    muisq_rows: List[List[List[int]]] = []
+    calc_rows: List[List[List[int]]] = []
     for u in range(len(UNITS)):
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
         dsa_starts, dsa_dones = ends_of(DSA_EDGE, u)
@@ -482,22 +507,40 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         else:
             chain_rows.append(step_chain(load, issue, rv_starts, t_end))
             datain_rows.append([])
-        if u != 2:
+        # MU / VU 的 DSA 那一行都拆成两段：起点从各家「过门槛」后移到「真正发行进
+        # 执行通路」，被切掉的那一截（单元把这一笔收下 → 发行）归 `muisq` / `vuisq`
+        # 那一行。发行那对边沿既是新行的终点，也是 DSA 行的新起点，两行首尾相接。
+        # MU 收下的是写 trigger 被 regfile 锁成的那一笔，VU 是 config_register 收到
+        # 的那条宏指令；DTE（u == 0）没有这一层，仍从过门槛那一拍起算。
+        if u == 0:
             dsa_rows.append(dsa)
             vuisq_rows.append([])
+            muisq_rows.append([])
+            calc_rows.append([])
             continue
-        # VU 这一路拆成两段：起点从「ISQ 收下」后移到「真正发行进执行流水」，被切掉
-        # 的那一截（trigger 收下 → 发行）归 `vuisq` 那一行。发行那对边沿既是新行的
-        # 终点，也是 DSA 行的新起点，两行因此首尾相接。
         trig_starts, disp_starts = ends_of(TASK_START_EDGE, u)
-        vuisq_rows.append(user_spans(trig_starts, disp_starts, t_end))
+        isq = user_spans(trig_starts, disp_starts, t_end)
+        if u == 1:
+            muisq_rows.append(isq)
+            vuisq_rows.append([])
+        else:
+            vuisq_rows.append(isq)
+            muisq_rows.append([])
         dsa_rows.append(user_spans(disp_starts, dsa_dones, t_end))
+        # MU 另有「这笔任务的 prim 在矩阵执行单元里进出所跨的那一段」。**它不是切分**
+        # ——整段落在上面那个 MU-DSA 段里面（起点比它晚、终点比它早），只有 MU 有。
+        if u == 1:
+            calc_starts, calc_dones = ends_of(CALC_EDGE, u)
+            calc_rows.append(user_spans(calc_starts, calc_dones, t_end))
+        else:
+            calc_rows.append([])
     return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows,
-            "datain": datain_rows, "vuisq": vuisq_rows}
+            "datain": datain_rows, "vuisq": vuisq_rows, "muisq": muisq_rows,
+            "calc": calc_rows}
 
 
 def lanes_of(spans: Dict[str, List[List[List[int]]]]) -> List[List[List[int]]]:
-    """core_spans 的产物 → 一个 core 的十一条通道，顺序与 `LANES` 一致。"""
+    """core_spans 的产物 → 一个 core 的十三条通道，顺序与 `LANES` 一致。"""
     return [spans[group][u] for _, group, u in LANES]
 
 

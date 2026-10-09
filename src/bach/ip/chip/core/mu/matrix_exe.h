@@ -66,7 +66,11 @@ class MatrixExe : public BachModule {
   // k_first / k_last 说这一段在这一列的哪个位置，ep_first / ep_last 说这个专家
   // 在这一列的几个专家里的哪个位置。一列只占一段、只有一个专家时四个都是真，与
   // 不分块一样。w_ep 是这个专家的 topK 权重，只在几个专家合并成一份时用。
-  void Issue(MuTaskCfg const& cfg, std::vector<uint8_t> const& token,
+  // 返回这一次有没有真的产出 prim。一笔任务按 tile 走 kblock × 专家数 × nblock 遍，
+  // 但**只有一列算完那一遍才产出 prim**（下面两处提前返回），所以 prim 数 ≠ tile 数。
+  // 调用方要认「这一笔的第一个/最后一个 prim」，必须看这个返回值，不能拿 tile 序号
+  // 硬套。判据见 mu.h 的 Ctrl::Compute()。
+  bool Issue(MuTaskCfg const& cfg, std::vector<uint8_t> const& token,
              std::vector<uint8_t> const& weight,
              std::vector<uint8_t> const& scale,
              std::vector<uint8_t> const& wscale = {}, uint64_t out_addr = 0,
@@ -128,7 +132,7 @@ class MatrixExe : public BachModule {
                           : numeric::ClampNanInf(ksplit[j] + clamped);
     }
     // 一列还没算完就不往下走：结果地址只按 n 递增，中间段写出去会把前一段盖掉。
-    if (!k_last) return;
+    if (!k_last) return false;
 
     // 几个专家合并成一份：这一列的部分和乘上这个专家的权重，进 EP 累加寄存器。
     if (cfg.ep_reduce) {
@@ -142,7 +146,7 @@ class MatrixExe : public BachModule {
         ep_acc[j] = ep_first ? w : numeric::ClampNanInf(ep_acc[j] + w);
       }
       ksplit.clear();
-      if (!ep_last) return;
+      if (!ep_last) return false;
     }
 
     Result r;
@@ -161,6 +165,7 @@ class MatrixExe : public BachModule {
     r.ready_at = CycleNow() + kMuLaneDepth;
     pipe.push_back(r);
     ++prim_pending;
+    return true;
   }
 
   // 算完的那一笔。取走之后流水线上就空出这一格。

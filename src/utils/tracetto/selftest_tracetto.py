@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tracetto 的自检。
 
-造几份合成波形，把读波形、分段、标签、十一条行、建索引、窗口查询、服务各查一遍，不碰 C++
+造几份合成波形，把读波形、分段、标签、十三条行、建索引、窗口查询、服务各查一遍，不碰 C++
 那一边的构建产物。全过就退出码 0，有一处不对就打印差在哪并退出码非零 —— 与
 compiler/selftest_hwconfig.py 收尾方式一致。
 """
@@ -121,11 +121,17 @@ RV_DONE_EV = [(20, 0, 3, 77), (50, 1, 5, 77), (70, 2, 0xFF, 0xFFFF),
               (76, 0, 7, 77)]
 DSA_EV = [(14, 0, 3, 77), (44, 1, 5, 77)]
 DSA_DONE_EV = [(30, 0, 3, 77), (70, 1, 5, 77)]
-# VU 那条 task 起点宏指令的两端：trigger 收下（16）→ 真正发行（22）。只有 VU 有。
-# VU-DSA-ISQ 量的是这两拍之间，VU-DSA 从发行（22）起算 —— VU 没有 dsa_done，
-# 那一段因此延到波形末，两行仍然首尾相接（16..22 接 22..80）。
-TASK_TRIG_EV = [(16, 2, 3, 77)]
-TASK_DISP_EV = [(22, 2, 3, 77)]
+# 一笔任务在单元里的两端：收下（trigger）→ 真正发行（dispatch）。MU 抬 bit1、VU 抬 bit2。
+#   VU：收下 16 → 发行 22。VU-DSA-ISQ 量这两拍；VU 没有 dsa_done，VU-DSA 从 22 延到波形末。
+#   MU：收下 36 → 发行 46。中间夹着 dsa_start（44，即「进 issue_q」）—— 拆开之后它不再是
+#       行的边界，正是要看清「收下了为什么还不算」。MU-DSA 从 46 起算，到 dsa_done（70）。
+TASK_TRIG_EV = [(16, 2, 3, 77), (36, 1, 5, 77)]
+TASK_DISP_EV = [(22, 2, 3, 77), (46, 1, 5, 77)]
+# MU 那笔任务在矩阵执行单元里进出所跨的一段：52 进、64 出。只有 MU 有。
+# **这一段整段落在 MU-DSA（46..70）里面** —— 与上面几行不同，它不是把一段切成两半，
+# 而是嵌在 MU-DSA 里的子区间，所以画面上两者是重叠的。
+CALC_START_EV = [(52, 1, 5, 77)]
+CALC_DONE_EV = [(64, 1, 5, 77)]
 
 # TaskCtrl 把一步装进 stream：两条**单调计数器**、身份是标量（不是位掩码），所以不走
 # lanes_to_signals，手工编。三笔，正好把 DTE 那两行的分流踩出来：
@@ -152,6 +158,10 @@ MODULES = [
     (123, 2, "ts_create"), (124, 2, "ts_create_task"), (125, 2, "ts_create_user"),
     (126, 2, "ts_install"), (127, 2, "ts_install_task"),
     (128, 2, "ts_install_user"),
+    (129, 2, "dsa_calc_start"), (130, 2, "dsa_calc_start_task"),
+    (131, 2, "dsa_calc_start_user"),
+    (132, 2, "dsa_calc_done"), (133, 2, "dsa_calc_done_task"),
+    (134, 2, "dsa_calc_done_user"),
 ]
 SIGNALS = {
     100: [(10, 1), (40, 2), (70, 1)],             # DTE 两发，MU 一发
@@ -169,7 +179,8 @@ for _i, (_t, _task, _user) in enumerate(STEP_INSTALL_EV, start=1):
     SIGNALS.setdefault(127, []).append((_t, _task))
     SIGNALS.setdefault(128, []).append((_t, _user))
 for _base, _ev, _done in ((105, RV_EV, RV_DONE_EV), (111, DSA_EV, DSA_DONE_EV),
-                          (117, TASK_TRIG_EV, TASK_DISP_EV)):
+                          (117, TASK_TRIG_EV, TASK_DISP_EV),
+                          (129, CALC_START_EV, CALC_DONE_EV)):
     _m, _t, _u = lanes_to_signals(_ev)
     _dm, _dt, _du = lanes_to_signals(_done)
     SIGNALS[_base], SIGNALS[_base + 1], SIGNALS[_base + 2] = _m, _t, _u
@@ -203,6 +214,10 @@ def synth_scaled(path, cores, rounds):
                      "dsa_task_trigger_user",
                      "dsa_task_dispatch", "dsa_task_dispatch_task",
                      "dsa_task_dispatch_user",
+                     "dsa_calc_start", "dsa_calc_start_task",
+                     "dsa_calc_start_user",
+                     "dsa_calc_done", "dsa_calc_done_task",
+                     "dsa_calc_done_user",
                      "ts_create", "ts_create_task", "ts_create_user",
                      "ts_install", "ts_install_task", "ts_install_user"):
             sig[name] = mid
@@ -211,6 +226,7 @@ def synth_scaled(path, cores, rounds):
         unit, task, user, done, fly = [], [], [], [], []
         rv_ev, rv_done_ev, dsa_ev, dsa_done_ev = [], [], [], []
         trig_ev, disp_ev, loads = [], [], []
+        calc_start_ev, calc_done_ev = [], []
         t = 10
         for i in range(rounds):
             for u in range(3):
@@ -231,11 +247,15 @@ def synth_scaled(path, cores, rounds):
                 # 压过 256（`2 * px` 那个阈值）才走粗层，挪太多了就掉回 exact。
                 late = u == 0 and i % 8 == 7
                 loads.append((t + 1 if late else t - 1, tk, usr))
-                # VU 那条 task 起点宏指令的两端，只有 VU（lane 2）：trigger 收下在
-                # RV 起点后一拍，真正发行在 DSA 起点后一拍。
-                if u == 2:
-                    trig_ev.append((t + 1, 2, tk, usr))
-                    disp_ev.append((t + 3, 2, tk, usr))
+                # 收下与真正发行那两拍：MU / VU 各一（DTE 没有这一层）。收下在 RV
+                # 起点后一拍、发行在 DSA 起点后一拍，把它夹在 dsa_start 两侧。
+                if u in (1, 2):
+                    trig_ev.append((t + 1, u, tk, usr))
+                    disp_ev.append((t + 3, u, tk, usr))
+                # MU 的「在矩阵执行单元里」那一段：落在 MU-DSA（t+3..t+6）里面。
+                if u == 1:
+                    calc_start_ev.append((t + 4, 1, tk, usr))
+                    calc_done_ev.append((t + 5, 1, tk, usr))
                 t += 8
             done.append((t, i + 1))
             fly += [(t, 1), (t + 1, 0)]
@@ -257,7 +277,9 @@ def synth_scaled(path, cores, rounds):
         for base, evs in (("rv_start", rv_ev), ("rv_done", rv_done_ev),
                           ("dsa_start", dsa_ev), ("dsa_done", dsa_done_ev),
                           ("dsa_task_trigger", trig_ev),
-                          ("dsa_task_dispatch", disp_ev)):
+                          ("dsa_task_dispatch", disp_ev),
+                          ("dsa_calc_start", calc_start_ev),
+                          ("dsa_calc_done", calc_done_ev)):
             m, pt, pu = lanes_to_signals(evs)
             signals[sig[base]] = m
             signals[sig[base + "_task"]] = pt
@@ -272,7 +294,7 @@ def check_tree(prefix):
     try:
         paths = r.tree_paths()
         expect(paths[100], "chip0.core0.ts_unit", "层次名")
-        expect(r.signals(), list(range(100, 129)), "信号号列表")
+        expect(r.signals(), list(range(100, 135)), "信号号列表")
         ts, vs = r.events(100)
         expect(list(zip(ts, vs)), [(10, 1), (40, 2), (70, 1)], "ts_unit 的事件")
         expect(len(r.segments(100)), 1, "一个信号的段数（非零一直连着）")
@@ -443,7 +465,7 @@ def check_done(prefix):
 
 
 def check_rows(prefix):
-    """十一条通道（`lanes_of` 按**通道号**给，不是显示行号 —— 显示行序见 `spans.ROWS`）。"""
+    """十三条通道（`lanes_of` 按**通道号**给，不是显示行号 —— 显示行序见 `spans.ROWS`）。"""
     plan = idxbuild.plan(Path(prefix + ".trace"))
     with TraceReader(prefix) as r:
         nodes = S.core_spans(r, plan["core_sig"]["0.0"], plan["t_end"])
@@ -465,12 +487,22 @@ def check_rows(prefix):
     # VU 那一路：起点从「ISQ 收下」换成了「真正发行」（22），VU 没有 dsa_done，
     # 这一段延到波形末；被切掉的前半截归 VU_DSA_ISQ（16..22）。两行首尾相接。
     expect(rows[7], [[22, 80, 77, 3]], "VU_DSA（从真正发行起算）")
-    expect(rows[8], [[44, 70, 77, 5]], "MU_DSA")
-    expect(rows[9], [[16, 22, 77, 3]], "VU_DSA_ISQ（trigger 收下 → 真正发行）")
-    expect(rows[9][0][1], rows[7][0][0], "两行首尾相接")
+    # MU 那一路同理：起点从「进 issue_q」（44）换成了「真正发行」（46），被切掉的前半截
+    # （收下 36 → 发行 46）归 MU_DSA_ISQ —— 它把 44 那个旧边界整个包了进去。
+    expect(rows[8], [[46, 70, 77, 5]], "MU_DSA（从真正发行起算）")
+    expect(rows[9], [[16, 22, 77, 3]], "VU_DSA_ISQ（收下 → 真正发行）")
+    expect(rows[9][0][1], rows[7][0][0], "VU 两行首尾相接")
     # 第 10 条通道：Router 触发的那一路。
     expect(rows[10], [[70, 71, 77, 7]], "DTE_DATAIN（下发 → rv_start）")
     expect(rows[10][0][1], rows[3][1][0], "TS-DTE-DATAIN 段末接上 DTE_Core 另一段的首")
+    # 第 11 条通道：MU 的「收下 → 真正发行」。
+    expect(rows[11], [[36, 46, 77, 5]], "MU_DSA_ISQ（收下 → 真正发行）")
+    expect(rows[11][0][1], rows[8][0][0], "MU 两行首尾相接")
+    # 第 12 条通道：MU 的「prim 在矩阵执行单元里进出」。与上面几行不同 —— 它**不是
+    # 切分，而是嵌在 MU-DSA 里的子区间**：整段落在 [46, 70] 里面，两头都不贴边。
+    expect(rows[12], [[52, 64, 77, 5]], "MU_DSA_CALC（第一个 prim 进 → 最后一个 prim 出）")
+    expect_true(rows[8][0][0] < rows[12][0][0] and rows[12][0][1] < rows[8][0][1],
+                "MU-DSA-CALC 严格嵌在 MU-DSA 里面（不是首尾相接）")
     expect(S.LANES[5][0], "MU_Core", "第 5 条通道是 MU_Core")
     expect(S.UNITS[S.LANES[5][2]], "MU", "第 5 条通道的单元")
 
@@ -489,7 +521,7 @@ def check_index_roundtrip(prefix):
     d = index.index_dir(prefix)
     plan = idxbuild.plan(trace)
     expect(manifest["t_end"], plan["t_end"], "manifest 里的 t_end")
-    expect(len(manifest["lane_n"]), 11, "一条 core 十一条行")
+    expect(len(manifest["lane_n"]), 13, "一条 core 十三条行")
     expect_true(manifest["core_size"][0] > 0, "core0 的索引文件大小记下来了")
 
     bad = 0
@@ -507,7 +539,7 @@ def check_index_roundtrip(prefix):
                 if bad <= 2:
                     FAILS.append(f"索引往返 {key} row{row}：{got[:3]} vs {want[row][:3]}")
         cf.close()
-    expect(lanes_checked, 11, "查过的行数")
+    expect(lanes_checked, 13, "查过的行数")
     expect(bad, 0, "索引往返应当逐段一致")
 
 
@@ -689,24 +721,30 @@ def check_http(prefix):
         expect(init["build"], index.build_id(manifest["source"]), "/api/init 的 build")
         expect(init["t_end"], 80, "/api/init 的 t_end")
         expect(init["rows"], ["TS-DTE-DATAIN", "TS-DTE", "TS-MU", "TS-VU",
-                              "DTE-Core", "DTE-DSA", "MU-Core", "MU-DSA",
-                              "VU-Core", "VU-DSA-ISQ", "VU-DSA"],
-               "/api/init 的十一行与顺序")
+                              "DTE-Core", "DTE-DSA", "MU-Core", "MU-DSA-ISQ",
+                              "MU-DSA", "MU-DSA-CALC", "VU-Core", "VU-DSA-ISQ",
+                              "VU-DSA"],
+               "/api/init 的十三行与顺序")
         expect(init["chips"][0][1][0][1], 1, "core0 派了角色")
-        expect(len(init["lane_n"]), 11, "/api/init 的行段数")
-        expect(init["lanes_per_core"], 11, "/api/init 的通道步长")
-        # 每行一条通道；十一种颜色各有其主。通道号与行序不是一回事：TS-DTE-DATAIN
-        # 在第 0 行、取的却是第 10 条通道。段上印的名字由 spans.SLOT_UNITS 按颜色号
-        # 取，两张表必须一样长。
+        expect(len(init["lane_n"]), 13, "/api/init 的行段数")
+        expect(init["lanes_per_core"], 13, "/api/init 的通道步长")
+        # 每行一条通道；十二种颜色各有其主。通道号与行序不是一回事：TS-DTE-DATAIN
+        # 在第 0 行取第 10 条通道，MU-DSA-ISQ 在第 7 行取第 11 条。段上印的名字由
+        # spans.SLOT_UNITS 按颜色号取，两张表必须一样长。
         expect(init["row_parts"][0], [{"lane": 10, "color": 10,
                                        "unit": "DATAIN-DTE"}],
                "/api/init 里 TS-DTE-DATAIN 那一行的一条通道")
         expect(init["row_parts"][1], [{"lane": 0, "color": 0, "unit": "TS-DTE"}],
                "/api/init 里 TS-DTE 那一行的一条通道")
-        expect(init["row_parts"][9], [{"lane": 9, "color": 9, "unit": "DSA-ISQ-VU"}],
+        expect(init["row_parts"][7], [{"lane": 11, "color": 11, "unit": "DSA-ISQ-MU"}],
+               "/api/init 里 MU-DSA-ISQ 那一行")
+        expect(init["row_parts"][9], [{"lane": 12, "color": 12,
+                                       "unit": "DSA-CALC-MU"}],
+               "/api/init 里 MU-DSA-CALC 那一行")
+        expect(init["row_parts"][11], [{"lane": 9, "color": 9, "unit": "DSA-ISQ-VU"}],
                "/api/init 里 VU-DSA-ISQ 那一行")
         used = [p["color"] for row in init["row_parts"] for p in row]
-        expect(sorted(used), list(range(11)), "/api/init 的十一种颜色各用一次")
+        expect(sorted(used), list(range(13)), "/api/init 的十三种颜色各用一次")
 
         with get("/") as r:
             page = r.read()
@@ -736,12 +774,12 @@ def check_http(prefix):
             expect(raw[8 + n + e["off"]:8 + n + e["off"] + e["len"]], want_bytes,
                    "/api/window 的切片")
             expect((head["t0"], head["t1"]), (0, 80), "帧头里的窗口")
-        with get("/api/window?lanes=0-10&t0=0&t1=80&px=1200") as r:
+        with get("/api/window?lanes=0-12&t0=0&t1=80&px=1200") as r:
             raw = r.read()
             n = struct.unpack_from("<I", raw, 4)[0]
             head = json.loads(raw[8:8 + n])
-            # 十一条通道条条有段（见 check_rows），所以十一条全回。
-            expect(sorted(e["lane"] for e in head["lanes"]), list(range(11)),
+            # 十三条通道条条有段（见 check_rows），所以十三条全回。
+            expect(sorted(e["lane"] for e in head["lanes"]), list(range(13)),
                    "有段的行才回，空的跳过")
 
         st = json.loads(get("/api/status").read())

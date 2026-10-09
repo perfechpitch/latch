@@ -44,6 +44,10 @@ struct MuInflight {
   MuAgu agu;
   uint64_t total = 1;
   uint64_t issued = 0, computed = 0, stored = 0;
+  // 这一笔实际产出过几个 prim。`computed` 数的是喂进去的 tile，而一个 tile 未必产出
+  // prim（一列算完那一遍才产），两者不等；波形上认「这笔的第一个 prim 进执行单元」
+  // 要靠这个计数。判据见 mu.h 的 Ctrl::Compute()。
+  uint64_t prim_out = 0;
   // acu 查出越界：这一笔余下的数据全部作废，已发出的回复收回来也不算。
   bool dropped = false;
   // 各 tile 写回哪。发读的时候由 AGU 算出来记下，算完那一拍再取，因为 AGU 的

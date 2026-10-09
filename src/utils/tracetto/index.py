@@ -5,7 +5,7 @@
 ```
 moe_lpu.tracetto-index/
   manifest.json          格式版本 + 波形身份 + 树 + 每条行的段数
-  cores/<core_idx>.bin   一个 core 十一条行放一个文件（一个 core 的十一条行永远一起被看）
+  cores/<core_idx>.bin   一个 core 十三条行放一个文件（一个 core 的十三条行永远一起被看）
   .building.<pid>.<xx>/  建索引时的临时目录，建成再 rename 过去
 ```
 
@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import spans as S
 
-INDEX_FORMAT = 11  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
+INDEX_FORMAT = 13  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
                    #    带上行名（TS-DTE / CORE-DTE …）。5：段间隔改 zigzag，
                    #    重叠的段能原样解回来。6：VU 那条 DSA 拆成两行（VU-DSA-ISQ
                    #    在前），十条通道 —— 每条 core 的头里 lane_off 从 9 个变 10 个。
@@ -48,6 +48,10 @@ INDEX_FORMAT = 11  # 2：七行显示 + 九条通道；3：段上印的单元名
                    #    （TS-DTE 不动，还是「下发 → DSA 做完」）。
                    #    11：TS-DTE 拆成两行（TS-DTE-DATAIN 在前），十一条通道 ——
                    #    每条 core 的头里 lane_off 又从 10 个变 11 个。
+                   #    12：MU-DSA 拆成两行（MU-DSA-ISQ 在前），十二条通道 ——
+                   #    lane_off 又从 11 个变 12 个。
+                   #    13：加 MU-DSA-CALC（嵌在 MU-DSA 里的子区间），十三条通道
+                   #    —— lane_off 从 12 个变 13 个。
                    #    复用判据只看波形身份，改展示不会自动重建；格式号不对时打开
                    #    索引会要求重建。
 INDEX_SUFFIX = ".tracetto-index"
@@ -257,7 +261,7 @@ def encode_l1(seg_spans: List[List[int]], t_end: int) -> Tuple[bytes, int, int]:
 
 def encode_core(core_idx: int, lane_spans: List[List[List[int]]],
                 lane_base: int, t_end: int) -> bytes:
-    """一个 core 的十一条行 → 一个完整文件的字节。"""
+    """一个 core 的十三条行 → 一个完整文件的字节。"""
     n_lanes = S.LANES_PER_CORE
     if len(lane_spans) != n_lanes:
         raise ValueError(f"core {core_idx} 只给了 {len(lane_spans)} 条行")
@@ -323,7 +327,7 @@ class LaneView:
 
 
 class CoreFile:
-    """一个 core 的索引文件：头 + 十一条行的头 + 按窗口切一段字节出来。"""
+    """一个 core 的索引文件：头 + 十三条行的头 + 按窗口切一段字节出来。"""
 
     def __init__(self, path: Path):
         self.path = path

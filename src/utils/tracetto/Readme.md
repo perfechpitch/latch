@@ -3,7 +3,7 @@
 起一个本地服务，把 latch 的 `.trace` 里每个 core 的 user / task 分段看成一页波形。
 
 自己一套：自己的波形解码、自己的索引、自己的协议、自己的前端（`web/`），不依赖仓库里别的
-Python、也不用第三方包。左边树是 `chip → core → 十一行`，右边是波形；一笔画成一段，
+Python、也不用第三方包。左边树是 `chip → core → 十三行`，右边是波形；一笔画成一段，
 段上写 `User_id 77 CORE-MU 5 12拍` —— 77 是 user_id、`CORE-MU` 是单元（前缀标明哪一行：
 `TS-` / `CORE-` / `DSA-`）、5 是 task 号、12 是持续多少拍。
 行名只在左边树上写一遍，画布里不重复，所以波形是从画布最左边开始铺的。
@@ -22,9 +22,9 @@ python3 src/utils/tracetto/tracetto.py moe_lpu --dump         # 把索引的 man
 也可以 `python3 -m src.utils.tracetto moe_lpu`（在仓库根下）。默认监听 `127.0.0.1:8766`，占了就往上
 找；`--host` / `--port` / `--workers`（建索引用几个进程）可以改。
 
-## 十一行与十一条通道
+## 十三行与十三条通道
 
-core 底下列的不是 `cmcm_q` 那些信号，而是十一条派生行：
+core 底下列的不是 `cmcm_q` 那些信号，而是十三条派生行：
 
 | 行 | 画什么 |
 | - | - |
@@ -32,24 +32,36 @@ core 底下列的不是 `cmcm_q` 那些信号，而是十一条派生行：
 | `TS-DTE` | 主线那一步从 **TaskCtrl 把它装进 stream** 到**这一路的 RV core 接下它** |
 | `TS-MU` / `TS-VU` | 同上；MU / VU 没有 Router 触发那一路，各只有一行 |
 | `X-Core` | 这一路 RV core 执行一笔 task 的那几拍（`rv_start`→`rv_done`）。每个用户各一段，时间上可以重叠 |
-| `X-DSA` | 这一路 DSA 手上有活的那几拍（`dsa_start`→`dsa_done`）。每个用户各一段，时间上可以重叠 |
-| `VU-DSA-ISQ` | 只有 VU 有。那条 task 起点宏指令从**被 `config_register` 收下 trigger** 到**真正发行进执行流水**的那一段 —— 收下了为什么还不算，看这一行 |
+| `MU-DSA-ISQ` / `VU-DSA-ISQ` | 一笔任务从**被单元收下**到**真正发行进执行通路**的那一段 —— 收下了为什么还不算，看这一行。MU 的收下是写 `TASK_TRIGGER` 被 `regfile` 锁成一笔，VU 的是 `config_register` 收到那条宏指令 |
+| `X-DSA` | 这一路 DSA 真正发行之后手上一直有活的那几拍。每个用户各一段，时间上可以重叠 |
+| `MU-DSA-CALC` | 只有 MU 有。这笔任务**在矩阵执行单元里进出所跨的那一段**（第一个真正产出的 prim 进 → 最后一个 prim 被取走）。**它不是切分，是嵌在 `MU-DSA` 里面的子区间** |
 
 TS 那一族量的都是「这一步在 TS 里等了多久」，终点都是这一路的 `rv_start`，所以每一行都跟
 下面 `X-Core` 那一行首尾相接、不重叠。DTE 拆成两行是因为它既有主线又有 Router 触发的搬入：
 `TS-DTE-DATAIN` 摆在 `TS-DTE` 上面。MU / VU 的仲裁器没有 DataIn 通路，所以不拆。
 
-VU 的 DSA 那一行拆成了两段：`VU-DSA-ISQ` 量「收下 trigger → 真正发行」，`VU-DSA` 从
-**真正发行**起算、到 EVENT_EN 的宏指令退休报 `dsa_done` 为止。两行首尾相接，起点那一拍是同一个。
-DTE / MU 没有这一层，它们的 DSA 行仍从各自「过门槛」那一拍起算。
+MU / VU 的 DSA 那一行各拆成了两段（DTE 没有这一层，仍从「过门槛」那一拍起算）：
 
-索引里一条 core 是**十一条通道**（`TS·DTE`/`TS·MU`/`TS·VU`/`DTE_DATAIN` 四条，加每单元各一对
-Core/DSA，加 VU 单有的 DSA-START），十一行只是呈现层：TS 那四行各取一条通道，其余各取一条。
-**通道号与显示行序不是一回事** —— 新通道一律追加在末尾，行序可以另排。显示顺序是
-`TS-DTE-DATAIN` / `TS-DTE` / `TS-MU` / `TS-VU` / `DTE-Core` / `DTE-DSA` / `MU-Core` /
-`MU-DSA` / `VU-Core` / `VU-DSA-ISQ` / `VU-DSA`。
+- `MU-DSA-ISQ` = 「`regfile` 收下 trigger → 第一个 tile 真正发起访存」，
+  `MU-DSA` = 「真正发行 → `dsa_done`」。中间夹着「进 `issue_q`」（那条 `dsa_start`
+  仍照发，只是拆开之后它不再是行的边界）—— 这一段正是「收下了为什么还不算」。
+- `VU-DSA-ISQ` = 「`config_register` 收下 trigger → 宏指令进执行流水」，
+  `VU-DSA` = 「真正发行 → EVENT_EN 的宏指令退休报 `dsa_done`」。
 
-**颜色一共十一种**，只按“行”与“单元”分，与 user 无关：同一个颜色下可以有很多个 user，
+两对都首尾相接，起点那一拍是同一个。
+
+`MU-DSA-CALC` 与上面所有行**形态不同**：那几行都是把一段切成首尾相接的两半，而 CALC 是**嵌在
+`MU-DSA` 里面的子区间** —— 它整段落在 `MU-DSA` 里面（起点比它晚、终点比它早），画面上两者重叠。
+它回答的是「`MU-DSA` 那一段里，真正在执行单元里算的是哪几拍」：实测 `chip0.core1` 一笔 75 拍的
+`MU-DSA` 里，CALC 只占中间一段，前面在发读请求等数据、后面在收尾。
+
+索引里一条 core 是**十三条通道**（`TS·DTE`/`TS·MU`/`TS·VU`/`DTE_DATAIN` 四条，加每单元各一对
+Core/DSA，加 MU 与 VU 各一条 DSA-ISQ、加 MU 一条 DSA-CALC），十三行只是呈现层：TS 那四行各取一条
+通道，其余各取一条。**通道号与显示行序不是一回事** —— 新通道一律追加在末尾，行序可以另排。
+显示顺序是 `TS-DTE-DATAIN` / `TS-DTE` / `TS-MU` / `TS-VU` / `DTE-Core` / `DTE-DSA` / `MU-Core` /
+`MU-DSA-ISQ` / `MU-DSA` / `MU-DSA-CALC` / `VU-Core` / `VU-DSA-ISQ` / `VU-DSA`。
+
+**颜色一共十三种**，只按“行”与“单元”分，与 user 无关：同一个颜色下可以有很多个 user，
 谁是谁看段上的 `User_id` 字。用户上千个，按 user 上色必然撞色。
 
 只有 Router 在用的 core（坏 core 与 TS 没配过任务的好 core，没有 `ts_inflight`）没有数据，树上标“只有 Router”，点不开。
@@ -61,7 +73,7 @@ Core/DSA，加 VU 单有的 DSA-START），十一行只是呈现层：TS 那四�
 ```
 moe_lpu.tracetto-index/
   manifest.json          格式版本 + 波形身份 + 树 + 每条行的段数
-  cores/<core_idx>.bin   一个 core 的十一条通道放一个文件
+  cores/<core_idx>.bin   一个 core 的十三条通道放一个文件
 ```
 
 - **什么时候建**：第一次起服务自动建（多进程并行，打进度）；之后波形没变就直接复用
@@ -136,7 +148,7 @@ moe_lpu.tracetto-index/
 
 ## 波形要带的信号
 
-工具读这二十七条，另拿 `ts_inflight` 认一个 core 是不是只有 Router 在用：
+工具读这三十三条，另拿 `ts_inflight` 认一个 core 是不是只有 Router 在用：
 
 | 组 | 信号 |
 | - | - |
@@ -144,7 +156,8 @@ moe_lpu.tracetto-index/
 | 装进 stream | `ts_create` / `ts_create_task` / `ts_create_user`（建表）、`ts_install` / `ts_install_task` / `ts_install_user`（装后继）—— 两条都是单调计数器，身份是标量 |
 | RV core | `rv_start` / `rv_start_task` / `rv_start_user`、`rv_done` / `rv_done_task` / `rv_done_user` |
 | DSA | `dsa_start` / `dsa_start_task` / `dsa_start_user`、`dsa_done` / `dsa_done_task` / `dsa_done_user` |
-| VU 那条 task 起点宏指令 | `dsa_task_trigger` / `dsa_task_trigger_task` / `dsa_task_trigger_user`（trigger 被收下）、`dsa_task_dispatch` / `dsa_task_dispatch_task` / `dsa_task_dispatch_user`（真正发行） |
+| 一笔任务在单元里的两端 | `dsa_task_trigger` / `dsa_task_trigger_task` / `dsa_task_trigger_user`（被收下）、`dsa_task_dispatch` / `dsa_task_dispatch_task` / `dsa_task_dispatch_user`（真正发行）|
+| MU 那段计算的两端 | `dsa_calc_start` / `dsa_calc_start_task` / `dsa_calc_start_user`（第一个 prim 进矩阵执行单元）、`dsa_calc_done` / `dsa_calc_done_task` / `dsa_calc_done_user`（最后一个 prim 被取走）|
 
 边沿的起点是各家“过门槛”那一拍（DTE 过 Commit 准入、MU 进 issue_q、VU 被 ISQ 收下；
 RV core 是执行器接下队头那笔），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
@@ -153,22 +166,40 @@ RV core 是执行器接下队头那笔），终点是各家把完成报回去那
 「装进 stream」那六条不是边沿：它们是**只加不清零的计数器**，判据是“这一拍的值比上一拍
 大”，身份在涨的那一拍单独取（标量，不是按位打包）。`TS-MU` / `TS-VU` 的起点从这里取。
 
-最后那一对只有 VU 的位（bit2）会抬，量的是同一个 task 第一条宏指令的两拍：`dsa_task_trigger`
-是它被 `config_register` 收下 trigger 那一拍（比 ISQ 收下还早），`dsa_task_dispatch` 是它真正
-发行进执行流水、`pipe_ctrl` 收下那一拍。`VU-DSA-ISQ` 取这两拍，`VU-DSA` 从后一拍起算。
+最后那一对（`dsa_task_trigger` / `dsa_task_dispatch`）量的是**一笔任务在单元里的两端**，
+MU 抬 bit1、VU 抬 bit2，DTE 恒 0：
+
+- `dsa_task_trigger` = 单元把这一笔收进自己的配置入口那一拍。MU 是写 `TASK_TRIGGER` 被
+  `regfile` 锁成一笔，VU 是被 `config_register` 收下那条宏指令（比 ISQ 收下还早）。
+- `dsa_task_dispatch` = 它真正发行进执行通路那一拍。MU 是这一笔的第一个 tile 开始发起
+  访存，VU 是宏指令进执行流水。
+
+`MU-DSA-ISQ` / `VU-DSA-ISQ` 取这两拍，`MU-DSA` / `VU-DSA` 从后一拍起算。
+
+最后那一对（`dsa_calc_start` / `dsa_calc_done`）**只有 MU 抬 bit1**，量的是这笔任务的 prim
+在矩阵执行单元里进出所跨的一段：
+
+- `dsa_calc_start` = 它第一个**真正产出**的 prim 进 exe 那一拍。**不是「第一个 tile」** ——
+  一笔任务按 tile 走 `kblock × 专家数 × nblock` 遍，但一列算完那一遍才产 prim，前面几段 K 只累加，
+  所以模型里 `MatrixExe::Issue()` 特意返回「这一遍有没有真的产出 prim」，波形判据认的是它。
+- `dsa_calc_done` = 它最后一个 prim 被从流水线**取走**那一拍（取走之后那一格才真的空出来，
+  `exe.inflight` 就是 `pipe.size()`）。不是 `ready_at` —— 那只说明结果算完、可用。
+
+两个点都是**定义式**的，与 tile 怎么切无关，也不绑流水线深度那个常数；越界那一笔一个 prim 都不产，
+两端都不计（它没有计算阶段）。`MU-DSA-CALC` 取这两拍，整段落在 `MU-DSA` 里面。
 
 波形里缺 `ts_user`、边沿信号或「装进 stream」那几条时，启动会提醒缺哪几条，缺的那些行是空的。
 
 ## 性能与规模
 
-实测（`moe_lpu.trace`，2.9 MB / 48 chip / 480 个 core 其中 402 个配了任务 / 4422 条通道）：
+实测（`moe_lpu.trace`，2.9 MB / 48 chip / 480 个 core 其中 402 个配了任务 / 5226 条通道）：
 
 | 量 | 值 |
 | - | - |
 | 建索引 | 32 进程 **0.1 s**，索引 **0.3 MB** |
 | 第二次起服务 | **几毫秒**（波形没变，直接用现成的索引） |
 | `/api/init` | **13.0 KB**，gzip 之后 1.9 KB |
-| 一次窗口查询（一个 core 的十一条通道，看全波形） | 计算 core **552 B**，dot core **888 B**（平移缩放走这条） |
+| 一次窗口查询（一个 core 的十三条通道，看全波形） | 计算 core **552 B**，dot core **888 B**（平移缩放走这条） |
 | 服务常驻内存 | 几十 MB（索引文件按需打开，最多同时开 64 个） |
 
 合成波形按“每条行的段数 ×K”量过（`selftest` 里就有这条）：
@@ -192,7 +223,7 @@ O(可见行数)（前端限一次 200 行）；浏览器每帧画的块数 = O(�
 
 ## 页面怎么用
 
-- 左边点 chip 展开 core，点 core 展开它那十一行（开头只列 chip，免得一屏铺几千行）。
+- 左边点 chip 展开 core，点 core 展开它那十三行（开头只列 chip，免得一屏铺几千行）。
 - 滚轮缩放（锚在鼠标处）、按住拖拽平移、`F` 看全、方向键平移、`+` / `-` 缩放。
 - 悬停看某一段的全文与起止；点一下选中它，底下给出 `chip · core · 行`、
   `User_id · 单元 · task`、起止与拍数。
@@ -204,7 +235,7 @@ O(可见行数)（前端限一次 200 行）；浏览器每帧画的块数 = O(�
 
 - **段太多时只有密度**：缩到一屏几千段时服务端给的是粗层格子（一格一色 + 深浅表示忙的
   比例），段上的字与精确边界都没了 —— 放大回来就有。
-- **颜色只有十一种**（每行一种），不区分 user：同一颜色下会有很多笔不同的
+- **颜色只有十三种**（每行一种），不区分 user：同一颜色下会有很多笔不同的
   task，认哪一笔靠段上印的 `User_id`。
 - **段表没有了**：段是按窗口取的，所以只在点选时给单段的明细，不再列整条行的表。
 - 属性框里的耗时是精确的（段就在手上），但没有“忙多少拍 / 占多少比例”这类统计 ——
@@ -219,6 +250,6 @@ O(可见行数)（前端限一次 200 行）；浏览器每帧画的块数 = O(�
 python3 src/utils/tracetto/selftest_tracetto.py
 ```
 
-造几份合成波形，把读波形、分段、十一行、索引往返、窗口查询（exact 与 coarse）、复用与
+造几份合成波形，把读波形、分段、十三行、索引往返、窗口查询（exact 与 coarse）、复用与
 失效（含“同大小同 mtime 换内容”）、并行确定性、规模检查（init 与窗口传输不随段数涨）、
 HTTP 端到端各查一遍。`ctest -R tracetto` 也是这一条。
