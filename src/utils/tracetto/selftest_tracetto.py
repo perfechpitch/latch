@@ -119,8 +119,12 @@ def lanes_to_signals(evs, lanes=3):
 RV_EV = [(11, 0, 3, 77), (41, 1, 5, 77), (60, 2, 0xFF, 0xFFFF), (71, 0, 7, 77)]
 RV_DONE_EV = [(20, 0, 3, 77), (50, 1, 5, 77), (70, 2, 0xFF, 0xFFFF),
               (76, 0, 7, 77)]
-DSA_EV = [(14, 0, 3, 77), (44, 1, 5, 77)]
+DSA_EV = [(14, 0, 3, 77), (44, 1, 5, 77), (52, 0, 7, 77)]
 DSA_DONE_EV = [(30, 0, 3, 77), (70, 1, 5, 77)]
+# DTE 的第二笔 DSA（起手 52）**只有「完成了但不报」的那条完成**（链一 / 自启动 Bypass
+# 那一路），没有 dsa_done。DTE-DSA 的终点把两条完成流并起来才收得住它 —— 不并的话
+# 这一段会一直延到波形末（这正是真波形上那 3311 段的成因）。只有 DTE 有。
+DSA_NOACK_EV = [(60, 0, 7, 77)]
 # 一笔任务在单元里的两端：收下（trigger）→ 真正发行（dispatch）。MU 抬 bit1、VU 抬 bit2。
 #   VU：收下 16 → 发行 22。VU-DSA-ISQ 量这两拍；VU 没有 dsa_done，VU-DSA 从 22 延到波形末。
 #   MU：收下 36 → 发行 46。中间夹着 dsa_start（44，即「进 issue_q」）—— 拆开之后它不再是
@@ -162,6 +166,8 @@ MODULES = [
     (131, 2, "dsa_calc_start_user"),
     (132, 2, "dsa_calc_done"), (133, 2, "dsa_calc_done_task"),
     (134, 2, "dsa_calc_done_user"),
+    (135, 2, "dsa_done_noack"), (136, 2, "dsa_done_noack_task"),
+    (137, 2, "dsa_done_noack_user"),
 ]
 SIGNALS = {
     100: [(10, 1), (40, 2), (70, 1)],             # DTE 两发，MU 一发
@@ -185,6 +191,10 @@ for _base, _ev, _done in ((105, RV_EV, RV_DONE_EV), (111, DSA_EV, DSA_DONE_EV),
     _dm, _dt, _du = lanes_to_signals(_done)
     SIGNALS[_base], SIGNALS[_base + 1], SIGNALS[_base + 2] = _m, _t, _u
     SIGNALS[_base + 3], SIGNALS[_base + 4], SIGNALS[_base + 5] = _dm, _dt, _du
+
+# 第二条完成流：不是一对边沿，只是三条信号（掩码 / task / user）。
+_m, _t, _u = lanes_to_signals(DSA_NOACK_EV)
+SIGNALS[135], SIGNALS[136], SIGNALS[137] = _m, _t, _u
 
 
 def with_trace(fn):
@@ -218,6 +228,8 @@ def synth_scaled(path, cores, rounds):
                      "dsa_calc_start_user",
                      "dsa_calc_done", "dsa_calc_done_task",
                      "dsa_calc_done_user",
+                     "dsa_done_noack", "dsa_done_noack_task",
+                     "dsa_done_noack_user",
                      "ts_create", "ts_create_task", "ts_create_user",
                      "ts_install", "ts_install_task", "ts_install_user"):
             sig[name] = mid
@@ -227,6 +239,7 @@ def synth_scaled(path, cores, rounds):
         rv_ev, rv_done_ev, dsa_ev, dsa_done_ev = [], [], [], []
         trig_ev, disp_ev, loads = [], [], []
         calc_start_ev, calc_done_ev = [], []
+        noack_ev = []
         t = 10
         for i in range(rounds):
             for u in range(3):
@@ -239,7 +252,13 @@ def synth_scaled(path, cores, rounds):
                 rv_ev.append((t, u, tk, usr))
                 rv_done_ev.append((t + 5, u, tk, usr))
                 dsa_ev.append((t + 2, u, tk, usr))
-                dsa_done_ev.append((t + 6, u, tk, usr))
+                # DTE 每 4 轮把终点的**另一条流**踩一脚：这一轮不报 TS，走
+                # `dsa_done_noack`（链一/自启动 Bypass 那一路）。段数不变，只是换一条
+                # 完成流收尾。
+                if u == 0 and i % 4 == 3:
+                    noack_ev.append((t + 6, 0, tk, usr))
+                else:
+                    dsa_done_ev.append((t + 6, u, tk, usr))
                 # 这一步上一拍装进 stream，本拍 RV core 接下 —— TS 那几行量的就是
                 # 这一拍之差。DTE 那一路每 8 轮把装进 stream 挪到**下发之后**：搬入
                 # 任务（Router 触发）就是那个样子，好让 TS-DTE-DATAIN 也有段。
@@ -279,7 +298,8 @@ def synth_scaled(path, cores, rounds):
                           ("dsa_task_trigger", trig_ev),
                           ("dsa_task_dispatch", disp_ev),
                           ("dsa_calc_start", calc_start_ev),
-                          ("dsa_calc_done", calc_done_ev)):
+                          ("dsa_calc_done", calc_done_ev),
+                          ("dsa_done_noack", noack_ev)):
             m, pt, pu = lanes_to_signals(evs)
             signals[sig[base]] = m
             signals[sig[base + "_task"]] = pt
@@ -294,7 +314,7 @@ def check_tree(prefix):
     try:
         paths = r.tree_paths()
         expect(paths[100], "chip0.core0.ts_unit", "层次名")
-        expect(r.signals(), list(range(100, 135)), "信号号列表")
+        expect(r.signals(), list(range(100, 138)), "信号号列表")
         ts, vs = r.events(100)
         expect(list(zip(ts, vs)), [(10, 1), (40, 2), (70, 1)], "ts_unit 的事件")
         expect(len(r.segments(100)), 1, "一个信号的段数（非零一直连着）")
@@ -377,7 +397,9 @@ def check_labels(prefix):
         r.close()
     dsa = S.edge_spans(S.issue_events(st, sv, stt, stv, sut, suv, 0),
                        S.issue_events(dt, dv, dtt, dtv, dut, duv, 0), 80)
-    expect(dsa, [[14, 30, 77, 3]], "DTE 的 DSA 段带身份")
+    # 第二笔（52 起手）在 dsa_done 上没有终点，所以这里延到波形末 —— 它靠
+    # dsa_done_noack 收尾，那条在 check_rows 里查（DTE-DSA 那一行）。
+    expect(dsa, [[14, 30, 77, 3], [52, 80, 77, 7]], "DTE 的 DSA 段带身份")
     expect(S.edge_spans([], [], 80), [], "没有边沿就没有段")
 
 
@@ -483,7 +505,10 @@ def check_rows(prefix):
     expect(rows[3], [[11, 20, 77, 3], [71, 76, 77, 7]], "DTE_Core（两笔）")
     expect(rows[4], [[60, 70, -1, -1]], "VU_Core（身份是占位）")
     expect(rows[5], [[41, 50, 77, 5]], "MU_Core")
-    expect(rows[6], [[14, 30, 77, 3]], "DTE_DSA")
+    # DTE_DSA 的终点有两个：`dsa_done` 与 `dsa_done_noack`。52 起手那一笔只有后者，
+    # 所以这一段收在 60 而不是延到波形末的 80 —— 这条断言就是这一行存在的理由。
+    expect(rows[6], [[14, 30, 77, 3], [52, 60, 77, 7]],
+           "DTE_DSA（两条完成流合一）")
     # VU 那一路：起点从「ISQ 收下」换成了「真正发行」（22），VU 没有 dsa_done，
     # 这一段延到波形末；被切掉的前半截归 VU_DSA_ISQ（16..22）。两行首尾相接。
     expect(rows[7], [[22, 80, 77, 3]], "VU_DSA（从真正发行起算）")

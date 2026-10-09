@@ -33,7 +33,7 @@ core 底下列的不是 `cmcm_q` 那些信号，而是十三条派生行：
 | `TS-MU` / `TS-VU` | 同上；MU / VU 没有 Router 触发那一路，各只有一行 |
 | `X-Core` | 这一路 RV core 执行一笔 task 的那几拍（`rv_start`→`rv_done`）。每个用户各一段，时间上可以重叠 |
 | `MU-DSA-ISQ` / `VU-DSA-ISQ` | 一笔任务从**被单元收下**到**真正发行进执行通路**的那一段 —— 收下了为什么还不算，看这一行。MU 的收下是写 `TASK_TRIGGER` 被 `regfile` 锁成一笔，VU 的是 `config_register` 收到那条宏指令 |
-| `X-DSA` | 这一路 DSA 真正发行之后手上一直有活的那几拍。每个用户各一段，时间上可以重叠 |
+| `X-DSA` | 这一路 DSA 真正发行之后手上一直有活的那几拍，到单元把完成报回去为止。每个用户各一段，时间上可以重叠。DTE 那一路有**两个**终点，见下 |
 | `MU-DSA-CALC` | 只有 MU 有。这笔任务**在矩阵执行单元里进出所跨的那一段**（第一个真正产出的 prim 进 → 最后一个 prim 被取走）。**它不是切分，是嵌在 `MU-DSA` 里面的子区间** |
 
 TS 那一族量的都是「这一步在 TS 里等了多久」，终点都是这一路的 `rv_start`，所以每一行都跟
@@ -148,7 +148,7 @@ moe_lpu.tracetto-index/
 
 ## 波形要带的信号
 
-工具读这三十三条，另拿 `ts_inflight` 认一个 core 是不是只有 Router 在用：
+工具读这三十六条，另拿 `ts_inflight` 认一个 core 是不是只有 Router 在用：
 
 | 组 | 信号 |
 | - | - |
@@ -156,12 +156,25 @@ moe_lpu.tracetto-index/
 | 装进 stream | `ts_create` / `ts_create_task` / `ts_create_user`（建表）、`ts_install` / `ts_install_task` / `ts_install_user`（装后继）—— 两条都是单调计数器，身份是标量 |
 | RV core | `rv_start` / `rv_start_task` / `rv_start_user`、`rv_done` / `rv_done_task` / `rv_done_user` |
 | DSA | `dsa_start` / `dsa_start_task` / `dsa_start_user`、`dsa_done` / `dsa_done_task` / `dsa_done_user` |
+| DTE 那个不报的完成 | `dsa_done_noack` / `dsa_done_noack_task` / `dsa_done_noack_user` —— 只有 DTE 抬 bit0 |
 | 一笔任务在单元里的两端 | `dsa_task_trigger` / `dsa_task_trigger_task` / `dsa_task_trigger_user`（被收下）、`dsa_task_dispatch` / `dsa_task_dispatch_task` / `dsa_task_dispatch_user`（真正发行）|
 | MU 那段计算的两端 | `dsa_calc_start` / `dsa_calc_start_task` / `dsa_calc_start_user`（第一个 prim 进矩阵执行单元）、`dsa_calc_done` / `dsa_calc_done_task` / `dsa_calc_done_user`（最后一个 prim 被取走）|
 
 边沿的起点是各家“过门槛”那一拍（DTE 过 Commit 准入、MU 进 issue_q、VU 被 ISQ 收下；
 RV core 是执行器接下队头那笔），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
 边沿自带身份，段的标签直接取自边沿。
+
+**DTE 那一路的终点有两个**，因为它的完成分两种去向：`ack_ts_en` 置了的报回 TS（`dsa_done`），
+没置的（自启动 core 的链一 Bypass DataIn、身份是保留号 63，以及别的不上报的搬入）在
+`CompletionRs::Join()` 里就被判为不上报，`Report()` 那一步压根不会碰它。**不报不等于没完成**，
+所以另发一条 `dsa_done_noack`，判据挂在 `Report()` 的 `if (!p.notify)` 那一支上 ——
+`Report()` 一拍只处理一笔，所以这里抬计数天然是「一拍一笔」，波形上不会互相盖掉。
+（试过把判据挪到 `Join()`：那里一拍按通道扫、能收好几笔，一笔会盖掉另一笔；加个队列
+补上「一拍一发」也不行，背压一动就把段拉长了。）
+
+两者**互斥** —— 一个完成只走一支 —— 所以 `DTE-DSA` 那一行的终点就是把两条流**按时间并起来**，
+不用去重。不并的话那批只能延到波形末（`moe_lpu_tokens` 上实测：链一那 928 段原来最长
+17335 拍、并上之后 192 拍）。
 
 「装进 stream」那六条不是边沿：它们是**只加不清零的计数器**，判据是“这一拍的值比上一拍
 大”，身份在涨的那一拍单独取（标量，不是按位打包）。`TS-MU` / `TS-VU` 的起点从这里取。

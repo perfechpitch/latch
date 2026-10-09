@@ -59,6 +59,12 @@ SIG_DSA_START_USER = "dsa_start_user"
 SIG_DSA_DONE = "dsa_done"
 SIG_DSA_DONE_TASK = "dsa_done_task"
 SIG_DSA_DONE_USER = "dsa_done_user"
+# 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）：自启动 core 的 Bypass DataIn（链一，
+# 保留号 63）与权重加载阶段的 datain。只有 DTE 抬 bit0。与上面那对**互斥** —— 一个完成
+# 只走一支，所以两条流不相交，DTE-DSA 的终点直接并起来当一条流用即可。
+SIG_DSA_NOACK = "dsa_done_noack"
+SIG_DSA_NOACK_TASK = "dsa_done_noack_task"
+SIG_DSA_NOACK_USER = "dsa_done_noack_user"
 # 一笔任务在单元里的两端，比 DSA 那对更靠前：起点是单元把它收进自己的配置入口那一拍
 # （MU 写 TASK_TRIGGER 被 regfile 锁成一笔、VU 被 config_register 收下 trigger），
 # 终点是它真正发行进执行通路那一拍（MU 第一个 tile 开始发起访存、VU 宏指令进流水）。
@@ -84,6 +90,9 @@ RV_EDGE = (SIG_RV_START, SIG_RV_START_TASK, SIG_RV_START_USER,
            SIG_RV_DONE, SIG_RV_DONE_TASK, SIG_RV_DONE_USER)
 DSA_EDGE = (SIG_DSA_START, SIG_DSA_START_TASK, SIG_DSA_START_USER,
             SIG_DSA_DONE, SIG_DSA_DONE_TASK, SIG_DSA_DONE_USER)
+# DTE-DSA 的**另一个**终点：完成了但不报的那一批。它不是一对边沿（起点的另一半），
+# 而是与 DSA_EDGE 的后三条**并列**的另一条完成流。
+NOACK_EDGE = (SIG_DSA_NOACK, SIG_DSA_NOACK_TASK, SIG_DSA_NOACK_USER)
 # MU / VU 那一对：收下 → 真正发行。
 TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
                    SIG_TASK_DISP, SIG_TASK_DISP_TASK, SIG_TASK_DISP_USER)
@@ -97,11 +106,11 @@ STEP_SIGS = (SIG_TS_CREATE, SIG_TS_CREATE_TASK, SIG_TS_CREATE_USER,
              SIG_TS_INSTALL, SIG_TS_INSTALL_TASK, SIG_TS_INSTALL_USER)
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
-             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE)
+             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE)
 # 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那些也在
 # 这里 —— TS-MU / TS-VU 与 MU-DSA-CALC 现在要读它们，老波形缺了那些行就是空的。
 NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS +
-            CALC_EDGE)
+            CALC_EDGE + NOACK_EDGE)
 
 # 索引里一个 core 的十三条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
@@ -495,6 +504,13 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         # 一个核上可以同时压着几个用户。Core 与 DSA 都按用户各画一段，不并成
         # 最早那笔的长段。
         core_rows.append(user_spans(rv_starts, rv_dones, t_end))
+        # DTE 那一路的 DSA 有**两个**终点：`dsa_done`（报给 TS 的）与 `dsa_done_noack`
+        # （完成了但不报的，链一/自启动 Bypass 走这条）。两者互斥，所以按时间并成一条
+        # 完成流就完事 —— 不并的话那 3311 笔只能延到波形末。
+        if u == 0:
+            na = issue_events(*ev(SIG_DSA_NOACK), *ev(SIG_DSA_NOACK_TASK),
+                              *ev(SIG_DSA_NOACK_USER), 0)
+            dsa_dones = sorted(dsa_dones + na, key=lambda e: e["t"])
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
         # TS 那几行都是「这一步在 TS 里等了多久」：起点是它进入 TS、可以被下发那一刻，

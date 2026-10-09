@@ -86,6 +86,12 @@ class CompletionRs : public BachModule {
   // task（Drive 的第三参默认 0），user 取自描述符里 RV core 采下来的那一份。
   uint64_t DoneTask() const { return done_task; }
   uint64_t DoneUser() const { return done_user; }
+  // 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）：自启动 core 的 Bypass DataIn、
+  // 权重加载阶段的 datain。与 Reported() 互斥，同一个 Pend 只走一支。Core 层发
+  // dsa_done_noack 用 —— 波形上 DTE-DSA 的终点要靠它，不报不等于没完成。
+  uint64_t NoAckCnt() const { return noack_cnt; }
+  uint64_t NoAckTask() const { return noack_task; }
+  uint64_t NoAckUser() const { return noack_user; }
 
   bool Quiescent() const override { return rs.empty() && pend.empty(); }
 
@@ -211,6 +217,13 @@ class CompletionRs : public BachModule {
       return;
     }
     if (!p.notify) {
+      // 完成了、但不报 TS（ack_ts_en = 0）：自启动 core 的链一 Bypass DataIn（保留号
+      // 63）、以及别的不上报的搬入。**不报不等于没完成** —— 记下来，波形上 DTE-DSA
+      // 的终点靠它收尾，否则那些段只能延到波形末。Report() 一拍只处理一笔，所以这里
+      // 抬计数天然是「一拍一笔」，不会互相盖掉。
+      ++noack_cnt;
+      noack_task = p.task_id;
+      noack_user = p.user_id;
       pend.pop_front();
       to_ts->Idle();
       return;
@@ -236,6 +249,8 @@ class CompletionRs : public BachModule {
   std::map<uint64_t, Entry> rs;
   std::deque<Pend> pend;
   uint64_t join_pending = 0, report_pending = 0;
+  // 完成了但不报 TS 的笔数与最近一笔的身份，供 Core 层发 dsa_done_noack。
+  uint64_t noack_cnt = 0, noack_task = 0, noack_user = 0;
 
   // 刚报到 TS 那一笔的身份，供 Core 层发波形。
   uint64_t done_task = 0, done_user = 0;

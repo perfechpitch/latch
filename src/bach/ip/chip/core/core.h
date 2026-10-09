@@ -361,6 +361,7 @@ class Core : public BachModule {
     uint64_t disp_mask = 0, disp_task = 0, disp_user = 0;
     uint64_t calcmask = 0, calctask = 0, calcuser = 0;
     uint64_t cendmask = 0, cendtask = 0, cenduser = 0;
+    uint64_t namask = 0, natask = 0, nauser = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       DsaEv s = DsaStartOf(u);
       if (s.seq != dsa_start_seq[u]) {
@@ -404,6 +405,13 @@ class Core : public BachModule {
         cendtask |= (ce.task & 0xFFu) << (8 * u);
         cenduser |= (ce.user & 0xFFFFu) << (16 * u);
       }
+      DsaEv na = DsaDoneNoAckOf(u);
+      if (na.seq != dsa_done_noack_seq[u]) {
+        dsa_done_noack_seq[u] = na.seq;
+        namask |= 1ull << u;
+        natask |= (na.task & 0xFFu) << (8 * u);
+        nauser |= (na.user & 0xFFFFu) << (16 * u);
+      }
     }
     TracePerCycle("dsa_start", start_mask);
     TracePerCycle("dsa_start_task", start_task);
@@ -423,6 +431,9 @@ class Core : public BachModule {
     TracePerCycle("dsa_calc_done", cendmask);
     TracePerCycle("dsa_calc_done_task", cendtask);
     TracePerCycle("dsa_calc_done_user", cenduser);
+    TracePerCycle("dsa_done_noack", namask);
+    TracePerCycle("dsa_done_noack_task", natask);
+    TracePerCycle("dsa_done_noack_user", nauser);
   }
 
   // 三个 RV core 各自对一笔 task 的执行时间，两个端点各发三个信号。
@@ -667,6 +678,15 @@ class Core : public BachModule {
     return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser()};
   }
 
+  // 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）。只有 DTE（u == 0）有 ——
+  // 自启动 core 的 Bypass DataIn（保留号 63）与权重加载阶段的 datain 走这一路。
+  // 与 DsaDoneOf(0) 互斥，波形上 DTE-DSA 的终点取两者之一。
+  DsaEv DsaDoneNoAckOf(uint64_t u) {
+    if (u != 0) return {};
+    CompletionRs& c = dte->Completion();
+    return {c.NoAckCnt(), c.NoAckTask(), c.NoAckUser()};
+  }
+
   // 一笔任务在矩阵执行单元里进出所跨那一段的两端，只有 MU（u == 1）有：起点是它
   // 第一个真产出的 prim 进 exe，终点是最后一个 prim 被取走。另两位恒 0。
   DsaEv DsaCalcStartOf(uint64_t u) {
@@ -687,6 +707,8 @@ class Core : public BachModule {
   std::array<uint64_t, 3> dsa_task_trig_seq{}, dsa_task_disp_seq{};
   // 同上，MU 那一段计算的两个端点。
   std::array<uint64_t, 3> dsa_calc_start_seq{}, dsa_calc_done_seq{};
+  // 同上，DTE 那批「完成了但不报」的笔数。
+  std::array<uint64_t, 3> dsa_done_noack_seq{};
   // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
   // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。
