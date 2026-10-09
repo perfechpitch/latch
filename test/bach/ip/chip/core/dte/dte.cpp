@@ -520,10 +520,84 @@ static void FeedOversizedFrame() {
 
 TEST(BachDte, IllegalHeaderIsFatal) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(FeedOversizedFrame(), "Mover");
+  EXPECT_DEATH(FeedOversizedFrame(), "HeaderParser");
 }
 
-// Join：一笔任务搬完才报完成，不会报两次。三笔走同一个 path，认哪两半
+// Commit 三样一起拿：Completion RS 占满之后不再 dispatch，挡住半任务。
+TEST(BachDte, CommitNeedsAllThreeResources) {
+  uint64_t admitted = 0, stalled = 0, peak = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
+
+    // 存储侧一直不 ready，任务做不完，Completion RS 会被占满
+    class DeadMem : public BachModule {
+     public:
+      DeadMem(ClockPtr c, std::vector<std::shared_ptr<MemPort>> list)
+          : BachModule(c, "dead"), ports(std::move(list)) {}
+
+     protected:
+      void Step() override {
+        for (auto& p : ports) p->DriveSlave(false, false, nullptr);
+      }
+
+     private:
+      std::vector<std::shared_ptr<MemPort>> ports;
+    };
+    DeadMem mem_dead(clk, mem);
+    // 连着配 30 个纯包头任务，把 RS 占满（RS 只有 16 项）。
+    std::vector<RvCfgDriver::Task> tasks;
+    for (uint64_t i = 0; i < 30; ++i) {
+      RvCfgDriver::Task t;
+      t.stream = i % 8;
+      t.task = i;
+      t.user = 100 + i;
+      t.path = 0;
+      t.wr = {{kDteRegAddr0Dst, HeaderAddr(i % 8)},
+              {kDteRegTransMode, TransMode(Route::kRouterToCm, 0)},
+              {kDteRegTrigger, 0}};
+      tasks.push_back(t);
+    }
+    RvCfgDriver rv(clk, dte, tasks, 2);
+
+    class Probe : public BachModule {
+     public:
+      Probe(ClockPtr c, Dte& d) : BachModule(c, "probe"), dte(d) {}
+      uint64_t admitted = 0, stalled = 0;
+
+     protected:
+      void Step() override {
+        admitted = dte.Committer().Admitted();
+        stalled = dte.Committer().Stalled();
+        uint64_t u = dte.Completion().Used();
+        if (u > peak) peak = u;
+      }
+
+     public:
+      uint64_t peak = 0;
+
+     private:
+      Dte& dte;
+    };
+    Probe probe(clk, dte);
+    clk->Continue(400 * kPeriod);
+    RT::JoinAll();
+    admitted = probe.admitted;
+    stalled = probe.stalled;
+    peak = probe.peak;
+  }
+  RT::Reset();
+  // Completion RS 只有 16 项，在途的任务数任何时候都不超过它
+  EXPECT_LE(peak, kCompRsNum);
+  EXPECT_GT(admitted, 0u);
+  EXPECT_GT(stalled, 0u);   // 后面的被挡住了，不是丢了
+}
+
+// Join：一笔任务的两侧都满足才报完成，不会报两次。三笔走同一个 path，认哪两半
 // 属于同一笔靠的是 Commit 分配的内部序号。三个进核任务与三个包按到达顺序 FIFO
 // 配对。
 TEST(BachDte, JoinReportsExactlyOnce) {
@@ -560,6 +634,50 @@ TEST(BachDte, JoinReportsExactlyOnce) {
   ASSERT_EQ(tasks.size(), 3u);
   EXPECT_NE(tasks[0], tasks[1]);
   EXPECT_NE(tasks[1], tasks[2]);
+}
+
+// 中间 Buffer 满时向 Router 反压，不丢数据。
+TEST(BachDte, BufferFullBackpressuresRouter) {
+  uint64_t sent = 0, parsed = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Dte dte(clk, "dte");
+    DteDriver driver(clk, dte);
+    std::vector<std::shared_ptr<MemPort>> mem;
+    AttachDummyMem(dte, clk, mem);
+
+    // 存储侧不收，写那一半推不动，buffer 会满
+    class DeadMem : public BachModule {
+     public:
+      DeadMem(ClockPtr c, std::vector<std::shared_ptr<MemPort>> list)
+          : BachModule(c, "dead"), ports(std::move(list)) {}
+
+     protected:
+      void Step() override {
+        for (auto& p : ports) p->DriveSlave(false, false, nullptr);
+      }
+
+     private:
+      std::vector<std::shared_ptr<MemPort>> ports;
+    };
+    DeadMem mem_dead(clk, mem);
+    // 一个很大的包：256 B × 100 拍，buffer 只有 32 拍
+    constexpr uint64_t kBig = 100 * 256;
+    RvCfgDriver rv(clk, dte,
+                   {InboundTask(0, 0, 30, 0x400, kBig)}, 2);
+    FrameFeeder feed(clk, dte, {{20, MakeMsg(30, 0, kBig)}});
+    TsSide ts(clk, dte);
+    clk->Continue(200 * kPeriod);
+    RT::JoinAll();
+    sent = feed.sent;
+    parsed = ts.parsed;
+  }
+  RT::Reset();
+  EXPECT_EQ(parsed, 1u);
+  // buffer 顶住了，没把 100 拍全收下
+  EXPECT_LT(sent, 100u);
+  EXPECT_GT(sent, 0u);
 }
 
 // 写 Trigger 时采样这笔写带进来的身份：软件不另写身份寄存器，DSA 报完成时填的
