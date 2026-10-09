@@ -158,6 +158,12 @@ class DteRegfile : public BachModule {
  protected:
   void Step() override {
     rdata_used = false;
+    cfg_start_ev = false;
+    trig_ev = false;
+    cfg_start_task = 0xFFu;
+    cfg_start_user = 0xFFFFu;
+    trig_task = 0xFFu;
+    trig_user = 0xFFFFu;
     // 末级先做：先看上一笔 Descriptor 被 Commit 收下没有，再收新的寄存器写。
     Drain();
     ReturnRead();
@@ -170,6 +176,14 @@ class DteRegfile : public BachModule {
     triggers = trig_cnt;
     writes = write_cnt;
     TracePerCycle("holding", held ? 1 : 0);
+    // 一笔任务的配置两端：第一次写 Config 区寄存器（起点）与写 trigger（终点），
+    // 身份都取这一笔配置写带进来的 STUPV，Python 侧按 (user, task) 配对。
+    TracePerCycle("dsa_cfg_start", cfg_start_ev ? 1 : 0);
+    TracePerCycle("dsa_cfg_start_task", cfg_start_task);
+    TracePerCycle("dsa_cfg_start_user", cfg_start_user);
+    TracePerCycle("dsa_trigger", trig_ev ? 1 : 0);
+    TracePerCycle("dsa_trigger_task", trig_task);
+    TracePerCycle("dsa_trigger_user", trig_user);
   }
 
  private:
@@ -221,6 +235,13 @@ class DteRegfile : public BachModule {
     // Config 区 19 项（0x0004~0x004C）。
     if (at >= kDteConfigBase + 0x004 && at <= kDteRegTransMode) {
       int64_t idx = (at - 0x004) / 4;
+      // dirty 在 trigger 时清零，所以本拍还全 0 就是这笔任务的第一笔配置写。
+      if (dirty == 0) {
+        DsaTaskIds ids = cfg->TaskIds();
+        cfg_start_ev = true;
+        cfg_start_task = ids.task & 0xFFu;
+        cfg_start_user = ids.user & 0xFFFFu;
+      }
       cfg_file.SetField(idx, data);
       dirty |= 1ull << idx;
       return;
@@ -310,6 +331,9 @@ class DteRegfile : public BachModule {
     held = Held{d, out->NextSeq()};
     ++trig_cnt;
     dirty = 0;
+    trig_ev = true;
+    trig_task = d->task_id & 0xFFu;
+    trig_user = d->user_id & 0xFFFFu;
   }
 
   Agcu agcu;
@@ -335,6 +359,12 @@ class DteRegfile : public BachModule {
   std::optional<Held> held;
   bool rdata_used = false;
   uint64_t last_seq = 0, trig_cnt = 0, write_cnt = 0;
+
+  // 一笔任务配置两端的波形事件：第一次写 Config 区寄存器、写 trigger。身份取这一
+  // 笔配置写带进来的 STUPV（与 trigger 那一拍同一份），本拍没有就填 0xFF / 0xFFFF。
+  bool cfg_start_ev = false, trig_ev = false;
+  uint64_t cfg_start_task = 0xFFu, cfg_start_user = 0xFFFFu;
+  uint64_t trig_task = 0xFFu, trig_user = 0xFFFFu;
 
   Logic64 triggers, writes;
 };

@@ -127,6 +127,25 @@ class Lane : public BachModule {
     mmem_used = false;
     router_used = false;
     topk_driven = false;
+    rresp_ev = false;
+    wreq_ev = false;
+    rresp_task = 0xFFu;
+    rresp_user = 0xFFFFu;
+    wreq_task = 0xFFu;
+    wreq_user = 0xFFFFu;
+    // 读写两半各一条轨道：rd_start/wr_start = 这一半激活一个任务，rd_done/wr_done =
+    // 这一半把这个任务做完（读全回来 / 最后一拍发出去）。身份统一取 desc 的
+    // task_id / user_id，读写两半的起点与终点各自对得上。
+    rd_start_ev = false;
+    rd_done_ev = false;
+    wr_start_ev = false;
+    wr_done_ev = false;
+    rd_start_task = 0xFFu; rd_start_user = 0xFFFFu;
+    rd_done_task = 0xFFu; rd_done_user = 0xFFFFu;
+    wr_start_task = 0xFFu; wr_start_user = 0xFFFFu;
+    wr_done_task = 0xFFu; wr_done_user = 0xFFFFu;
+    rd_start_data = 0; rd_start_scale = 0; rd_start_topk = 0;
+    wr_start_data = 0; wr_start_scale = 0; wr_start_topk = 0;
 
     // 末级先做：先收响应、再发新请求、最后激活下一个任务。
     TakeAdmit();
@@ -144,6 +163,36 @@ class Lane : public BachModule {
 
     TracePerCycle("rd_q", q[kRd].Size());
     TracePerCycle("wr_q", q[kWr].Size());
+    // 一笔任务的两个端点：收到第一拍数据（rresp）与发完最后一拍 wreq。
+    // 身份出核取 desc 的 STUPV，进核取包头那份 Message —— 两者在各自那条路上
+    // 从收到发一路带着，rresp 与 wreq 配对得上。
+    TracePerCycle("rresp", rresp_ev ? 1 : 0);
+    TracePerCycle("rresp_task", rresp_task);
+    TracePerCycle("rresp_user", rresp_user);
+    TracePerCycle("wreq", wreq_ev ? 1 : 0);
+    TracePerCycle("wreq_task", wreq_task);
+    TracePerCycle("wreq_user", wreq_user);
+    // 读写两半各自一条轨道：rd_start → rd_done 是读这一半，wr_start → wr_done 是
+    // 写这一半，身份取 desc 的 task_id / user_id。
+    TracePerCycle("rd_start", rd_start_ev ? 1 : 0);
+    TracePerCycle("rd_start_task", rd_start_task);
+    TracePerCycle("rd_start_user", rd_start_user);
+    TracePerCycle("rd_done", rd_done_ev ? 1 : 0);
+    TracePerCycle("rd_done_task", rd_done_task);
+    TracePerCycle("rd_done_user", rd_done_user);
+    TracePerCycle("wr_start", wr_start_ev ? 1 : 0);
+    TracePerCycle("wr_start_task", wr_start_task);
+    TracePerCycle("wr_start_user", wr_start_user);
+    TracePerCycle("wr_done", wr_done_ev ? 1 : 0);
+    TracePerCycle("wr_done_task", wr_done_task);
+    TracePerCycle("wr_done_user", wr_done_user);
+    // rd_start / wr_start 那一拍的字节画像，供 Perfetto 段上印 bytes 与理想/堵塞拍数。
+    TracePerCycle("rd_start_data", rd_start_data);
+    TracePerCycle("rd_start_scale", rd_start_scale);
+    TracePerCycle("rd_start_topk", rd_start_topk);
+    TracePerCycle("wr_start_data", wr_start_data);
+    TracePerCycle("wr_start_scale", wr_start_scale);
+    TracePerCycle("wr_start_topk", wr_start_topk);
   }
 
  private:
@@ -179,6 +228,26 @@ class Lane : public BachModule {
       if (RdLen(d, i) != 0) return true;
     }
     return false;
+  }
+
+  // 这笔任务的字节画像：data（Cmem/Mmem 数据段）、scale 旁带、topK 各多少字节。
+  // 段长统一按字节计（与 Descriptor::PayloadBytes 一致）；scale/topK 看任一端 tag。
+  static void ByteProfile(Descriptor const& d, uint64_t& data, uint64_t& scale,
+                          uint64_t& topk) {
+    data = 0;
+    scale = 0;
+    topk = 0;
+    for (auto const& s : d.seg) {
+      if (!s.valid || s.is_header) continue;
+      if (s.src_kind == SegEndpoint::kTopk || s.dst_kind == SegEndpoint::kTopk) {
+        topk += s.len;
+      } else if (s.src_kind == SegEndpoint::kScale ||
+                 s.dst_kind == SegEndpoint::kScale) {
+        scale += s.len;
+      } else {
+        data += s.len;
+      }
+    }
   }
 
   // 进核：包头上下文落库。计算 core 落 Hmem（按 stream_id 索引），B/R core 落
@@ -232,6 +301,19 @@ class Lane : public BachModule {
     return b;
   }
 
+  // wreq 发完那一拍记一笔。身份取这一拍带的那份 Message：进核是包头那份（从收
+  // payload 一路带到发 wreq），出核是 MakeOutboundMsg 造的那份（task_id / user_id
+  // 都与 desc 一致）。拿不到 Message 就退回 desc 的 STUPV。
+  void MarkWreq(MessagePtr const& m, Descriptor const& d) {
+    wreq_ev = true;
+    wreq_task = m ? (m->task_id & 0xFFu) : (d.task_id & 0xFFu);
+    wreq_user = m ? (m->user_id & 0xFFFFu) : (d.user_id & 0xFFFFu);
+    // 写这一半的终点（最后一拍发出），身份取 desc，与 wr_start 对得上。
+    wr_done_ev = true;
+    wr_done_task = d.task_id & 0xFFu;
+    wr_done_user = d.user_id & 0xFFFFu;
+  }
+
   // 收 Commit 准入的任务。
   // ready 在收下这一拍的任务之后算，Commit 读到它时已经算上了这一笔。
   void TakeAdmit() {
@@ -264,6 +346,12 @@ class Lane : public BachModule {
       uint64_t n = payload->bytes.Get();
       uint64_t off = payload->off.Get();
       MessagePtr m = payload->msg.Get();
+      // off == 0 是这一帧的第一拍数据：进核的“收到 rresp”就是收到第一拍 payload。
+      if (off == 0) {
+        rresp_ev = true;
+        rresp_task = m ? (m->task_id & 0xFFu) : 0xFFu;
+        rresp_user = m ? (m->user_id & 0xFFFFu) : 0xFFFFu;
+      }
       buffer.Push(idx, {frame, n, last, SliceOf(m, off, n), m});
       if (last) inbound_done.insert(frame);
     }
@@ -283,6 +371,9 @@ class Lane : public BachModule {
         if (c.outstanding != 0) continue;
         rd_done->Drive(c.desc.commit_seq, kRd, true);
         rd_reported = true;
+        rd_done_ev = true;
+        rd_done_task = c.desc.task_id & 0xFFu;
+        rd_done_user = c.desc.user_id & 0xFFFFu;
       } else {
         if (!buffer.TaskDrained(idx, TagOf(c.desc))) continue;
         wr_done->Drive(c.desc.commit_seq, kWr, true);
@@ -312,6 +403,23 @@ class Lane : public BachModule {
       ctx[h].sent_first = false;
       ctx[h].topk_pending = false;
       ctx[h].hdr_stored = false;
+      uint64_t data_b, scale_b, topk_b;
+      ByteProfile(d, data_b, scale_b, topk_b);
+      if (h == kRd) {
+        rd_start_ev = true;
+        rd_start_task = d.task_id & 0xFFu;
+        rd_start_user = d.user_id & 0xFFFFu;
+        rd_start_data = data_b;
+        rd_start_scale = scale_b;
+        rd_start_topk = topk_b;
+      } else {
+        wr_start_ev = true;
+        wr_start_task = d.task_id & 0xFFu;
+        wr_start_user = d.user_id & 0xFFFFu;
+        wr_start_data = data_b;
+        wr_start_scale = scale_b;
+        wr_start_topk = topk_b;
+      }
       q[h].Pop();
     }
   }
@@ -329,6 +437,9 @@ class Lane : public BachModule {
         if (!rd_reported) {
           rd_done->Drive(c.desc.commit_seq, kRd, true);
           rd_reported = true;
+          rd_done_ev = true;
+          rd_done_task = c.desc.task_id & 0xFFu;
+          rd_done_user = c.desc.user_id & 0xFFFFu;
         } else {
           drain_q[kRd].push_back(c);
         }
@@ -409,7 +520,15 @@ class Lane : public BachModule {
     ByteBlockPtr blk = port.RspData();
     FillOut(c, blk);
     uint64_t n = blk ? blk->size() : kFlitBytes;
-    buffer.Push(idx, {TagOf(c.desc), n, last, blk, c.desc.msg});
+    // 这一笔任务的 commit_seq 变了就是新任务的第一笔读响应：出核的“收到 rresp”。
+    uint64_t tag = TagOf(c.desc);
+    if (tag != rd_seen_commit) {
+      rd_seen_commit = tag;
+      rresp_ev = true;
+      rresp_task = c.desc.task_id & 0xFFu;
+      rresp_user = c.desc.user_id & 0xFFFFu;
+    }
+    buffer.Push(idx, {tag, n, last, blk, c.desc.msg});
   }
 
   void StepWr() {
@@ -436,6 +555,7 @@ class Lane : public BachModule {
       c.topk_pending = false;
       router_used = true;
       c.issue_done = true;
+      MarkWreq(c.desc.msg, c.desc);
       return;
     }
 
@@ -462,7 +582,10 @@ class Lane : public BachModule {
       buffer.Pop(idx);
       if (b.last) {
         if (has_topk) c.topk_pending = true;
-        else c.issue_done = true;
+        else {
+          c.issue_done = true;
+          MarkWreq(b.msg, c.desc);
+        }
       }
       return;
     }
@@ -520,7 +643,10 @@ class Lane : public BachModule {
     c.off += n;
     c.part = 0;
     buffer.Pop(idx);
-    if (last) c.issue_done = true;
+    if (last) {
+      c.issue_done = true;
+      MarkWreq(b.msg, c.desc);
+    }
   }
 
   uint64_t idx;
@@ -545,6 +671,25 @@ class Lane : public BachModule {
   uint64_t last_payload_seq = 0, last_admit_seq = 0;
   bool cmem_used = false, mmem_used = false, router_used = false;
   bool topk_driven = false;
+  // 一笔任务两端的波形事件：rresp（收到第一拍数据）与 wreq（发完最后一拍）。
+  // 本拍没有就填 0xFF / 0xFFFF，Python 侧按 (user, task) 配对。
+  bool rresp_ev = false, wreq_ev = false;
+  uint64_t rresp_task = 0xFFu, rresp_user = 0xFFFFu;
+  uint64_t wreq_task = 0xFFu, wreq_user = 0xFFFFu;
+  // 读/写拆分：读轨道 = RD 半激活(rd_start) → RD 半读完(rd_done)，
+  // 写轨道 = WR 半激活(wr_start) → 发完最后一拍(wr_done)。都用 desc 的身份
+  // (task_id/user_id)，进核/出核两侧一致，Python 侧按 (user, task) 配对。
+  bool rd_start_ev = false, rd_done_ev = false;
+  bool wr_start_ev = false, wr_done_ev = false;
+  uint64_t rd_start_task = 0xFFu, rd_start_user = 0xFFFFu;
+  uint64_t rd_done_task = 0xFFu, rd_done_user = 0xFFFFu;
+  uint64_t wr_start_task = 0xFFu, wr_start_user = 0xFFFFu;
+  uint64_t wr_done_task = 0xFFu, wr_done_user = 0xFFFFu;
+  // rd_start / wr_start 那一拍带上这笔任务的字节画像：data / scale / topk 各多少字节。
+  uint64_t rd_start_data = 0, rd_start_scale = 0, rd_start_topk = 0;
+  uint64_t wr_start_data = 0, wr_start_scale = 0, wr_start_topk = 0;
+  // 出核：上一次报过 rresp 起点的 commit_seq，用它认“新任务的第一笔响应”。
+  uint64_t rd_seen_commit = ~0ull;
 };
 
 }  // namespace bach
