@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import spans as S
 
-INDEX_FORMAT = 9   # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
+INDEX_FORMAT = 10  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
                    #    带上行名（TS-DTE / CORE-DTE …）。5：段间隔改 zigzag，
                    #    重叠的段能原样解回来。6：VU 那条 DSA 拆成两行（VU-DSA-ISQ
                    #    在前），十条通道 —— 每条 core 的头里 lane_off 从 9 个变 10 个。
@@ -44,6 +44,8 @@ INDEX_FORMAT = 9   # 2：七行显示 + 九条通道；3：段上印的单元名
                    #    8：TS 那三行改成量「下发 → RV core 起跑」。
                    #    9：TS 那三行回退成「下发 → DSA 做完」（8 那一版已撤），
                    #    通道里的段又变了 —— 号只能往前走，退回去会让 8 的旧索引被当成好的。
+                   #    10：TS-MU / TS-VU 改成量「装进 stream → 这一路 rv_start」
+                   #    （TS-DTE 不动，还是「下发 → DSA 做完」）。
                    #    复用判据只看波形身份，改展示不会自动重建；格式号不对时打开
                    #    索引会要求重建。
 INDEX_SUFFIX = ".tracetto-index"

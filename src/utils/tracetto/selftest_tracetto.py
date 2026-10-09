@@ -125,6 +125,15 @@ DSA_DONE_EV = [(30, 0, 3, 77), (70, 1, 5, 77)]
 TASK_TRIG_EV = [(16, 2, 3, 77)]
 TASK_DISP_EV = [(22, 2, 3, 77)]
 
+# TaskCtrl 把一步装进 stream：两条**单调计数器**、身份是标量（不是位掩码），所以不走
+# lanes_to_signals，手工编。三笔：
+#   12 装的是 DTE 那笔（走 install）→ 没下发给 MU，被 ts_unit 那一筛滤掉
+#   38 装的是 MU 那笔（走 create）  → 与 rv_start@41 配上
+#   52 装进来的是 task 6        → 也没下发给 MU，同样被滤掉
+# 「装进来了、这一路一直没接」那一条分支在 check_step_chain 里单独查。
+STEP_CREATE_EV = [(38, 5, 77)]                    # (t, task, user)
+STEP_INSTALL_EV = [(12, 3, 77), (52, 6, 77)]
+
 MODULES = [
     (1, 0, "chip0"),
     (2, 1, "core0"),
@@ -138,6 +147,9 @@ MODULES = [
     (119, 2, "dsa_task_trigger_user"),
     (120, 2, "dsa_task_dispatch"), (121, 2, "dsa_task_dispatch_task"),
     (122, 2, "dsa_task_dispatch_user"),
+    (123, 2, "ts_create"), (124, 2, "ts_create_task"), (125, 2, "ts_create_user"),
+    (126, 2, "ts_install"), (127, 2, "ts_install_task"),
+    (128, 2, "ts_install_user"),
 ]
 SIGNALS = {
     100: [(10, 1), (40, 2)],                      # DTE 一发，MU 一发
@@ -146,6 +158,14 @@ SIGNALS = {
     103: [(35, 1), (80, 2)],                      # 完成 1 → 2
     104: [(10, 1), (35, 0), (40, 1), (80, 0)],    # ts_inflight
 }
+for _t, _task, _user in STEP_CREATE_EV:
+    SIGNALS.setdefault(123, []).append((_t, 1))       # 计数器的值就是笔数
+    SIGNALS.setdefault(124, []).append((_t, _task))
+    SIGNALS.setdefault(125, []).append((_t, _user))
+for _i, (_t, _task, _user) in enumerate(STEP_INSTALL_EV, start=1):
+    SIGNALS.setdefault(126, []).append((_t, _i))
+    SIGNALS.setdefault(127, []).append((_t, _task))
+    SIGNALS.setdefault(128, []).append((_t, _user))
 for _base, _ev, _done in ((105, RV_EV, RV_DONE_EV), (111, DSA_EV, DSA_DONE_EV),
                           (117, TASK_TRIG_EV, TASK_DISP_EV)):
     _m, _t, _u = lanes_to_signals(_ev)
@@ -180,32 +200,49 @@ def synth_scaled(path, cores, rounds):
                      "dsa_task_trigger", "dsa_task_trigger_task",
                      "dsa_task_trigger_user",
                      "dsa_task_dispatch", "dsa_task_dispatch_task",
-                     "dsa_task_dispatch_user"):
+                     "dsa_task_dispatch_user",
+                     "ts_create", "ts_create_task", "ts_create_user",
+                     "ts_install", "ts_install_task", "ts_install_user"):
             sig[name] = mid
             modules.append((mid, core_id, name))
             mid += 1
         unit, task, user, done, fly = [], [], [], [], []
         rv_ev, rv_done_ev, dsa_ev, dsa_done_ev = [], [], [], []
-        trig_ev, disp_ev = [], []
+        trig_ev, disp_ev, loads = [], [], []
         t = 10
         for i in range(rounds):
             for u in range(3):
+                # 身份按单元错开（task 加上 u * 8）：TaskCtrl 那两条计数器是整核一份
+                # 的，三路共用同一个身份的话，装进 stream 的那条流就分不出是哪一路。
+                tk, usr = (i % 7) + u * 8, i % 5 + 1
                 unit += [(t, 1 << u), (t + 1, 0)]
-                task.append((t, (i % 7) << (8 * u)))
-                user.append((t, (i % 5 + 1) << (16 * u)))
-                rv_ev.append((t, u, i % 7, i % 5 + 1))
-                rv_done_ev.append((t + 5, u, i % 7, i % 5 + 1))
-                dsa_ev.append((t + 2, u, i % 7, i % 5 + 1))
-                dsa_done_ev.append((t + 6, u, i % 7, i % 5 + 1))
+                task.append((t, tk << (8 * u)))
+                user.append((t, usr << (16 * u)))
+                rv_ev.append((t, u, tk, usr))
+                rv_done_ev.append((t + 5, u, tk, usr))
+                dsa_ev.append((t + 2, u, tk, usr))
+                dsa_done_ev.append((t + 6, u, tk, usr))
+                # 这一步上一拍装进 stream，本拍 RV core 接下 —— TS-MU / TS-VU 量的
+                # 就是这一拍之差。
+                loads.append((t - 1, tk, usr))
                 # VU 那条 task 起点宏指令的两端，只有 VU（lane 2）：trigger 收下在
                 # RV 起点后一拍，真正发行在 DSA 起点后一拍。
                 if u == 2:
-                    trig_ev.append((t + 1, 2, i % 7, i % 5 + 1))
-                    disp_ev.append((t + 3, 2, i % 7, i % 5 + 1))
+                    trig_ev.append((t + 1, 2, tk, usr))
+                    disp_ev.append((t + 3, 2, tk, usr))
                 t += 8
             done.append((t, i + 1))
             fly += [(t, 1), (t + 1, 0)]
             t += 2
+        # TaskCtrl 装进 stream：第一笔走 create（建表），其余走 install（装后继）。
+        # 两条都是单调计数器（值就是笔数）、身份是标量，所以不走 lanes_to_signals。
+        signals[sig["ts_create"]] = [(loads[0][0], 1)]
+        signals[sig["ts_create_task"]] = [(loads[0][0], loads[0][1])]
+        signals[sig["ts_create_user"]] = [(loads[0][0], loads[0][2])]
+        rest = loads[1:]
+        signals[sig["ts_install"]] = [(lt, n) for n, (lt, _, _) in enumerate(rest, 1)]
+        signals[sig["ts_install_task"]] = [(lt, tk) for lt, tk, _ in rest]
+        signals[sig["ts_install_user"]] = [(lt, usr) for lt, _, usr in rest]
         signals[sig["ts_unit"]] = unit
         signals[sig["ts_task"]] = task
         signals[sig["ts_user"]] = user
@@ -229,7 +266,7 @@ def check_tree(prefix):
     try:
         paths = r.tree_paths()
         expect(paths[100], "chip0.core0.ts_unit", "层次名")
-        expect(r.signals(), list(range(100, 123)), "信号号列表")
+        expect(r.signals(), list(range(100, 129)), "信号号列表")
         ts, vs = r.events(100)
         expect(list(zip(ts, vs)), [(10, 1), (40, 2)], "ts_unit 的事件")
         expect(len(r.segments(100)), 1, "一个信号的段数")
@@ -331,6 +368,29 @@ def check_user_spans():
            [[10, 40, 23, 4], [20, 50, 24, 4]], "重叠的段能原样解回来")
 
 
+def check_step_chain():
+    """TS-MU / TS-VU 那一行：装进 stream → 这一路的 rv_start，按身份一一对上。"""
+    load = [{"t": 12, "task": 3, "user": 77},     # 别的单元的活，没人认领
+            {"t": 38, "task": 5, "user": 77},     # 本单元下发 @40 认领，RV 接下 @41
+            {"t": 48, "task": 6, "user": 77}]     # 本单元下发 @50 认领，但一直没接
+    issue = [{"t": 40, "task": 5, "user": 77}, {"t": 50, "task": 6, "user": 77}]
+    rv = [{"t": 41, "task": 5, "user": 77}]
+    expect(S.step_chain(load, issue, rv, 80),
+           [[38, 41, 77, 5], [48, 80, 77, 6]],
+           "配上的按身份对上；认领了却没等到 RV 的延到波形末")
+    got = S.step_chain(load, issue, rv, 80)
+    expect_true(not any(s[0] == 12 for s in got),
+                "没被本单元下发认领的装进 stream 不画在这一行")
+    # 装进来晚于下发那一刻的，不算这一次下发的（留给下一笔）。
+    expect(S.step_chain([{"t": 52, "task": 6, "user": 77}],
+                        [{"t": 50, "task": 6, "user": 77}], [], 80), [],
+           "装进来晚于下发的不认领")
+    # RV 起了却没有装进来那一拍：DataIn 任务，只记一拍。
+    expect(S.step_chain([], [{"t": 60, "task": 1, "user": 9}],
+                        [{"t": 60, "task": 1, "user": 9}], 80),
+           [[60, 61, 9, 1]], "没有装进 stream 那一拍的只记一拍")
+
+
 def check_chain():
     ev0 = [{"t": 10, "task": 3, "user": 77}]
     ev1 = [{"t": 40, "task": 5, "user": 77}]
@@ -373,9 +433,14 @@ def check_rows(prefix):
         nodes = S.core_spans(r, plan["core_sig"]["0.0"], plan["t_end"])
     rows = S.lanes_of(nodes)
     expect(plan["t_end"], 80, "波形末尾（只按要读的信号算）")
-    expect(rows[0], [[10, 30, 77, 3]], "TS · DTE")
-    expect(rows[1], [[40, 70, 77, 5]], "TS · MU")
-    expect(rows[2], [], "TS · VU")
+    expect(rows[0], [[10, 30, 77, 3]], "TS · DTE（旧口径，下发 → DSA 做完）")
+    # MU 这一行换了口径：起点是装进 stream（38，走 create），终点是这一路的 rv_start
+    # （41）。另外两笔装进来的（12 的 DTE 那笔、52 的 task 6）都没下发给 MU，被
+    # ts_unit 那一筛滤掉了，不画在这一行上。
+    expect(rows[1], [[38, 41, 77, 5]], "TS · MU（装进 stream → rv_start）")
+    # VU 这一路没有下发，装进 stream 的那条流被筛空；rv_start 那笔身份是占位、又没
+    # 有装进来那一拍（DataIn 那一路），只记一拍。
+    expect(rows[2], [[60, 61, -1, -1]], "TS · VU（没装进来那一拍的只记一拍）")
     expect(rows[3], [[11, 20, 77, 3]], "DTE_Core")
     expect(rows[4], [[60, 70, -1, -1]], "VU_Core（身份是占位）")
     expect(rows[5], [[41, 50, 77, 5]], "MU_Core")
@@ -651,7 +716,9 @@ def check_http(prefix):
             raw = r.read()
             n = struct.unpack_from("<I", raw, 4)[0]
             head = json.loads(raw[8:8 + n])
-            expect(sorted(e["lane"] for e in head["lanes"]), [0, 1, 3, 4, 5, 6, 7, 8, 9],
+            # 十条通道里只有 TS-VU 那条没段 —— 它的 rv_start 没有装进来那一拍，只
+            # 落到一拍上（见 check_rows）。现在这一行有段了，所以十条全回。
+            expect(sorted(e["lane"] for e in head["lanes"]), list(range(10)),
                    "有段的行才回，空的跳过")
 
         st = json.loads(get("/api/status").read())
@@ -713,6 +780,7 @@ def main():
     with_trace(check_http)
     with_trace(check_labels)
     check_chain()
+    check_step_chain()
     check_user_spans()
     check_window()
     with tempfile.TemporaryDirectory() as d:

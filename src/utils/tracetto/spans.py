@@ -6,9 +6,13 @@
 
 这一层是**参考实现**：索引里存的就是它算出来的段，自检拿它对拍。
 
-单元侧的段不读模型里的电平忙位，读的是两对边沿信号：起点是各家“过门槛”那一拍，
-终点是各家把完成报回去那一拍。一条边沿事件带 8 bit 的 task 与 16 bit 的 user，本拍
-没有事件的那一路填占位（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。
+单元侧的段不读模型里的电平忙位，读的是边沿信号：起点是各家“过门槛”那一拍，终点是
+各家把完成报回去那一拍。一条边沿事件带 8 bit 的 task 与 16 bit 的 user，本拍没有事件
+的那一路填占位（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。
+
+TS 那三行不是一对边沿：DTE 仍是「下发 → DTE DSA 完成」，MU / VU 换成了「TaskCtrl 把
+这一步装进 stream → 这一路的 RV core 接下它」—— 后者两端来自形状完全不同的两种信号
+（起点是单调计数器 + 标量身份，终点是位掩码 + 按位打包），所以配对按 (user, task)。
 """
 
 from __future__ import annotations
@@ -26,6 +30,16 @@ SIG_TS_TASK = "ts_task"
 SIG_TS_USER = "ts_user"
 SIG_TS_DONE = "ts_done"
 SIG_TS_INFLIGHT = "ts_inflight"
+# TaskCtrl 把一步装进 stream。两条来源：第一个 task 走 create（建表），其余走
+# install（装后继）—— core.h 的 EmitStep() 说这是“同一件事的两种来源”。都是**单调
+# 计数器**（只加不清零，涨了的那一拍就是装进去一笔），一拍最多一笔；身份是标量而不是
+# 位掩码：task 8 bit、user 16 bit，本拍没有就填 0xFF / 0xFFFF。TS-MU / TS-VU 的起点。
+SIG_TS_CREATE = "ts_create"
+SIG_TS_CREATE_TASK = "ts_create_task"
+SIG_TS_CREATE_USER = "ts_create_user"
+SIG_TS_INSTALL = "ts_install"
+SIG_TS_INSTALL_TASK = "ts_install_task"
+SIG_TS_INSTALL_USER = "ts_install_user"
 # RV core 的两端：起点是执行器接下队头那笔（PC 跳到 task_pc），终点是 kernel 交还。
 SIG_RV_START = "rv_start"
 SIG_RV_START_TASK = "rv_start_task"
@@ -60,10 +74,15 @@ DSA_EDGE = (SIG_DSA_START, SIG_DSA_START_TASK, SIG_DSA_START_USER,
 TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
                    SIG_TASK_DISP, SIG_TASK_DISP_TASK, SIG_TASK_DISP_USER)
 
+# 「装进 stream」那两条：也是六条，但是计数器不是位掩码，凑不成一对边沿，单独成组。
+STEP_SIGS = (SIG_TS_CREATE, SIG_TS_CREATE_TASK, SIG_TS_CREATE_USER,
+             SIG_TS_INSTALL, SIG_TS_INSTALL_TASK, SIG_TS_INSTALL_USER)
+
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
-             DSA_EDGE + TASK_START_EDGE)
-# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。
-NEW_SIGS = (SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE
+             DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
+# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那六条也在
+# 这里 —— TS-MU / TS-VU 现在要读它们，老波形缺了那两行就是空的，得让人看见。
+NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
 
 # 索引里一个 core 的十条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
@@ -154,6 +173,30 @@ def issue_events(unit_ts: list, unit_vs: list, task_ts: list, task_vs: list,
     return out
 
 
+def step_events(counter_ts: list, counter_vs: list, task_ts: list,
+                task_vs: list, user_ts: list, user_vs: list) -> List[dict]:
+    """单调计数器 → 「装进去一笔」的事件，带上那一笔的身份。
+
+    `issue_events` 的孪生兄弟，形状不一样：那几条是位掩码 + 按位打包的 task / user，
+    这几条是**只加不清零的笔数**，身份是标量。所以判据是“这一拍的值比上一拍大”，
+    而不是某一位 0→1。一拍最多装一笔，不用管一次涨多笔。
+
+    身份在计数器涨的那一拍取 —— `ts_create_task` / `ts_install_task` 那几条只在涨的
+    那一拍带真值，其余拍是 0xFF / 0xFFFF 的占位。
+    """
+    out: List[dict] = []
+    prev = 0
+    for t, v in zip(counter_ts, counter_vs):
+        if v > prev:
+            out.append({
+                "t": t,
+                "task": val_at(task_ts, task_vs, t) & 0xFF,
+                "user": val_at(user_ts, user_vs, t) & 0xFFFF,
+            })
+        prev = v
+    return out
+
+
 def _task_tag(task: int) -> int:
     """0xFF 是“这一路本拍没有事件”的填充，认不出来时统一写 -1。"""
     return -1 if task == 0xFF else task
@@ -227,10 +270,44 @@ def user_spans(starts: List[dict], dones: List[dict],
     return out
 
 
+def step_chain(load: List[dict], issue: List[dict],
+               rv_starts: List[dict], t_end: int) -> List[List[int]]:
+    """TS-MU / TS-VU 那一行：一步从「TaskCtrl 把它装进 stream」到「这一路的 RV core
+    接下它」。
+
+    量的是这一步在 TS 里等的时间 —— 等 credit、等发射通路空出来、等前一笔从 RV core
+    那边腾出槽位。不含 RV core 与 DSA 的任何时间。
+
+    三条流的形状各不相同：`load` 是装进 stream（整核一份的单调计数器），`issue` 是
+    下发到本单元（`ts_unit` 的这一位），`rv_starts` 是本单元 RV core 接下。
+
+    **先按身份把 `load` 与本单元的下发一一对上**（装进来一定在下发之前，先到先得），
+    对不上的丢掉 —— 那是别的单元的活。不这么筛会很难看：实测 MU 上整核装进 82231
+    笔、本单元只下发 25224 笔；只按“身份在不在下发集合里”筛的话，会多出 654 笔配不
+    上的（身份跟别的 task 撞了），每笔从它装进来那一拍一直画到波形末，整行都是假的。
+
+    配好的起点再与 `rv_start` 配 —— 这两条都是本单元的，实测 MU 上 25224 对 25170，
+    近乎一一对应。两种配不上都不丢：
+      - 装进来了、下发了、这一路还没接下 → 延到波形末（那笔确实还在等）
+      - RV 起了、压根没有装进来那一拍 → 只记一拍（DataIn 任务既没建表也没装后继）
+    """
+    queues: Dict[Tuple[int, int], List[int]] = {}
+    for e in load:
+        queues.setdefault((e["user"], e["task"]), []).append(e["t"])
+    started: List[dict] = []
+    for e in issue:
+        q = queues.get((e["user"], e["task"]))
+        if q and q[0] <= e["t"]:
+            started.append({"t": q.pop(0), "user": e["user"],
+                            "task": e["task"]})
+    return user_spans(started, rv_starts, t_end)
+
+
 def pair_chain(spans: List[Tuple[int, int]],
                events: List[dict]) -> List[List[int]]:
-    """TS 三行里的任一行（按单元各跑一次）：每笔从下发到它做完 DSA 的全程，
-    所以段起点前移到配对的下发那一刻。
+    """**现在只剩 TS-DTE 这一行在用**：每笔从下发到它做完 DSA 的全程，所以段起点
+    前移到配对的下发那一刻。TS-MU / TS-VU 已经换成「装进 stream → rv_start」，不走
+    这里 —— 那两行的起点是 TaskCtrl 装进去那一拍，直接按身份配对，不需要贪心认领。
 
     一笔 task 的 DSA 活儿会碎成好几段 —— 真波形上这是常态。所以认领不是“一段对一
     笔”：按时间序贪心，每个下发事件认领“起点不早于它、还没被认领的”第一个段，
@@ -339,6 +416,16 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     tt, tv = ev(SIG_TS_TASK)
     xt, xv = ev(SIG_TS_USER)
 
+    # 这一步「装进 stream」的那一拍：create（第一个 task）与 install（装后继）合起来
+    # 才是完整的一条流 —— 只认 install 的话，每个用户的第一笔没有起点。两条都是按
+    # 时间升序的，合起来重排一次即可。
+    load = sorted(
+        step_events(*ev(SIG_TS_CREATE), *ev(SIG_TS_CREATE_TASK),
+                    *ev(SIG_TS_CREATE_USER)) +
+        step_events(*ev(SIG_TS_INSTALL), *ev(SIG_TS_INSTALL_TASK),
+                    *ev(SIG_TS_INSTALL_USER)),
+        key=lambda e: e["t"])
+
     def ends_of(group: Tuple[str, ...], bit: int) -> Tuple[List[dict], List[dict]]:
         """一组六条边沿信号在 `bit` 那一路上的 (起点事件, 终点事件)。"""
         def one(base: int) -> List[dict]:
@@ -351,17 +438,23 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     chain_rows: List[List[List[int]]] = []
     vuisq_rows: List[List[List[int]]] = []
     for u in range(len(UNITS)):
-        issue = issue_events(ut, uv, tt, tv, xt, xv, u)
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
         dsa_starts, dsa_dones = ends_of(DSA_EDGE, u)
         # 一个核上可以同时压着几个用户。Core 与 DSA 都按用户各画一段，不并成
-        # 最早那笔的长段。TS 用这些 DSA 段去认下发，于是也是每个用户一段。
+        # 最早那笔的长段。
         core_rows.append(user_spans(rv_starts, rv_dones, t_end))
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
+        issue = issue_events(ut, uv, tt, tv, xt, xv, u)
+        # TS 这一行：MU / VU 从「TaskCtrl 把这一步装进 stream」到「这一路的 RV core
+        # 接下它」；DTE 仍是旧口径 [下发, DTE DSA 完成]（用 DSA 段去认下发），这次
+        # 没动它。两者的配对方式也不同 —— 前者两端都带身份，后者要贪心认领。
+        if u == 0:
+            chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
+        else:
+            chain_rows.append(step_chain(load, issue, rv_starts, t_end))
         if u != 2:
             dsa_rows.append(dsa)
             vuisq_rows.append([])
-            chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
             continue
         # VU 这一路拆成两段：起点从「ISQ 收下」后移到「真正发行进执行流水」，被切掉
         # 的那一截（trigger 收下 → 发行）归 `vuisq` 那一行。发行那对边沿既是新行的
@@ -369,9 +462,6 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         trig_starts, disp_starts = ends_of(TASK_START_EDGE, u)
         vuisq_rows.append(user_spans(trig_starts, disp_starts, t_end))
         dsa_rows.append(user_spans(disp_starts, dsa_dones, t_end))
-        # TS 那三行的配对输入仍用「ISQ 收下」起的这一段：换成发行起会让 chain 的贪心
-        # 认领跟着动，而 TS 那几行这次不动。
-        chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
     return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows,
             "vuisq": vuisq_rows}
 

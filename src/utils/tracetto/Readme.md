@@ -28,7 +28,8 @@ core 底下列的不是 `cmcm_q` 那些信号，而是十行派生行：
 
 | 行 | 画什么 |
 | - | - |
-| `TS-DTE` / `TS-MU` / `TS-VU` | 一笔 task 从**下发**到它做完 DSA 的全程。每个用户各一段，时间上可以重叠 |
+| `TS-DTE` | 一笔 task 从**下发**到它做完 DSA 的全程。每个用户各一段，时间上可以重叠（旧口径，另两行改了它没动） |
+| `TS-MU` / `TS-VU` | 一步从 **TaskCtrl 把它装进 stream** 到**这一路的 RV core 接下它**（`rv_start`）—— 量的是它在 TS 里等的时间，不含 RV core 与 DSA 的任何时间 |
 | `X-Core` | 这一路 RV core 执行一笔 task 的那几拍（`rv_start`→`rv_done`）。每个用户各一段，时间上可以重叠 |
 | `X-DSA` | 这一路 DSA 手上有活的那几拍（`dsa_start`→`dsa_done`）。每个用户各一段，时间上可以重叠 |
 | `VU-DSA-ISQ` | 只有 VU 有。那条 task 起点宏指令从**被 `config_register` 收下 trigger** 到**真正发行进执行流水**的那一段 —— 收下了为什么还不算，看这一行 |
@@ -100,13 +101,22 @@ moe_lpu.tracetto-index/
 - **段的标签**：直接来自起手那条边沿（不是贴下发事件）。身份是占位就写 `-1`，画面上是 `?`。
   DTE 那一行有个缺口：Router 入站那一路按约定不算一笔 DTE task，它有完成没有起手，
   只记那一拍。
-- **TS 那一行的配对**：DSA 的起手与完成边沿都带 task 与 user，按身份认回下发的那一笔：
-  同一 task、同一 user 的下发里，下发时刻不晚于这条边沿的最后一笔。一笔 task 的 DSA
-  边沿可以有好几对（`moe_lpu` 里 dot core 的 MU task 1 发两笔、各 139 拍，VU task 4
-  发六条宏指令），都认回同一笔，段 = `[下发那一刻, 最后一次完成)` —— 一笔一段，段末
-  就是这一笔 DSA 做完。只认到完成的（DTE 的搬入）段末是完成的下一拍；起手多于完成
-  的延到波形末。一条边沿也没认到的下发丢掉（有的 task 不经过 DSA）；身份是占位、或者
-  没有同一身份的下发的边沿，折成段标 `?`。
+- **TS 那三行有两套配对，别串了**：
+  - `TS-DTE` 还是旧的：DSA 的起手与完成边沿都带 task 与 user，按身份认回下发的那一笔：
+    同一 task、同一 user 的下发里，下发时刻不晚于这条边沿的最后一笔。一笔 task 的 DSA
+    边沿可以有好几对（`moe_lpu` 里 dot core 的 MU task 1 发两笔、各 139 拍，VU task 4
+    发六条宏指令），都认回同一笔，段 = `[下发那一刻, 最后一次完成)` —— 一笔一段，段末
+    就是这一笔 DSA 做完。只认到完成的（DTE 的搬入）段末是完成的下一拍；起手多于完成
+    的延到波形末。一条边沿也没认到的下发丢掉（有的 task 不经过 DSA）；身份是占位、或者
+    没有同一身份的下发的边沿，折成段标 `?`。
+  - `TS-MU` / `TS-VU` 是「装进 stream → 这一路的 `rv_start`」。起点那条流是 `ts_create`
+    （第一个 task 走建表）与 `ts_install`（装后继）两条**单调计数器**合起来的 —— 它是
+    **整核一份、不分路**的，所以要先按身份跟**本单元的下发**（`ts_unit` 这一位）一一对上，
+    对不上的是别的单元的活、丢掉（实测 MU 上整核装进 82231 笔、本单元只下发 25224 笔，
+    不筛的话多出来的会每笔从装进来那拍画到波形末）。对上之后再与 `rv_start` 配，段 =
+    `[装进 stream 那一刻, 这一路 RV core 接下那一刻)`。装进来了、下发了、这一路还没接下
+    的延到波形末；`rv_start` 起了却没有装进来那一拍的只记一拍 —— DataIn 任务既没建表也
+    没装后继，它在 `ts_unit` 上出现时就是这一种。
 - **`ts_unit` 数下发要逐拍展开**。一条命令在端口上被持有期间不会被重新驱动
   （`mu_vu_arb.h` 的 `Select()` 里 `if (held) return;`），所以那一位抬起来就是这一拍
   新驱动了一条命令；同一路连着几拍都下发时位一直是 1、波形上只有一段，**事件却是一拍
@@ -121,11 +131,12 @@ moe_lpu.tracetto-index/
 
 ## 波形要带的信号
 
-工具读这二十一条，另拿 `ts_inflight` 认一个 core 是不是只有 Router 在用：
+工具读这二十七条，另拿 `ts_inflight` 认一个 core 是不是只有 Router 在用：
 
 | 组 | 信号 |
 | - | - |
 | TS 下发 | `ts_unit` / `ts_task` / `ts_user` |
+| 装进 stream | `ts_create` / `ts_create_task` / `ts_create_user`（建表）、`ts_install` / `ts_install_task` / `ts_install_user`（装后继）—— 两条都是单调计数器，身份是标量 |
 | RV core | `rv_start` / `rv_start_task` / `rv_start_user`、`rv_done` / `rv_done_task` / `rv_done_user` |
 | DSA | `dsa_start` / `dsa_start_task` / `dsa_start_user`、`dsa_done` / `dsa_done_task` / `dsa_done_user` |
 | VU 那条 task 起点宏指令 | `dsa_task_trigger` / `dsa_task_trigger_task` / `dsa_task_trigger_user`（trigger 被收下）、`dsa_task_dispatch` / `dsa_task_dispatch_task` / `dsa_task_dispatch_user`（真正发行） |
@@ -134,11 +145,14 @@ moe_lpu.tracetto-index/
 RV core 是执行器接下队头那笔），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
 边沿自带身份，段的标签直接取自边沿。
 
+「装进 stream」那六条不是边沿：它们是**只加不清零的计数器**，判据是“这一拍的值比上一拍
+大”，身份在涨的那一拍单独取（标量，不是按位打包）。`TS-MU` / `TS-VU` 的起点从这里取。
+
 最后那一对只有 VU 的位（bit2）会抬，量的是同一个 task 第一条宏指令的两拍：`dsa_task_trigger`
 是它被 `config_register` 收下 trigger 那一拍（比 ISQ 收下还早），`dsa_task_dispatch` 是它真正
 发行进执行流水、`pipe_ctrl` 收下那一拍。`VU-DSA-ISQ` 取这两拍，`VU-DSA` 从后一拍起算。
 
-波形里缺 `ts_user` 或边沿信号时，启动会提醒缺哪几条，缺的那些行是空的。
+波形里缺 `ts_user`、边沿信号或「装进 stream」那几条时，启动会提醒缺哪几条，缺的那些行是空的。
 
 ## 性能与规模
 
