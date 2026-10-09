@@ -31,9 +31,9 @@ DTE 的做法是**把数据通路收敛成一个 `Mover` 模块**：
 
 * 一个任务从接纳到报完成都在 Mover 里按顺序走完，不拆读写两半
 * 五个通道各一个在途任务槽，逐段读写、一拍搬一拍
-* 去掉中间 Buffer、credit、drain 队列、读 outstanding 这些逐拍协调细节
+* 去掉中间 Buffer、credit、drain 队列这些逐拍协调细节，读侧保留 outstanding（一块存储一队按序在途读，掩盖读延迟）
 
-代价是去掉流水重叠后 cycle 数会变，功能结果（字节级落点、包内容、事件计数）不变。下一节“结构”讲这个收敛前后的对比。
+代价是去掉读与写/发之间的流水重叠后 cycle 数会变，功能结果（字节级落点、包内容、事件计数）不变。下一节“结构”讲这个收敛前后的对比。
 
 支持五种搬运方向：
 
@@ -87,7 +87,7 @@ DTE 的做法是**把数据通路收敛成一个 `Mover` 模块**：
 <text x="482" y="230" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#475569" text-anchor="start">Inbound（Router → MM / CM）：收帧 → 逐段写存储 → 报完成</text>
 <text x="482" y="248" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#475569" text-anchor="start">Outbound（MM / CM → Router）：建包 → 逐段读存储 → 逐拍发 Router → 报完成</text>
 <text x="482" y="266" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#475569" text-anchor="start">MM → CM：读 Mmem → 写 Cmem → 报完成</text>
-<text x="482" y="284" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#475569" text-anchor="start">存储口与 Router 出核单口内联仲裁；读响应按“一块存储一个在途读”认归属</text>
+<text x="482" y="284" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#475569" text-anchor="start">存储口与 Router 出核单口内联仲裁；读响应按“一块存储一队按序在途读”认归属</text>
 <text x="482" y="302" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#475569" text-anchor="start">done_pend 串行化完成上报，shareMem 写在前，ack_ts_en 恰好一次</text>
 <rect x="470" y="520" width="520" height="44" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
 <text x="482" y="538" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="700" text-anchor="start">完成上报</text>
@@ -121,7 +121,7 @@ DTE 的做法是**把数据通路收敛成一个 `Mover` 模块**：
 
 ## 结构：一条 Mover 数据通路
 
-DTE 的数据通路收敛成**一个 `Mover` 模块**：一个任务从接纳到报完成都在 Mover 里按顺序走完，不拆读写两半。旧的 Lane / DteBuffer / DteXbar / DteOutArb / Commit / CompletionRs / HeaderParser / TaskQueue 八个模块、以及中间的 Buffer credit、drain 队列、读 outstanding、Completion RS Join，全部折叠进 Mover 的任务状态机。
+DTE 的数据通路收敛成**一个 `Mover` 模块**：一个任务从接纳到报完成都在 Mover 里按顺序走完，不拆读写两半。旧的 Lane / DteBuffer / DteXbar / DteOutArb / Commit / CompletionRs / HeaderParser / TaskQueue 八个模块、以及中间的 Buffer credit、drain 队列、Completion RS Join，全部折叠进 Mover 的任务状态机；读侧保留 outstanding（掩盖读延迟）。
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 300" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Mover 的任务状态机：接纳、逐段读写、完成上报">
@@ -143,7 +143,7 @@ DTE 的数据通路收敛成**一个 `Mover` 模块**：一个任务从接纳到
 <rect x="570" y="110" width="220" height="70" rx="6" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
 <text x="680" y="138" font-size="12" fill="#111827" font-weight="600" text-anchor="middle">逐段读写</text>
 <text x="680" y="158" font-size="9.5" fill="#475569" text-anchor="middle">Read / Write / Send 三相位</text>
-<text x="680" y="172" font-size="9.5" fill="#475569" text-anchor="middle">一拍搬一拍，读一拍等一拍</text>
+<text x="680" y="172" font-size="9.5" fill="#475569" text-anchor="middle">一拍搬一拍，读侧按序流水</text>
 <rect x="870" y="110" width="200" height="70" rx="6" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.25"/>
 <text x="970" y="138" font-size="12" fill="#111827" font-weight="600" text-anchor="middle">done_pend</text>
 <text x="970" y="158" font-size="9.5" fill="#475569" text-anchor="middle">搬完即入队</text>
@@ -151,7 +151,7 @@ DTE 的数据通路收敛成**一个 `Mover` 模块**：一个任务从接纳到
 <path d="M210 145 L289.5 145" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#md)"/>
 <path d="M490 145 L569.5 145" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#md)"/>
 <path d="M790 145 L869.5 145" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#md)"/>
-<text x="24" y="230" font-size="10.5" fill="#475569">去掉的逐拍协调：读写两半拆分、中间 Buffer credit、drain 队列、读 outstanding 限额、Completion RS 按 task_id Join、完成的六个层级。</text>
+<text x="24" y="230" font-size="10.5" fill="#475569">去掉的逐拍协调：读写两半拆分、中间 Buffer credit、drain 队列、Completion RS 按 task_id Join、完成的六个层级。</text>
 <text x="24" y="248" font-size="10.5" fill="#475569">代价：去掉流水重叠后 cycle 数会变；功能结果（字节级落点、包内容、事件计数）不变。</text>
 <text x="24" y="276" font-size="10.5" fill="#475569">CM → MM 本版本不支持：XBar 不提供往 Matrix Memory 的写路径。</text>
 </svg>
@@ -189,9 +189,9 @@ Mover 每个任务槽的占用是原子的：一个任务要么整个装进槽�
 没有中间 Buffer：数据在每一拍从源端口直接搬到目标端口。
 
 * **进核**：收一拍 Router 帧，下一拍（或当拍）把这一拍写进 MM / CM；帧收齐后按段切分——数据段写、scale 段走 `WriteScale` 旁带、topK 走 `MuTopkPort`、包头落 `Hmem` 或 CoreMem 48B
-* **出核**：按段读存储，读一拍等一拍（一次只 1 个在途读），读到的数据填进包 payload，逐拍发 Router；数据段 beat 与 scale 段 beat 分开发，不合并
-* **MM → CM**：读 Mmem 一拍，写 Cmem 一拍，读一拍等一拍
-* 出核带宽从“~256B/拍”降到“~256B/读延迟拍”，这是接受 cycle 变化的核心代价
+* **出核**：按段读存储填 payload，读侧按序流水——一块存储一队按序在途读，读完一拍紧接着发下一拍、不等响应，读延迟被 outstanding 掩盖；数据段 beat 与 scale 段 beat 分开发，不合并
+* **MM → CM**：读 Mmem 填 payload（读侧同样按序流水），读完写 Cmem
+* 出核读侧按存储带宽推进（约 256B/拍），不再是每拍等一次读延迟
 
 ### 完成上报：exactly-once
 
@@ -229,7 +229,7 @@ Mover 每个任务槽的占用是原子的：一个任务要么整个装进槽�
 选定的 Matrix Mem 或 Core Mem 是数据源，Router TX 是最终的流式接收端。
 
 1. 任务装进 `out_ch[0..3]` 槽，先建包：回读包头上下文、算 `DataDst`、填 size / scale_valid / topk / `reduce_seq`。
-2. 按段读源存储，读一拍等一拍（一次只 1 个在途读），读到的数据直接填进包 payload。
+2. 按段读源存储填 payload，读侧按序流水（一块存储一队按序在途读），读到的数据直接填进包 payload。
 3. 按固化的 Route 选 Router TX 或 CoreMem Egress，逐拍发出；数据段 beat 与 scale 段 beat 分开发，topK beat 单独带。
 4. 发完（收到出口响应），任务进 done_pend，向 TS 产生一次 `task_done`。
 
@@ -238,10 +238,10 @@ Mover 每个任务槽的占用是原子的：一个任务要么整个装进槽�
 完全走出核通道，且固定占 `out_ch[3]`（`MM → CM` 不出核、不占 VC，出口在目的端 MUX 到 Core Mem）。
 
 1. 任务锁定 Matrix Mem 为读源、Core Mem 为写目标
-2. 读 Mmem 一拍，写 Cmem 一拍，读一拍等一拍
+2. 读 Mmem 填 payload（读侧按序流水），读完写 Cmem
 3. 出口绑定选 DMA WR1 而不是 Router TX；WR1 的硬件 route mask 只允许 CoreMem，因此不会把数据写回 Matrix Mem
 
-去掉 Buffer 后，读、写、发不再流水重叠：每个任务在自己的槽里读完一拍写/发一拍，同一块存储一次只 1 个在途读。
+去掉 Buffer 后，读与写/发之间不再流水重叠：每个任务在自己的槽里先把该读的读完（读侧按序流水，一块存储一队按序在途读），再写/发。
 
 ***
 
@@ -894,9 +894,9 @@ stall_cycles  = cycles(valid && !ready)
 这么合是因为两个方案各自的短板正好互补。方案二把资源检查全放进 DTE，DTE 就要在 PendingQ 里做拆包，拆出来的小任务数量不确定，会把中央任务队列填满、堵住后面那笔释放资源的任务，死锁只是换了个位置。方案一用“任务足够小”这条软件约束避开了拆包，但它的出口仍是按 Buffer 而不是按通道切的，DTE 侧没有乱序执行能力。取通道结构加软件约束，两头都避掉了。
 
 * **为什么去掉读写两半、去掉中间 Buffer**
-  * 读写两半和中间 Buffer 是为了让两端按各自节奏推进、吸收速度差，代价是配对关系、Buffer credit、drain 队列、读 outstanding、Completion RS Join 一套逐拍协调
+  * 读写两半和中间 Buffer 是为了让两端按各自节奏推进、吸收速度差，代价是配对关系、Buffer credit、drain 队列、Completion RS Join 一套逐拍协调
   * 这套协调是复杂度的主要来源，但功能上只是“把一个任务搬完”，不改变字节落点和包内容
-  * 收敛成一条 Mover 后，一个任务在自己的槽里读完写完发完，一拍搬一拍；代价是去掉流水重叠，cycle 数会变（出核带宽从 ~256B/拍降到 ~256B/读延迟拍），功能结果不变
+  * 收敛成一条 Mover 后，一个任务在自己的槽里读完写完发完，一拍搬一拍；代价是去掉读与写/发之间的流水重叠，cycle 数仍会变（读侧靠 outstanding 恢复按存储带宽推进，但读与发不再重叠），功能结果不变
 * **为什么接纳要原子、要 FIFO 配对**
   * 槽的占用是原子的：一个任务要么整个装进槽、要么整体保持在 pending，不存在“读已经开始、写还没有落脚点”的半任务
   * 进核任务与到达的进核帧按到达顺序 FIFO 配对，第 N 个任务配第 N 个包，两侧没到齐就先等，不装槽

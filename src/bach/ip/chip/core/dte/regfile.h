@@ -153,6 +153,13 @@ class DteRegfile : public BachModule {
   // ── 观测 ──
   uint64_t Triggers() const { return trig_cnt; }
   uint64_t Writes() const { return write_cnt; }
+  // 配置突发起点（这一笔任务的第一笔寄存器写）与其身份；trigger 的身份另存一份。
+  // 供 core.h 的 EmitDte() 打包成 dte_cfg_* / dte_trigger_*。
+  uint64_t CfgStartSeq() const { return cfg_start_seq; }
+  uint64_t CfgStartTask() const { return cfg_start_task; }
+  uint64_t CfgStartUser() const { return cfg_start_user; }
+  uint64_t TrigTask() const { return trig_task; }
+  uint64_t TrigUser() const { return trig_user; }
   bool Quiescent() const override { return !held && pending_read.empty(); }
 
  protected:
@@ -190,6 +197,14 @@ class DteRegfile : public BachModule {
       return;
     }
     ++write_cnt;
+    if (at >= kDteConfigBase + 0x004 && at <= kDteRegTransMode && !cfg_open) {
+      // 第一笔任务配置寄存器写：配置突发起点。身份随这笔写带进来。
+      cfg_open = true;
+      ++cfg_start_seq;
+      DsaTaskIds ids = cfg->TaskIds();
+      cfg_start_task = ids.task;
+      cfg_start_user = ids.user;
+    }
     WriteReg(at, cfg->req_wdata.Get());
   }
 
@@ -278,6 +293,8 @@ class DteRegfile : public BachModule {
     d->user_id = ids.user;
     d->path_id = ids.path;
     d->vc = ids.vc;
+    trig_task = ids.task;
+    trig_user = ids.user;
     d->route = Route(merged.trans_mode & kDteModeMask);
     uint64_t seg_valid = (merged.trans_mode >> kDteSegValidShift) &
                          kDteSegValidMask;
@@ -310,6 +327,7 @@ class DteRegfile : public BachModule {
     held = Held{d, out->NextSeq()};
     ++trig_cnt;
     dirty = 0;
+    cfg_open = false;
   }
 
   Agcu agcu;
@@ -335,6 +353,10 @@ class DteRegfile : public BachModule {
   std::optional<Held> held;
   bool rdata_used = false;
   uint64_t last_seq = 0, trig_cnt = 0, write_cnt = 0;
+  // 配置突发起点（第一笔寄存器写）与 trigger 的边沿计数与身份。
+  bool cfg_open = false;
+  uint64_t cfg_start_seq = 0, cfg_start_task = 0, cfg_start_user = 0;
+  uint64_t trig_task = 0, trig_user = 0;
 
   Logic64 triggers, writes;
 };

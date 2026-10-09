@@ -205,6 +205,7 @@ class Core : public BachModule {
     EmitStep();
     EmitDsa();
     EmitRv();
+    EmitDte();
   }
 
   // Router 里设计文档画出来的那几个方框，各记一两个量：
@@ -436,6 +437,70 @@ class Core : public BachModule {
     TracePerCycle("rv_done_user", done_user);
   }
 
+  // DTE 那 6 条 Perfetto 轨道背后的两组边沿：dte_rvcore 一轨 + 五条 lane。
+  //
+  //   dte_cfg / dte_trigger      位 0 掩码：配置突发起点 / trigger 提交，各带身份。
+  //                              dte_rvcore 轨道 = 从第一笔寄存器写到 trigger。
+  //   dte_lane_rd / dte_lane_wr  5 位掩码：bit i = lane i 的起点 / 终点。
+  //                              起点 = 第一笔读响应（进核无读则放进槽那一拍），
+  //                              终点 = 最后一笔写/发出去（任务离开槽位）。
+  //   dte_lane_rd_task           task 打包：lane i 占 8 bit（bit 8*i）。
+  //   dte_lane_rd_user / _user2  user 打包：lane 0~3 在 user（各 16 bit）、lane 4
+  //                              在 user2（16 bit）—— 16×5=80 放不进一个 64。
+  //
+  // 五条 lane 各自只压一笔任务、严格先后，起点与终点按 lane 内顺序配对即可，所以
+  // 终点不带身份，身份一律从起点那笔取。id 与 ts_task / ts_user 同宽：task 8 bit、
+  // user 16 bit。
+  void EmitDte() {
+    // 配置面：一个 DTE RV core，起点是这一笔的第一笔寄存器写，终点是 trigger。
+    uint64_t cfg_mask = 0, cfg_task = 0, cfg_user = 0;
+    uint64_t trig_mask = 0, trig_task = 0, trig_user = 0;
+    uint64_t cs = dte->CfgStartSeq();
+    if (cs != dte_cfg_seq) {
+      dte_cfg_seq = cs;
+      cfg_mask |= 1;
+      cfg_task |= dte->CfgStartTask() & 0xFFu;
+      cfg_user |= dte->CfgStartUser() & 0xFFFFu;
+    }
+    uint64_t tsn = dte->Triggers();
+    if (tsn != dte_trig_seq) {
+      dte_trig_seq = tsn;
+      trig_mask |= 1;
+      trig_task |= dte->TrigTask() & 0xFFu;
+      trig_user |= dte->TrigUser() & 0xFFFFu;
+    }
+    TracePerCycle("dte_cfg", cfg_mask);
+    TracePerCycle("dte_cfg_task", cfg_task);
+    TracePerCycle("dte_cfg_user", cfg_user);
+    TracePerCycle("dte_trigger", trig_mask);
+    TracePerCycle("dte_trigger_task", trig_task);
+    TracePerCycle("dte_trigger_user", trig_user);
+
+    // 数据面：五条 lane。
+    uint64_t rd_mask = 0, rd_task = 0, rd_user = 0, rd_user2 = 0, wr_mask = 0;
+    for (uint64_t l = 0; l < kLaneNum; ++l) {
+      uint64_t s = dte->LaneRdSeq(l);
+      if (s != dte_lane_rd_seq[l]) {
+        dte_lane_rd_seq[l] = s;
+        rd_mask |= 1ull << l;
+        rd_task |= (dte->LaneRdTask(l) & 0xFFu) << (8 * l);
+        uint64_t u = dte->LaneRdUser(l) & 0xFFFFu;
+        if (l < 4) rd_user |= u << (16 * l);
+        else rd_user2 |= u;
+      }
+      uint64_t w = dte->LaneWrSeq(l);
+      if (w != dte_lane_wr_seq[l]) {
+        dte_lane_wr_seq[l] = w;
+        wr_mask |= 1ull << l;
+      }
+    }
+    TracePerCycle("dte_lane_rd", rd_mask);
+    TracePerCycle("dte_lane_rd_task", rd_task);
+    TracePerCycle("dte_lane_rd_user", rd_user);
+    TracePerCycle("dte_lane_rd_user2", rd_user2);
+    TracePerCycle("dte_lane_wr", wr_mask);
+  }
+
   bool Quiescent() const override {
     if (!router->Quiescent()) return false;
     if (Bad()) return true;
@@ -634,6 +699,10 @@ class Core : public BachModule {
   std::array<uint64_t, 3> dsa_task_trig_seq{}, dsa_task_disp_seq{};
   // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
+  // DTE 配置突发起点与 trigger 上一次见到的笔数，EmitDte() 用它认本拍新发生的那一笔。
+  uint64_t dte_cfg_seq = 0, dte_trig_seq = 0;
+  // 五条 lane 上一次见到的起/完笔数，EmitDte() 用它认本拍新发生的那一笔。
+  std::array<uint64_t, kLaneNum> dte_lane_rd_seq{}, dte_lane_wr_seq{};
   // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。
   uint64_t ts_create_seq = 0, ts_reactivate_seq = 0, ts_install_seq = 0;
   std::unique_ptr<Router> router;

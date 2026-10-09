@@ -113,6 +113,18 @@ class Dte {
   OutArbView OutArb() { return OutArbView{*mover}; }
   OutBufView OutBuf() { return OutBufView{*mover}; }
 
+  // 供 core.h 的 EmitDte() 读：配置突发起点 / trigger / 五条 lane 的边沿与身份。
+  uint64_t CfgStartSeq() const { return reg->CfgStartSeq(); }
+  uint64_t CfgStartTask() const { return reg->CfgStartTask(); }
+  uint64_t CfgStartUser() const { return reg->CfgStartUser(); }
+  uint64_t Triggers() const { return reg->Triggers(); }
+  uint64_t TrigTask() const { return reg->TrigTask(); }
+  uint64_t TrigUser() const { return reg->TrigUser(); }
+  uint64_t LaneRdSeq(uint64_t lane) const { return mover->LaneRdSeq(lane); }
+  uint64_t LaneWrSeq(uint64_t lane) const { return mover->LaneWrSeq(lane); }
+  uint64_t LaneRdTask(uint64_t lane) const { return mover->LaneRdTask(lane); }
+  uint64_t LaneRdUser(uint64_t lane) const { return mover->LaneRdUser(lane); }
+
   void RunStep() {
     hmem->RunStep();
     reg->RunStep();

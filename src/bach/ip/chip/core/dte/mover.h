@@ -111,6 +111,11 @@ class Mover : public BachModule {
   uint64_t DoneUser() const { return done_user; }
   uint64_t Sent() const { return sent; }
   uint64_t Occupancy() const { return occupancy; }
+  // 五条 lane 的边沿计数与起点身份，供 core.h 的 EmitDte() 打包成波形信号。
+  uint64_t LaneRdSeq(uint64_t lane) const { return lane_rd_seq[lane]; }
+  uint64_t LaneWrSeq(uint64_t lane) const { return lane_wr_seq[lane]; }
+  uint64_t LaneRdTask(uint64_t lane) const { return lane_rd_task[lane]; }
+  uint64_t LaneRdUser(uint64_t lane) const { return lane_rd_user[lane]; }
 
   bool Quiescent() const override {
     if (!pending.empty() || !rx_frames.empty() || !done_pend.empty()) return false;
@@ -162,6 +167,8 @@ class Mover : public BachModule {
     bool hdr_stored = false;     // 进核：包头上下文落库没有
     bool sent_first = false;     // 出核：首拍发出去没有
     bool topk_pending = false;   // 出核：最后一拍 payload 发完，还欠 topK 拍
+    bool rresp_seen = false;     // 已收到第一笔读响应（lane 轨道的起点）
+    uint64_t rd_outstanding = 0; // 已发出、还没回来的读请求数（这个任务）
   };
 
   struct Pend {
@@ -190,8 +197,6 @@ class Mover : public BachModule {
     if (!s.valid || s.is_header) return false;
     return DataOrScale(s.dst_kind) || s.dst_kind == SegEndpoint::kTopk;
   }
-  // 段的读长：读侧不搬 topK（topK 从 MU 的 topK_ep_table 读），header 段也不搬。
-  static uint64_t ReadLen(Segment const& s) { return ReadSeg(s) ? s.len : 0; }
   // 段 i 在 msg->payload 里的起点：前面所有 data/scale 段的长度之和。
   static uint64_t PayloadBase(Descriptor const& d, uint64_t seg) {
     uint64_t base = 0;
@@ -303,6 +308,9 @@ class Mover : public BachModule {
       start_task = t.desc.task_id;
       start_user = t.desc.user_id;
       slots[lane] = std::move(t);
+      if (IsInbound(slots[lane]->desc.route)) {
+        LaneRdEvent(lane, *slots[lane]);   // 进核无读：起点取放进槽这一拍
+      }
       it = pending.erase(it);
       moved = true;
     }
@@ -338,16 +346,30 @@ class Mover : public BachModule {
     d.msg = m;
   }
 
-  // 读响应按“一块存储一个在途读”认归属。
+  // 读响应按“一块存储一队按序在途读”认归属：同一存储的响应按发出顺序回来，
+  // owner 队列的队头就是这一笔响应属于哪个槽。
   void CollectResponses() {
-    CollectOne(*cmem_rd, cmem_rd_owner);
-    CollectOne(*mmem_rd, mmem_rd_owner);
+    CollectOne(*cmem_rd, cmem_rd_owners);
+    CollectOne(*mmem_rd, mmem_rd_owners);
   }
 
-  void CollectOne(MemPort& rd, int& owner) {
-    if (owner < 0 || !rd.RspValid()) return;
+  // lane 轨道起点边沿：这一拍 lane 上某笔任务收到第一笔读响应（进核无读，放进槽
+  // 那一拍就算起点）。身份取这笔任务自己的，供 core.h 打包进 dte_lane_rd_*。
+  void LaneRdEvent(uint64_t lane, Task const& t) {
+    ++lane_rd_seq[lane];
+    lane_rd_task[lane] = t.desc.task_id;
+    lane_rd_user[lane] = t.desc.user_id;
+  }
+
+  void CollectOne(MemPort& rd, std::deque<int>& owners) {
+    if (owners.empty() || !rd.RspValid()) return;
+    int owner = owners.front();
+    owners.pop_front();
     Task& t = *slots[owner];
-    owner = -1;
+    if (!t.rresp_seen) {
+      t.rresp_seen = true;
+      LaneRdEvent(owner, t);
+    }
     ByteBlockPtr blk = rd.RspData();
     uint64_t n = blk ? blk->size() : kFlitBytes;
     if (t.msg) {
@@ -356,11 +378,7 @@ class Mover : public BachModule {
       }
     }
     t.filled += n;
-    t.off += n;
-    if (t.off >= ReadLen(t.desc.seg[t.seg])) {
-      t.off = 0;
-      ++t.seg;
-    }
+    --t.rd_outstanding;
   }
 
   // 推进各槽的读/写。出核发拍走 SendStep（全局一个 Router 口）。
@@ -377,18 +395,28 @@ class Mover : public BachModule {
   }
 
   void ReadStep(Task& t, uint64_t slot) {
-    int& owner = FromCm(t.desc.route) ? cmem_rd_owner : mmem_rd_owner;
-    if (owner != -1) return;  // 这块存储已有一个在途读，等响应
-    MemPort& rd = FromCm(t.desc.route) ? *cmem_rd : *mmem_rd;
-    if (!rd.Ready()) return;
+    bool from_cm = FromCm(t.desc.route);
+    MemPort& rd = from_cm ? *cmem_rd : *mmem_rd;
+    std::deque<int>& owners = from_cm ? cmem_rd_owners : mmem_rd_owners;
 
     while (t.seg < 4 && !ReadSeg(t.desc.seg[t.seg])) ++t.seg;
     if (t.seg >= 4) {
-      t.phase = (t.desc.route == Route::kMmToCm) ? Phase::kWrite : Phase::kSend;
-      t.seg = 0;
-      t.off = 0;
+      // 读段都发出去了，等这笔任务的在途读全部回来再进下一相（读发完不等于读完）。
+      if (t.rd_outstanding == 0) {
+        if (!t.rresp_seen) {
+          t.rresp_seen = true;
+          LaneRdEvent(slot, t);   // 没有读段：读相直接结束，起点取这一拍
+        }
+        t.phase = (t.desc.route == Route::kMmToCm) ? Phase::kWrite : Phase::kSend;
+        t.seg = 0;
+        t.off = 0;
+      }
       return;
     }
+    // 一个口一拍只发一笔；这块存储本拍已发过就轮到下一拍。
+    if (from_cm ? cmem_rd_used : mmem_rd_used) return;
+    if (!rd.Ready()) return;
+
     Segment const& s = t.desc.seg[t.seg];
     uint64_t left = s.len - t.off;
     uint64_t n = left > kFlitBytes ? kFlitBytes : left;
@@ -397,8 +425,15 @@ class Mover : public BachModule {
     } else {
       rd.Read(s.src_addr + t.off, n);
     }
-    owner = slot;
-    if (FromCm(t.desc.route)) cmem_rd_used = true;
+    owners.push_back(slot);
+    ++t.rd_outstanding;
+    // 读游标在读发出的当拍就推进，不等响应；响应回来只往 payload 里填。
+    t.off += n;
+    if (t.off >= s.len) {
+      t.off = 0;
+      ++t.seg;
+    }
+    if (from_cm) cmem_rd_used = true;
     else mmem_rd_used = true;
   }
 
@@ -550,6 +585,7 @@ class Mover : public BachModule {
 
   void Finish(uint64_t slot) {
     Task const& t = *slots[slot];
+    ++lane_wr_seq[slot];   // lane 轨道终点：最后一笔写/发出去，任务离开槽位
     ++joined;
     if (t.desc.ack_ts_en || t.desc.wr_sharemem_flag) {
       done_pend.push_back({t.desc.stream_id, t.desc.task_id, t.desc.user_id,
@@ -611,8 +647,8 @@ class Mover : public BachModule {
   std::array<std::optional<Task>, kLaneNum> slots;
   std::deque<Pend> done_pend;
 
-  // 读响应归属：一块存储一个在途读。
-  int cmem_rd_owner = -1, mmem_rd_owner = -1;
+  // 读响应归属：一块存储一队按序在途读，队头是下一笔响应属于哪个槽。
+  std::deque<int> cmem_rd_owners, mmem_rd_owners;
   // 出核发拍状态。
   int router_owner = -1;
   bool router_held = false, router_held_last = false;
@@ -623,6 +659,13 @@ class Mover : public BachModule {
   uint64_t parsed = 0, admitted = 0, start_task = 0, start_user = 0;
   uint64_t stalled = 0, joined = 0, used = 0, reported = 0;
   uint64_t done_task = 0, done_user = 0, sent = 0, occupancy = 0;
+
+  // 五条 lane 的边沿计数与起点身份。lane_rd_seq 起点（第一笔读响应 / 进核放进槽）、
+  // lane_wr_seq 终点（最后一笔写/发）。起点身份随事件存一份，供 EmitDte() 读。
+  std::array<uint64_t, kLaneNum> lane_rd_seq{};
+  std::array<uint64_t, kLaneNum> lane_wr_seq{};
+  std::array<uint64_t, kLaneNum> lane_rd_task{};
+  std::array<uint64_t, kLaneNum> lane_rd_user{};
 
   // 每拍端口占用标记。
   bool cmem_rd_used = false, cmem_wr_used = false, mmem_rd_used = false;

@@ -20,7 +20,7 @@
 
 DTE 只做搬运，不做计算，职责五件：接纳任务、生成访问命令、处理背压、追踪在途事务、向 TS 报告最终完成。
 
-难点在两端的节奏对不上：Router 一侧流式到达、什么时候来由上游决定；存储一侧要过 DMA_XBAR 抢 bank。这一版的做法是**把数据通路收敛成一个 `Mover` 模块**：一个任务从接纳到报完成都在一个模块里按顺序走完，不再拆读写两半、不再有中间 Buffer、credit、drain 队列、读 outstanding 这些逐拍协调细节。代价是去掉流水重叠后 cycle 数会变，功能结果（字节级落点、包内容、事件计数）不变。
+难点在两端的节奏对不上：Router 一侧流式到达、什么时候来由上游决定；存储一侧要过 DMA_XBAR 抢 bank。这一版的做法是**把数据通路收敛成一个 `Mover` 模块**：一个任务从接纳到报完成都在一个模块里按顺序走完，不再拆读写两半、不再有中间 Buffer、credit、drain 队列这些逐拍协调细节，读侧保留 outstanding（一块存储一队按序在途读，掩盖读延迟）。代价是去掉读与写/发之间的流水重叠后 cycle 数会变，功能结果（字节级落点、包内容、事件计数）不变。
 
 DTE 由三个模块组成：
 
@@ -49,7 +49,7 @@ DTE 由三个模块组成：
 <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker></defs>
 <rect x="0" y="0" width="1560" height="900" fill="#ffffff"/>
 <text x="20" y="26" font-size="12" fill="#111827">DTE DSA · 第 0 层（三个模块：Hmem 表、Mover 数据通路、DteRegfile 配置前端。方位：RV core 与 TS 在上，存储与 Router 在下）</text>
-<text x="20" y="46" font-size="9.5" fill="#6b7280">一个任务从接纳到报完成都在 Mover 里按顺序走完，不拆读写两半，没有中间 Buffer / credit / drain / outstanding / Join</text>
+<text x="20" y="46" font-size="9.5" fill="#6b7280">一个任务从接纳到报完成都在 Mover 里按顺序走完，不拆读写两半，没有中间 Buffer / credit / drain / Join；读侧保留 outstanding</text>
 <rect x="160" y="110" width="300" height="113.5" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="172" y="131" font-size="11" fill="#111827" font-weight="600">DteRegfile</text>
 <text x="172.0" y="148.0" font-size="8.5" fill="#475569">19 项配置 + 8 套模板，dirty 掩码合并</text>
@@ -70,11 +70,12 @@ DTE 由三个模块组成：
 <text x="852.0" y="148.0" font-size="8.5" fill="#475569">中央任务队列 pending（深度 16）+ 5 个通道槽</text>
 <text x="852.0" y="161.5" font-size="8.5" fill="#475569">　（in_ch + out_ch[0..3]），每槽一个在途任务</text>
 <text x="852.0" y="175.0" font-size="8.5" fill="#475569">收帧 rx_frames 与进核任务 FIFO 配对</text>
-<text x="852.0" y="188.5" font-size="8.5" fill="#475569">逐段读写存储，一拍搬一拍；出核一个在途读</text>
+<text x="852.0" y="188.5" font-size="8.5" fill="#475569">逐段读写存储，一拍搬一拍；出核读侧按序流水</text>
 <text x="852.0" y="202.0" font-size="8.5" fill="#475569">存储读/写口与 Router 出核单口内联仲裁</text>
 <text x="852.0" y="215.5" font-size="8.5" fill="#475569">done_pend 串行化完成上报，shareMem 写在前</text>
 <text x="852.0" y="229.0" font-size="8.5" fill="#475569">ack_ts_en 恰好一次，向 DonePort 一拍报一笔</text>
 <text x="852.0" y="242.5" font-size="8.5" fill="#475569">观测计数：parsed / admitted / joined / sent / reported / occupancy</text>
+<text x="852.0" y="256.0" font-size="8.5" fill="#475569">另记 lane 起终点 / 配置突发起点→trigger，供 Perfetto 6 条 DTE 轨道</text>
 <polygon points="599,44 710,44 701,74 590,74" fill="#f8fafc" stroke="#374151"/>
 <text x="650.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">dsa_done → TS</text>
 <polygon points="1289,44 1400,44 1391,74 1280,74" fill="#f8fafc" stroke="#374151"/>
@@ -83,7 +84,7 @@ DTE 由三个模块组成：
 <text x="312" y="421" font-size="11" fill="#111827" font-weight="600">Mover 逐拍推进（Step 顺序）</text>
 <text x="312.0" y="438.0" font-size="8.5" fill="#475569">ReceiveFromRouter（收帧 + 反压 + 序号去重）</text>
 <text x="312.0" y="451.5" font-size="8.5" fill="#475569">Dispatch（pending → 空闲槽；进核要等帧配对）</text>
-<text x="312.0" y="465.0" font-size="8.5" fill="#475569">CollectResponses（读响应按“一块存储一个在途读”认归属）</text>
+<text x="312.0" y="465.0" font-size="8.5" fill="#475569">CollectResponses（读响应按“一块存储一队按序在途读”认归属）</text>
 <text x="312.0" y="478.5" font-size="8.5" fill="#475569">AdvanceAll（逐槽推进读/写）</text>
 <text x="312.0" y="492.0" font-size="8.5" fill="#475569">SendStep（Router 单口，帧粘连不插拍）</text>
 <text x="312.0" y="505.5" font-size="8.5" fill="#475569">Report（done_pend 串行化，shareMem 写在前）</text>
@@ -154,8 +155,8 @@ DTE 由三个模块组成：
 | 编号 | 功能 |
 | - | - |
 | F32 | Inbound（Router → MM / CM）：RV core 配 CFG + trigger 起任务 → 任务进中央队列 → 收到帧后与进核任务 FIFO 配对放进通道槽 → 逐段写存储（包头落库、数据段写、scale 走 WriteScale、topK 走旁带写 MU）→ 报完成 |
-| F33 | Outbound（MM / CM → Router）：任务进中央队列 → 放进通道槽建包（MakeOutboundMsg：回读包头上下文、填身份与长度、带 scale / topK）→ 逐段读存储填 payload（一个在途读，读一拍等一拍）→ 逐拍发 Router（数据段 + scale 段分开发 beat，带 topK 的补最后一拍）→ 报完成 |
-| F34 | Inner（MM → CM）：完全走出核通道，固定占 `out_ch[3]`。读 Mmem（一个在途读）→ 写 Cmem → 报完成 |
+| F33 | Outbound（MM / CM → Router）：任务进中央队列 → 放进通道槽建包（MakeOutboundMsg：回读包头上下文、填身份与长度、带 scale / topK）→ 逐段读存储填 payload（读侧按序流水，一块存储一队按序在途读）→ 逐拍发 Router（数据段 + scale 段分开发 beat，带 topK 的补最后一拍）→ 报完成 |
+| F34 | Inner（MM → CM）：完全走出核通道，固定占 `out_ch[3]`。读 Mmem（按序流水）→ 写 Cmem → 报完成 |
 | F35 | 各槽之间彼此独立、按序推进；每拍各口仍遵守 valid / ready |
 
 ### 完成上报
@@ -334,7 +335,7 @@ total_latency = setup + issue + report
   <text x="326" y="292" font-size="11" fill="#111827">shareMem 写 + 报 TS</text>
   <path d="M300 286 L315 286" stroke="#475569" marker-end="url(#areov)" fill="none"/>
   <text x="20" y="360" font-size="10.5" fill="#374151">各通道槽彼此独立：一个通道搬完立刻能放下一个任务，不等别的通道。</text>
-  <text x="20" y="392" font-size="10.5" fill="#374151">去掉读写两半与中间 Buffer 后，读一拍等一拍，cycle 数比旧版多，但字节级结果不变。</text>
+  <text x="20" y="392" font-size="10.5" fill="#374151">去掉读写两半与中间 Buffer 后，读与写/发不再重叠，cycle 数仍比旧版多，但字节级结果不变；读侧本身按存储带宽推进。</text>
 </svg>
 ```
 
@@ -362,14 +363,14 @@ Mover 每拍按固定顺序走一遍（`Step()`）：`ReceiveFromRouter → Disp
 
 ### CollectResponses · 读响应归属
 
-* 一块存储一个在途读：`cmem_rd_owner` / `mmem_rd_owner` 记谁在等响应。
-* 响应回来把数据填进出核任务的 `msg->payload`（从 `filled` 处往后填），`off` 与 `seg` 推进。
+* 一块存储一队按序在途读：`cmem_rd_owners` / `mmem_rd_owners` 是 FIFO，队头是下一笔响应属于哪个槽。
+* 响应回来把数据填进出核任务的 `msg->payload`（从 `filled` 处往后填），`filled` 推进；读游标 `off` / `seg` 在发出当拍已推进，响应不再动它。
 
 ### AdvanceAll · 逐槽推进
 
 * 每槽按 `phase` 调 `ReadStep`（kRead）或 `WriteStep`（kWrite）。
 
-**ReadStep（出核读存储填 payload）**：跳过非读段（`ReadSeg` = 非 header 且 src 是 data/scale）。scale 段走 `ReadScale`（每 32 组一 B），data 段走 `Read`。发完一个在途读就记 `owner` 等响应，一拍只发一个（读一拍等一拍）。段读完后 `phase` 切 kSend（出核）或 kWrite（MM→CM）。
+**ReadStep（出核读存储填 payload）**：跳过非读段（`ReadSeg` = 非 header 且 src 是 data/scale）。scale 段走 `ReadScale`（每 32 组一 B），data 段走 `Read`。读游标 `off` / `seg` 在发出的当拍推进，`owner` 进队列、`rd_outstanding` 加一；一个口一拍只发一笔（`*_used` 标记），不等响应。段都发完且 `rd_outstanding` 归零才 `phase` 切 kSend（出核）或 kWrite（MM→CM）。
 
 **WriteStep（进核写存储 / MM→CM 写）**：进核第一拍先落包头上下文（`StoreHeader`，只一次）。跳过非写段（`WriteSeg` = 非 header 且 dst 是 data/scale/topk）。topK 段走旁带 `mu_topk->Drive` 写 MU，不落存储。scale 段走 `WriteScale`，data 段走 `Write`。段写完 `Finish(slot)` 报完成。
 
@@ -473,12 +474,12 @@ scale / topK 长度   scale 由软件配段 2 的 CFG_DATA_LEN（默认 data_len
 ## 9　取舍
 
 * **为什么把数据通路收敛成一个 `Mover`**
-  * 旧版拆读写两半、中间 Buffer、credit、drain 队列、读 outstanding，是为了让两端节奏对不上的流水线还能重叠推进，代价是 8 个模块 + 6 个端口类、靠多拍握手互相协调，结构复杂难读
-  * 这一版按任务顺序逐拍推进，一个任务在模块里走完；代价是读一拍等一拍、去掉了流水重叠，cycle 数会变，但字节级落点、包内容、事件计数不变
+  * 旧版拆读写两半、中间 Buffer、credit、drain 队列，是为了让两端节奏对不上的流水线还能重叠推进，代价是 8 个模块 + 6 个端口类、靠多拍握手互相协调，结构复杂难读
+  * 这一版按任务顺序逐拍推进，一个任务在模块里走完；代价是去掉读与写/发之间的流水重叠，cycle 数会变，但字节级落点、包内容、事件计数不变
   * 存储口与 Router 口仍保留逐拍 valid/ready，外部接口的逐拍搬运不动，只是内部不再有协调细节
-* **为什么读一拍等一拍**
-  * 出核一个在途读、读响应回来才发下一读，读响应按“一块存储一个在途读”认归属，不用在途表记多笔
-  * 代价是出核带宽从 ~256B/拍降到 ~256B/延迟拍；cycle 变化是用户接受的代价
+* **为什么读侧保留 outstanding**
+  * 读响应按“一块存储一队按序在途读”认归属：读游标在发出的当拍推进，响应按 FIFO 填 payload，读延迟被后续读掩盖，出核读侧回到按存储带宽推进（约 256B/拍）
+  * 代价是读响应归属要维护一条按序队列；读与写/发之间仍不重叠（读完才写/发）
 * **为什么通道按 VC 切、出核四份进核一份**
   * 出核任务共用一条出口，某个 VC 的 credit 耗尽会把排在后面、走别的 VC 的任务一起堵死
   * 现在把出核那条按 VC 分成四个通道槽，一个 VC 阻塞只影响自己那条；进核方向没有这个问题，仍是一条
