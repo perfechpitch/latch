@@ -32,6 +32,8 @@ endforeach()
 # 硬件配置生成器与参考实现都是 Python 写的，各挂一条 CTest。
 # 参考实现那一条还查比对向量与代码同步：向量由 C++ 那一侧读进来做逐 bit 比对，
 # 不同步的话比的就是旧结果。
+# tracetto 是 src/utils 下的波形查看器，与 bach 无关，也挂在这里 —— 全仓就这一处
+# find_package(Python3) 挂 Python 用例，另起一处再来一遍 find_package 没意思。
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_FOUND)
   add_test(NAME hwconfig
@@ -40,4 +42,7 @@ if(Python3_FOUND)
   add_test(NAME reference
            COMMAND ${Python3_EXECUTABLE}
                    ${LATCH_ROOT_DIR}/src/bach/compiler/reference/selftest.py)
+  add_test(NAME tracetto
+           COMMAND ${Python3_EXECUTABLE}
+                   ${LATCH_ROOT_DIR}/src/utils/tracetto/selftest_tracetto.py)
 endif()

@@ -781,13 +781,18 @@ def check_no_insight():
 
 
 def check_cmake_path():
-    """ctest 那条得指着小写的 tracetto 这一份。"""
-    cmake = HERE.parents[2] / "test" / "CMakeLists.txt"     # src/utils/tracetto → 仓库根
+    """ctest 那条得指着小写的 tracetto 这一份。
+
+    挂 CTest 的是 `test/bach/CMakeLists.txt`（全仓唯一一处 find_package(Python3)
+    挂 Python 用例的地方），不是顶层的 `test/CMakeLists.txt` —— 顶层那个只
+    add_subdirectory，里面从来没有过 tracetto。
+    """
+    cmake = HERE.parents[2] / "test" / "bach" / "CMakeLists.txt"   # src/utils/tracetto → 仓库根
     if not cmake.is_file():
         return
     text = cmake.read_text(encoding="utf-8")
     expect_true("Tracetto/" not in text, "CMakeLists 里还写着大写的 Tracetto/")
-    expect_true("../src/utils/tracetto/selftest_tracetto.py" in text,
+    expect_true("${LATCH_ROOT_DIR}/src/utils/tracetto/selftest_tracetto.py" in text,
                 "CMakeLists 没指着 selftest")
 
 
