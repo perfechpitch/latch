@@ -192,12 +192,14 @@ class Lane : public BachModule {
       h.hardware_used = 1;
       h.gpu_id = m->gpu_id;
       h.token_id = m->token_id;
+      h.user_id = m->user_id;
     } else {
       HmemEntry h;
       h.core_mask = m->path_core_mask;
       h.hardware_used = 1;
       h.gpu_id = m->gpu_id;
       h.token_id = m->token_id;
+      h.user_id = m->user_id;
       cmem_sync->Poke(d.seg[0].dst_addr, HeaderToBytes(h, d.pcode));
     }
   }

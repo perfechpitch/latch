@@ -4,6 +4,7 @@
 #include <sstream>
 #include <map>
 #include "test/bach/ip/chip/moe_common.h"
+#include "test/bach/pcode_case.h"
 
 namespace {
 using namespace latch;
@@ -74,7 +75,12 @@ TEST(PcodeBundle, Ep6OneToken) {
       std::array<uint64_t,6>{2,2,1,1,1,1} : std::array<uint64_t,6>{2,2,0,2,0,2};
   uint64_t active_mask = 0;
   for (uint64_t ep = 0; ep < 6; ++ep) if (counts[ep]) active_mask |= 1ull << ep;
-  EnsureSlots(kChipNum * (kMaxCorePerChip + 1));
+  std::unique_ptr<pcode_test::Fixture> fixture;
+  if (auto path = std::getenv("PCODE_CASE_FILE")) fixture = std::make_unique<pcode_test::Fixture>(path);
+  if (auto threads = std::getenv("PCODE_THREADS")) {
+    uint64_t n = std::stoull(threads); ASSERT_GT(n,0u); ASSERT_LE(n,16u);
+    RT::Reset(n, (600 + n - 1) / n);
+  } else EnsureSlots(kChipNum * (kMaxCorePerChip + 1));
   auto clk = MakeClock(0, 1);
   auto owned = MakeLpuChips(clk, 0);
   std::vector<Chip*> all;
@@ -84,7 +90,8 @@ TEST(PcodeBundle, Ep6OneToken) {
     for (uint64_t c = 0; c < all.size(); ++c)
       for (uint64_t p = 0; p < 10; ++p)
         std::cerr << "reduce id " << all[c]->GetCore(p).GetRouter().GetReduce().Id() << " chip " << c << " core " << p << "\n";
-  LoadFixtureWeights(all, root, counts);
+  if (fixture) fixture->Load(all,root);
+  else LoadFixtureWeights(all, root, counts);
   auto m = std::make_shared<Message>();
   m->path_id = 63;
   m->path_core_mask = active_mask;
@@ -103,6 +110,7 @@ TEST(PcodeBundle, Ep6OneToken) {
   }
   std::fill(m->payload.begin() + 304, m->payload.begin() + 304 + 6144, 0x38);
   std::fill(m->payload.begin() + 304 + 6144, m->payload.end(), 127);
+  if (fixture) m = fixture->Message();
   C2cBridge feed(clk, "feed", StubCfg()), sink(clk, "sink", StubCfg());
   uint64_t max_cycles = 30000;
   if (char const* cap = std::getenv("PCODE_MAX_CYCLES")) max_cycles = std::stoull(cap);
@@ -110,6 +118,20 @@ TEST(PcodeBundle, Ep6OneToken) {
                   kChipE, 2, max_cycles, m);
   clk->Continue();
   RT::JoinAll();
+  if (auto prefix = std::getenv("PCODE_SNAPSHOT_PREFIX")) {
+    auto dump=[](std::string const& path, ByteBlock const& bytes) {
+      std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<char const*>(bytes.data()),bytes.size());
+    };
+    for (uint64_t chip=0;chip<48;++chip) {
+      auto& mem=all[chip]->GetCore(9).Cmem();
+      std::string path=std::string(prefix)+".chip"+std::to_string(chip);
+      dump(path+".fc13",mem.Peek(0x6000,9*512*2));
+      dump(path+".quant",mem.Peek(0,9*256));
+      dump(path+".scales",mem.PeekScale(0,9*256/32));
+      for (uint64_t core=0;core<10;++core)
+        dump(path+".core"+std::to_string(core)+".fc2",all[chip]->GetCore(core).Cmem().Peek(0x1200,768*4));
+    }
+  }
   std::cerr << "pcode stopped at " << h.stopped_at << ", output packets " << h.out_msgs.size() << "\n";
   for (uint64_t c = 0; c < all.size(); ++c) {
     for (uint64_t p = 0; p < 10; ++p) {
@@ -145,10 +167,11 @@ TEST(PcodeBundle, Ep6OneToken) {
   }
   ASSERT_EQ(h.out_msgs.size(), 1u);
   auto const& result = *h.out_msgs.front();
-  EXPECT_EQ(result.user_id, 0u);
-  EXPECT_EQ(result.token_id, 1u);
+  EXPECT_EQ(result.user_id, m->user_id);
+  EXPECT_EQ(result.token_id, m->token_id);
   EXPECT_EQ(result.payload.size(), 6144u * 2);
-  std::ofstream actual("build-ep6/actual-" + case_name + ".bf16", std::ios::binary);
+  std::string actual_path = std::getenv("PCODE_ACTUAL") ? std::getenv("PCODE_ACTUAL") : "build-ep6/actual-" + case_name + ".bf16";
+  std::ofstream actual(actual_path, std::ios::binary);
   ASSERT_TRUE(actual.good());
   actual.write(reinterpret_cast<char const*>(result.payload.data()), result.payload.size());
 }

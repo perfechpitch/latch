@@ -797,3 +797,17 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
   RT::Reset();
   EXPECT_EQ(trigs, 1u);
 }
+
+TEST(BachDte, PcodeHeaderKeepsUserAndIdentity) {
+  for (uint16_t user : {uint16_t(0), uint16_t(5), uint16_t(78), uint16_t(1023)}) {
+    HmemEntry h;
+    h.hardware_used=1;h.core_mask=0x2b;h.user_id=user;h.gpu_id=13;h.token_id=20261010;
+    auto bytes=HeaderToBytes(h,true);
+    ASSERT_EQ(bytes.size(),32u);
+    EXPECT_EQ(uint16_t(bytes[8]) | uint16_t(bytes[9])<<8,user);
+    auto got=BytesToHeader(bytes,true);
+    EXPECT_EQ(got.user_id,user);EXPECT_EQ(got.core_mask,h.core_mask);
+    EXPECT_EQ(got.gpu_id,h.gpu_id);EXPECT_EQ(got.token_id,h.token_id);
+    EXPECT_EQ(got.hardware_used,h.hardware_used);
+  }
+}

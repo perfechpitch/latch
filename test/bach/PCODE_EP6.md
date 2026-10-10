@@ -1,5 +1,7 @@
 # pcode EP6/TP8 单 token 功能验收
 
+扩展的 134 用例测试、独立精度参考、修复内容和复现方法见 [PCODE_CAMPAIGN.md](PCODE_CAMPAIGN.md)。本文保留最初 `full/gap` 两个确定性用例的说明；它们不是扩展测试的全部覆盖。
+
 分支 `pcode_dev_zlm` 基于 latch 的 `pcode_dev_jxc`，起始提交为 `198c8dfaff331cb9c0d33a0004cf65f2e5052e1b`。配套 BachFlow 分支同名，起始提交为 `96853a104c0d803184a2b633ab973b2aed75c970`。
 
 从配套 BachFlow 工作树执行 `./pcode/run_ep6_single_token.sh`，可完成生成、RISC-V 编译、latch 构建、两个单 token 用例和余弦验收。完整配置说明见 BachFlow 的 `pcode/EP6_SINGLE_TOKEN.md`。

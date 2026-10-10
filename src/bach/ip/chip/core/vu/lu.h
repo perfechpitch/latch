@@ -99,8 +99,12 @@ class VuLu : public BachModule {
 
  private:
   // 一条宏指令的读：读哪几块、发了几块、回了几块，收回来的字节，分段的进度。
+  struct StrideRead {
+    uint64_t addr, offset, bytes, logical_end;
+  };
   struct Ctx {
     VuFlowPtr flow;
+    std::vector<StrideRead> stride_reads;
     uint64_t base = 0, head = 0, blocks = 0, sent = 0, got = 0, want_bytes = 0;
     // 分段走的那一档：一段多少元素、在 CM 上多少字节、共几段、已经交出去几段。
     // seg_len 为 0 表示本条不分段。
@@ -227,6 +231,23 @@ class VuLu : public BachModule {
     uint64_t total = c.head + want;
     c.blocks = (total + kVuVrfEntryBytes - 1) / kVuVrfEntryBytes;
     c.want_bytes = want;
+    uint64_t run = uops.cfg.lu.src1 * 32 * elem_bits / 8;
+    uint64_t skip = uops.cfg.lu.src2 * 32 * elem_bits / 8;
+    // LU stride fields are in units of 32 elements. Gather only the run
+    // portions; each physical memory request remains 128-byte aligned.
+    if (run && skip && op != LuOp::kLdMask && op != LuOp::kLdSFp32) {
+      uint64_t logical = 0;
+      while (logical < want) {
+        uint64_t physical = addr + (logical / run) * (run + skip) + logical % run;
+        uint64_t offset = physical % kVuVrfEntryBytes;
+        uint64_t bytes = std::min(want - logical,
+                          std::min(run - logical % run, kVuVrfEntryBytes - offset));
+        logical += bytes;
+        c.stride_reads.push_back({physical - offset, offset, bytes, logical});
+      }
+      c.head = 0;
+      c.blocks = c.stride_reads.size();
+    }
     ctxs.push_back(std::move(c));
   }
 
@@ -241,7 +262,9 @@ class VuLu : public BachModule {
       return;
     }
     bool need_scale = LuOp(c.flow->uops.cfg.lu.opcode) == LuOp::kLdMxfp8;
-    cmem->Read(c.base + c.sent * kVuVrfEntryBytes, kVuVrfEntryBytes, need_scale);
+    uint64_t address = c.stride_reads.empty() ? c.base + c.sent * kVuVrfEntryBytes
+                                             : c.stride_reads[c.sent].addr;
+    cmem->Read(address, kVuVrfEntryBytes, need_scale);
     mem_used = true;
     ++c.sent;
     ++occupied;
@@ -252,6 +275,10 @@ class VuLu : public BachModule {
   // 最后一段把尾巴上没铺满的那一块也还掉。
   uint64_t CreditsOf(Ctx& c, uint64_t to, bool last) {
     uint64_t end = last ? c.blocks : to / kVuVrfEntryBytes;
+    if (!last && !c.stride_reads.empty()) {
+      end = c.credited;
+      while (end < c.blocks && c.stride_reads[end].logical_end <= to) ++end;
+    }
     if (end > c.blocks) end = c.blocks;
     if (end < c.credited) end = c.credited;
     uint64_t n = end - c.credited;
@@ -265,7 +292,19 @@ class VuLu : public BachModule {
     Ctx& c = ctxs.front();
     LOGCHECK(c.got < c.sent, "VuLu: 收到响应，却没有在等的读。");
     ByteBlockPtr d = cmem->RspData();
-    if (d) {
+    if (d && !c.stride_reads.empty()) {
+      auto const& request = c.stride_reads[c.got];
+      LOGCHECK(request.offset + request.bytes <= d->size(), "VuLu: short stride response");
+      c.buf.insert(c.buf.end(), d->begin()+request.offset,
+                   d->begin()+request.offset+request.bytes);
+      if (LuOp(c.flow->uops.cfg.lu.opcode) == LuOp::kLdMxfp8) {
+        uint64_t first = request.offset / 32;
+        uint64_t last = (request.offset + request.bytes + 31) / 32;
+        LOGCHECK(kVuVrfEntryBytes + last <= d->size(), "VuLu: missing stride scales");
+        c.scale_buf.insert(c.scale_buf.end(), d->begin()+kVuVrfEntryBytes+first,
+                           d->begin()+kVuVrfEntryBytes+last);
+      }
+    } else if (d) {
       // CM 数据信号是 1056 bit = 128 B data + 4 B scale，scale 段仅 MXFP8 有效。
       // 一次响应因此可能带 132 字节，末尾那 4 个是这一块的 scale：MXFP8 的
       // scale 与数据一一映射，地址由硬件推断，不参与软件编址。
@@ -302,7 +341,7 @@ class VuLu : public BachModule {
   // 已经收到的字节够哪几段，就把那几段各做成一份交下去。最后一段按实际剩下的
   // 元素数算，整条不一定正好铺满一个 entry。
   void EmitSegments(Ctx& c) {
-    uint64_t have = c.got * kVuVrfEntryBytes;
+    uint64_t have = c.buf.size();
     uint64_t vl = c.flow->uops.inst.Vl();
     while (c.seg_done < c.seg_total) {
       uint64_t from = c.head + c.seg_done * c.seg_bytes;
@@ -381,7 +420,7 @@ class VuLu : public BachModule {
       // scale 是第 (head + i) / 32 个。向量从一行中间开始时 head 不为 0。
       uint64_t block = numeric::ScaleBlockOf(t);
       for (uint64_t i = 0; i < v.size(); ++i) {
-        uint64_t b = (c.head + i) / block;
+        uint64_t b = (c.head + f->seg_base + i) / block;
         if (b < scale.size()) v[i] *= scale[b];
       }
     }

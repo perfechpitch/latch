@@ -2258,3 +2258,56 @@ TEST(Vu, Mxfp8ValuStartsOnFirstGrain) {
   EXPECT_EQ(rig.stmem->PeekScale(kDstAddr, kN / 32), want_scale);
   ASSERT_EQ(rig.sink->got.size(), 1u);
 }
+
+// Gate/up halves alternate per expert. Distinct values expose a contiguous
+// load accidentally reading the skipped half or the next expert's values.
+TEST(Vu, FusedBf16LoadStrideForNineExperts) {
+  constexpr uint64_t width=256, experts=9;
+  std::vector<float> physical(experts*width*2);
+  for (uint64_t i=0;i<physical.size();++i) physical[i]=float(1+i%97)/8;
+  auto bytes=numeric::Encode(numeric::DataType::kBf16,physical,{},numeric::RoundMode::kRne);
+  for (uint64_t half=0;half<2;++half) {
+    Rig rig;rig.ldmem->Poke(kSrcAddr,bytes);
+    SetupChain(rig,kVuValu2Op,OpWord(0x23,kSrcLu),kSrcValu2,experts*width);
+    rig.WriteStatic(0,kVuLuOp,OpWord(uint64_t(LuOp::kLdBf16),8,8));
+    rig.WriteStatic(0,kVuStaticDupOffset+kVuLdAddr,kSrcAddr+half*width*2);
+    rig.Write(kVuMacroInstTrigger,TriggerWord(0));rig.Run(1000);
+    auto got=Fp32Of(rig.stmem->Peek(kDstAddr,experts*width*4));
+    for (uint64_t i=0;i<got.size();++i)
+      ASSERT_EQ(got[i],physical[(i/width)*width*2+half*width+i%width])<<"element "<<i;
+  }
+}
+
+TEST(Vu, ShortBf16LoadStrideAndPartialTail) {
+  constexpr uint64_t count=96;
+  std::vector<float> physical(224);
+  for (uint64_t i=0;i<physical.size();++i) physical[i]=float(1+i%97)/8;
+  Rig rig;
+  rig.ldmem->Poke(kSrcAddr+32,numeric::Encode(numeric::DataType::kBf16,physical,{},numeric::RoundMode::kRne));
+  SetupChain(rig,kVuValu2Op,OpWord(0x23,kSrcLu),kSrcValu2,count);
+  rig.WriteStatic(0,kVuLuOp,OpWord(uint64_t(LuOp::kLdBf16),2,1));
+  rig.WriteStatic(0,kVuStaticDupOffset+kVuLdAddr,kSrcAddr+32);
+  rig.Write(kVuMacroInstTrigger,TriggerWord(0));rig.Run(400);
+  auto got=Fp32Of(rig.stmem->Peek(kDstAddr,count*4));
+  for (uint64_t i=0;i<count;++i) ASSERT_EQ(got[i],physical[(i/64)*96+i%64])<<i;
+}
+
+TEST(Vu, Mxfp8LoadUsesEachSegmentsPhysicalScale) {
+  constexpr uint64_t count=96;
+  for (uint64_t skip : {0u,1u}) {
+    Rig rig;
+    rig.ldmem->Poke(kSrcAddr,ByteBlock(512,0x38));
+    std::vector<uint8_t> scales(16);
+    for (uint64_t i=0;i<scales.size();++i)scales[i]=127+i%3;
+    rig.ldmem->PokeScale(kSrcAddr,scales);
+    SetupChain(rig,kVuValu2Op,OpWord(0x23,kSrcLu),kSrcValu2,count);
+    rig.WriteStatic(0,kVuLuOp,OpWord(uint64_t(LuOp::kLdMxfp8),1,skip));
+    rig.WriteStatic(0,kVuStaticDupOffset+kVuLdAddr,kSrcAddr+32);
+    rig.Write(kVuMacroInstTrigger,TriggerWord(0));rig.Run(400);
+    auto got=Fp32Of(rig.stmem->Peek(kDstAddr,count*4));
+    for (uint64_t i=0;i<count;++i) {
+      uint64_t group=1+(i/32)*(1+skip);
+      ASSERT_EQ(got[i],float(1u<<(group%3)))<<"element "<<i<<" skip "<<skip;
+    }
+  }
+}

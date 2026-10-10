@@ -38,6 +38,7 @@ struct HmemEntry {
   // DPU 写的那一对自定义包头。进核那一笔记在这里，出核造包时原样带上，出口
   // 桩按它认这是哪个 GPU 的第几个 token，中途丢掉就分不清了。
   uint64_t gpu_id = 0, token_id = 0;
+  uint16_t user_id = 0;  // pcode header offset 8; used by check_flag/shared expert.
 };
 
 // 包头上下文落 Core Mem（B/R core）时的字节块大小与序列化。
@@ -57,6 +58,7 @@ inline ByteBlock HeaderToBytes(HmemEntry const& h, bool pcode = false) {
   if (pcode) {
     put(0, h.hardware_used, 1);
     put(2, h.core_mask, 2);
+    put(8, h.user_id, 2);
     put(16, h.gpu_id, 8);
     put(24, h.token_id, 8);
     return b;
@@ -80,6 +82,7 @@ inline HmemEntry BytesToHeader(ByteBlock const& b, bool pcode = false) {
   if (pcode) {
     h.hardware_used = get(0, 1);
     h.core_mask = get(2, 2);
+    h.user_id = get(8, 2);
     h.gpu_id = get(16, 8);
     h.token_id = get(24, 8);
     return h;
