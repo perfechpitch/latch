@@ -184,6 +184,9 @@ class DteRegfile : public BachModule {
     TracePerCycle("dsa_trigger", trig_ev ? 1 : 0);
     TracePerCycle("dsa_trigger_task", trig_task);
     TracePerCycle("dsa_trigger_user", trig_user);
+    // 写 trigger 那一拍的配置寄存器数（标量）。Python 侧按 (user, task) 与 DTE-Core
+    // 那一行配对，带出「这笔任务配置了多少个寄存器」。
+    TracePerCycle("dsa_trigger_cfg_count", trig_cfg_count);
   }
 
  private:
@@ -234,6 +237,10 @@ class DteRegfile : public BachModule {
     }
     // Config 区 19 项（0x0004~0x004C）。
     if (at >= kDteConfigBase + 0x004 && at <= kDteRegTransMode) {
+      // 任务配置寄存器每写一次记一笔：一笔任务配置过多少个寄存器。写 trigger 那
+      // 一刻锁进 trig_cfg_count 再清零，好让下一笔任务重新数。Template 区走下面
+      // 那一支，不计（它是持久配置，不是随任务下发的那一套）。
+      ++cfg_write_cnt;
       int64_t idx = (at - 0x004) / 4;
       // dirty 在 trigger 时清零，所以本拍还全 0 就是这笔任务的第一笔配置写。
       if (dirty == 0) {
@@ -334,6 +341,10 @@ class DteRegfile : public BachModule {
     trig_ev = true;
     trig_task = d->task_id & 0xFFu;
     trig_user = d->user_id & 0xFFFFu;
+    // 这笔任务配置过的寄存器数，写 trigger 这一拍锁存，随波形带出去（Perfetto 的
+    // DTE-Core args 靠它带上「这笔任务配置了多少个寄存器」）。
+    trig_cfg_count = cfg_write_cnt;
+    cfg_write_cnt = 0;
   }
 
   Agcu agcu;
@@ -365,6 +376,10 @@ class DteRegfile : public BachModule {
   bool cfg_start_ev = false, trig_ev = false;
   uint64_t cfg_start_task = 0xFFu, cfg_start_user = 0xFFFFu;
   uint64_t trig_task = 0xFFu, trig_user = 0xFFFFu;
+  // 从上一笔 trigger 到这一拍，Config 区任务配置寄存器（0x004~0x04C）被写了几次。
+  // 写 trigger 那一刻锁进 trig_cfg_count 再清零，好让下一笔任务重新数。
+  uint64_t cfg_write_cnt = 0;
+  uint64_t trig_cfg_count = 0;
 
   Logic64 triggers, writes;
 };

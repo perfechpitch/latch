@@ -7,23 +7,23 @@
 chrome://tracing。
 
 **与 tracetto 显示的是同一份数据**：段与标签都走 `spans.py` 里那套（`core_spans`
-折段、`ROWS` 那十一行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
+折段、`ROWS` 那十三行、每行由哪几条通道叠出来），所以看到的是同样的区间、同样的 `User_id 77 CORE-MU 5 813拍`。
 
 两边的对应关系（Perfetto 只有“process → thread”两级，tracetto 是
-“chip → core → 十一行”三级，压掉最上面一级）：
+“chip → core → 十三行”三级，压掉最上面一级）：
 
     pid  = 一个派角色的 core，名字写成 `chip0.core1`，左栏能直接搜
-    tid  = 那条 core 的十一行之一，名字就是行名（TS-DTE / DTE-Core / …）
+    tid  = 那条 core 的十三行之一，名字就是行名（TS-DTE / DTE-Core / …）
     X 事件 = 一个段，`User_id 77 CORE-MU 5 813拍`
 
-**顺序**：进程按 chip 升序、再按 core 升序，每个进程里十一行按 tracetto 的行序。
+**顺序**：进程按 chip 升序、再按 core 升序，每个进程里十三行按 tracetto 的行序。
 这两层各自再发一条排序键（`process_sort_index` / `thread_sort_index`）钉死 ——
 **Perfetto 是按名字排轨道的，不按 pid / tid**（实测：不发键时 chip10 跑到 chip2
 前面、TS 掉到第五行），而名字的字典序本来就排不对。试过把序号写进名字里（`chip00`
 / `1 TS`）来代替这两组键，也不行，所以键留着（258 KB）。
 
 **颜色**：Perfetto 是**按段上的名字上色**的，所以“哪一行”必须写进那段字里 ——
-单元名带前缀（`TS-DTE` / `CORE-DTE` / `DSA-DTE` …），十一个槽的名字两两不同，十一行
+单元名带前缀（`TS-DTE` / `CORE-DTE` / `DSA-DTE` …），十三个槽的名字两两不同，十三行
 才分得开。不给 cname（只能填十来个具名色，里面近似的不少）、也不给 cat（不参与
 上色）。
 
@@ -32,10 +32,10 @@ chrome://tracing。
 
 精简（都是实测省下来的）：
   · 字段只留 name/ph/ts/dur/pid/tid 六样，外加 args 里 user/task 两个键值（段名里
-    已有，这里作为结构化字段，点选 slice 时在详情面板看）；MU-DSA 那段多一个
+    已有，这里作为结构化字段，点选 slice 时在详情面板看）；MU-Core 那段多一个
     cfg_count（这一笔任务配置了多少个寄存器），MU-DSA-CALC 那段多 expert_num / M /
     K / N / block_k / block_n / prim_k / prim_N / a_dtype / b_dtype / out_dtype
-    十一个键值（GEMM 规模：全尺寸、K/N 分块、原语尺寸、三处数据类型），DTE 那十一
+    十一个键值（GEMM 规模：全尺寸、K/N 分块、原语尺寸、三处数据类型），DTE 那十
     条轨道多 bytes / data / scale / topk 各多少字节，以及 data/scale 落 cmem 还是
     mmem、topk 落 topk_table 的存储位置；
   · 不发 cat（140 KB）：它不参与上色（颜色按段上的名字走），只对“按分类过滤”
@@ -61,8 +61,8 @@ from tracetto import spans as S          # noqa: E402
 from tracetto.reader import TraceReader   # noqa: E402
 
 # 段上印的单元名与 tracetto 共用一张表（spans.SLOT_UNITS）：每个颜色槽一个名字，
-# 带着行前缀（TS-DTE / CORE-DTE / DSA-DTE …）。Perfetto 按段上的名字上色，十一个槽
-# 名字两两不同，十一行才分得开 —— 原来 TS 行的 DTE 段与 DTE-Core 行的段都叫
+# 带着行前缀（TS-DTE / CORE-DTE / DSA-DTE …）。Perfetto 按段上的名字上色，十三个槽
+# 名字两两不同，十三行才分得开 —— 原来 TS 行的 DTE 段与 DTE-Core 行的段都叫
 # `User_id x DTE y`，就撞成了一个色。
 
 
@@ -70,22 +70,21 @@ from tracetto.reader import TraceReader   # noqa: E402
 # 在波形里存的是这个码，args 里转成人能读的名字。
 DTYPE_NAME = {0: "BF16", 1: "MXFP8", 2: "MXFP4", 3: "NVFP4", 4: "FP32"}
 
-# DTE 十一条轨道（dte_rvcore + lan0~4 各拆读/写）。挂在 chip.core.dte.<regfile|lane<k>>
-# 下，段由 spans.dte_spans 折好；它们与上面那十一行同属一个 core 进程，排在十一行之后。
-DTE_TRACKS = ("dte_rvcore",
-              "lan0_rd", "lan0_wr", "lan1_rd", "lan1_wr",
+# DTE 十条轨道（lan0~4 各拆读/写）。挂在 chip.core.dte.<regfile|lane<k>>
+# 下，段由 spans.dte_lane_spans 折好；它们与上面那十三行同属一个 core 进程，排在十三行
+# 之后。原来的 dte_rvcore 轨道已删，配置寄存器数改挂 DTE-Core 那一行的 args。
+DTE_TRACKS = ("lan0_rd", "lan0_wr", "lan1_rd", "lan1_wr",
               "lan2_rd", "lan2_wr", "lan3_rd", "lan3_wr",
               "lan4_rd", "lan4_wr")
-# 段上印的单元名，与 DTE_TRACKS 一一对应。Perfetto 按名字上色，这十一个名字两两不同。
-DTE_SLOT_UNITS = ("DTE-RV",
-                  "DTE-L0-RD", "DTE-L0-WR", "DTE-L1-RD", "DTE-L1-WR",
+# 段上印的单元名，与 DTE_TRACKS 一一对应。Perfetto 按名字上色，这十个名字两两不同。
+DTE_SLOT_UNITS = ("DTE-L0-RD", "DTE-L0-WR", "DTE-L1-RD", "DTE-L1-WR",
                   "DTE-L2-RD", "DTE-L2-WR", "DTE-L3-RD", "DTE-L3-WR",
                   "DTE-L4-RD", "DTE-L4-WR")
 
 
 def label_of(unit: str, seg) -> str:
     """段上那行字，与 tracetto 逐字一致：`User_id 77 CORE-DTE 5 813拍`。
-    单元名里带着行号（TS- / CORE- / DSA-），Perfetto 按名字上色，靠它把十一行分开。"""
+    单元名里带着行号（TS- / CORE- / DSA-），Perfetto 按名字上色，靠它把十三行分开。"""
     t0, t1, user, task = seg
     if user < 0 or task < 0:
         return "?"
@@ -93,8 +92,8 @@ def label_of(unit: str, seg) -> str:
 
 
 def dte_label(unit: str, seg) -> str:
-    """DTE 十一条轨道的段上那行字，格式同 `label_of`：`User_id 1 DTE-L0-RD 2 7拍`。
-    轨道的段形状不一（rvcore 是 4 元、lane 是 8 元），这里只取前四项。"""
+    """DTE 十条轨道的段上那行字，格式同 `label_of`：`User_id 1 DTE-L0-RD 2 7拍`。
+    lane 段是 8 元，这里只取前四项。"""
     t0, t1, user, task = seg[0], seg[1], seg[2], seg[3]
     if user < 0 or task < 0:
         return "?"
@@ -133,17 +132,20 @@ def build(prefix: str) -> dict:
                 if key in core_sig:
                     ordered.append((chip, core, key))
 
-        # DTE 十一条轨道的段先折好：没段（DTE 没干活）的 core 不发那十一条线程。
+        # DTE 十条轨道的段先折好：没段（DTE 没干活）的 core 不发那十条线程。
         dte_sigs = S.dte_signal_paths(r)
         dte_spans_by_core = {}
+        dte_cfg_by_core = {}
         for _chip, _core, key in ordered:
             if key not in dte_sigs:
                 continue
-            rv, rd_lanes, wr_lanes = S.dte_lane_spans(r, dte_sigs[key], t_end)
-            if rv or any(rd_lanes) or any(wr_lanes):
-                dte_spans_by_core[key] = (rv, rd_lanes, wr_lanes)
+            rd_lanes, wr_lanes = S.dte_lane_spans(r, dte_sigs[key], t_end)
+            if any(rd_lanes) or any(wr_lanes):
+                dte_spans_by_core[key] = (rd_lanes, wr_lanes)
+            # DTE-Core 那一行的 args 要带配置寄存器数，按 (user, task) 对上 trigger 拍。
+            dte_cfg_by_core[key] = S.dte_cfg_count(r, dte_sigs[key])
 
-        # 元数据：每个 core 一个进程名，十一行各一条 thread_name。
+        # 元数据：每个 core 一个进程名，十三行各一条 thread_name。
         #
         # 顺序靠这两组排序键钉死：**Perfetto 是按名字排轨道的，不按 pid / tid**
         # （实测：不给键时 chip10 跑到 chip2 前面、TS 掉到第五行）。而名字的字典序
@@ -163,7 +165,7 @@ def build(prefix: str) -> dict:
                 meta.append({"ph": "M", "pid": pid, "tid": tid,
                              "name": "thread_sort_index",
                              "args": {"sort_index": tid}})
-            # DTE 十一条轨道作为本 core 进程的十一条线程，排在十一行之后。
+            # DTE 十条轨道作为本 core 进程的十条线程，排在十三行之后。
             if key in dte_spans_by_core:
                 for t, tname in enumerate(DTE_TRACKS):
                     tid = len(S.ROWS) + 1 + t
@@ -177,7 +179,7 @@ def build(prefix: str) -> dict:
         # 想按 core 找一段也能直接 grep。组内按时间升序。
         #
         # 整场没跑过的行不补占位：Perfetto 只画有事件的轨道，那些行会整条不出现
-        # （moe_lpu 上 2856 条轨道里有 108 条），这一点与 tracetto 的固定十一行不同。
+        # （moe_lpu 上 2856 条轨道里有 108 条），这一点与 tracetto 的固定十三行不同。
         spans_cnt = 0
         for ordinal, (_chip, _core, key) in enumerate(ordered):
             pid = ordinal + 1
@@ -185,8 +187,9 @@ def build(prefix: str) -> dict:
             # MU-DSA-CALC 那一段的 GEMM 尺寸：按 calc_start 那拍取，键是起点时间。
             # 只有 MU 有，M 恒为 1（见 spans.calc_dims）。老波形缺这几条时是空 dict。
             dims = S.calc_dims(r, core_sig[key])
-            # MU-DSA 那一段的配置寄存器数：按发行那拍取，键是发行时间（即段起点）。
-            cfgc = S.dispatch_cfg_count(r, core_sig[key])
+            # MU-Core 那一段的配置寄存器数：按 (user, task) 对上发行拍，键是身份。
+            mucfg = S.mu_cfg_count(r, core_sig[key])
+            dtecfg = dte_cfg_by_core.get(key, {})
             for row, (_name, parts) in enumerate(S.ROWS):
                 tid = row + 1
                 row_events: List[dict] = []
@@ -195,8 +198,14 @@ def build(prefix: str) -> dict:
                     for seg in lanes[lane]:
                         t0, t1, user, task = seg
                         args = {"user": user, "task": task}
-                        if _name == "MU-DSA" and t0 in cfgc:
-                            args["cfg_count"] = cfgc[t0]
+                        if _name == "MU-Core":
+                            c = mucfg.get((user, task))
+                            if c is not None:
+                                args["cfg_count"] = c
+                        if _name == "DTE-Core":
+                            c = dtecfg.get((user, task))
+                            if c is not None:
+                                args["cfg_count"] = c
                         if _name == "MU-DSA-CALC" and t0 in dims:
                             d = dims[t0]
                             args.update({
@@ -215,12 +224,12 @@ def build(prefix: str) -> dict:
                         spans_cnt += 1
                 row_events.sort(key=lambda e: e["ts"])
                 slices.extend(row_events)
-            # DTE 十一条轨道：dte_rvcore + lan0~4 各拆读/写。轨道号按 DTE_TRACKS 的
-            # 交错顺序（lan0_rd, lan0_wr, …），段要按同一顺序排，否则挂到错的轨道名上。
+            # DTE 十条轨道：lan0~4 各拆读/写。轨道号按 DTE_TRACKS 的交错顺序
+            # （lan0_rd, lan0_wr, …），段要按同一顺序排，否则挂到错的轨道名上。
             if key in dte_spans_by_core:
-                rv, rd_lanes, wr_lanes = dte_spans_by_core[key]
+                rd_lanes, wr_lanes = dte_spans_by_core[key]
                 dte_events: List[dict] = []
-                lane_segs = [rv]
+                lane_segs = []
                 for ln in range(5):
                     lane_segs.append(rd_lanes[ln])
                     lane_segs.append(wr_lanes[ln])
@@ -228,9 +237,7 @@ def build(prefix: str) -> dict:
                     tid = len(S.ROWS) + 1 + t
                     for seg in segs:
                         t0, t1 = seg[0], seg[1]
-                        args = {"user": seg[2], "task": seg[3]}
-                        if t != 0:
-                            args = lane_args(seg)
+                        args = lane_args(seg)
                         dte_events.append({
                             "name": dte_label(DTE_SLOT_UNITS[t], seg),
                             "ph": "X", "ts": t0, "dur": t1 - t0,

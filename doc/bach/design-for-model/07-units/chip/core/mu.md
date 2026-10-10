@@ -203,7 +203,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F3 | `streamID` / `taskID` / `userID` **不由软件写进寄存器**。MU RV core 执行 `dsaw` 时从自定义 CSR 抄进这笔配置请求，写 `TASK_TRIGGER` 被收下时从请求上采样进任务快照。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是这一组 |
 | F4 | 寄存器地址映射本轮用临时映射（`regmap.h`）。原来等的《MU/DTE 寄存器配置参数》已改名为《DTE 寄存器配置参数》，只剩 DTE 那一半（地址空间三段加寄存器模板，见《DTE 数据搬运引擎》），**MU 侧的寄存器地址映射仍无着落** |
 
-regfile 另记一个只供波形带出的标量：从上一笔 trigger 到写 `TASK_TRIGGER` 之间，软件写任务配置寄存器（`0x004`~`0x028`，即 `kMuPrimitiveDim` 到 `kMuPrimitiveMode`）的次数，写 trigger 那一刻锁进任务快照的 `cfg_count` 再清零（写 `TASK_TRIGGER` 是启动位不算、静态配置区 `0x400+` 走 default 也不计）。它不影响计算，只让 `trace2perfetto.py` 的 `MU-DSA` 段 args 能带上一笔任务配置了多少个寄存器。
+regfile 另记一个只供波形带出的标量：从上一笔 trigger 到写 `TASK_TRIGGER` 之间，软件写任务配置寄存器（`0x004`~`0x028`，即 `kMuPrimitiveDim` 到 `kMuPrimitiveMode`）的次数，写 trigger 那一刻锁进任务快照的 `cfg_count` 再清零（写 `TASK_TRIGGER` 是启动位不算、静态配置区 `0x400+` 走 default 也不计）。它不影响计算，只让 `trace2perfetto.py` 的 `MU-Core` 段 args 能带上一笔任务配置了多少个寄存器。
 
 ### issue_q
 
