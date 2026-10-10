@@ -156,24 +156,39 @@ SIG_DTE_WR_START_USER = "wr_start_user"
 SIG_DTE_WR_DONE = "wr_done"
 SIG_DTE_WR_DONE_TASK = "wr_done_task"
 SIG_DTE_WR_DONE_USER = "wr_done_user"
-# rd_start / wr_start 那一拍的字节画像：data / scale / topk 各多少字节。
+# rd_start / wr_start 那一拍的四份内容（head/data/scale/topk）各多少字节。head 是
+# 固定 48 B 的包头上下文（段 0 恒参与），写这一半 MM→CM 不落包头记 0。
+SIG_DTE_RD_START_HEAD = "rd_start_head"
 SIG_DTE_RD_START_DATA = "rd_start_data"
 SIG_DTE_RD_START_SCALE = "rd_start_scale"
 SIG_DTE_RD_START_TOPK = "rd_start_topk"
+SIG_DTE_WR_START_HEAD = "wr_start_head"
 SIG_DTE_WR_START_DATA = "wr_start_data"
 SIG_DTE_WR_START_SCALE = "wr_start_scale"
 SIG_DTE_WR_START_TOPK = "wr_start_topk"
-# rd_start / wr_start 那一拍 data/scale 落在哪块存储：1 = Core Mem，0 = Matrix Mem。
-# scale 旁带随它的数据落在同一块存储；topK 恒走 topk_table，不单列信号。
-SIG_DTE_RD_START_CMEM = "rd_start_cmem"
-SIG_DTE_WR_START_CMEM = "wr_start_cmem"
+# 同一拍各份内容从哪里读（rd）/写到哪（wr）的位置编码，见 lane.h 的 DteLoc：
+# 0 = none，1 = Hmem，2 = Core Mem，3 = Matrix Mem，4 = Router，5 = MU（topK_ep_table）。
+SIG_DTE_RD_START_HEAD_LOC = "rd_start_head_loc"
+SIG_DTE_RD_START_DATA_LOC = "rd_start_data_loc"
+SIG_DTE_RD_START_SCALE_LOC = "rd_start_scale_loc"
+SIG_DTE_RD_START_TOPK_LOC = "rd_start_topk_loc"
+SIG_DTE_WR_START_HEAD_LOC = "wr_start_head_loc"
+SIG_DTE_WR_START_DATA_LOC = "wr_start_data_loc"
+SIG_DTE_WR_START_SCALE_LOC = "wr_start_scale_loc"
+SIG_DTE_WR_START_TOPK_LOC = "wr_start_topk_loc"
 
 DTE_RD_EDGE = (SIG_DTE_RD_START, SIG_DTE_RD_START_TASK, SIG_DTE_RD_START_USER,
                SIG_DTE_RD_DONE, SIG_DTE_RD_DONE_TASK, SIG_DTE_RD_DONE_USER)
 DTE_WR_EDGE = (SIG_DTE_WR_START, SIG_DTE_WR_START_TASK, SIG_DTE_WR_START_USER,
                SIG_DTE_WR_DONE, SIG_DTE_WR_DONE_TASK, SIG_DTE_WR_DONE_USER)
-DTE_RD_BYTE = (SIG_DTE_RD_START_DATA, SIG_DTE_RD_START_SCALE, SIG_DTE_RD_START_TOPK)
-DTE_WR_BYTE = (SIG_DTE_WR_START_DATA, SIG_DTE_WR_START_SCALE, SIG_DTE_WR_START_TOPK)
+DTE_RD_BYTE = (SIG_DTE_RD_START_HEAD, SIG_DTE_RD_START_DATA,
+               SIG_DTE_RD_START_SCALE, SIG_DTE_RD_START_TOPK)
+DTE_WR_BYTE = (SIG_DTE_WR_START_HEAD, SIG_DTE_WR_START_DATA,
+               SIG_DTE_WR_START_SCALE, SIG_DTE_WR_START_TOPK)
+DTE_RD_LOC = (SIG_DTE_RD_START_HEAD_LOC, SIG_DTE_RD_START_DATA_LOC,
+              SIG_DTE_RD_START_SCALE_LOC, SIG_DTE_RD_START_TOPK_LOC)
+DTE_WR_LOC = (SIG_DTE_WR_START_HEAD_LOC, SIG_DTE_WR_START_DATA_LOC,
+              SIG_DTE_WR_START_SCALE_LOC, SIG_DTE_WR_START_TOPK_LOC)
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
              DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE +
@@ -722,13 +737,20 @@ def dte_cfg_count(reader: TraceReader, sigs: Dict) -> Dict[Tuple[int, int], int]
 
 def lane_user_spans(starts: List[dict], dones: List[dict],
                     t_end: int) -> List[List[int]]:
-    """`user_spans` 的 lane 版：段多带起点的字节画像与存储位置，形状
-    `[t0, t1, user, task, data, scale, topk, cmem]`。配对规则同 `user_spans`。
+    """`user_spans` 的 lane 版：段多带起点那一拍四份内容（head/data/scale/topk）的
+    字节数与位置，形状
+    `[t0, t1, user, task, head, data, scale, topk, head_loc, data_loc, scale_loc,
+    topk_loc]`。配对规则同 `user_spans`。
 
-    `cmem` 是起点那一拍 data/scale 落在哪块存储（1 = Core Mem，0 = Matrix Mem）；
-    topK 恒走 topk_table，不单列。scale 旁带随它的数据落在同一块存储，所以 data 与
-    scale 共用一个位置。
+    `*_loc` 是这份内容从哪里读（rd）/写到哪（wr）的位置编码（见 lane.h 的 DteLoc）：
+    0 = none（这一半不搬这份内容，长度 0），1 = Hmem，2 = Core Mem，3 = Matrix Mem，
+    4 = Router，5 = MU（topK_ep_table）。
     """
+    def content(e) -> List[int]:
+        return [e.get(n, 0) for n in
+                ("head", "data", "scale", "topk",
+                 "head_loc", "data_loc", "scale_loc", "topk_loc")]
+
     ev = [(e["t"], 1, e) for e in starts] + [(e["t"], 0, e) for e in dones]
     ev.sort(key=lambda x: (x[0], x[1]))
     pending: Dict[Tuple[int, int], List[dict]] = {}
@@ -740,19 +762,16 @@ def lane_user_spans(starts: List[dict], dones: List[dict],
             continue
         q = pending.get(key)
         if not q:
-            out.append([t, t + 1, _user_tag(e["user"]), _task_tag(e["task"]),
-                        e.get("data", 0), e.get("scale", 0), e.get("topk", 0),
-                        e.get("cmem", 0)])
+            out.append([t, t + 1, _user_tag(e["user"]), _task_tag(e["task"])]
+                       + content(e))
             continue
         s0 = q.pop(0)
-        out.append([s0["t"], t, _user_tag(e["user"]), _task_tag(e["task"]),
-                    s0.get("data", 0), s0.get("scale", 0), s0.get("topk", 0),
-                    s0.get("cmem", 0)])
+        out.append([s0["t"], t, _user_tag(e["user"]), _task_tag(e["task"])]
+                   + content(s0))
     for (user, task), evs in pending.items():
         for s0 in evs:
-            out.append([s0["t"], t_end, _user_tag(user), _task_tag(task),
-                        s0.get("data", 0), s0.get("scale", 0), s0.get("topk", 0),
-                        s0.get("cmem", 0)])
+            out.append([s0["t"], t_end, _user_tag(user), _task_tag(task)]
+                       + content(s0))
     out.sort(key=lambda s: (s[0], s[1]))
     return out
 
@@ -791,10 +810,11 @@ def dte_lane_spans(reader: TraceReader, sigs: Dict, t_end: int):
     """一个 core 的 DTE 十条轨道。`sigs` 是 `dte_signal_paths()` 里那一个 core 的值。
 
     返回 `([读段 × 5], [写段 × 5])`。每条 lane 拆读/写两条（读 = rd_start → rd_done，
-    写 = wr_start → wr_done），段形状 `[t0, t1, user, task, data, scale, topk, cmem]`，
-    后面四项是起点那一拍的字节画像与存储位置（data/scale 落 Core Mem 还是 Matrix
-    Mem）。原来还有一条「配置 → trigger」的 dte_rvcore 轨道，已删；配置寄存器数改挂
-    到 DTE-Core 那一行的 args（见 `dte_cfg_count`）。
+    写 = wr_start → wr_done），段形状
+    `[t0, t1, user, task, head, data, scale, topk, head_loc, data_loc, scale_loc,
+    topk_loc]`，后面八项是起点那一拍四份内容的字节数与位置（从哪读/写到哪）。原来
+    还有一条「配置 → trigger」的 dte_rvcore 轨道，已删；配置寄存器数改挂到 DTE-Core
+    那一行的 args（见 `dte_cfg_count`）。
     """
 
     def ev(sid):
@@ -810,25 +830,23 @@ def dte_lane_spans(reader: TraceReader, sigs: Dict, t_end: int):
         return starts, dones
 
     def ends_bytes(group: Tuple[str, ...], flat: Dict,
-                   byte_group: Tuple[str, ...], cmem_name: str):
+                   byte_group: Tuple[str, ...], loc_group: Tuple[str, ...]):
         starts, dones = ends(group, flat)
-        dts, dvs = ev(flat.get(byte_group[0]))
-        sts, svs = ev(flat.get(byte_group[1]))
-        tts, tvs = ev(flat.get(byte_group[2]))
-        cts, cvs = ev(flat.get(cmem_name))
-        for s in starts:
-            s["data"] = val_at(dts, dvs, s["t"])
-            s["scale"] = val_at(sts, svs, s["t"])
-            s["topk"] = val_at(tts, tvs, s["t"])
-            s["cmem"] = val_at(cts, cvs, s["t"])
+        for name, bname, lname in zip(
+                ("head", "data", "scale", "topk"), byte_group, loc_group):
+            bts, bvs = ev(flat.get(bname))
+            lts, lvs = ev(flat.get(lname))
+            for s in starts:
+                s[name] = val_at(bts, bvs, s["t"])
+                s[name + "_loc"] = val_at(lts, lvs, s["t"])
         return starts, dones
 
     rd_lanes, wr_lanes = [], []
     for k in range(5):
         rd_starts, rd_dones = ends_bytes(DTE_RD_EDGE, sigs["lane"][k],
-                                         DTE_RD_BYTE, SIG_DTE_RD_START_CMEM)
+                                         DTE_RD_BYTE, DTE_RD_LOC)
         wr_starts, wr_dones = ends_bytes(DTE_WR_EDGE, sigs["lane"][k],
-                                         DTE_WR_BYTE, SIG_DTE_WR_START_CMEM)
+                                         DTE_WR_BYTE, DTE_WR_LOC)
         rd_lanes.append(lane_user_spans(rd_starts, rd_dones, t_end))
         wr_lanes.append(lane_user_spans(wr_starts, wr_dones, t_end))
     return rd_lanes, wr_lanes

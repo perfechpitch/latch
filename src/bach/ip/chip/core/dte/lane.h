@@ -74,6 +74,19 @@ inline bool WrSeg(SegEndpoint k) {
          k == SegEndpoint::kScale || k == SegEndpoint::kTopk;
 }
 
+// 一份内容（head/data/scale/topk）在波形里标记「从哪读 / 写到哪」的位置编码。与
+// Python 侧 spans.py 的 DTE_*_LOC 信号、trace2perfetto.py 的 DTE_LOC_NAME 一一对应。
+// 0 = none（这一半不搬这份内容，长度 0）；1 = Hmem（包头上下文表）；2 = Core Mem；
+// 3 = Matrix Mem；4 = Router（进核的源端 / 出核的目的端）；5 = MU（topK_ep_table）。
+enum DteLoc : uint64_t {
+  kDteLocNone = 0,
+  kDteLocHmem = 1,
+  kDteLocCmem = 2,
+  kDteLocMmem = 3,
+  kDteLocRouter = 4,
+  kDteLocMu = 5,
+};
+
 class Lane : public BachModule {
  public:
   Lane(ClockPtr clock, const std::string& name, uint64_t lane_idx,
@@ -144,10 +157,12 @@ class Lane : public BachModule {
     rd_done_task = 0xFFu; rd_done_user = 0xFFFFu;
     wr_start_task = 0xFFu; wr_start_user = 0xFFFFu;
     wr_done_task = 0xFFu; wr_done_user = 0xFFFFu;
-    rd_start_data = 0; rd_start_scale = 0; rd_start_topk = 0;
-    wr_start_data = 0; wr_start_scale = 0; wr_start_topk = 0;
-    rd_start_cmem = 0;
-    wr_start_cmem = 0;
+    rd_start_head = 0; rd_start_data = 0; rd_start_scale = 0; rd_start_topk = 0;
+    wr_start_head = 0; wr_start_data = 0; wr_start_scale = 0; wr_start_topk = 0;
+    rd_start_head_loc = 0; rd_start_data_loc = 0;
+    rd_start_scale_loc = 0; rd_start_topk_loc = 0;
+    wr_start_head_loc = 0; wr_start_data_loc = 0;
+    wr_start_scale_loc = 0; wr_start_topk_loc = 0;
 
     // 末级先做：先收响应、再发新请求、最后激活下一个任务。
     TakeAdmit();
@@ -188,17 +203,25 @@ class Lane : public BachModule {
     TracePerCycle("wr_done", wr_done_ev ? 1 : 0);
     TracePerCycle("wr_done_task", wr_done_task);
     TracePerCycle("wr_done_user", wr_done_user);
-    // rd_start / wr_start 那一拍的字节画像，供 Perfetto 段上印 bytes 与理想/堵塞拍数。
+    // rd_start / wr_start 那一拍的四份内容（head/data/scale/topk）各多少字节，供
+    // Perfetto 段上印 bytes 与理想/堵塞拍数。head 是固定的 48 B 包头上下文。
+    TracePerCycle("rd_start_head", rd_start_head);
     TracePerCycle("rd_start_data", rd_start_data);
     TracePerCycle("rd_start_scale", rd_start_scale);
     TracePerCycle("rd_start_topk", rd_start_topk);
+    TracePerCycle("wr_start_head", wr_start_head);
     TracePerCycle("wr_start_data", wr_start_data);
     TracePerCycle("wr_start_scale", wr_start_scale);
     TracePerCycle("wr_start_topk", wr_start_topk);
-    // rd_start / wr_start 那一拍 data/scale 落在哪块存储：1 = Core Mem，0 = Matrix
-    // Mem。scale 旁带随它的数据落在同一块存储；topK 恒走 topk_table，不用信号。
-    TracePerCycle("rd_start_cmem", rd_start_cmem);
-    TracePerCycle("wr_start_cmem", wr_start_cmem);
+    // 同一拍各份内容从哪里读（rd）/写到哪（wr），位置编码见 DteLoc。
+    TracePerCycle("rd_start_head_loc", rd_start_head_loc);
+    TracePerCycle("rd_start_data_loc", rd_start_data_loc);
+    TracePerCycle("rd_start_scale_loc", rd_start_scale_loc);
+    TracePerCycle("rd_start_topk_loc", rd_start_topk_loc);
+    TracePerCycle("wr_start_head_loc", wr_start_head_loc);
+    TracePerCycle("wr_start_data_loc", wr_start_data_loc);
+    TracePerCycle("wr_start_scale_loc", wr_start_scale_loc);
+    TracePerCycle("wr_start_topk_loc", wr_start_topk_loc);
   }
 
  private:
@@ -211,6 +234,52 @@ class Lane : public BachModule {
   // RouterToMm 写 Matrix Mem。scale 旁带随它的数据落在同一块存储。
   bool ToCm(Route r) const {
     return r == Route::kRouterToCm || r == Route::kMmToCm;
+  }
+
+  // 读这一半：head/data/scale/topk 各从哪里读（源端）。
+  //   data/scale：进核从 Router 的包来，出核按 route 落 Core Mem（CmToRouter）或
+  //               Matrix Mem（其余），scale 旁带随数据落同一块；
+  //   topk：进核从 Router 的包来，出核从 MU 的 topK_ep_table 读（不在 Lane 里读，
+  //         由 Commit 造包时取出）；
+  //   head（包头）：进核从 Router 的包头拍来，出核从落库处读回——计算 core 在
+  //                Hmem（段 0 打 header tag），B/R core 在 Core Mem。
+  DteLoc RdLocHead(Descriptor const& d) const {
+    if (IsInbound(d.route)) return kDteLocRouter;
+    return d.seg[0].src_kind == SegEndpoint::kHeader ? kDteLocHmem : kDteLocCmem;
+  }
+  DteLoc RdLocData(Descriptor const& d) const {
+    if (IsInbound(d.route)) return kDteLocRouter;
+    return FromCm(d.route) ? kDteLocCmem : kDteLocMmem;
+  }
+  DteLoc RdLocScale(Descriptor const& d) const { return RdLocData(d); }
+  DteLoc RdLocTopk(Descriptor const& d) const {
+    return IsInbound(d.route) ? kDteLocRouter : kDteLocMu;
+  }
+  // 写这一半：head/data/scale/topk 各写到哪（目的端）。
+  //   data/scale：进核按 route 落 Core Mem（RouterToCm）或 Matrix Mem（RouterToMm），
+  //               出核发 Router（MM→CM 落 Core Mem），scale 旁带随数据落同一块；
+  //   topk：发 Router 的出核（CmToRouter/MmToRouter）随包发出去，进核与 MM→CM 经
+  //         旁带写进 MU 的 topK_ep_table；
+  //   head（包头）：进核落库处（计算 core 落 Hmem、B/R core 落 Core Mem），出核发
+  //                Router 作包头拍（MM→CM 不写包头，这份内容长度 0）。
+  DteLoc WrLocHead(Descriptor const& d) const {
+    if (IsInbound(d.route))
+      return d.seg[0].dst_kind == SegEndpoint::kHeader ? kDteLocHmem : kDteLocCmem;
+    return d.route == Route::kMmToCm ? kDteLocNone : kDteLocRouter;
+  }
+  DteLoc WrLocData(Descriptor const& d) const {
+    if (IsInbound(d.route)) return ToCm(d.route) ? kDteLocCmem : kDteLocMmem;
+    return d.route == Route::kMmToCm ? kDteLocCmem : kDteLocRouter;
+  }
+  DteLoc WrLocScale(Descriptor const& d) const { return WrLocData(d); }
+  DteLoc WrLocTopk(Descriptor const& d) const {
+    if (d.route == Route::kCmToRouter || d.route == Route::kMmToRouter)
+      return kDteLocRouter;
+    return kDteLocMu;
+  }
+  // 这份内容没搬（字节 0）时位置记 none，避免「长度 0 却给了个位置」。
+  static uint64_t LocOrNone(DteLoc loc, uint64_t bytes) {
+    return bytes ? uint64_t(loc) : uint64_t(kDteLocNone);
   }
 
   // 这一笔在本通道的 buffer 里用哪个号认。进核那一路的号由 Lane 在 TakeAdmit 时按
@@ -411,22 +480,32 @@ class Lane : public BachModule {
       ctx[h].hdr_stored = false;
       uint64_t data_b, scale_b, topk_b;
       ByteProfile(d, data_b, scale_b, topk_b);
+      // 包头是固定 48 B 的上下文（段 0 恒参与），写这一半 MM→CM 不落包头记 0。
+      uint64_t head_b = kHeaderCtxBytes;
       if (h == kRd) {
         rd_start_ev = true;
         rd_start_task = d.task_id & 0xFFu;
         rd_start_user = d.user_id & 0xFFFFu;
+        rd_start_head = head_b;
         rd_start_data = data_b;
         rd_start_scale = scale_b;
         rd_start_topk = topk_b;
-        rd_start_cmem = FromCm(d.route) ? 1 : 0;
+        rd_start_head_loc = uint64_t(RdLocHead(d));
+        rd_start_data_loc = LocOrNone(RdLocData(d), data_b);
+        rd_start_scale_loc = LocOrNone(RdLocScale(d), scale_b);
+        rd_start_topk_loc = LocOrNone(RdLocTopk(d), topk_b);
       } else {
         wr_start_ev = true;
         wr_start_task = d.task_id & 0xFFu;
         wr_start_user = d.user_id & 0xFFFFu;
+        wr_start_head = WrLocHead(d) == kDteLocNone ? 0 : head_b;
         wr_start_data = data_b;
         wr_start_scale = scale_b;
         wr_start_topk = topk_b;
-        wr_start_cmem = ToCm(d.route) ? 1 : 0;
+        wr_start_head_loc = uint64_t(WrLocHead(d));
+        wr_start_data_loc = LocOrNone(WrLocData(d), data_b);
+        wr_start_scale_loc = LocOrNone(WrLocScale(d), scale_b);
+        wr_start_topk_loc = LocOrNone(WrLocTopk(d), topk_b);
       }
       q[h].Pop();
     }
@@ -693,13 +772,15 @@ class Lane : public BachModule {
   uint64_t rd_done_task = 0xFFu, rd_done_user = 0xFFFFu;
   uint64_t wr_start_task = 0xFFu, wr_start_user = 0xFFFFu;
   uint64_t wr_done_task = 0xFFu, wr_done_user = 0xFFFFu;
-  // rd_start / wr_start 那一拍带上这笔任务的字节画像：data / scale / topk 各多少字节。
-  uint64_t rd_start_data = 0, rd_start_scale = 0, rd_start_topk = 0;
-  uint64_t wr_start_data = 0, wr_start_scale = 0, wr_start_topk = 0;
-  // rd_start / wr_start 那一拍 data/scale 落在哪块存储：1 = Core Mem，0 = Matrix Mem。
-  // scale 旁带随它的数据落在同一块存储；topK 恒走 topk_table，不单列。
-  uint64_t rd_start_cmem = 0;
-  uint64_t wr_start_cmem = 0;
+  // rd_start / wr_start 那一拍带上这笔任务四份内容（head/data/scale/topk）的字节数。
+  // head 是固定 48 B 的包头上下文（段 0 恒参与），写这一半 MM→CM 不落包头记 0。
+  uint64_t rd_start_head = 0, rd_start_data = 0, rd_start_scale = 0, rd_start_topk = 0;
+  uint64_t wr_start_head = 0, wr_start_data = 0, wr_start_scale = 0, wr_start_topk = 0;
+  // 同一拍各份内容从哪里读（rd）/写到哪（wr）的位置编码，见 DteLoc。
+  uint64_t rd_start_head_loc = 0, rd_start_data_loc = 0;
+  uint64_t rd_start_scale_loc = 0, rd_start_topk_loc = 0;
+  uint64_t wr_start_head_loc = 0, wr_start_data_loc = 0;
+  uint64_t wr_start_scale_loc = 0, wr_start_topk_loc = 0;
   // 出核：上一次报过 rresp 起点的 commit_seq，用它认“新任务的第一笔响应”。
   uint64_t rd_seen_commit = ~0ull;
 };

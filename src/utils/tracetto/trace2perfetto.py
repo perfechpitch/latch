@@ -37,8 +37,9 @@ chrome://tracing。
     cfg_count（这一笔任务配置了多少个寄存器），MU-DSA-CALC 那段多 expert_num / M /
     K / N / block_k / block_n / prim_k / prim_N / a_dtype / b_dtype / out_dtype
     十一个键值（GEMM 规模：全尺寸、K/N 分块、原语尺寸、三处数据类型），DTE 那十
-    条轨道多 bytes / data / scale / topk 各多少字节，以及 data/scale 落 cmem 还是
-    mmem、topk 落 topk_table 的存储位置；
+    条轨道多 head/data/scale/topk 各多少字节，以及各份内容从哪读（rd 轨道，`*_rd`）
+    /写到哪（wr 轨道，`*_wr`）：hmem / cmem / mmem / router / mu，这一半不搬的
+    内容长度 0、位置 none；
   · 不发 cat（140 KB）：它不参与上色（颜色按段上的名字走），只对“按分类过滤”
     有用，而这个转换器给不出有意义的分类；
   · 分隔符用最紧的写法，一行一个事件（方便 grep，代价 ~1 B/行）。时间按 1 拍 = 1 ns
@@ -106,18 +107,26 @@ def dte_label(unit: str, seg) -> str:
     return f"User_id {user} {unit} {task} {t1 - t0}拍"
 
 
-def lane_args(seg) -> dict:
-    """lane 轨道的 args：bytes 总长、data/scale/topk 各多少字节、以及各自落在哪块存储。
-    data/scale 随 route 落 Core Mem 或 Matrix Mem（两者同一块，见 lane.h 的 FromCm/ToCm），
-    topK 恒走 topk_table。"""
-    _t0, _t1, user, task, data, scale, topk, cmem = seg
-    loc = "cmem" if cmem else "mmem"
+# DteLoc 位置编码 → 名字（与 lane.h 的 DteLoc 一致）：0 = none（这一半不搬这份内容，
+# 长度 0），1 = Hmem，2 = Core Mem，3 = Matrix Mem，4 = Router，5 = MU（topK_ep_table）。
+DTE_LOC_NAME = {0: "none", 1: "hmem", 2: "cmem", 3: "mmem", 4: "router", 5: "mu"}
+
+
+def lane_args(seg, suffix: str) -> dict:
+    """lane 轨道的 args：head/data/scale/topk 各多少字节、各从哪读（`suffix="rd"`）/
+    写到哪（`suffix="wr"`）。位置编码经 DTE_LOC_NAME 转成 hmem/cmem/mem/router/mu 之
+    类；这一半不搬的内容长度 0、位置 none。`bytes` 是 data+scale+topk 的 payload 字节
+    数，不含包头上下文（与包 size 一致）。"""
+    _t0, _t1, user, task, head, data, scale, topk, \
+        head_loc, data_loc, scale_loc, topk_loc = seg
+    loc = lambda c: DTE_LOC_NAME.get(c, "none")
     return {
         "user": user, "task": task,
         "bytes": data + scale + topk,
-        "data": data, "data_loc": loc,
-        "scale": scale, "scale_loc": loc,
-        "topk": topk, "topk_loc": "topk_table",
+        "head": head, f"head_{suffix}": loc(head_loc),
+        "data": data, f"data_{suffix}": loc(data_loc),
+        "scale": scale, f"scale_{suffix}": loc(scale_loc),
+        "topk": topk, f"topk_{suffix}": loc(topk_loc),
     }
 
 
@@ -244,7 +253,7 @@ def build(prefix: str) -> dict:
                     tid = len(S.ROWS) + 1 + t
                     for seg in segs:
                         t0, t1 = seg[0], seg[1]
-                        args = lane_args(seg)
+                        args = lane_args(seg, "rd" if t % 2 == 0 else "wr")
                         dte_events.append({
                             "name": dte_label(DTE_SLOT_UNITS[t], seg),
                             "ph": "X", "ts": t0 * NS_TO_US,
