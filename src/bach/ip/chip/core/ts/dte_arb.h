@@ -28,28 +28,25 @@
 #include <optional>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/ts/cfg_reg.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
 #include "bach/ip/chip/core/ts/user_match.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
 
 class DteArb : public BachModule {
- public:
-  DteArb(ClockPtr clock, const std::string& name, UserMatch& matcher,
-         CfgReg& reg, uint64_t parent = 0, bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        um(matcher),
-        cfg(reg),
+public:
+  DteArb(ClockPtr clock, const std::string &name, UserMatch &matcher,
+         CfgReg &reg, uint64_t parent = 0, bool tick = true)
+      : BachModule(clock, name, parent, tick), um(matcher), cfg(reg),
         cmd(std::make_shared<TaskCmdPort>(clock)),
         snap(std::make_shared<SnapshotPort>(clock)),
-        issue(std::make_shared<StreamWritePortIf>(clock)),
-        issued(clock) {}
+        issue(std::make_shared<StreamWritePortIf>(clock)), issued(clock) {}
 
-  TaskCmdPort& Cmd() { return *cmd; }
+  TaskCmdPort &Cmd() { return *cmd; }
   std::shared_ptr<TaskCmdPort> CmdPtr() const { return cmd; }
   void AttachCmd(std::shared_ptr<TaskCmdPort> p) { cmd = std::move(p); }
   void AttachSnapshot(std::shared_ptr<SnapshotPort> p) { snap = std::move(p); }
@@ -59,165 +56,124 @@ class DteArb : public BachModule {
 
   bool Quiescent() const override { return !held; }
 
- protected:
+protected:
   void Step() override {
-    // 上一笔的 READY → INFLY 回写被表收下了就撤掉，没收下就下一拍补发：写口
-    // 是握手口，落到同一个 stream 的写按优先级排，没轮上的这一拍不回 accepted。
-    if (infly && issue->Accepted()) infly.reset();
-
-    // 非抢占保持：锁定的这一笔一直发到看见 ACCEPT。
+    issue->Idle();
+    auto view = snap->Get();
     if (held) {
-      if (cmd->Ready()) {
-        Accept();
-      } else {
-        DriveIssue();
+      if (!cmd->Ready()) {
         issued = issue_pending;
-        return;  // 命令与字段保持不变
+        return;
       }
+      Held h = *held;
+      held.reset();
+      cmd->Idle();
+      if (!h.bypass && !h.weight && view) {
+        auto const &e = view->entry[h.stream];
+        LOGCHECK(e.valid && e.allocation == h.allocation,
+                 "DteArb: 持有命令的分配已失效。");
+        auto w = std::make_shared<StreamWrite>();
+        w->valid = w->check_allocation = true;
+        w->stream_id = h.stream;
+        w->allocation = h.allocation;
+        w->from_task_id = h.task;
+        w->fsm_if_current = w->set_fsm = true;
+        w->fsm = TaskFsm::kInfly;
+        if (h.datain)
+          w->datain_accept_mask = 1ull << h.task;
+        issue->Drive(w);
+        issued_stream = h.stream;
+        issued_task = h.task;
+        issued_allocation = h.allocation;
+      }
+      ++issue_pending;
+      issued = issue_pending;
+      return;
     }
-    DriveIssue();
-    Select();
-    issued = issue_pending;
-    TracePerCycle("issued", issue_pending);
-  }
-
- private:
-  void Select() {
-    // 上一笔的 READY → INFLY 回写还没被表收下就不挑下一笔：只有一个回写槽，
-    // 接着发会把没收下的那一笔盖掉，它的 INFLY 丢了就会被再下发一次。
-    if (infly) {
+    if (!view) {
       cmd->Idle();
       return;
     }
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) {
-      cmd->Idle();
-      return;
-    }
-    // 上一笔的 INFLY 已经在表里了，标记可以放开。
     if (issued_stream < kStreamNum) {
-      StreamEntry const& e = s->entry[issued_stream];
-      if (!e.valid || e.task_fsm != TaskFsm::kReady ||
-          e.task_id != issued_task) {
+      auto const &e = view->entry[issued_stream];
+      if (!e.valid || e.task_id != issued_task ||
+          e.allocation != issued_allocation || e.task_fsm != TaskFsm::kReady)
         issued_stream = kStreamNum;
+    }
+    auto candidate = um.CandidatePtr()->candidate.Get();
+    bool candidate_valid =
+        candidate && candidate->valid && candidate->seq != seen_candidate;
+    bool normal_candidate =
+        candidate_valid && !candidate->bypass && !candidate->weight &&
+        candidate->stream_id < view->slot_num &&
+        view->entry[candidate->stream_id].valid &&
+        view->entry[candidate->stream_id].user_id_vld &&
+        view->entry[candidate->stream_id].user_id == candidate->user_id;
+    uint64_t winner = kStreamNum;
+    bool use_datain = false;
+    for (uint64_t age = 0; age < view->slot_num; ++age) {
+      uint64_t sid = view->AgeOrder(age);
+      auto const &e = view->entry[sid];
+      if (normal_candidate && candidate->stream_id == sid) {
+        winner = sid;
+        use_datain = true;
+        break;
+      }
+      if (e.valid && e.task_fsm == TaskFsm::kReady &&
+          e.task_unit == SendUnit::kDte &&
+          !(sid == issued_stream && e.task_id == issued_task)) {
+        winner = sid;
+        break;
       }
     }
-    // DataIn 与普通 Generated 按相对 head_ptr 的 Stream 年龄比较，较老者优先；
-    // 同一个 Stream 上两者都在时优先选 Generated。
-    //
-    // 把 DataIn 一律排在所有 Generated 之后是不行的：主线上只要一直有就绪的
-    // Generated，那一格 DataIn 就发不出去，而它占着 DataIn_task_table 唯一的
-    // 一格，新用户建表跟着一起停。
-    DatainHold const& h = um.Hold();
-    uint64_t datain_age = kStreamNum;
-    if (h.valid) {
-      datain_age = h.task_id == kBypassTid
-                       ? 0
-                       : (h.stream_id + kStreamNum - s->head_ptr) % kStreamNum;
-    }
-    for (uint64_t k = 0; k < kStreamNum; ++k) {
-      uint64_t i = s->AgeOrder(k);
-      StreamEntry const& e = s->entry[i];
-      if (Candidate(i, e)) {
-        Lock(i, e);
-        return;
+    bool special = candidate_valid && candidate->bypass;
+    bool weight = candidate_valid && candidate->weight;
+    if (weight || (special && (winner == kStreamNum || prefer_bypass))) {
+      LoadCandidate(*candidate, 0);
+      if (!weight)
+        prefer_bypass = false;
+    } else if (winner < kStreamNum) {
+      if (use_datain)
+        LoadCandidate(*candidate, view->entry[winner].allocation);
+      else {
+        auto const &e = view->entry[winner];
+        auto const &task = cfg.Task(e.task_id);
+        uint64_t vc = !task.IsDataIn() ? cfg.Route(e.task_path_id).vcid : 0;
+        cmd->Drive(e.task_pc, winner, e.task_id, e.user_id, e.task_path_id,
+                   e.task_recv != RecvUnit::kRvOnly, ++cmd_seq, vc);
+        held = Held{winner, e.task_id, e.allocation, false, false, false};
       }
-      if (k == datain_age) {
-        LockDatain(h);
-        return;
-      }
-    }
-    if (h.valid) {
-      LockDatain(h);
-      return;
-    }
-    cmd->Idle();
+      prefer_bypass = true;
+    } else
+      cmd->Idle();
+    issued = issue_pending;
   }
 
-  bool Candidate(uint64_t i, StreamEntry const& e) const {
-    if (!e.valid || e.task_fsm != TaskFsm::kReady ||
-        e.task_unit != SendUnit::kDte) {
-      return false;
-    }
-    // 刚发出去的那一笔，表里的 READY → INFLY 还没落下来：写口一拍、快照一拍，
-    // 这两拍里快照上它仍是 READY。不挡住的话同一个 task 会被下发两次。
-    return !(i == issued_stream && e.task_id == issued_task);
+private:
+  void LoadCandidate(DatainHold const &h, uint64_t allocation) {
+    cmd->Drive(h.task_pc, h.stream_id, h.task_id, h.user_id, h.path_id, true,
+               ++cmd_seq, 0);
+    held = Held{h.stream_id, h.task_id, allocation, true, h.bypass, h.weight};
+    seen_candidate = h.seq;
+    um.CandidatePtr()->taken_seq = h.seq;
   }
-
-  void Lock(uint64_t i, StreamEntry const& e) {
-    cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
-               e.task_recv != RecvUnit::kRvOnly, ++cmd_seq,
-               cfg.Route(e.task_path_id).vcid);
-    held = Held{i, e.task_id, false, e.task_type == TaskType::kReduce};
-  }
-
-  void LockDatain(DatainHold const& h) {
-    cmd->Drive(h.task_pc, h.stream_id, h.task_id, h.user_id, h.path_id,
-               /*dsa_en=*/true, ++cmd_seq);
-    held = Held{h.stream_id, h.task_id, true, false};
-  }
-
-  void Accept() {
-    Held h = *held;
-    held.reset();
-    ++issue_pending;
-    if (h.datain) {
-      // DataIn 任务只通知 DataIn_task_table 出槽，不改 stream_table 的当前状态。
-      um.ReleaseHold();
-      return;
-    }
-    issued_stream = h.stream;
-    issued_task = h.task;
-    auto w = std::make_shared<StreamWrite>();
-    w->valid = true;
-    w->stream_id = h.stream;
-    w->set_fsm = true;
-    w->fsm = TaskFsm::kInfly;
-    w->take_rmem = h.reduce;
-    infly = w;
-    infly_fresh = true;
-  }
-
-  // 一笔回写只驱一次，之后保持不动直到表收下：Latch 留着上一拍的值，表按序号
-  // 认它。每拍重驱会换一个序号，表就当成新的一笔再执行一遍，占 credit、已发
-  // 笔数加一这类写会被执行两次。
-  void DriveIssue() {
-    if (!infly) {
-      issue->Idle();
-      return;
-    }
-    if (infly_fresh) {
-      issue->Drive(infly);
-      infly_fresh = false;
-    }
-  }
-
-  UserMatch& um;
-  CfgReg& cfg;
+  struct Held {
+    uint64_t stream, task, allocation;
+    bool datain, bypass, weight;
+  };
+  UserMatch &um;
+  CfgReg &cfg;
   std::shared_ptr<TaskCmdPort> cmd;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<StreamWritePortIf> issue;
-
-  // 还没被表收下的那一笔状态回写。
-  std::shared_ptr<StreamWrite> infly;
-  bool infly_fresh = false;
-  // 锁定的一笔：命令与字段保持稳定，直到 RV core 返回 ACCEPT。
-  struct Held {
-    uint64_t stream = 0;
-    uint64_t task = 0;
-    bool datain = false;
-    bool reduce = false;
-  };
   std::optional<Held> held;
-  // 刚发出、表里还没变成 INFLY 的那一笔。
-  uint64_t issued_stream = kStreamNum, issued_task = 0;
-  uint64_t cmd_seq = 0;
-  uint64_t issue_pending = 0;
-
+  bool prefer_bypass = false;
+  uint64_t issued_stream = kStreamNum, issued_task = 0, issued_allocation = 0;
+  uint64_t seen_candidate = 0, cmd_seq = 0, issue_pending = 0;
   Logic64 issued;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

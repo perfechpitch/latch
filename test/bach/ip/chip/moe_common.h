@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -20,12 +21,12 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/common/numeric/formats.h"
 #include "bach/ip/bundle_load.h"
 #include "bach/ip/chip/chip.h"
 #include "bach/ip/lpu_grid.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 #include "test/bach/ip/chip/kn_data.h"
 
 namespace latch {
@@ -57,7 +58,7 @@ inline std::string BundleRoot() {
 
 // 波形写成 <name>.trace，落在跑测试时的当前目录。一个进程里几个用例各写各的，
 // 所以每个用例给一个自己的名字。
-inline void TraceInto(std::string const& name) {
+inline void TraceInto(std::string const &name) {
   RT::GetRecorder().StartNew(name);
 }
 
@@ -70,11 +71,12 @@ inline std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-inline uint64_t SymbolOf(std::string const& name, std::string const& kind) {
+inline uint64_t SymbolOf(std::string const &name, std::string const &kind) {
   std::ifstream f(KernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -92,15 +94,15 @@ struct Vectors {
   std::map<std::string, std::string> kv;
 
   bool Empty() const { return kv.empty(); }
-  bool Has(std::string const& key) const { return kv.count(key) != 0; }
-  std::vector<uint8_t> Bytes(std::string const& key) const {
+  bool Has(std::string const &key) const { return kv.count(key) != 0; }
+  std::vector<uint8_t> Bytes(std::string const &key) const {
     std::vector<uint8_t> v;
     auto it = kv.find(key);
     if (it == kv.end()) {
       ADD_FAILURE() << "比对向量里没有 " << key;
       return v;
     }
-    std::string const& s = it->second;
+    std::string const &s = it->second;
     v.reserve(s.size() / 2);
     for (size_t i = 0; i + 1 < s.size(); i += 2) {
       v.push_back(uint8_t(std::stoul(s.substr(i, 2), nullptr, 16)));
@@ -109,31 +111,34 @@ struct Vectors {
   }
 };
 
-inline Vectors ReadVectors(std::string const& name) {
+inline Vectors ReadVectors(std::string const &name) {
   Vectors c;
   std::ifstream f(std::string(LATCH_SOURCE_DIR) +
                   "/src/bach/compiler/reference/vectors/" + name);
   std::string line;
   while (std::getline(f, line)) {
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
     size_t sp = line.find(' ');
-    if (sp == std::string::npos) continue;
+    if (sp == std::string::npos)
+      continue;
     c.kv[line.substr(0, sp)] = line.substr(sp + 1);
   }
   return c;
 }
 
 // 两段字节逐个比，报出第一处不同。整段打印一万多个字节看不出东西。
-inline void ExpectSame(std::vector<uint8_t> const& got,
-                       std::vector<uint8_t> const& want,
-                       std::string const& what) {
+inline void ExpectSame(std::vector<uint8_t> const &got,
+                       std::vector<uint8_t> const &want,
+                       std::string const &what) {
   if (got.size() != want.size()) {
     ADD_FAILURE() << what << "：长度是 " << got.size() << "，该是 "
                   << want.size();
     return;
   }
   for (size_t i = 0; i < got.size(); ++i) {
-    if (got[i] == want[i]) continue;
+    if (got[i] == want[i])
+      continue;
     ADD_FAILURE() << what << "：第 " << i << " 个字节是 0x" << std::hex
                   << int(got[i]) << "，该是 0x" << int(want[i]) << std::dec;
     return;
@@ -143,14 +148,15 @@ inline void ExpectSame(std::vector<uint8_t> const& got,
 // ── 每个 core 的数据 ──
 
 // topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
-inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
+inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const &t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
   for (size_t i = 0; i < t.size(); ++i) {
     uint64_t at = i * kTopkEntryBytes;
     b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
     b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
-    for (int k = 0; k < 4; ++k) b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
+    for (int k = 0; k < 4; ++k)
+      b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
   }
   return b;
 }
@@ -165,9 +171,9 @@ inline std::vector<uint8_t> TokenTopk() {
 }
 
 // boot 期铺进一个计算 core 的数据：本 core 分到的那一片权重。group 是 EP 组号，
-// chip 是这颗 chip 在组里的序号，slot 是这个 core 的逻辑槽位。topK 表随 token 走，
-// 不在这里铺。
-inline void SetUpCoreData(Core& core, uint64_t group, uint64_t chip,
+// chip 是这颗 chip 在组里的序号，slot 是这个 core 的逻辑槽位。topK 表随 token
+// 走， 不在这里铺。
+inline void SetUpCoreData(Core &core, uint64_t group, uint64_t chip,
                           uint64_t slot) {
   kn::PokeCoreWeights(core.Mmem(), group, chip, slot, kLocal);
 }
@@ -175,8 +181,9 @@ inline void SetUpCoreData(Core& core, uint64_t group, uint64_t chip,
 // ── chip 内的几何 ──
 //
 // 每颗 chip 2×5 共 10 个 core，8 个计算 core 当 2 行 4 列的格子用，槽位号是
-// 行 × 4 + 逻辑列。逻辑列到物理列按 chip 所在列换算：第一列 chip 是 1、2、3、4，
-// 中间两列是 0、1、3、4，最后一列是 0、1、2、3。与 compiler/hwconfig/moe.py 同源。
+// 行 × 4 + 逻辑列。逻辑列到物理列按 chip 所在列换算：第一列 chip 是
+// 1、2、3、4， 中间两列是 0、1、3、4，最后一列是 0、1、2、3。与
+// compiler/hwconfig/moe.py 同源。
 constexpr uint64_t kCols = 4;
 constexpr uint64_t kCorePerChip = 8;
 
@@ -184,8 +191,10 @@ inline uint64_t PhysColOf(uint64_t gx, uint64_t col) {
   static const uint64_t kFirst[kCols] = {1, 2, 3, 4};
   static const uint64_t kMiddle[kCols] = {0, 1, 3, 4};
   static const uint64_t kLast[kCols] = {0, 1, 2, 3};
-  if (gx == 0) return kFirst[col];
-  if (gx + 1 == kGridX) return kLast[col];
+  if (gx == 0)
+    return kFirst[col];
+  if (gx + 1 == kGridX)
+    return kLast[col];
   return kMiddle[col];
 }
 
@@ -200,20 +209,21 @@ constexpr uint64_t kRcoreId = kChipCoreNum - 1;
 // ── 几条 path 与 token ──
 //
 // 与 compiler/hwconfig/moe.py 同源。
-constexpr uint64_t kInPath = 4;        // token 广播进各计算 core
-constexpr uint64_t kBcastInPath = 5;   // 送进 B core 那一段
+constexpr uint64_t kInPath = 4;      // token 广播进各计算 core
+constexpr uint64_t kBcastInPath = 5; // 送进 B core 那一段
 constexpr uint64_t kUserId = 77;
 
 // 第几笔落在 B core 的 Matrix Mem 哪里。发方按送出的笔数算，B core 按收下的笔
 // 数算，同一条规则。与 compiler/kernel/bach.h 的 BC_SLOTS 与 bc_land 同源。
 inline uint64_t BcoreLand(uint64_t seq) {
-  return (seq % kn::kBcSlots) * kn::kBcTokenBytes;
+  return (seq % kn::kBcSlots) * kn::kBcSlotBytes;
 }
 
-// 第 k 个 token：6144 个 MXFP8，192 个 scale 接在后面，topK 表随包走。path 与落点
-// 由调用方给：从 B core 进来的落它的 Matrix Mem，直接进计算 core 的落 Core Mem。
-inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId,
-                            uint64_t k = 0) {
+// 第 k 个 token：6144 个 MXFP8，192 个 scale 接在后面，topK 表随包走。path
+// 与落点 由调用方给：从 B core 进来的落它的 Matrix Mem，直接进计算 core 的落
+// Core Mem。
+inline MessagePtr MakeToken(uint64_t path, uint64_t dst,
+                            uint64_t user = kUserId, uint64_t k = 0) {
   auto m = std::make_shared<Message>();
   m->path_id = path;
   m->user_id = user;
@@ -228,8 +238,8 @@ inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId
   m->payload.insert(m->payload.end(), scale.begin(), scale.end());
   m->topk_valid = 1;
   m->topk = TokenTopk();
-  // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放 payload，
-  // 单独在 topk 字段里。
+  // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放
+  // payload， 单独在 topk 字段里。
   m->size = m->payload.size() + m->topk.size();
   return m;
 }
@@ -238,11 +248,12 @@ inline MessagePtr MakeToken(uint64_t path, uint64_t dst, uint64_t user = kUserId
 //
 // 装模型时权重不经 SCP，走的是 Host 那条 msg 流：包从 Router 进来，Router 通知
 // TS，TS 派 datain 任务给 DTE RV core 跑 weights loader，搬运把数据从 Router
-// 落进 Matrix Mem，scale 随包头的标记落进 scale 旁带。这一阶段不建 stream 表项、
-// 不启动任务链；各 core 数够了 SCP 才把 core 切到业务模式。
+// 落进 Matrix Mem，scale 随包头的标记落进 scale 旁带。这一阶段不建 stream
+// 表项、 不启动任务链；各 core 数够了 SCP 才把 core 切到业务模式。
 
 // weights 加载阶段走的那条 path：这一阶段只用一条，走遍格子里的 8 个计算 core，
-// 一个包落哪个 core 由包头的 path_core_mask 挑，位号就是槽位号。bundle 里不用这个号。
+// 一个包落哪个 core 由包头的 path_core_mask 挑，位号就是槽位号。bundle
+// 里不用这个号。
 constexpr uint64_t kWeightsPath = 12;
 // 与 compiler/kernel/bach.h 的 WEIGHTS_CNT_OFF 同源。
 constexpr uint64_t kWeightsCntOff = kn::kWeightsCntOff;
@@ -254,27 +265,29 @@ constexpr uint64_t kWeightsUser = 3;
 
 // 把一颗 core 配进 weights 加载阶段。任务链在这之前就由 bundle 配好了，切模式
 // 只动 datain 那一项。
-inline void EnterWeightsMode(Core& core) {
+inline void EnterWeightsMode(Core &core) {
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_weights_loader", "dte"),
                                      /*weights_mode=*/true);
   core.GetTs().Cfg().SetTriggerChainEn(false);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(kWeightsPath, 0);
 }
 
 // 切回业务：datain 改指 token 搬移那一笔，任务链放行。
-inline void EnterBusinessMode(Core& core) {
+inline void EnterBusinessMode(Core &core) {
   core.GetTs().Cfg().WriteDatainTask(SymbolOf("task_dte_user_init", "dte"),
                                      /*weights_mode=*/false);
   core.GetTs().Cfg().SetTriggerChainEn(true);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
 }
 
 // weights 那条 path 的路由表，只铺第一列 chip：从 W 口进来，坐在口上的 core5
 // 不是计算 core，往右转一跳；格子第 1 行往右铺满，行首那个槽位再经 mid 到第 0
 // 行往右铺满。每一跳都开 path_core_mask，包走遍整棵树，只在自己那一位是 1 的
 // core 上落地。
-inline void WireWeightsPath(Chip& chip) {
+inline void WireWeightsPath(Chip &chip) {
   LOGCHECK(chip.Gx() == 0, "WireWeightsPath: 只铺第一列 chip。");
   RouteEntry in;
   in.flow_dir = kFlowRight;
@@ -283,7 +296,8 @@ inline void WireWeightsPath(Chip& chip) {
   for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
     RouteEntry e;
     e.flow_dir = slot % kCols + 1 < kCols ? uint64_t(kFlowRight) : 0;
-    if (slot == kCols) e.flow_dir |= kFlowMid;
+    if (slot == kCols)
+      e.flow_dir |= kFlowMid;
     e.path_core_bypass = false;
     e.path_core_mask_enable = true;
     e.path_core_mask_idx = slot;
@@ -295,7 +309,7 @@ inline void WireWeightsPath(Chip& chip) {
 // 上的最终地址，mask 挑收它的那个 core。
 inline MessagePtr MakeWeightsMsg(uint64_t slot, uint64_t at,
                                  std::vector<uint8_t> data,
-                                 std::vector<uint8_t> const& scale) {
+                                 std::vector<uint8_t> const &scale) {
   auto m = std::make_shared<Message>();
   m->path_id = kWeightsPath;
   m->path_core_mask = 1ull << slot;
@@ -341,7 +355,7 @@ inline std::vector<std::unique_ptr<Chip>> MakeLpuChips(ClockPtr clk,
 // 配置表与 kernel 从 bundle 装：那一份由 compiler 按 topo/moe_lpu.json 编出来，
 // 拓扑、任务链、路由表、进核配置都在里面。再铺各计算 core 的数据，把第 0 行
 // R core 标成链首：它只有本行结果，槽的另一半一直是 0，等一笔就走。
-inline BundleStat LoadLpu(std::vector<Chip*> const& all) {
+inline BundleStat LoadLpu(std::vector<Chip *> const &all) {
   BundleStat st = LoadBundle(all, BundleRoot(), "moe_lpu");
   for (uint64_t i = 0; i < all.size(); ++i) {
     uint64_t gy = GyOfChip(i);
@@ -377,8 +391,10 @@ inline std::vector<ChipPair> GridLinks(uint64_t rows, uint64_t cols) {
   for (uint64_t gy = 0; gy < rows; ++gy) {
     for (uint64_t gx = 0; gx < cols; ++gx) {
       uint64_t a = gy * cols + gx;
-      if (gx + 1 < cols) v.push_back({a, kChipE, a + 1, kChipW});
-      if (gy + 1 < rows) v.push_back({a, kChipS, a + cols, kChipN});
+      if (gx + 1 < cols)
+        v.push_back({a, kChipE, a + 1, kChipW});
+      if (gy + 1 < rows)
+        v.push_back({a, kChipS, a + cols, kChipN});
     }
   }
   return v;
@@ -387,9 +403,9 @@ inline std::vector<ChipPair> GridLinks(uint64_t rows, uint64_t cols) {
 // 几颗 chip、两座接头桥与它们之间的段搬运，全由这一个协程驱动。出口上的 flit
 // 是单拍脉冲，分到两个协程里谁先跑不定，会整拍错过。
 class SpreadHarness : public BachModule {
- public:
-  SpreadHarness(ClockPtr c, std::vector<Chip*> target,
-                std::vector<ChipPair> pairs, C2cBridge& feed, C2cBridge& sink,
+public:
+  SpreadHarness(ClockPtr c, std::vector<Chip *> target,
+                std::vector<ChipPair> pairs, C2cBridge &feed, C2cBridge &sink,
                 uint64_t feed_chip, uint64_t feed_port, uint64_t sink_chip,
                 uint64_t sink_port, uint64_t at, uint64_t cap, MessagePtr m)
       : BachModule(c, "harness"), chips(std::move(target)),
@@ -428,7 +444,7 @@ class SpreadHarness : public BachModule {
   // 通成员，别的协程读它就是跨协程读非 atomic 的量。
   std::vector<uint64_t> inflight;
 
- protected:
+protected:
   void Step() override {
     // 入口桥把收下的 flit 送走一个，就还回来一个位置。
     if (ReadRelease(in_stub.RcVaSa().ToCoreBack()->release).vc_valid) {
@@ -440,35 +456,47 @@ class SpreadHarness : public BachModule {
     if (out_msgs.size() >= OutWanted()) {
       inflight.clear();
       all_empty = true;
-      for (Chip* c : chips) {
+      for (Chip *c : chips) {
         for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-          uint64_t n = c->GetCore(CoreOfSlot(c->Gx(), slot)).GetTs().Table()
-                           .InFlight();
+          uint64_t n =
+              c->GetCore(CoreOfSlot(c->Gx(), slot)).GetTs().Table().InFlight();
           inflight.push_back(n);
-          if (n != 0) all_empty = false;
+          if (n != 0)
+            all_empty = false;
         }
       }
     }
 
     LinkEndPtr feed_in = in_stub.FromCore();
     MessagePtr fire = Pick();
-    if (fire) {
-      feed_in->flit.Drive(/*vc=*/0, /*is_head=*/true, /*is_tail=*/true,
-                          fire->size, fire);
-    } else {
+    if (fire)
+      input_packets.push_back(fire);
+    if (!input_packets.empty() && feed_room) {
+      auto packet = input_packets.front();
+      uint64_t total = packet->TotalBytes();
+      uint64_t bytes = std::min<uint64_t>(256, total - input_offset);
+      bool last = input_offset + bytes == total;
+      feed_in->flit.Drive(0, input_offset == 0, last, bytes, packet);
+      --feed_room;
+      input_offset += bytes;
+      if (last) {
+        input_packets.pop_front();
+        input_offset = 0;
+      }
+    } else
       feed_in->flit.Idle();
-    }
     feed_in->release.Idle();
     out_stub.FromCore()->flit.Idle();
     out_stub.FromCore()->release.Idle();
 
     // 收取那一头在最外，注入那一头在最里；chip 按编号倒着推。
     out_stub.RunStep();
-    for (uint64_t i = chips.size(); i > 0; --i) chips[i - 1]->RunOutside();
+    for (uint64_t i = chips.size(); i > 0; --i)
+      chips[i - 1]->RunOutside();
     in_stub.RunStep();
 
     Move(in_stub, chips[in_chip]->Port(in_port));
-    for (ChipPair const& p : links) {
+    for (ChipPair const &p : links) {
       Move(chips[p.a]->Port(p.a_port), chips[p.b]->Port(p.b_port));
     }
     Move(chips[out_chip]->Port(out_port), out_stub);
@@ -480,8 +508,7 @@ class SpreadHarness : public BachModule {
       out_msgs.push_back(f.msg);
       out_at.push_back(CycleNow());
       // 这个 token 的结果出来了：还一份额度，R core 上它那个槽空出来了。
-      if (busy_slots.erase(f.msg->user_id) != 0 &&
-          credit != kGpuUnlimited) {
+      if (busy_slots.erase(f.msg->user_id) != 0 && credit != kGpuUnlimited) {
         ++credit;
       }
     }
@@ -494,28 +521,37 @@ class SpreadHarness : public BachModule {
     }
   }
 
- private:
+private:
   // 这一拍往里注哪个包。weights 那一段一个一个来，注完等各 core 收够，切模式，
   // 再发 token。
+  std::deque<MessagePtr> input_packets;
+  uint64_t input_offset = 0;
   MessagePtr Pick() {
     uint64_t now = CycleNow();
-    if (!tokens.empty()) return PickToken(now);
-    if (weights.empty()) return now == fire_at ? msg : MessagePtr();
+    if (!tokens.empty())
+      return PickToken(now);
+    if (weights.empty())
+      return now == fire_at ? msg : MessagePtr();
     LOGCHECK(weights_gap != 0, "SpreadHarness: weights 那一段要给注入间隔。");
-    if (now < fire_at) return MessagePtr();
+    if (now < fire_at)
+      return MessagePtr();
     if (sent < weights.size()) {
-      if ((now - fire_at) % weights_gap != 0) return MessagePtr();
+      if ((now - fire_at) % weights_gap != 0)
+        return MessagePtr();
       return weights[sent++];
     }
     if (switched_at == 0) {
       // 各 core 都收够了 loader 才中断 SCP。计数是 loader 写的，那一笔搬运还
       // 在路上，所以再留一个 gap 给它落完，也是 SCP 改配置的那段时间。
-      if (weights_done && !weights_done()) return MessagePtr();
+      if (weights_done && !weights_done())
+        return MessagePtr();
       switched_at = now + weights_gap;
       return MessagePtr();
     }
-    if (now != switched_at) return MessagePtr();
-    if (to_business) to_business();
+    if (now != switched_at)
+      return MessagePtr();
+    if (to_business)
+      to_business();
     return msg;
   }
 
@@ -530,7 +566,7 @@ class SpreadHarness : public BachModule {
     if (sent_at.size() != tokens.size()) {
       sent_at.assign(tokens.size(), 0);
       std::set<uint64_t> users;
-      for (MessagePtr const& m : tokens) {
+      for (MessagePtr const &m : tokens) {
         LOGCHECK(m->user_id < kn::kRcSlots,
                  "SpreadHarness: user_id 就是 R core 槽号，必须小于槽数。");
         users.insert(m->user_id);
@@ -538,16 +574,21 @@ class SpreadHarness : public BachModule {
       LOGCHECK(users.size() == tokens.size(),
                "SpreadHarness: 连续发的 token 每个一个用户号，不许重复。");
     }
-    if (now < fire_at || feed_room == 0) return MessagePtr();
-    if (token_gap != 0 && now < fire_at + sent * token_gap) return MessagePtr();
-    if (credit != kGpuUnlimited && credit == 0) return MessagePtr();
+    if (now < fire_at || feed_room == 0)
+      return MessagePtr();
+    if (token_gap != 0 && now < fire_at + sent * token_gap)
+      return MessagePtr();
+    if (credit != kGpuUnlimited && credit == 0)
+      return MessagePtr();
     for (uint64_t i = 0; i < tokens.size(); ++i) {
-      if (sent_at[i] != 0) continue;
+      if (sent_at[i] != 0)
+        continue;
       uint64_t slot = tokens[i]->user_id;
-      if (busy_slots.count(slot) != 0) continue;
+      if (busy_slots.count(slot) != 0)
+        continue;
       busy_slots.insert(slot);
-      if (credit != kGpuUnlimited) --credit;
-      --feed_room;
+      if (credit != kGpuUnlimited)
+        --credit;
       sent_at[i] = now;
       tokens[i]->dst_addr = BcoreLand(sent++);
       return tokens[i];
@@ -555,15 +596,17 @@ class SpreadHarness : public BachModule {
     return MessagePtr();
   }
 
-  static void Move(C2cBridge& x, C2cBridge& y) {
-    while (x.HasOut()) y.PushIn(x.TakeOut());
-    while (y.HasOut()) x.PushIn(y.TakeOut());
+  static void Move(C2cBridge &x, C2cBridge &y) {
+    while (x.HasOut())
+      y.PushIn(x.TakeOut());
+    while (y.HasOut())
+      x.PushIn(y.TakeOut());
   }
 
-  std::vector<Chip*> chips;
+  std::vector<Chip *> chips;
   std::vector<ChipPair> links;
-  C2cBridge& in_stub;
-  C2cBridge& out_stub;
+  C2cBridge &in_stub;
+  C2cBridge &out_stub;
   uint64_t in_chip, in_port, out_chip, out_port;
   uint64_t fire_at, limit;
   MessagePtr msg;
@@ -581,7 +624,7 @@ class SpreadHarness : public BachModule {
 
 // 一颗 chip 上 dot core 拼好的 concat 区。stream 是 token 占的槽位，落点按
 // stream 切片偏移。
-inline std::vector<uint8_t> ConcatOf(Chip& chip, uint64_t stream = 0) {
+inline std::vector<uint8_t> ConcatOf(Chip &chip, uint64_t stream = 0) {
   return chip.GetCore(CoreOfSlot(chip.Gx(), kn::kDotSlot))
       .Cmem()
       .Peek(kn::kConcatOff + stream * kn::kStreamStride,
@@ -590,10 +633,10 @@ inline std::vector<uint8_t> ConcatOf(Chip& chip, uint64_t stream = 0) {
 
 // 一颗 chip 的中间量逐项与参考实现对：各 core 的部分和、FC2 输入与 FC2 那一段，
 // dot core 上的归约结果与 concat。tag 是向量里这颗 chip 那几行的前缀。
-inline void CheckChip(Chip& chip, Vectors const& want, std::string const& tag) {
+inline void CheckChip(Chip &chip, Vectors const &want, std::string const &tag) {
   std::vector<uint8_t> concat;
   for (uint64_t s = 0; s < kn::kSlots; ++s) {
-    Core& core = chip.GetCore(CoreOfSlot(chip.Gx(), s));
+    Core &core = chip.GetCore(CoreOfSlot(chip.Gx(), s));
     std::string who = tag + "槽位 " + std::to_string(s) + " ";
     ExpectSame(core.Cmem().Peek(kn::kPartOff + kn::kSwHead,
                                 kn::kPartBytes - kn::kSwHead),
@@ -612,25 +655,25 @@ inline void CheckChip(Chip& chip, Vectors const& want, std::string const& tag) {
                who + "的 FC2 那一段");
     concat.insert(concat.end(), fc2.begin(), fc2.end());
   }
-  Core& dot = chip.GetCore(CoreOfSlot(chip.Gx(), kn::kDotSlot));
-  ExpectSame(dot.Cmem().Peek(kn::kRedOff + kn::kSwHead,
-                             kn::kPartBytes - kn::kSwHead),
-             want.Bytes(tag + "red"), tag + "dot core 上的归约结果");
+  Core &dot = chip.GetCore(CoreOfSlot(chip.Gx(), kn::kDotSlot));
+  ExpectSame(
+      dot.Cmem().Peek(kn::kRedOff + kn::kSwHead, kn::kPartBytes - kn::kSwHead),
+      want.Bytes(tag + "red"), tag + "dot core 上的归约结果");
   ExpectSame(ConcatOf(chip), concat, tag + "dot core 上的 concat");
 }
 
 // R core 的 Matrix Mem 里这个用户那一槽的一半：跳过 16 B 头。half 为 0 是本行
 // 结果，为 1 是上一行 R core 送来的累加结果。user 默认 kUserId，多 token 时每个
 // token 用 kUserId + seq。
-inline std::vector<uint8_t> RcoreHalf(Chip& chip, uint64_t half,
+inline std::vector<uint8_t> RcoreHalf(Chip &chip, uint64_t half,
                                       uint64_t user = kUserId) {
   return chip.GetCore(kRcoreId).Mmem().Peek(
       kn::RcLand(user, half) + kn::kSwHead, kn::kRowBytes - kn::kSwHead);
 }
 
 // 出口上收到的一包：16 B 头后面是结果，落点是 dst。what 说这是哪一包。
-inline void CheckOutMsg(Message const& got, std::vector<uint8_t> const& want,
-                        uint64_t dst, std::string const& what) {
+inline void CheckOutMsg(Message const &got, std::vector<uint8_t> const &want,
+                        uint64_t dst, std::string const &what) {
   ASSERT_EQ(got.payload.size(), kn::kRowBytes) << what;
   EXPECT_EQ(got.dst_addr, dst) << what;
   ExpectSame(std::vector<uint8_t>(got.payload.begin() + kn::kSwHead,
@@ -639,8 +682,8 @@ inline void CheckOutMsg(Message const& got, std::vector<uint8_t> const& want,
 }
 
 // 只发一个 token 的用例：出口上要收到一包结果。
-inline void CheckOut(std::vector<MessagePtr> const& got,
-                     std::vector<uint8_t> const& want, uint64_t dst) {
+inline void CheckOut(std::vector<MessagePtr> const &got,
+                     std::vector<uint8_t> const &want, uint64_t dst) {
   ASSERT_EQ(got.size(), 1u) << "出口上要收到一包结果";
   CheckOutMsg(*got[0], want, dst, "出口上收到的结果");
 }
@@ -648,11 +691,11 @@ inline void CheckOut(std::vector<MessagePtr> const& got,
 // 一轮跑完之后的业务级 credit 守恒：每个 core 的四张 Stream 资源表都空了。
 // 表项记的是相邻下游那个 core 上的坑，只有那个 core 退休时还回来，所以这一条
 // 同时说明各级的 release 都走到了位。
-inline void CheckStreamDrained(std::vector<Chip*> const& all) {
+inline void CheckStreamDrained(std::vector<Chip *> const &all) {
   uint64_t returned = 0;
   for (uint64_t c = 0; c < all.size(); ++c) {
     for (uint64_t i = 0; i < kMaxCorePerChip; ++i) {
-      Router& rt = all[c]->GetCore(i).GetRouter();
+      Router &rt = all[c]->GetCore(i).GetRouter();
       for (uint64_t o = 0; o <= kOutCore; ++o) {
         EXPECT_EQ(rt.GetXbar().StreamUsed(o), 0u)
             << "chip " << c << " core " << i << " 出口 " << o << " 的坑没还";
@@ -665,14 +708,14 @@ inline void CheckStreamDrained(std::vector<Chip*> const& all) {
   std::cerr << "  收到 release " << returned << " 笔\n";
 }
 
-inline void CheckInflight(std::vector<uint64_t> const& inflight) {
+inline void CheckInflight(std::vector<uint64_t> const &inflight) {
   for (uint64_t g = 0; g < inflight.size(); ++g) {
     EXPECT_EQ(inflight[g], 0u) << "第 " << g << " 个计算 core 的任务链没走到头";
   }
 }
 
-}  // namespace moetest
-}  // namespace bach
-}  // namespace latch
+} // namespace moetest
+} // namespace bach
+} // namespace latch
 
 #endif

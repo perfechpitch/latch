@@ -3,5 +3,6 @@
 #include "test/bach/ip/chip/moe_lpu_token_case.h"
 
 TEST(BachMoeLpu, OneHundredTwentyEightTokens) {
-  latch::bach::moetest::RunTokens(128, 0, "moe_lpu_tokens_128", 60000);
+  latch::bach::moetest::RunTokens(128, 0, "moe_lpu_tokens_128", 60000,
+                               /*max_middle_cycles=*/200);
 }

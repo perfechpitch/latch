@@ -16,14 +16,15 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <deque>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "bach/ip/chip/core/core.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/core/core.h"
 #include "test/bach/ip/chip/kn_data.h"
 
 using namespace latch;
@@ -39,11 +40,12 @@ std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-uint64_t SymbolOf(std::string const& name, std::string const& kind) {
+uint64_t SymbolOf(std::string const &name, std::string const &kind) {
   std::ifstream f(KernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -67,10 +69,11 @@ constexpr uint64_t kOutPath = 0;
 // 第几笔落在 Matrix Mem 的哪里。发方按自己送出的笔数算，B core 那边按收下的
 // 笔数算，同一条规则。
 uint64_t Land(uint64_t seq) {
-  return kMmBase + (seq % kSlots) * kTokenBytes;
+  return kMmBase + (seq % kSlots) * kn::kBcSlotBytes;
 }
 
-// 一笔 token 的包内容：数据后面接 scale，认得出是哪一笔就行，B core 不算它，只搬。
+// 一笔 token 的包内容：数据后面接 scale，认得出是哪一笔就行，B core
+// 不算它，只搬。
 std::vector<uint8_t> TokenBytes(uint64_t seed) {
   std::vector<uint8_t> b(kTokenBytes + kScaleBytes, 0);
   for (uint64_t j = 0; j < b.size(); ++j) {
@@ -80,7 +83,7 @@ std::vector<uint8_t> TokenBytes(uint64_t seed) {
 }
 
 MessagePtr MakeToken(uint64_t seq, uint64_t user,
-                     std::vector<uint8_t> const& body) {
+                     std::vector<uint8_t> const &body) {
   auto m = std::make_shared<Message>();
   m->path_id = kInPath;
   m->user_id = user;
@@ -91,12 +94,14 @@ MessagePtr MakeToken(uint64_t seq, uint64_t user,
   m->dst_addr = Land(seq);
   m->scale_valid = 1;
   m->payload = body;
-  m->size = m->payload.size();
+  m->topk_valid = 1;
+  m->topk.assign(256, 0);
+  m->size = m->payload.size() + m->topk.size();
   return m;
 }
 
 // B core 的两条链。链二从 task 0 起，链一是单独配的 datain_task。
-void WriteBcoreChains(Core& core) {
+void WriteBcoreChains(Core &core) {
   TaskEntry wait;
   wait.send_unit = SendUnit::kMu;
   wait.recv_unit = RecvUnit::kRvOnly;
@@ -121,6 +126,7 @@ void WriteBcoreChains(Core& core) {
   core.GetTs().Cfg().SetBCoreDirection(kFlowMid);
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
 }
 
 RouteEntry EnterCore() {
@@ -141,30 +147,42 @@ RouteEntry LeaveCore() {
 
 // core 里上百个模块与外面那两根线都由这一个协程驱动。
 class BcoreHarness : public BachModule {
- public:
+public:
   struct Job {
     uint64_t at = 0;
     MessagePtr msg;
   };
 
-  BcoreHarness(ClockPtr c, Core& target, std::vector<Job> list)
+  BcoreHarness(ClockPtr c, Core &target, std::vector<Job> list)
       : BachModule(c, "harness"), core(target), jobs(std::move(list)) {}
 
   std::vector<MessagePtr> out_msgs;
   std::array<bool, 3> took{};
   std::array<uint64_t, 3> took_vc{};
 
- protected:
+protected:
   void Step() override {
     LinkEndPtr in = core.InWire(1);
-    bool drove = false;
-    for (auto const& j : jobs) {
-      if (j.at != CycleNow()) continue;
-      in->flit.Drive(0, true, true, j.msg->size, j.msg);
-      drove = true;
-      break;
-    }
-    if (!drove) in->flit.Idle();
+    auto released = ReadRelease(core.UpBackWire(1)->release);
+    if (released.vc_valid)
+      ++input_credit;
+    for (auto const &job : jobs)
+      if (job.at == CycleNow())
+        pending_input.push_back(job.msg);
+    if (!pending_input.empty() && input_credit) {
+      auto message = pending_input.front();
+      uint64_t total = message->TotalBytes();
+      uint64_t bytes = std::min<uint64_t>(256, total - input_offset);
+      bool last = input_offset + bytes == total;
+      in->flit.Drive(0, input_offset == 0, last, bytes, message);
+      --input_credit;
+      input_offset += bytes;
+      if (last) {
+        pending_input.pop_front();
+        input_offset = 0;
+      }
+    } else
+      in->flit.Idle();
     // 出核那一路的下游：上一拍收下的 flit，这一拍把 VC 位置还回去。不还的话
     // core 那一侧的 credit 只减不加，一个多 flit 的包发满额度就再也发不动。
     for (uint64_t d = 0; d < 3; ++d) {
@@ -181,30 +199,35 @@ class BcoreHarness : public BachModule {
 
     for (uint64_t d = 0; d < 3; ++d) {
       FlitView f = ReadFlit(core.OutWire(d)->flit);
-      if (!f.valid) continue;
+      if (!f.valid)
+        continue;
       took[d] = true;
       took_vc[d] = f.vc;
       // 一个包只记一条：多 flit 的包在尾 flit 那一拍才算收完。
-      if (f.tail && f.msg) out_msgs.push_back(f.msg);
+      if (f.tail && f.msg)
+        out_msgs.push_back(f.msg);
     }
   }
 
- private:
-  Core& core;
+private:
+  Core &core;
   std::vector<Job> jobs;
+  std::deque<MessagePtr> pending_input;
+  uint64_t input_offset = 0, input_credit = kVcPrivateDepth + kVcSharedDepth;
 };
 
-void LoadKernels(Core& core) {
+void LoadKernels(Core &core) {
   core.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
   core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
   core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
 }
 
-}  // namespace
+} // namespace
 
 // 一笔都没进来：head 与 tail 一直相等，链二在 task 0 上等着，出口是空的。
 TEST(BachBcore, NothingGoesOutWithoutAToken) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   std::vector<MessagePtr> got;
   {
     EnsureSlots();
@@ -227,9 +250,11 @@ TEST(BachBcore, NothingGoesOutWithoutAToken) {
 
 // 连着三笔：按进来的次序发出去。三笔的 user 各不相同也不连号，落点只看第几笔。
 TEST(BachBcore, TokensGoOutInArrivalOrder) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   std::vector<std::vector<uint8_t>> bodies;
-  for (uint64_t u = 0; u < 3; ++u) bodies.push_back(TokenBytes(u + 1));
+  for (uint64_t u = 0; u < 3; ++u)
+    bodies.push_back(TokenBytes(u + 1));
 
   std::vector<MessagePtr> got;
   {
@@ -254,7 +279,9 @@ TEST(BachBcore, TokensGoOutInArrivalOrder) {
 
   ASSERT_EQ(got.size(), 3u) << "三笔都要发出去";
   for (uint64_t i = 0; i < 3; ++i) {
-    EXPECT_EQ(got[i]->payload, bodies[i]) << "第 " << i << " 笔";
+    auto expected = bodies[i];
+    expected.resize(expected.size() + 256, 0);
+    EXPECT_EQ(got[i]->payload, expected) << "第 " << i << " 笔";
     EXPECT_TRUE(got[i]->scale_valid) << "第 " << i << " 笔的 scale 要随它走";
   }
 }

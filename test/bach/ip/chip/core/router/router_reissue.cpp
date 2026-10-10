@@ -11,12 +11,12 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/ip/chip/core/router/coremem_reissue.h"
 #include "bach/ip/chip/core/router/retire.h"
 #include "bach/ip/chip/core/router/router_table.h"
 #include "bach/ip/wiring.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -44,7 +44,7 @@ FlitView MakeFlit(uint64_t user, uint64_t path, uint64_t vc) {
 
 // 存包、唤醒、读重发出口，都在这一个协程里。
 class ReissueHarness : public BachModule {
- public:
+public:
   struct StoreJob {
     uint64_t at = 0;
     FlitView f;
@@ -54,7 +54,7 @@ class ReissueHarness : public BachModule {
     uint64_t vc = 0;
   };
 
-  ReissueHarness(ClockPtr c, CoreMemReissue& target, LinkEndPtr out_wire)
+  ReissueHarness(ClockPtr c, CoreMemReissue &target, LinkEndPtr out_wire)
       : BachModule(c, "harness"), rq(target), out(std::move(out_wire)) {}
 
   std::vector<StoreJob> stores;
@@ -64,7 +64,7 @@ class ReissueHarness : public BachModule {
   // 重发完成报给 TS 的那一路。
   std::vector<std::pair<uint64_t, uint64_t>> done_reports;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     FlitView f = ReadFlit(out->flit);
@@ -78,24 +78,27 @@ class ReissueHarness : public BachModule {
       last_done_seq = rq.Done().Seq();
       done_reports.push_back({rq.Done().User(), rq.Done().Path()});
     }
-    for (auto const& s : stores) {
-      if (s.at == now) rq.Store(s.f);
+    for (auto const &s : stores) {
+      if (s.at == now)
+        rq.Store(s.f);
     }
-    for (auto const& w : wakes) {
-      if (w.at == now) rq.Wake(w.vc);
+    for (auto const &w : wakes) {
+      if (w.at == now)
+        rq.Wake(w.vc);
     }
     rq.RunStep();
   }
 
- private:
-  CoreMemReissue& rq;
+private:
+  CoreMemReissue &rq;
   LinkEndPtr out;
   uint64_t last_done_seq = 0;
 };
 
-}  // namespace
+} // namespace
 
-// 存的时候打上重发标记，放出来时改回去：Output Port 认这个标记决定扣不扣 credit。
+// 存的时候打上重发标记，放出来时改回去：Output Port 认这个标记决定扣不扣
+// credit。
 TEST(BachReissue, ReinjectFlagIsSetOnStoreAndClearedOnReissue) {
   std::vector<uint64_t> out_flags, out_paths;
   {
@@ -172,7 +175,6 @@ TEST(BachReissue, PassThroughCoreTakesNoOverflow) {
   RT::Reset();
 }
 
-
 // 重发完成后向 TS 报一笔，至少带 UserID 与 PathID：直接发送那一路由 CoreStation
 // 的 trigger 通知 TS，走了暂存的这一路要在这里补上。
 TEST(BachReissue, ReportsToTsAfterReissue) {
@@ -220,8 +222,8 @@ namespace {
 
 // 推 Retire 与下游还回来的 release，读三个方向出线上的回程。
 class RetireHarness : public BachModule {
- public:
-  RetireHarness(ClockPtr c, Retire& target, std::vector<LinkEndPtr> up,
+public:
+  RetireHarness(ClockPtr c, Retire &target, std::vector<LinkEndPtr> up,
                 std::vector<LinkEndPtr> down = {})
       : BachModule(c, "harness"), rt(target), wires(std::move(up)),
         down_wires(std::move(down)) {}
@@ -237,7 +239,7 @@ class RetireHarness : public BachModule {
   // 广播口上出现过的退休用户，一笔记一次。
   std::vector<uint64_t> retired;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     for (uint64_t d = 0; d < wires.size(); ++d) {
@@ -273,8 +275,8 @@ class RetireHarness : public BachModule {
     rt.RunStep();
   }
 
- private:
-  Retire& rt;
+private:
+  Retire &rt;
   std::vector<LinkEndPtr> wires, down_wires;
   uint64_t last_bcast_seq = 0, last_rel_seq = 0;
 };
@@ -297,7 +299,7 @@ struct RetireBench {
   }
 };
 
-}  // namespace
+} // namespace
 
 // 本级退休往三个 R2R 方向各发一笔：哪个上游申请过，删的就是它那一项，没申请过
 // 的查无此项丢掉。
@@ -308,7 +310,7 @@ TEST(BachRetire, LocalRetireReleasesAllThreeDirections) {
     ClockPtr clk = MakeClock(0, kPeriod);
     RetireBench b(clk);
     RetireHarness h(clk, *b.rt, b.up, b.down);
-    h.req_at = {3, 4};
+    h.req_at = {3};
     h.req_user = 88;
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
@@ -321,8 +323,8 @@ TEST(BachRetire, LocalRetireReleasesAllThreeDirections) {
   EXPECT_EQ(users, std::vector<uint64_t>({88, 88, 88}));
 }
 
-// 下游还回来的那一笔：交给本级删那个方向的表项，同时按那个口的 RTR_RELEASE_ROUTE
-// 转出去。坏 core 上配的是左进转左、右进转右。
+// 下游还回来的那一笔：交给本级删那个方向的表项，同时按那个口的
+// RTR_RELEASE_ROUTE 转出去。坏 core 上配的是左进转左、右进转右。
 TEST(BachRetire, DownstreamReleaseGoesToTheLocalTableAndTheStaticRoute) {
   std::vector<uint64_t> dirs, users, self_dirs, self_users;
   {
@@ -359,7 +361,7 @@ TEST(BachRetire, SameUserRetiringTwiceBroadcastsTwice) {
     ClockPtr clk = MakeClock(0, kPeriod);
     RetireBench b(clk);
     RetireHarness h(clk, *b.rt, b.up, b.down);
-    h.req_at = {3, 4, 8, 9};
+    h.req_at = {3, 8};
     h.req_user = 88;
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
@@ -367,4 +369,17 @@ TEST(BachRetire, SameUserRetiringTwiceBroadcastsTwice) {
   }
   RT::Reset();
   EXPECT_EQ(retired, std::vector<uint64_t>({88, 88}));
+}
+
+TEST(BachRetire, AdjacentValidOnlyPulsesAreDistinctRetirements) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  RetireBench bench(clock);
+  RetireHarness driver(clock, *bench.rt, bench.up, bench.down);
+  driver.req_at = {3, 4};
+  driver.req_user = 88;
+  clock->Continue(20);
+  RT::JoinAll();
+  EXPECT_EQ(driver.retired, (std::vector<uint64_t>{88, 88}));
+  RT::Reset();
 }

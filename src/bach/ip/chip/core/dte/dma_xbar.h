@@ -26,17 +26,17 @@
 #include <memory>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
 #include "bach/ip/chip/core/ports.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
 
 class DteXbar : public BachModule {
- public:
-  DteXbar(ClockPtr clock, const std::string& name, uint64_t parent = 0,
+public:
+  DteXbar(ClockPtr clock, const std::string &name, uint64_t parent = 0,
           bool tick = true)
       : BachModule(clock, name, parent, tick) {
     for (uint64_t w = 0; w < kWhichNum; ++w) {
@@ -56,11 +56,21 @@ class DteXbar : public BachModule {
     return side[kToMmem].at(lane);
   }
 
+  std::shared_ptr<MemPort> LaneTopk(uint64_t lane) const {
+    return side[2].at(lane);
+  }
+  void AttachTopkRd(std::shared_ptr<MemPort> p) {
+    out[2][kRead] = std::move(p);
+  }
+  void AttachTopkWr(std::shared_ptr<MemPort> p) {
+    out[2][kWrite] = std::move(p);
+  }
+
   // ── 对外：每块存储的读与写各一个口 ──
-  MemPort& CmemRd() { return *out[kToCmem][kRead]; }
-  MemPort& CmemWr() { return *out[kToCmem][kWrite]; }
-  MemPort& MmemRd() { return *out[kToMmem][kRead]; }
-  MemPort& MmemWr() { return *out[kToMmem][kWrite]; }
+  MemPort &CmemRd() { return *out[kToCmem][kRead]; }
+  MemPort &CmemWr() { return *out[kToCmem][kWrite]; }
+  MemPort &MmemRd() { return *out[kToMmem][kRead]; }
+  MemPort &MmemWr() { return *out[kToMmem][kWrite]; }
   void AttachCmemRd(std::shared_ptr<MemPort> p) {
     out[kToCmem][kRead] = std::move(p);
   }
@@ -76,23 +86,35 @@ class DteXbar : public BachModule {
 
   bool Quiescent() const override {
     for (uint64_t w = 0; w < kWhichNum; ++w) {
-      if (!pend[w].empty()) return false;
-      for (auto const& q : slot[w]) {
-        if (!q.empty()) return false;
+      for (auto const &pending : pend[w]) {
+        if (!pending.empty())
+          return false;
+      }
+      for (auto const &q : slot[w]) {
+        if (!q.empty())
+          return false;
       }
     }
     return true;
   }
 
- protected:
+protected:
   void Step() override {
+    mtop_used.fill(false);
     Serve(kToCmem);
-    Serve(kToMmem);
+    if (topk_first) {
+      Serve(2);
+      Serve(kToMmem);
+    } else {
+      Serve(kToMmem);
+      Serve(2);
+    }
+    topk_first = !topk_first;
     TracePerCycle("grants", grant_cnt);
   }
 
- private:
-  enum Which : uint64_t { kToCmem = 0, kToMmem = 1, kWhichNum = 2 };
+private:
+  enum Which : uint64_t { kToCmem = 0, kToMmem = 1, kWhichNum = 3 };
   enum Rw : uint64_t { kRead = 0, kWrite = 1, kRwNum = 2 };
 
   // 入口每个通道的格数，与报 ready 的门限。
@@ -100,36 +122,69 @@ class DteXbar : public BachModule {
   static constexpr uint64_t kSlotMark = 2;
 
   void Serve(uint64_t which) {
-    uint64_t owner = kLaneNum;
+    uint64_t read_owner = kLaneNum, write_owner = kLaneNum;
     ByteBlockPtr data;
-    Respond(which, &owner, &data);
+    uint64_t read_error = 0, write_error = 0;
+    Respond(which, kRead, &read_owner, &data, &read_error);
+    ByteBlockPtr ignored;
+    Respond(which, kWrite, &write_owner, &ignored, &write_error);
     Collect(which);
     Forward(which, kRead);
     Forward(which, kWrite);
-    // ready 报的是这一拍收完、发完之后还剩几格。放在最前算的话报的是收这一笔
-    // 之前的占用，比实际少一笔，通道就会多发一笔进来。
     for (uint64_t i = 0; i < kLaneNum; ++i) {
-      bool mine = (i == owner);
-      side[which][i]->DriveSlave(slot[which][i].size() < kSlotMark, mine,
-                                 mine ? data : ByteBlockPtr());
+      side[which][i]->DriveSlaveWithWrite(
+          slot[which][i].size() < kSlotMark, i == read_owner,
+          i == read_owner ? data : ByteBlockPtr(), i == write_owner,
+          i == read_owner ? read_error : 0, i == write_owner ? write_error : 0);
     }
   }
 
-  // 读响应按发出顺序回到发起的通道。存储对同一个口是按序返回的。
-  void Respond(uint64_t which, uint64_t* owner, ByteBlockPtr* data) {
-    MemPort& rd = *out[which][kRead];
-    if (!rd.RspValid() || pend[which].empty()) return;
-    *owner = pend[which].front();
-    *data = rd.RspData();
-    pend[which].pop_front();
+  void Respond(uint64_t which, uint64_t rw, uint64_t *owner, ByteBlockPtr *data,
+               uint64_t *error) {
+    MemPort &port = *out[which][rw];
+    if (!(port.RspValid() || (rw == kWrite && port.WriteRspValid())) ||
+        pend[which][rw].empty())
+      return;
+    auto &flight = pend[which][rw].front();
+    uint64_t mask = port.rsp_pair_mask.Get();
+    if (!mask)
+      mask = 3;
+    uint64_t response_error = rw == kWrite && port.WriteRspValid()
+                                  ? port.WriteRspError()
+                                  : port.RspError();
+    flight.error = flight.error ? flight.error : response_error;
+    auto returned = port.RspData();
+    if (flight.pair && mask != 3) {
+      if (rw == kRead) {
+        if (!flight.data)
+          flight.data = std::make_shared<ByteBlock>(256, 0);
+        uint64_t input = 0;
+        for (uint64_t half = 0; half < 2; ++half)
+          if (mask & (1ull << half)) {
+            if (returned)
+              for (uint64_t k = 0; k < 128 && input + k < returned->size(); ++k)
+                (*flight.data)[half * 128 + k] = (*returned)[input + k];
+            input += 128;
+          }
+      }
+      flight.mask |= mask;
+      if (flight.mask != 3)
+        return;
+    } else
+      flight.data = returned;
+    *owner = flight.lane;
+    *data = flight.data;
+    *error = flight.error;
+    pend[which][rw].pop_front();
   }
 
   // 按序号把新请求收进各自那一格。
   void Collect(uint64_t which) {
     for (uint64_t i = 0; i < kLaneNum; ++i) {
-      MemPort const& in = *side[which][i];
+      MemPort const &in = *side[which][i];
       MemReqView r = ReadMemReq(in);
-      if (!r.valid || r.seq == seen[which][i]) continue;
+      if (!r.valid || r.seq == seen[which][i])
+        continue;
       LOGCHECK(slot[which][i].size() < kSlotDepth,
                "DteXbar: 那几格满了。通道应当先看 ready 再发。");
       seen[which][i] = r.seq;
@@ -139,20 +194,26 @@ class DteXbar : public BachModule {
 
   // 轮转取一笔发给存储。读与写各走各的口，各有各的轮转指针。
   void Forward(uint64_t which, uint64_t rw) {
-    MemPort& port = *out[which][rw];
-    if (!port.Ready()) {
+    MemPort &port = *out[which][rw];
+    if ((which != kToCmem && mtop_used[rw]) || !port.Ready()) {
       port.IdleReq();
       return;
     }
-    uint64_t& turn = grant[which][rw];
+    uint64_t &turn = grant[which][rw];
     for (uint64_t k = 0; k < kLaneNum; ++k) {
       uint64_t i = (turn + k) % kLaneNum;
       // 一个通道的读与写之间保持先来后到：队头不是这一档就轮下一个通道。
-      if (slot[which][i].empty()) continue;
-      MemReqView const& r = slot[which][i].front();
-      if ((r.we ? kWrite : kRead) != rw) continue;
+      if (slot[which][i].empty())
+        continue;
+      MemReqView const &r = slot[which][i].front();
+      if ((r.we ? kWrite : kRead) != rw)
+        continue;
+      if (r.pair && !port.PairReady())
+        continue;
       ForwardMemReq(port, r);
-      if (!r.we) pend[which].push_back(i);
+      if (which != kToCmem)
+        mtop_used[rw] = true;
+      pend[which][rw].push_back({i, r.pair, 0, 0, nullptr});
       slot[which][i].pop_front();
       turn = (i + 1) % kLaneNum;
       ++grant_cnt;
@@ -166,11 +227,19 @@ class DteXbar : public BachModule {
   std::array<std::array<uint64_t, kLaneNum>, kWhichNum> seen{};
   std::array<std::array<std::shared_ptr<MemPort>, kRwNum>, kWhichNum> out;
   std::array<std::array<uint64_t, kRwNum>, kWhichNum> grant{};
-  std::array<std::deque<uint64_t>, kWhichNum> pend;
+  struct ResponseOwner {
+    uint64_t lane = 0;
+    bool pair = false;
+    uint64_t mask = 0, error = 0;
+    ByteBlockPtr data;
+  };
+  std::array<std::array<std::deque<ResponseOwner>, kRwNum>, kWhichNum> pend;
+  std::array<bool, kRwNum> mtop_used{};
+  bool topk_first = false;
   uint64_t grant_cnt = 0;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

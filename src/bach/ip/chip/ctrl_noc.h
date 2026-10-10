@@ -35,32 +35,36 @@ struct CfgEvent {
 };
 
 class CtrlNocEndpoint : public BachModule {
- public:
-  CtrlNocEndpoint(ClockPtr clock, const std::string& name, uint64_t core_id,
+public:
+  CtrlNocEndpoint(ClockPtr clock, const std::string &name, uint64_t core_id,
                   uint64_t parent = 0, bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        id(core_id),
-        ctrl(std::make_shared<ScpCtrlPort>(clock)),
-        taken(clock),
+      : BachModule(clock, name, parent, tick), id(core_id),
+        ctrl(std::make_shared<ScpCtrlPort>(clock)), taken(clock),
         addr_errs(clock) {}
 
-  ScpCtrlPort& Ctrl() { return *ctrl; }
+  ScpCtrlPort &Ctrl() { return *ctrl; }
   void AttachCtrl(std::shared_ptr<ScpCtrlPort> p) { ctrl = std::move(p); }
 
   // 本拍要交给哪个模块。装配层每拍读一次，读到的是上一拍锁存下来的那一笔。
-  CfgEvent const& Event() const { return out; }
+  CfgEvent const &Event() const { return out; }
   // 目的模块读出来的值，端点下一拍回给 SCP。
-  void SetRdata(uint64_t v) { rdata = v; }
+  void SetRdata(uint64_t v) {
+    rdata = v;
+    response_pending = true;
+  }
 
   uint64_t CoreId() const { return id; }
   uint64_t Taken() const { return take_cnt; }
   uint64_t AddrErrors() const { return err_cnt; }
   bool Quiescent() const override { return true; }
 
- protected:
+protected:
   void Step() override {
     // 上一拍锁存的那一笔在本拍交给目的模块，同时把它的读返回给 SCP。
-    ctrl->DriveRdata(rdata);
+    if (response_pending) {
+      ctrl->DriveRdata(rdata);
+      response_pending = false;
+    }
     out = staged;
     staged = CfgEvent();
 
@@ -74,6 +78,10 @@ class CtrlNocEndpoint : public BachModule {
     if (ctrl->Core() != id && !ctrl->Bcast()) {
       taken = take_cnt;
       addr_errs = err_cnt;
+      return;
+    }
+    if (ctrl->Bcast() && !ctrl->We()) {
+      ++err_cnt;
       return;
     }
     CfgRoute r = LookupCfg(ctrl->Addr());
@@ -95,16 +103,17 @@ class CtrlNocEndpoint : public BachModule {
     TracePerCycle("taken", take_cnt);
   }
 
- private:
+private:
   uint64_t id;
   std::shared_ptr<ScpCtrlPort> ctrl;
   CfgEvent staged, out;
   uint64_t rdata = 0, last_seq = 0, take_cnt = 0, err_cnt = 0;
 
+  bool response_pending = false;
   Logic64 taken, addr_errs;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

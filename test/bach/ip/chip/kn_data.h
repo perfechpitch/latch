@@ -26,9 +26,10 @@ constexpr uint64_t kInter = 2048;
 constexpr uint64_t kSlots = 8;
 constexpr uint64_t kDotSlot = 7;
 constexpr uint64_t kExperts = 2;
-constexpr uint64_t kSegEmbed = kEmbed / kSlots;   // 768
-constexpr uint64_t kSegInter = kInter / kSlots;   // 256
-// FC1 与 FC3 按 1×K128×N64 切块，FC2 按 1×K64×N128（K128×N64 阵列开 vlane = 2）。
+constexpr uint64_t kSegEmbed = kEmbed / kSlots; // 768
+constexpr uint64_t kSegInter = kInter / kSlots; // 256
+// FC1 与 FC3 按 1×K128×N64 切块，FC2 按 1×K64×N128（K128×N64 阵列开 vlane =
+// 2）。
 constexpr uint64_t kFc13K = 128, kFc13N = 64;
 constexpr uint64_t kFc2K = 64, kFc2N = 128;
 constexpr uint64_t kTileBytes = 8192;
@@ -80,10 +81,11 @@ constexpr uint64_t kRcSlotOff = kRcMapOff + kRcSlots * 4;
 constexpr uint64_t kRcHeadOff = kRcSlotOff + kStreamNum * 4;
 constexpr uint64_t kBcTokenBytes = kEmbed;
 constexpr uint64_t kBcSmemOverhead = 4 + 4 + kStreamNum * 4 + 4 + 4 + 4;
-constexpr uint64_t kBcSlotsMm = kMatrixMemBytes / kBcTokenBytes;
+constexpr uint64_t kBcPacketBytes = kBcTokenBytes + kBcTokenBytes / 32 + 256;
+constexpr uint64_t kBcSlotBytes = (kBcPacketBytes + 255) / 256 * 256;
+constexpr uint64_t kBcSlotsMm = kMatrixMemBytes / kBcSlotBytes;
 constexpr uint64_t kBcSlotsSm = (kShareMemBytes - kBcSmemOverhead) / 8;
-constexpr uint64_t kBcSlots =
-    kBcSlotsMm < kBcSlotsSm ? kBcSlotsMm : kBcSlotsSm;
+constexpr uint64_t kBcSlots = kBcSlotsMm < kBcSlotsSm ? kBcSlotsMm : kBcSlotsSm;
 constexpr uint64_t kBcFlagOff = 0;
 constexpr uint64_t kBcUserOff = kBcFlagOff + kBcSlots * 4;
 constexpr uint64_t kBcHeadOff = kBcUserOff + kBcSlots * 4;
@@ -119,8 +121,9 @@ inline std::vector<uint8_t> Pattern(uint64_t n, uint64_t seed) {
 // 一段 MXFP8 元素：抹掉 NaN 编码。
 inline std::vector<uint8_t> Data(uint64_t count, uint64_t seed) {
   std::vector<uint8_t> v = Pattern(count, seed);
-  for (uint8_t& b : v) {
-    if ((b & 0x7Fu) == 0x7Fu) b = uint8_t(b & 0xFEu);
+  for (uint8_t &b : v) {
+    if ((b & 0x7Fu) == 0x7Fu)
+      b = uint8_t(b & 0xFEu);
   }
   return v;
 }
@@ -128,7 +131,8 @@ inline std::vector<uint8_t> Data(uint64_t count, uint64_t seed) {
 // 一段 E8M0 scale：收进 2^-14～2^-7。种子与同一段数据相同，另异或一个常数。
 inline std::vector<uint8_t> Scale(uint64_t count, uint64_t seed) {
   std::vector<uint8_t> v = Pattern(count, seed ^ 0x5CA1Eu);
-  for (uint8_t& b : v) b = uint8_t(113 + (b % 8));
+  for (uint8_t &b : v)
+    b = uint8_t(113 + (b % 8));
   return v;
 }
 
@@ -143,8 +147,8 @@ inline uint64_t SeedOf(uint64_t base, uint64_t group, uint64_t expert) {
 struct Matrix {
   uint64_t rows = 0, cols = 0, tile_k = 0, tile_n = 0, seed = 0;
 
-  std::pair<std::vector<uint8_t>, std::vector<uint8_t>> Tile(uint64_t r0,
-                                                             uint64_t c0) const {
+  std::pair<std::vector<uint8_t>, std::vector<uint8_t>>
+  Tile(uint64_t r0, uint64_t c0) const {
     uint64_t tid = (c0 / tile_n) * (rows / tile_k) + r0 / tile_k;
     return {Data(tile_k * tile_n, seed + tid),
             Scale(tile_n * (tile_k / 32), seed + tid)};
@@ -164,7 +168,7 @@ inline Matrix W2(uint64_t group, uint64_t expert) {
 // tile_K 在 at + (n × kblock + k) × 8192 处，scale 随它进 scale 旁带。这一片从
 // 完整矩阵的第 row0 行、第 col0 列起。
 template <typename Mem>
-void PokeSlice(Mem& mm, uint64_t at, Matrix const& m, uint64_t row0,
+void PokeSlice(Mem &mm, uint64_t at, Matrix const &m, uint64_t row0,
                uint64_t col0, uint64_t kblock, uint64_t nblock) {
   for (uint64_t n = 0; n < nblock; ++n) {
     for (uint64_t k = 0; k < kblock; ++k) {
@@ -178,7 +182,7 @@ void PokeSlice(Mem& mm, uint64_t at, Matrix const& m, uint64_t row0,
 
 // 一个 core 的三个矩阵都摆好。topK 里第 e 个专家在本组内排第 local[e] 位。
 template <typename Mem>
-void PokeCoreWeights(Mem& mm, uint64_t group, uint64_t chip, uint64_t slot,
+void PokeCoreWeights(Mem &mm, uint64_t group, uint64_t chip, uint64_t slot,
                      uint64_t const local[kExperts]) {
   for (uint64_t e = 0; e < kExperts; ++e) {
     uint64_t off = local[e] * kMmStride;
@@ -186,8 +190,8 @@ void PokeCoreWeights(Mem& mm, uint64_t group, uint64_t chip, uint64_t slot,
               chip * kSegInter, kSegEmbed / kFc13K, kSegInter / kFc13N);
     PokeSlice(mm, kMmW3 + off, W13(kW3Seed, group, e), slot * kSegEmbed,
               chip * kSegInter, kSegEmbed / kFc13K, kSegInter / kFc13N);
-    PokeSlice(mm, kMmW2 + off, W2(group, e), chip * kSegInter,
-              slot * kSegEmbed, kSegInter / kFc2K, kSegEmbed / kFc2N);
+    PokeSlice(mm, kMmW2 + off, W2(group, e), chip * kSegInter, slot * kSegEmbed,
+              kSegInter / kFc2K, kSegEmbed / kFc2N);
   }
 }
 
@@ -200,8 +204,8 @@ inline std::vector<uint8_t> TokenScale(uint64_t k = 0) {
   return Scale(kEmbed / 32, kTokenSeed + k);
 }
 
-}  // namespace kn
-}  // namespace bach
-}  // namespace latch
+} // namespace kn
+} // namespace bach
+} // namespace latch
 
 #endif

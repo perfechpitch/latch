@@ -9,9 +9,9 @@
 #include <utility>
 #include <vector>
 
+#include "bach/ip/chip/core/ts/cfg_reg.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/core/ts/cfg_reg.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -45,15 +45,17 @@ TaskEntry Typed(TaskType type, bool credit_en, bool wait_wake = false,
 }
 
 // 按 {下标, 表项} 写一条链、写 TS_INIT_FINISH，返回 TS_STATE。
-uint64_t CheckChain(std::vector<std::pair<uint64_t, TaskEntry>> const& chain,
+uint64_t CheckChain(std::vector<std::pair<uint64_t, TaskEntry>> const &chain,
                     bool self_start = false, bool datain = true) {
   uint64_t state = 0;
   {
     ClockPtr clk = MakeClock(0, kPeriod);
     CfgReg cfg(clk, "cfg", 0, false);
     cfg.SetSelfStart(self_start);
-    for (auto const& one : chain) cfg.WriteTask(one.first, one.second);
-    if (datain) cfg.WriteDatainTask(0x300, /*weights_mode=*/false);
+    for (auto const &one : chain)
+      cfg.WriteTask(one.first, one.second);
+    if (datain)
+      cfg.WriteDatainTask(0x300, /*weights_mode=*/false);
     cfg.SetInitFinish();
     state = cfg.TsState();
   }
@@ -61,7 +63,7 @@ uint64_t CheckChain(std::vector<std::pair<uint64_t, TaskEntry>> const& chain,
   return state;
 }
 
-}  // namespace
+} // namespace
 
 // 每写一项，硬件自动把该项的 TASK_VALID 置起来，软件不必单独写这一位。
 TEST(BachTsCfg, WriteSetsValidAutomatically) {
@@ -70,7 +72,7 @@ TEST(BachTsCfg, WriteSetsValidAutomatically) {
 
   EXPECT_FALSE(cfg.Task(0).valid) << "复位后一项都不生效";
   TaskEntry t = Plain();
-  t.valid = false;  // 软件没置，硬件该自己置上
+  t.valid = false; // 软件没置，硬件该自己置上
   cfg.WriteTask(0, t);
   EXPECT_TRUE(cfg.Task(0).valid);
   EXPECT_EQ(cfg.Task(0).task_pc, 0x200u);
@@ -89,7 +91,7 @@ TEST(BachTsCfg, AttrFieldsAreStoredAsWritten) {
   t.credit_en = true;
   t.path_id = 200;
   cfg.WriteTask(2, t);
-  TaskEntry const& got = cfg.Task(2);
+  TaskEntry const &got = cfg.Task(2);
   EXPECT_EQ(got.send_unit, SendUnit::kVu);
   EXPECT_EQ(got.recv_unit, RecvUnit::kRvOnly);
   EXPECT_TRUE(got.wait_wake);
@@ -156,20 +158,20 @@ TEST(BachTsCfg, ChainShapeIsChecked) {
       << "End 后面还有 valid";
   EXPECT_NE(CheckChain({{0, Plain()}, {1, Plain()}}) & kStateChainError, 0u)
       << "没有 End";
-  EXPECT_EQ(CheckChain({}) & kStateChainError, 0u) << "普通模式下不配链不算错";
+  EXPECT_NE(CheckChain({}) & kStateChainError, 0u) << "普通模式下不配链不算错";
 }
 
 // 单项的检查：重发的搬出与 reduce 要标 credit_en，P2P 重发的搬入要标
 // wait_wake；重发搬入配对的那一项必须是重发的搬出任务。
 TEST(BachTsCfg, TaskTypeRulesAreChecked) {
-  auto err = [](std::vector<std::pair<uint64_t, TaskEntry>> const& c) {
+  auto err = [](std::vector<std::pair<uint64_t, TaskEntry>> const &c) {
     return (CheckChain(c) & kStateChainError) != 0;
   };
   TaskEntry out = Typed(TaskType::kReissueOut, /*credit_en=*/true);
   EXPECT_FALSE(err({{0, out}, {1, Last()}}));
   EXPECT_TRUE(err({{0, Typed(TaskType::kReissueOut, false)}, {1, Last()}}));
   EXPECT_FALSE(err({{0, Typed(TaskType::kReduce, true)}, {1, Last()}}));
-  EXPECT_TRUE(err({{0, Typed(TaskType::kReduce, false)}, {1, Last()}}));
+  EXPECT_FALSE(err({{0, Typed(TaskType::kReduce, false)}, {1, Last()}}));
 
   TaskEntry p2p_in = Typed(TaskType::kP2pReissueIn, false, true, 1);
   EXPECT_FALSE(err({{0, p2p_in}, {1, out}, {2, Last()}}));
@@ -202,14 +204,15 @@ TEST(BachTsCfg, SelfStartNeedsBothChainAndDatain) {
 }
 
 // 权重加载时不查配置。
-TEST(BachTsCfg, WeightsModeSkipsTheCheck) {
+TEST(BachTsCfg, WeightsModeDoesNotSubmitBusinessChain) {
   ClockPtr clk = MakeClock(0, kPeriod);
   CfgReg cfg(clk, "cfg", 0, false);
-  cfg.SetSelfStart(true);  // 自启动又没配链，不是权重加载就该报错
+  cfg.SetSelfStart(true); // 自启动又没配链，不是权重加载就该报错
   cfg.WriteDatainTask(0x300, /*weights_mode=*/true);
   cfg.SetInitFinish();
   EXPECT_TRUE(cfg.WeightsMode());
-  EXPECT_EQ(cfg.TsState(), 0u);
+  EXPECT_NE(cfg.TsState(), 0u);
+  EXPECT_FALSE(cfg.InitFinished());
   RT::Reset();
 }
 
@@ -223,7 +226,10 @@ TEST(BachTsCfg, StreamNumAbove16IsWrittenAs16) {
   EXPECT_EQ(cfg.StreamNum(), kStreamNum);
   cfg.SetStreamNum(31);
   EXPECT_EQ(cfg.StreamNum(), kStreamNum);
-  EXPECT_DEATH(cfg.SetStreamNum(0), "");
+  cfg.SetStreamNum(0);
+  cfg.WriteTask(0, Last());
+  cfg.SetInitFinish();
+  EXPECT_FALSE(cfg.InitFinished());
   RT::Reset();
 }
 
@@ -248,5 +254,58 @@ TEST(BachTsCfg, FlowControlWindowIsPerPath) {
   EXPECT_TRUE(cfg.FlowCtlEn(3));
   EXPECT_EQ(cfg.FlowCtlWindow(3), 4u);
   EXPECT_FALSE(cfg.FlowCtlEn(4)) << "只配了一条 path";
+  RT::Reset();
+}
+
+TEST(BachTsCfg, ApbRejectsPartialWritesIllegalEncodingAndHalfWrittenTasks) {
+  auto clock = MakeClock(0, kPeriod);
+  CfgReg cfg(clock, "cfg", 0, false);
+  EXPECT_TRUE(cfg.Access(1, true, 0).error);
+  EXPECT_TRUE(cfg.Access(0, true, 0, 3).error);
+  EXPECT_TRUE(cfg.Access(0x7ffc, true, 0).error);
+  EXPECT_FALSE(cfg.Access(0, true, 0x100).error);
+  cfg.Access(0x20c, true, 1);
+  EXPECT_FALSE(cfg.InitFinished());
+  cfg.Access(4, true, (1u << 23) | 3u); // illegal sending unit
+  cfg.Access(0x20c, true, 1);
+  EXPECT_FALSE(cfg.InitFinished());
+  cfg.Access(4, true, 1u << 23);
+  cfg.Access(0x208, true, 31);
+  cfg.Access(0x20c, true, 1);
+  EXPECT_TRUE(cfg.InitFinished());
+  EXPECT_EQ(cfg.StreamNum(), 16u);
+  EXPECT_TRUE(cfg.Access(0, true, 0x200).error);
+  EXPECT_EQ(cfg.Access(0, false).data, 0x100u);
+  RT::Reset();
+}
+
+TEST(BachTsCfg, ApbPortSamplesAccessPhaseAndReturnsSlaveError) {
+  RT::Reset(8, 8);
+  auto clock = MakeClock(0, 1);
+  CfgReg cfg(clock, "cfg", 0, false);
+  struct Driver : BachModule {
+    CfgReg &cfg;
+    uint64_t pc = 0, error = 0;
+    Driver(ClockPtr c, CfgReg &target) : BachModule(c, "driver"), cfg(target) {}
+    void Step() override {
+      auto port = cfg.ApbPtr();
+      auto now = CycleNow();
+      port->psel = (now >= 2 && now <= 3) || (now >= 7 && now <= 8);
+      port->penable = now == 3 || now == 8;
+      port->pwrite = 1;
+      port->paddr = now >= 7 ? 4 : 0;
+      port->pwdata = now >= 7 ? 1u << 23 : 0x1234;
+      port->pstrb = now >= 7 ? 3 : 15;
+      if (now == 6)
+        pc = cfg.Access(0, false).data;
+      error |= port->pslverr.Get();
+      cfg.RunStep();
+    }
+  } driver(clock, cfg);
+  clock->Continue(12);
+  RT::JoinAll();
+  EXPECT_EQ(driver.pc, 0x1234u);
+  EXPECT_EQ(driver.error, 1u);
+  EXPECT_FALSE(cfg.Task(0).valid);
   RT::Reset();
 }

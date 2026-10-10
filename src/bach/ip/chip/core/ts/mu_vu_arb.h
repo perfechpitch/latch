@@ -24,18 +24,15 @@ namespace latch {
 namespace bach {
 
 class UnitArb : public BachModule {
- public:
-  UnitArb(ClockPtr clock, const std::string& name, SendUnit which,
-          CfgReg& reg, uint64_t parent = 0, bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        unit(which),
-        cfg(reg),
+public:
+  UnitArb(ClockPtr clock, const std::string &name, SendUnit which, CfgReg &reg,
+          uint64_t parent = 0, bool tick = true)
+      : BachModule(clock, name, parent, tick), unit(which), cfg(reg),
         cmd(std::make_shared<TaskCmdPort>(clock)),
         snap(std::make_shared<SnapshotPort>(clock)),
-        issue(std::make_shared<StreamWritePortIf>(clock)),
-        issued(clock) {}
+        issue(std::make_shared<StreamWritePortIf>(clock)), issued(clock) {}
 
-  TaskCmdPort& Cmd() { return *cmd; }
+  TaskCmdPort &Cmd() { return *cmd; }
   std::shared_ptr<TaskCmdPort> CmdPtr() const { return cmd; }
   void AttachCmd(std::shared_ptr<TaskCmdPort> p) { cmd = std::move(p); }
   void AttachSnapshot(std::shared_ptr<SnapshotPort> p) { snap = std::move(p); }
@@ -45,114 +42,74 @@ class UnitArb : public BachModule {
 
   bool Quiescent() const override { return !held; }
 
- protected:
+protected:
   void Step() override {
-    // 上一笔的 READY → INFLY 回写被表收下了就撤掉，没收下就下一拍补发。
-    if (infly && issue->Accepted()) infly.reset();
-
+    issue->Idle();
+    auto view = snap->Get();
     if (held) {
-      if (cmd->Ready()) {
-        uint64_t stream = held->stream;
-        uint64_t task = held->task;
-        held.reset();
-        ++issue_pending;
-        issued_stream = stream;
-        issued_task = task;
-        auto w = std::make_shared<StreamWrite>();
-        w->valid = true;
-        w->stream_id = stream;
-        w->set_fsm = true;
-        w->fsm = TaskFsm::kInfly;
-        infly = w;
-        infly_fresh = true;
-      } else {
-        DriveIssue();
+      if (!cmd->Ready()) {
         issued = issue_pending;
-        return;  // 非抢占保持
+        return;
       }
-    }
-    DriveIssue();
-    Select();
-    issued = issue_pending;
-    TracePerCycle("issued", issue_pending);
-  }
-
- private:
-  // 一笔回写只驱一次，之后保持不动直到表收下：表按序号认它，每拍重驱会换一个
-  // 序号，被当成新的一笔再执行一遍。
-  void DriveIssue() {
-    if (!infly) {
-      issue->Idle();
+      auto w = std::make_shared<StreamWrite>();
+      w->valid = w->set_fsm = w->fsm_if_current = w->check_allocation = true;
+      w->stream_id = held->stream;
+      w->from_task_id = held->task;
+      w->allocation = held->allocation;
+      w->fsm = TaskFsm::kInfly;
+      issue->Drive(w);
+      issued_stream = held->stream;
+      issued_task = held->task;
+      issued_allocation = held->allocation;
+      held.reset();
+      cmd->Idle();
+      ++issue_pending;
+      issued = issue_pending;
       return;
     }
-    if (infly_fresh) {
-      issue->Drive(infly);
-      infly_fresh = false;
-    }
-  }
-
-  void Select() {
-    if (held) return;
-    // 上一笔的 READY → INFLY 回写还没被表收下就不挑下一笔：只有一个回写槽，
-    // 接着发会把没收下的那一笔盖掉，它的 INFLY 丢了就会被再下发一次。
-    if (infly) {
+    if (!view) {
       cmd->Idle();
       return;
     }
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) {
-      cmd->Idle();
-      return;
-    }
-    // 上一笔的 INFLY 已经在表里了，标记可以放开。
     if (issued_stream < kStreamNum) {
-      StreamEntry const& e = s->entry[issued_stream];
-      if (!e.valid || e.task_fsm != TaskFsm::kReady ||
-          e.task_id != issued_task) {
+      auto const &e = view->entry[issued_stream];
+      if (!e.valid || e.task_id != issued_task ||
+          e.allocation != issued_allocation || e.task_fsm != TaskFsm::kReady)
         issued_stream = kStreamNum;
-      }
     }
-    for (uint64_t k = 0; k < kStreamNum; ++k) {
-      uint64_t i = s->AgeOrder(k);
-      StreamEntry const& e = s->entry[i];
-      if (!e.valid || e.task_fsm != TaskFsm::kReady || e.task_unit != unit) {
+    for (uint64_t age = 0; age < view->slot_num; ++age) {
+      uint64_t sid = view->AgeOrder(age);
+      auto const &e = view->entry[sid];
+      if (!e.valid || e.task_fsm != TaskFsm::kReady || e.task_unit != unit ||
+          (sid == issued_stream && e.task_id == issued_task))
         continue;
-      }
-      // 刚发出去的那一笔，表里的 READY → INFLY 还没落下来：写口一拍、快照一
-      // 拍，这两拍里快照上它仍是 READY。不挡住的话同一个 task 会被下发两次。
-      if (i == issued_stream && e.task_id == issued_task) continue;
-      cmd->Drive(e.task_pc, i, e.task_id, e.user_id, e.task_path_id,
-                 e.task_recv != RecvUnit::kRvOnly, ++cmd_seq);
-      held = Held{i, e.task_id};
+      cmd->Drive(e.task_pc, sid, e.task_id, e.user_id, e.task_path_id,
+                 e.task_recv != RecvUnit::kRvOnly, ++cmd_seq,
+                 cfg.Route(e.task_path_id).vcid);
+      held = Held{sid, e.task_id, e.allocation};
+      issued = issue_pending;
       return;
     }
     cmd->Idle();
+    issued = issue_pending;
   }
 
+private:
+  struct Held {
+    uint64_t stream, task, allocation;
+  };
   SendUnit unit;
-  CfgReg& cfg;
+  CfgReg &cfg;
   std::shared_ptr<TaskCmdPort> cmd;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<StreamWritePortIf> issue;
-
-  // 还没被表收下的那一笔状态回写。
-  std::shared_ptr<StreamWrite> infly;
-  bool infly_fresh = false;
-  // 锁定的一笔：命令与字段保持稳定，直到 RV core 返回 ACCEPT。
-  struct Held {
-    uint64_t stream = 0;
-    uint64_t task = 0;
-  };
   std::optional<Held> held;
-  uint64_t cmd_seq = 0;
-  // 刚发出、表里还没变成 INFLY 的那一笔。
-  uint64_t issued_stream = kStreamNum, issued_task = 0;
-  uint64_t issue_pending = 0;
-
+  uint64_t issued_stream = kStreamNum, issued_task = 0, issued_allocation = 0;
+  uint64_t cmd_seq = 0, issue_pending = 0;
   Logic64 issued;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

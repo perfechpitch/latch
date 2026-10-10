@@ -18,15 +18,17 @@
 
 #include <array>
 
+#include <deque>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/common/numeric/formats.h"
 #include "bach/ip/chip/core/core.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 #include "test/bach/ip/chip/kn_data.h"
 
 using namespace latch;
@@ -42,11 +44,12 @@ std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-uint64_t SymbolOf(std::string const& name, std::string const& kind) {
+uint64_t SymbolOf(std::string const &name, std::string const &kind) {
   std::ifstream f(KernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -70,13 +73,14 @@ constexpr uint64_t kMmBase = 0x000000;
 constexpr uint64_t kInPath = 3;
 constexpr uint64_t kOutPath = 0;
 
-// 一个用户在 R core 上的落点。half 为 0 是本行结果，为 1 是上一行送来的累加结果。
+// 一个用户在 R core 上的落点。half 为 0 是本行结果，为 1
+// 是上一行送来的累加结果。
 uint64_t Land(uint64_t user, uint64_t half) {
   return kMmBase + user * kSlotBytes + half * kHalfBytes;
 }
 
 // 一笔的 payload：16 B 头，后面是 kOutN 个 BF16。
-std::vector<uint8_t> HalfPayload(std::vector<float> const& v) {
+std::vector<uint8_t> HalfPayload(std::vector<float> const &v) {
   std::vector<uint8_t> b(kPacketBytes, 0);
   for (uint64_t j = 0; j < kOutN; ++j) {
     uint16_t bits = numeric::ToBf16(v[j]);
@@ -87,7 +91,7 @@ std::vector<uint8_t> HalfPayload(std::vector<float> const& v) {
 }
 
 // 连着的一段字节按 BF16 读出来。
-std::vector<float> FloatsOf(std::vector<uint8_t> const& b) {
+std::vector<float> FloatsOf(std::vector<uint8_t> const &b) {
   std::vector<float> v;
   for (uint64_t j = 0; j + 2 <= b.size(); j += 2) {
     v.push_back(numeric::FromBf16(uint16_t(b[j] | (b[j + 1] << 8))));
@@ -98,11 +102,12 @@ std::vector<float> FloatsOf(std::vector<uint8_t> const& b) {
 // 一个数按 BF16 存下再读回来。
 float Bf16Of(float v) { return numeric::FromBf16(numeric::ToBf16(v)); }
 
-// 两笔按 BF16 读出来、按 FP32 相加、再按 BF16 写回，就是 R core 该算出来的那一份。
+// 两笔按 BF16 读出来、按 FP32 相加、再按 BF16 写回，就是 R core
+// 该算出来的那一份。
 float SumOf(float a, float b) { return Bf16Of(Bf16Of(a) + Bf16Of(b)); }
 
 // 一笔，落那一半的起点。
-MessagePtr MakeHalf(uint64_t user, uint64_t half, std::vector<float> const& v) {
+MessagePtr MakeHalf(uint64_t user, uint64_t half, std::vector<float> const &v) {
   auto m = std::make_shared<Message>();
   m->path_id = kInPath;
   m->user_id = user;
@@ -117,7 +122,7 @@ MessagePtr MakeHalf(uint64_t user, uint64_t half, std::vector<float> const& v) {
 }
 
 // R core 的两条链。链二从 task 0 起，链一是单独配的 datain_task。
-void WriteRcoreChains(Core& core) {
+void WriteRcoreChains(Core &core) {
   TaskEntry find;
   find.send_unit = SendUnit::kMu;
   find.recv_unit = RecvUnit::kRvOnly;
@@ -127,9 +132,9 @@ void WriteRcoreChains(Core& core) {
   // 送进 Rmem 那一笔是逐级 reduce 任务，由 Router 报完成。
   TaskEntry reduce;
   reduce.send_unit = SendUnit::kDte;
-  reduce.recv_unit = RecvUnit::kDsa;
+  reduce.recv_unit = RecvUnit::kRvAndDsa;
   reduce.task_type = TaskType::kReduce;
-  reduce.credit_en = true;
+  reduce.credit_en = false;
   reduce.end = true;
   reduce.path_id = kOutPath;
   reduce.task_pc = SymbolOf("task_dte_rc_reduce", "dte");
@@ -143,6 +148,7 @@ void WriteRcoreChains(Core& core) {
   // B core 与 R core 的 stream_num 配 16，自启动数因此也是 16（ts.md F72）。
   core.GetTs().Cfg().SetStreamNum(kStreamNum);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
 }
 
 RouteEntry EnterCore() {
@@ -169,30 +175,42 @@ RouteEntry ReduceOut() {
 
 // core 里上百个模块与外面那两根线都由这一个协程驱动。
 class RcoreHarness : public BachModule {
- public:
+public:
   struct Job {
     uint64_t at = 0;
     MessagePtr msg;
   };
 
-  RcoreHarness(ClockPtr c, Core& target, std::vector<Job> list)
+  RcoreHarness(ClockPtr c, Core &target, std::vector<Job> list)
       : BachModule(c, "harness"), core(target), jobs(std::move(list)) {}
 
   std::vector<MessagePtr> out_msgs;
   std::array<bool, 3> took{};
   std::array<uint64_t, 3> took_vc{};
 
- protected:
+protected:
   void Step() override {
     LinkEndPtr in = core.InWire(1);
-    bool drove = false;
-    for (auto const& j : jobs) {
-      if (j.at != CycleNow()) continue;
-      in->flit.Drive(0, true, true, j.msg->size, j.msg);
-      drove = true;
-      break;
-    }
-    if (!drove) in->flit.Idle();
+    auto released = ReadRelease(core.UpBackWire(1)->release);
+    if (released.vc_valid)
+      ++input_credit;
+    for (auto const &job : jobs)
+      if (job.at == CycleNow())
+        pending_input.push_back(job.msg);
+    if (!pending_input.empty() && input_credit) {
+      auto message = pending_input.front();
+      uint64_t total = message->TotalBytes();
+      uint64_t bytes = std::min<uint64_t>(256, total - input_offset);
+      bool last = input_offset + bytes == total;
+      in->flit.Drive(0, input_offset == 0, last, bytes, message);
+      --input_credit;
+      input_offset += bytes;
+      if (last) {
+        pending_input.pop_front();
+        input_offset = 0;
+      }
+    } else
+      in->flit.Idle();
     // 出核那一路的下游：上一拍收下的 flit，这一拍把 VC 位置还回去。不还的话
     // core 那一侧的 credit 只减不加，一个多 flit 的包发满额度就再也发不动。
     for (uint64_t d = 0; d < 3; ++d) {
@@ -209,34 +227,39 @@ class RcoreHarness : public BachModule {
 
     for (uint64_t d = 0; d < 3; ++d) {
       FlitView f = ReadFlit(core.OutWire(d)->flit);
-      if (!f.valid) continue;
+      if (!f.valid)
+        continue;
       took[d] = true;
       took_vc[d] = f.vc;
       // 一个包只记一条：多 flit 的包在尾 flit 那一拍才算收完。
-      if (f.tail && f.msg) out_msgs.push_back(f.msg);
+      if (f.tail && f.msg)
+        out_msgs.push_back(f.msg);
     }
   }
 
- private:
-  Core& core;
+private:
+  Core &core;
   std::vector<Job> jobs;
+  std::deque<MessagePtr> pending_input;
+  uint64_t input_offset = 0, input_credit = kVcPrivateDepth + kVcSharedDepth;
 };
 
 // 一笔，第 at 拍注进去。
 std::vector<RcoreHarness::Job> Parts(uint64_t at, uint64_t user, uint64_t half,
-                                     std::vector<float> const& v) {
+                                     std::vector<float> const &v) {
   return {{at, MakeHalf(user, half, v)}};
 }
 
 // 几笔的包并成一张注入表。
-std::vector<RcoreHarness::Job> Jobs(
-    std::initializer_list<std::vector<RcoreHarness::Job>> parts) {
+std::vector<RcoreHarness::Job>
+Jobs(std::initializer_list<std::vector<RcoreHarness::Job>> parts) {
   std::vector<RcoreHarness::Job> all;
-  for (auto const& p : parts) all.insert(all.end(), p.begin(), p.end());
+  for (auto const &p : parts)
+    all.insert(all.end(), p.begin(), p.end());
   return all;
 }
 
-void LoadKernels(Core& core) {
+void LoadKernels(Core &core) {
   core.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
   core.Rv(1).LoadImage(KernelDir() + "kernel_mu.hex");
   core.Rv(2).LoadImage(KernelDir() + "kernel_vu.hex");
@@ -244,27 +267,29 @@ void LoadKernels(Core& core) {
 
 std::vector<float> Ramp(float base, float step) {
   std::vector<float> v;
-  for (uint64_t j = 0; j < kOutN; ++j) v.push_back(base + step * float(j));
+  for (uint64_t j = 0; j < kOutN; ++j)
+    v.push_back(base + step * float(j));
   return v;
 }
 
-}  // namespace
+} // namespace
 
 // 起一个 R core：装 kernel、配路由与两条链。
-#define RCORE_SETUP()                                                   \
-  EnsureSlots();                                                        \
-  ClockPtr clk = MakeClock(0, kPeriod);                                 \
-  Core core(clk, "rcore", CoreContext{});                               \
-  LoadKernels(core);                                                    \
-  core.GetRouter().Preload(kInPath, EnterCore());                       \
-  core.GetRouter().Preload(kOutPath, ReduceOut());                      \
-  core.GetDte().Tables().PreloadRtab(kOutPath, ReduceOut());            \
+#define RCORE_SETUP()                                                          \
+  EnsureSlots();                                                               \
+  ClockPtr clk = MakeClock(0, kPeriod);                                        \
+  Core core(clk, "rcore", CoreContext{});                                      \
+  LoadKernels(core);                                                           \
+  core.GetRouter().Preload(kInPath, EnterCore());                              \
+  core.GetRouter().Preload(kOutPath, ReduceOut());                             \
+  core.GetDte().Tables().PreloadRtab(kOutPath, ReduceOut());                   \
   WriteRcoreChains(core)
 
 // 一个用户的两笔到齐之后在 Rmem 里相加送出去：两半逐元素相加，送出去的还是一
 // 包，落点按同一条规则算出来的是下一行 R core 那个槽的后一半。
 TEST(BachRcore, TwoPartsAreSummedAndSentOn) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kUser = 5;
   std::vector<float> a = Ramp(1.0f, 1.0f);
   std::vector<float> b = Ramp(1000.0f, 16.0f);
@@ -296,9 +321,10 @@ TEST(BachRcore, TwoPartsAreSummedAndSentOn) {
 // 偏移 0。进核那一笔照样要把这一项置上：前面先来一包别的用户，DTE 的标志地址
 // 寄存器里留着它那一项，0 号那一项要是没配进去，就会改写到别人的标志上。
 TEST(BachRcore, SlotZeroFrontHalfSetsItsFlag) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kOther = 5;
-  constexpr uint64_t kUser = 0;  // 槽号就是 user_id，落第 0 个槽
+  constexpr uint64_t kUser = 0; // 槽号就是 user_id，落第 0 个槽
   ASSERT_EQ(Land(kUser, 0), 0u);
   std::vector<float> a = Ramp(1.0f, 1.0f);
   std::vector<float> b = Ramp(1000.0f, 16.0f);
@@ -315,7 +341,8 @@ TEST(BachRcore, SlotZeroFrontHalfSetsItsFlag) {
   }
   RT::Reset();
 
-  ASSERT_EQ(got.size(), 1u) << "第 0 个槽两半到齐后送出一包，只来了一半的那个用户接着等";
+  ASSERT_EQ(got.size(), 1u)
+      << "第 0 个槽两半到齐后送出一包，只来了一半的那个用户接着等";
   EXPECT_EQ(got[0]->user_id, kUser);
   EXPECT_EQ(got[0]->dst_addr, Land(kUser, 1));
 }
@@ -323,7 +350,8 @@ TEST(BachRcore, SlotZeroFrontHalfSetsItsFlag) {
 // 用户之间乱序：谁先集齐谁先走，不按到达顺序。三个用户交叉着来，第二个先集
 // 齐，它就先算完出去。三个都要走完。
 TEST(BachRcore, WhoeverIsCompleteFirstGoesFirst) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   std::vector<uint64_t> order;
   uint64_t total = 0;
   {
@@ -338,7 +366,7 @@ TEST(BachRcore, WhoeverIsCompleteFirstGoesFirst) {
     clk->Continue(40000 * kPeriod);
     RT::JoinAll();
     total = h.out_msgs.size();
-    for (MessagePtr const& m : h.out_msgs) {
+    for (MessagePtr const &m : h.out_msgs) {
       // 一个用户送出去的那一包落在那一槽后一半的起点。
       if (m->dst_addr % kSlotBytes == kHalfBytes) {
         order.push_back(m->dst_addr / kSlotBytes);
@@ -355,7 +383,8 @@ TEST(BachRcore, WhoeverIsCompleteFirstGoesFirst) {
 
 // 只到一笔就不动：映射表还没到两笔，FIFO 里没有这个用户，链二一直等。
 TEST(BachRcore, OnePartAloneWaits) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   std::vector<MessagePtr> got;
   {
     RCORE_SETUP();
@@ -366,4 +395,24 @@ TEST(BachRcore, OnePartAloneWaits) {
   }
   RT::Reset();
   EXPECT_TRUE(got.empty()) << "只到一笔不该往下走";
+}
+
+TEST(BachRcore, SlotReuseReclaimsRmemForMoreThanSixteenUsers) {
+  RCORE_SETUP();
+  std::vector<RcoreHarness::Job> jobs;
+  auto first = Ramp(1.0f, 1.0f), second = Ramp(100.0f, 1.0f);
+  for (uint64_t user = 0; user < 20; ++user) {
+    jobs.push_back({2 + user * 2000, MakeHalf(user, 0, first)});
+    jobs.push_back({202 + user * 2000, MakeHalf(user, 1, second)});
+  }
+  RcoreHarness driver(clk, core, jobs);
+  clk->Continue(50000);
+  RT::JoinAll();
+  ASSERT_EQ(driver.out_msgs.size(), 20u);
+  std::set<uint64_t> users;
+  for (auto const &message : driver.out_msgs)
+    users.insert(message->user_id);
+  EXPECT_EQ(users.size(), 20u);
+  EXPECT_EQ(core.GetRouter().GetReduce().ContextUsed(), 0u);
+  RT::Reset();
 }

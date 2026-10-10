@@ -1,9 +1,10 @@
 // 进核那一路的数据通路单元：Header Parser。
 //
-// 对齐飞书《DTE DSA》后，进核是配置驱动，Header Parser 不再生成 Descriptor，只做
-// 三件事：把包头上下文（core_mask / Hardware Used / gpu_id / token_id）随 Message
-// 转发给进核通道（落库由 Lane 按段 0 端点做，见 dte_lane / dte 里的包头测试）、
-// 逐拍转发 payload、按帧边界判定与合法性检查（非法包头直接断言）。
+// 对齐飞书《DTE DSA》后，进核是配置驱动，Header Parser 不再生成
+// Descriptor，只做 三件事：把包头上下文（core_mask / Hardware Used / gpu_id /
+// token_id）随 Message 转发给进核通道（落库由 Lane 按段 0 端点做，见 dte_lane /
+// dte 里的包头测试）、 逐拍转发
+// payload、按帧边界判定与合法性检查（非法包头直接断言）。
 //
 // 覆盖：payload 一个字节不剥、靠上一帧 TLAST 认帧边界、纯包头帧、非法 Header
 // 断言、连续几帧各得一个帧号、包头上下文随 Message 原样带下去。
@@ -14,9 +15,9 @@
 #include <string>
 #include <vector>
 
+#include "bach/ip/chip/core/dte/header_parser.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/core/dte/header_parser.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -36,13 +37,14 @@ MessagePtr MakeMsg(uint64_t user, uint64_t path, uint64_t bytes,
   m->stream_id = stream;
   m->task_id = task;
   m->payload.assign(bytes, 0);
-  for (uint64_t i = 0; i < bytes; ++i) m->payload[i] = uint8_t(i & 0xFF);
+  for (uint64_t i = 0; i < bytes; ++i)
+    m->payload[i] = uint8_t(i & 0xFF);
   return m;
 }
 
 // 灌 AXI-Stream 的各拍、读 Header Table、收下游的 payload。
 class ParserHarness : public BachModule {
- public:
+public:
   struct Beat {
     uint64_t at = 0;
     uint64_t bytes = 0;
@@ -50,7 +52,7 @@ class ParserHarness : public BachModule {
     MessagePtr msg;
   };
 
-  ParserHarness(ClockPtr c, HeaderParser& target)
+  ParserHarness(ClockPtr c, HeaderParser &target)
       : BachModule(c, "harness"), hp(target) {}
 
   std::vector<Beat> beats;
@@ -63,19 +65,22 @@ class ParserHarness : public BachModule {
     MessagePtr msg;
   };
   std::vector<Got> payloads;
-  uint64_t parsed = 0, beats_seen = 0;
+  uint64_t parsed = 0, beats_seen = 0, errors = 0;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     // 末级先做：先看上一拍摆出来的 payload。
-    PayloadPort& p = *hp.PayloadPtr();
-    if (p.valid.Get() != 0) {
+    PayloadPort &p = *hp.PayloadPtr();
+    if (p.valid.Get() != 0 && now >= payload_from) {
       uint64_t seq = p.seq.Get();
       if (seq != last_pl_seq) {
         payloads.push_back({now, p.frame.Get(), p.bytes.Get(), p.off.Get(),
                             p.last.Get() != 0, p.msg.Get()});
         last_pl_seq = seq;
+        p.accepted_seq = seq;
+        if (p.error.Get())
+          ++errors;
       }
     }
     p.ready = now >= payload_from ? 1 : 0;
@@ -87,16 +92,18 @@ class ParserHarness : public BachModule {
     beats_seen = hp.Beats();
   }
 
- private:
+private:
   // Router 那一侧按 AXI-Stream 送：反压时保持不变，看见 ready 才换下一拍。
   void Feed(uint64_t now) {
-    CoreDataPort& in = hp.FromRouter();
+    CoreDataPort &in = hp.FromRouter();
     if (cursor >= beats.size() || now < beats[cursor].at) {
-      if (!driving) in.Idle();
+      if (!driving)
+        in.Idle();
       return;
     }
     if (driving) {
-      if (!in.Ready()) return;
+      if (!in.Ready())
+        return;
       ++cursor;
       driving = false;
       if (cursor >= beats.size() || now < beats[cursor].at) {
@@ -104,19 +111,19 @@ class ParserHarness : public BachModule {
         return;
       }
     }
-    Beat const& b = beats[cursor];
+    Beat const &b = beats[cursor];
     in.Drive(b.bytes, b.last, cursor == 0, 0, b.msg);
     driving = true;
   }
 
-  HeaderParser& hp;
+  HeaderParser &hp;
   uint64_t cursor = 0;
   bool driving = false;
   uint64_t last_pl_seq = 0;
 };
 
 // 一帧的各拍：头一拍带 256 B，其余各拍补满，最后一拍带 TLAST。
-std::vector<ParserHarness::Beat> Frame(uint64_t at, MessagePtr const& m) {
+std::vector<ParserHarness::Beat> Frame(uint64_t at, MessagePtr const &m) {
   std::vector<ParserHarness::Beat> out;
   uint64_t n = FlitsOf(m->size);
   uint64_t left = m->size;
@@ -128,11 +135,11 @@ std::vector<ParserHarness::Beat> Frame(uint64_t at, MessagePtr const& m) {
   return out;
 }
 
-}  // namespace
+} // namespace
 
 // 包头上下文随 Message 原样带下去：硬件改的 core_mask 与 Hardware Used 落库在
-// Lane（见 dte 里的包头测试），这里只验 Header Parser 不剥掉 gpu_id / token_id 与
-// path_core_mask，进核通道拿到的是同一份 Message。
+// Lane（见 dte 里的包头测试），这里只验 Header Parser 不剥掉 gpu_id / token_id
+// 与 path_core_mask，进核通道拿到的是同一份 Message。
 TEST(BachHeaderParser, HeaderContextIsForwardedOnTheMessage) {
   MessagePtr got;
   {
@@ -147,7 +154,8 @@ TEST(BachHeaderParser, HeaderContextIsForwardedOnTheMessage) {
     h.beats = Frame(2, m);
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
-    if (!h.payloads.empty()) got = h.payloads.front().msg;
+    if (!h.payloads.empty())
+      got = h.payloads.front().msg;
   }
   RT::Reset();
   ASSERT_TRUE(got);
@@ -169,7 +177,7 @@ TEST(BachHeaderParser, PayloadIsForwardedBeatByBeat) {
     clk->Continue(60 * kPeriod);
     RT::JoinAll();
     payload_num = h.payloads.size();
-    for (auto const& p : h.payloads) {
+    for (auto const &p : h.payloads) {
       offs.push_back(p.off);
       frames.push_back(p.frame);
     }
@@ -181,7 +189,8 @@ TEST(BachHeaderParser, PayloadIsForwardedBeatByBeat) {
   EXPECT_EQ(offs[1], 256u);
   EXPECT_EQ(offs[2], 512u);
   EXPECT_EQ(offs[3], 768u);
-  for (auto f : frames) EXPECT_EQ(f, 1u) << "同一帧的几拍同一个帧号";
+  for (auto f : frames)
+    EXPECT_EQ(f, 1u) << "同一帧的几拍同一个帧号";
 }
 
 // 靠上一帧的 TLAST 判断下一拍是新 Header：两帧首尾相接，各存一次包头。
@@ -200,7 +209,8 @@ TEST(BachHeaderParser, TlastMarksTheFrameBoundary) {
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
     parsed = h.parsed;
-    for (auto const& p : h.payloads) frames.push_back(p.frame);
+    for (auto const &p : h.payloads)
+      frames.push_back(p.frame);
   }
   RT::Reset();
   EXPECT_EQ(parsed, 2u) << "两帧各存一次包头";
@@ -232,22 +242,23 @@ TEST(BachHeaderParser, HeaderOnlyFrameIsOneBeat) {
 
 // 非法 Header 直接断言：进核任务与包按到达顺序配对，丢一帧会让之后的配对整体
 // 错开，模型不做 Drop Frame。
-static void FeedOversizedFrame() {
+static uint64_t FeedOversizedFrame() {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   HeaderParser hp(clk, "hp", 0, false);
   ParserHarness h(clk, hp);
   auto bad = MakeMsg(41, 7, 64, 0, 0);
-  bad->size = kMaxTaskBytes + 1;   // 长度超过上限
+  bad->size = kMaxTaskBytes + 1; // 长度超过上限
   h.beats = {{2, 256, false, bad}, {3, 256, true, bad}};
   clk->Continue(60 * kPeriod);
   RT::JoinAll();
+  auto errors = h.errors;
   RT::Reset();
+  return errors;
 }
 
-TEST(BachHeaderParser, IllegalHeaderIsFatal) {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_DEATH(FeedOversizedFrame(), "HeaderParser");
+TEST(BachHeaderParser, MalformedPacketCarriesStructuredError) {
+  EXPECT_EQ(FeedOversizedFrame(), 2u);
 }
 
 // Router 送过来的东西一个字节都不剥：交下去的还是同一个 Message。
@@ -263,7 +274,8 @@ TEST(BachHeaderParser, NothingIsStrippedFromTheRouterSide) {
     h.beats = Frame(2, sent);
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
-    if (!h.payloads.empty()) got = h.payloads.front().msg;
+    if (!h.payloads.empty())
+      got = h.payloads.front().msg;
   }
   RT::Reset();
   ASSERT_TRUE(got);
@@ -272,7 +284,8 @@ TEST(BachHeaderParser, NothingIsStrippedFromTheRouterSide) {
   EXPECT_EQ(got->reduce_seq, 4u);
 }
 
-// 连续几帧各得一个帧号，不重：第 N 帧配第 N 个进核任务（FIFO）靠的就是这套编号。
+// 连续几帧各得一个帧号，不重：第 N 帧配第 N
+// 个进核任务（FIFO）靠的就是这套编号。
 TEST(BachHeaderParser, FramesGetDistinctFrameNumbers) {
   std::vector<uint64_t> first_frames;
   {
@@ -287,8 +300,9 @@ TEST(BachHeaderParser, FramesGetDistinctFrameNumbers) {
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
     // 每帧只有一拍，帧号取各自那一拍的号。
-    for (auto const& p : h.payloads) {
-      if (p.off == 0) first_frames.push_back(p.frame);
+    for (auto const &p : h.payloads) {
+      if (p.off == 0)
+        first_frames.push_back(p.frame);
     }
   }
   RT::Reset();

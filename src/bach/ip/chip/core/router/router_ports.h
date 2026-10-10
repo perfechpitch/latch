@@ -7,20 +7,47 @@
 // RouterStation。文档把 VA 那一级画在 station 上，但这两样管的都是“下游方向”
 // 的资源，四个 station 会同时想用；只有让唯一的发送决策点持有它们，才不会出现
 // 两个 station 同一拍各自判断够、加起来超扣。station 侧做 M1 收 flit 进 VC
-// Buffer 与 M2 查表建上下文，把队首请求交给 Xbar；M3 的资源检查、M4 的通路仲裁、
-// M5 的交换都在 Xbar 一拍里做完。
+// Buffer 与 M2 查表建上下文，把队首请求交给 Xbar；M3 的资源检查、M4
+// 的通路仲裁、 M5 的交换都在 Xbar 一拍里做完。
 //
-// station 读 Xbar 上一拍发布的 credit 电平只是为了少提无望的请求，判不判都不影响
-// 正确性：真正的扣减只发生在 Xbar 授予的那一刻。
+// station 读 Xbar 上一拍发布的 credit
+// 电平只是为了少提无望的请求，判不判都不影响 正确性：真正的扣减只发生在 Xbar
+// 授予的那一刻。
 
 #include <cstdint>
+#include <vector>
 
-#include "base/logic.h"
 #include "bach/common/flit.h"
 #include "bach/ip/chip/core/router/router_table.h"
+#include "base/logic.h"
 
 namespace latch {
 namespace bach {
+
+// 方向返回为valid-only；归属记录仅用于模型内部避免转发流量误还TS额度。
+class DirectionReturnPort : public Logic {
+public:
+  Logic64 valid_mask;
+  explicit DirectionReturnPort(ClockPtr c) : valid_mask(c) {
+    Fields(valid_mask);
+  }
+};
+struct DirectionOwner {
+  uint64_t user = 0, dirs = 0;
+};
+class DirectionOwnerPort : public Logic {
+public:
+  LogicPtr<std::vector<DirectionOwner>> owners;
+  explicit DirectionOwnerPort(ClockPtr c) : owners(c) { Fields(owners); }
+};
+
+class DteTxCreditPort : public Logic {
+public:
+  Logic64 returned_mask;
+  explicit DteTxCreditPort(ClockPtr clock) : returned_mask(clock) {
+    Fields(returned_mask);
+  }
+};
 
 // RouterStation → Xbar：交出去的一笔 flit。
 //
@@ -30,10 +57,10 @@ namespace bach {
 // 下一拍才看得到），单个方向的吞吐就只有每两拍一个 flit，而 VC Buffer 队首每拍
 // 都能出一个。
 //
-// room 拉低到 station 停下来隔着一拍，所以 Xbar 那边的入口缓冲要比门限多留余量，
-// 多出来的那一笔照样收得下。
+// room 拉低到 station 停下来隔着一拍，所以 Xbar
+// 那边的入口缓冲要比门限多留余量， 多出来的那一笔照样收得下。
 class XbarReqPort : public Logic {
- public:
+public:
   Logic64 valid, out_mask, vc, head, tail, bytes;
   Logic64 path_id, user_id, enters_core, stall_way, stream_need;
   // 这个入口的队列里从队首起有没有一整个包。仲裁的第二档看它：手里攥着整包的
@@ -95,10 +122,11 @@ struct XbarReqView {
   uint64_t seq = 0;
 };
 
-inline XbarReqView ReadXbarReq(XbarReqPort const& p) {
+inline XbarReqView ReadXbarReq(XbarReqPort const &p) {
   XbarReqView v;
   v.valid = p.valid.Get() != 0;
-  if (!v.valid) return v;
+  if (!v.valid)
+    return v;
   v.out_mask = p.out_mask.Get();
   v.vc = p.vc.Get();
   v.head = p.head.Get() != 0;
@@ -118,10 +146,10 @@ inline XbarReqView ReadXbarReq(XbarReqPort const& p) {
 
 // Xbar 每拍发布的 credit 电平，给各 station 读。只是让它们少提无望的请求。
 class CreditLevelPort : public Logic {
- public:
+public:
   // 三个 R2R 方向 × 4 个 VC 的可发标志，压成一个位图。
   Logic64 vc_ok;
-  Logic64 stream_free;  // 每方向 stream 表还有没有空项，按方向压位
+  Logic64 stream_free; // 每方向 stream 表还有没有空项，按方向压位
 
   explicit CreditLevelPort(ClockPtr c) : vc_ok(c), stream_free(c) {
     Fields(vc_ok, stream_free);
@@ -141,7 +169,7 @@ class CreditLevelPort : public Logic {
 // 准入电平：接收方每拍发布自己收不收得下，发送方读上一拍的值。
 // 电平类端口，持续有效，接收方任意拍读。
 class ReadyLevelPort : public Logic {
- public:
+public:
   Logic64 ready;
 
   explicit ReadyLevelPort(ClockPtr c) : ready(c) { Fields(ready); }
@@ -153,7 +181,7 @@ class ReadyLevelPort : public Logic {
 // Xbar → CoreMemReissue：拿不到下游资源且 stall_way 选转存时，把这一笔交出去。
 // station 那一侧照常收到 grant，VC 槽腾出来，包落进本地 Core Mem 等重发。
 class OverflowPort : public Logic {
- public:
+public:
   Logic64 valid, vc, head, tail, bytes;
   LogicPtr<Message> msg;
 
@@ -162,7 +190,7 @@ class OverflowPort : public Logic {
     Fields(valid, vc, head, tail, bytes, msg);
   }
 
-  void Drive(FlitView const& f) {
+  void Drive(FlitView const &f) {
     valid = 1;
     vc = f.vc;
     head = f.head ? 1 : 0;
@@ -183,7 +211,8 @@ class OverflowPort : public Logic {
   FlitView View() const {
     FlitView v;
     v.valid = valid.Get() != 0;
-    if (!v.valid) return v;
+    if (!v.valid)
+      return v;
     v.vc = vc.Get();
     v.head = head.Get() != 0;
     v.tail = tail.Get() != 0;
@@ -196,7 +225,7 @@ class OverflowPort : public Logic {
 // CoreStation ↔ DTE 的进出核数据通路，AXI-Stream-Like：valid/ready 加 last 与
 // 有效字节数。反压时数据保持，位置不前移，恢复后从同一 flit 继续。
 class CoreDataPort : public Logic {
- public:
+public:
   Logic64 tvalid, tbytes, tlast, thdr, vc;
   LogicPtr<Message> tdata;
   Logic64 tready;
@@ -212,7 +241,7 @@ class CoreDataPort : public Logic {
   }
 
   void Drive(uint64_t bytes, bool last, bool hdr, uint64_t vc_id,
-             MessagePtr const& m) {
+             MessagePtr const &m) {
     tvalid = 1;
     tbytes = bytes;
     tlast = last ? 1 : 0;
@@ -234,7 +263,7 @@ class CoreDataPort : public Logic {
   bool Valid() const { return tvalid.Get() != 0; }
   uint64_t Seq() const { return seq.Get(); }
 
- private:
+private:
   uint64_t issue_seq = 0;
 };
 
@@ -247,10 +276,11 @@ struct CoreDataView {
   MessagePtr msg;
 };
 
-inline CoreDataView ReadCoreData(CoreDataPort const& p) {
+inline CoreDataView ReadCoreData(CoreDataPort const &p) {
   CoreDataView v;
   v.valid = p.tvalid.Get() != 0;
-  if (!v.valid) return v;
+  if (!v.valid)
+    return v;
   v.bytes = p.tbytes.Get();
   v.last = p.tlast.Get() != 0;
   v.hdr = p.thdr.Get() != 0;
@@ -263,7 +293,7 @@ inline CoreDataView ReadCoreData(CoreDataPort const& p) {
 // CoreStation → TS 的 trigger：Header 就绪即通知，不等整包收完。
 // 请求发出后保持到 TS 拉 ready；丢一笔 trigger 就等于丢一个 token。
 class TriggerPort : public Logic {
- public:
+public:
   Logic64 valid, user_id, path_id, reissue;
   Logic64 ready;
   // 一笔请求保持到看见 ready，TS 那一侧会连着几拍看到同一笔，按序号认它。
@@ -292,7 +322,7 @@ class TriggerPort : public Logic {
   bool Valid() const { return valid.Get() != 0; }
   uint64_t Seq() const { return seq.Get(); }
 
- private:
+private:
   uint64_t issue_seq = 0;
 };
 
@@ -305,7 +335,7 @@ class TriggerPort : public Logic {
 //
 // 电平口：valid 拉起一拍，接收方按序号认。
 class RetireBroadcastPort : public Logic {
- public:
+public:
   Logic64 valid, user_id, seq;
 
   explicit RetireBroadcastPort(ClockPtr c) : valid(c), user_id(c), seq(c) {
@@ -331,7 +361,7 @@ class RetireBroadcastPort : public Logic {
 // 表项可以删了。本级退休走 RetireBroadcastPort，两者不是一回事：一个放的是下游
 // 的坑，一个放的是本 core 自己的坑。
 class StreamReleasePort : public Logic {
- public:
+public:
   Logic64 valid, dir, user_id, seq;
 
   explicit StreamReleasePort(ClockPtr c)
@@ -357,7 +387,7 @@ class StreamReleasePort : public Logic {
   uint64_t Seq() const { return seq.Get(); }
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

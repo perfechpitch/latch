@@ -163,12 +163,12 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F1 | 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个，做到用户之间 task 的无 bubble 调度 |
 | F2 | 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
 | F2a | 一笔命令连着几拍出现在端口上，按 `seq` 认它，同一笔只入队一次。不按 `stream_id` 与 `task_id` 认：B core 与 R core 的 datain 任务不占 stream 表项，几笔的这两项都是 0 |
-| F3 | 下发信息七个字段：`task_pc` 是起始取指 PC；`stream_id` 4 bit，用于算该用户的 Core Mem 与 Share Mem 区域基址，只读；`user_id` 与 `task_id` 6 bit 由 TS 从 stream_table 取出一起下发；`path_id` 是当前任务的实际 PID；`task_dsa_en`；DTE 任务另带 `vcid`，由 TS 按 PID 查 `ROUTER_TABLE` 得到。三个身份与 `path_id` 硬件写入自定义 CSR |
+| F3 | 三Core下发字段PC32、SID4、TID6、UID16、实际PID8、VCID2与valid；SID/TID/UID/PID/VCID进入自定义CSR，DSA配置请求保存该身份直到Fire。task_dsa_en是当前仿真适配字段，目标接口不靠它替代recv_unit |
 | F4 | 自定义 CSR 四个：`stream_id`、`task_id` 只读，`user_id` 与 `path_id` 可读写。`path_id` 是当前任务的 PID，PID 更新任务里 kernel 把新 PID 写进去，随 `task_done` 带回 TS。`user_id` 有两条写入路径，写的是同一个字段：普通计算 core 上 TS 下发 task 时硬件写入；B core 与 R core 上 TS 下发时还没有用户身份，软件认出之后自己写。软件读它算 R core 的用户映射表与 Matrix Mem 地址，Router 与 credit 记账认的也是它 |
 | F5 | 自启动的 B core 与 R core 上，软件从 Share Mem 认出这一笔属于哪个用户（B core 按 `head` / `tail` 取一格，R core 从软件用户 FIFO 弹出队头）后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
 | F6 | 完成信息四个字段：`stream_id`、`user_id`、`task_id`、`pid`（`path_id` 这个 CSR 的当前值）。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
 | F6a | 自定义 CSR 读它当场拿到当前这一笔 task 的身份，不排队也不异步返回。DSA 寄存器读是另一档：发出去就走，数据由 dsa_rq 按记录的顺序写回 |
-| F7 | 身份到三个 DSA 走同一条路。自定义 CSR 留给软件读。RV 执行 `dsaw` 的那一拍把当时的 `streamID` / `taskID` / `userID` / `pathID` / `vcid` 抄进这笔配置请求，DSA 收下 trigger 写时用请求上的这一份，软件不必再写一遍。DTE 取全部五项，MU 与 VU 取前三项（`streamID` / `taskID` / `userID`）。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它。配置通路把 trigger 挡住时，已经发出的请求仍带着发出那一拍的身份 |
+| F7 | 身份到三个 DSA 走同一条路。自定义 CSR 留给软件读。RV 执行 `dsaw` 的那一拍把当时的 `streamID` / `taskID` / `userID` / `pathID` / `vcid` 抄进这笔配置请求，DSA 收下 trigger 写时用请求上的这一份，软件不必再写一遍。DTE 取全部五项，MU/VU命令同样带实际PID和VCID，请求快照保留身份，DSA按本单元接口使用所需字段（`streamID` / `taskID` / `userID`）。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它。配置通路把 trigger 挡住时，已经发出的请求仍带着发出那一拍的身份 |
 
 ### 指令执行
 
@@ -252,7 +252,7 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 
 ```
 port task_cmd (slave, valid/ready, clk)           // TS → RV core：task 下发
-  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · task_dsa_en · vcid[1:0] · seq
+  in  cmd_valid · task_pc[31:0] · stream_id[3:0] · task_id[5:0] · user_id[15:0] · path_id[7:0] · vcid[1:0]
   out cmd_ready                                     // = task_queue 有空槽（raw ACCEPT）
 port rv_done (master, 脉冲, clk)                  // RV core → TS：task_done 指令带 TS 标志时产生
   out valid · stream_id[3:0] · user_id[15:0] · task_id[5:0] · pid[7:0]
@@ -284,7 +284,7 @@ mem itcm        SRAM        4 KB，8 B/T，1 拍                                
 mem dtcm        SRAM        8 KB，4 bank × 32 bit，3 拍                        1R1W  同 bank 冲突阻塞第二条  复位未定义   // BSS · 寄存器溢出 · 堆栈
 mem gpr         FF 阵列     32 × 32 bit                                        —     由指令执行器读写      复位 0
 mem gpr_ready   FF          32 b 就绪位图                                       1RW   发出访存 / DSA 读时清，写回时置  复位 全 1
-mem task_q      FIFO        深 2 × {task_pc[31:0], stream_id[3:0], task_id[5:0], user_id[15:0], path_id[7:0], task_dsa_en, vcid[1:0]}  1W1R  满 → task_ack 拉低  复位空
+mem task_q      FIFO        深 2 × {task_pc[31:0], stream_id[3:0], task_id[5:0], user_id[15:0], path_id[7:0], vcid[1:0]}  1W1R  满 → task_ack 拉低  复位空
 mem dsa_rq      FIFO        8 × {rd_idx[4:0]}                                  1W1R  顺序记录，返回时按序写回 gpr  复位空
 mem sm_lsq      FIFO        16 × {we, addr[14:0], wdata[31:0], rd_idx[4:0]}     1W1R  顺序发射，每拍一个    复位空
 mem cm_lsq      FIFO        16 × {we, addr[17:0], wdata[31:0], be[3:0], rd_idx[4:0]}  1W1R  顺序发射，每拍一个；只有 DTE core 有  复位空
@@ -706,6 +706,14 @@ custom-0 字段布局   见下一节
 | 复位取 boot_pc，收 task 取 task_pc | F11 | `RunsOneTaskAndReportsDone` |
 
 ***
+
+## TS／DTE 详设接口要求
+
+任务命令包含PC32、SID4、TID6、UID16、PID8、VCID2和valid；三Core各自valid/ready保持完整命令。MU/VU同样接收按实际PID查询的VCID，经CSR传给DSA Trigger。匿名SELF_START Task0不从Trigger绑定UID，软件识别用户后经合法Core完成返回；等待双ACK的Task0由配对完成绑定。
+
+DSA配置请求逐笔保存发出时的SID/TID/UID/PID/VCID，直到Fire，不能在反压期间从已经切换的CSR重读。DTE配置请求被接收后一拍返回读值，valid-only无ID，连续读/写可交错；RV读取未就绪目的寄存器仍按自身gpr就绪规则等待。DTE的一拍读合同不规定MU/VU的读延迟。
+
+Reduce软件发Core完成，DTE物理搬运及Ack退休后发DSA完成，TS按双ACK推进。RMEM返回归Router/TS空间通路，不代替任何Core完成。现有共享`kDsaReadLatency=4`与DTE目标合同不符，后续需按DSA端点配置并联调。
 
 ## 9　取舍
 

@@ -1,61 +1,40 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_COMPLETION_RS_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_COMPLETION_RS_
 
-// Completion RS 与 Done Pending：把劈开的两半合回来。
-//
-// 只在同一个 task_id 的 RD 与 WR 两侧条件都满足时产生 task_done，这一步叫 Join。
-//
-// 认哪两半是同一笔，用的是 Commit 准入时分配的内部序号。业务上的 task_id 只在
-// 一个 stream 内唯一，同一拍在途的两笔任务可以带同一个值：一笔是 Router 送进来
-// 的搬入，另一笔是 RV core 配的搬出。向 TS 上报时用的仍是业务身份。
-// 同一拍多个 Join 命中时全部写进 Done Pending，不允许覆盖或丢失，由 Done Pending
-// 负责串行化。向 TS 的报告是 exactly-once。同一通道内按下发顺序 Join，通道之间
-// 不互相等。
-//
-// 六个完成层级：
-//   queued      已进 TaskQueue 未装载
-//   active      由对应 AGCU / Ctrl 执行
-//   issue_done  该侧最后一个请求已 Fire
-//   drained     相关响应、Buffer 数据和外部副作用均已收敛
-//   join_done   同一 task_id 的 RD 与 WR 都满足
-//   task_done   进 Done Pending 并与 TS 成功握手
-//
-// ack_ts_en 标记一个 task 拆成几笔搬运时的最后一笔，只有带这个标记的那一笔完成
-// 后才通知 TS；不通知 TS 的任务这一位清 0。
-//
-// shareMem 写落在 Join 之后：任务数据传输完成后按描述符里的地址与数据写一笔
-// shareMem，写出去了才通知 TS。这一路只有 B core 与 R core 用。
+// CompletionRs joins physical completion, issues ordered ShareMem writes, and
+// retires the global head only after its response. ACK carries UID/SID/TID and
+// is valid-only.
 
 #include <deque>
 #include <map>
-#include <vector>
 #include <string>
+#include <vector>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/ports.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
 
 class CompletionRs : public BachModule {
- public:
-  CompletionRs(ClockPtr clock, const std::string& name, uint64_t parent = 0,
+public:
+  CompletionRs(ClockPtr clock, const std::string &name, uint64_t parent = 0,
                bool tick = true)
       : BachModule(clock, name, parent, tick),
         rd_done(std::make_shared<HalfDonePort>(clock)),
         wr_done(std::make_shared<HalfDonePort>(clock)),
         to_ts(std::make_shared<DonePort>(clock)),
         admit(std::make_shared<AdmitPort>(clock)),
-        smem_wr(std::make_shared<MemPort>(clock)),
-        joined(clock),
-        reported(clock),
-        used(clock) {}
+        smem_wr(std::make_shared<MemPort>(clock)), joined(clock),
+        reported(clock), used(clock),
+        retired(std::make_shared<HalfDonePort>(clock)),
+        exception(std::make_shared<DteExceptionPort>(clock)) {}
 
-  HalfDonePort& RdDone() { return *rd_done; }
-  HalfDonePort& WrDone() { return *wr_done; }
+  HalfDonePort &RdDone() { return *rd_done; }
+  HalfDonePort &WrDone() { return *wr_done; }
   std::shared_ptr<HalfDonePort> RdDonePtr() const { return rd_done; }
   std::shared_ptr<HalfDonePort> WrDonePtr() const { return wr_done; }
 
@@ -65,11 +44,11 @@ class CompletionRs : public BachModule {
                  std::shared_ptr<HalfDonePort> wr) {
     sources.push_back({std::move(rd), std::move(wr)});
   }
-  DonePort& ToTs() { return *to_ts; }
+  DonePort &ToTs() { return *to_ts; }
   void AttachToTs(std::shared_ptr<DonePort> p) { to_ts = std::move(p); }
 
   // shareMem 表项写。B core 与 R core 之外的 core 上这个口一直空闲。
-  MemPort& SmemWr() { return *smem_wr; }
+  MemPort &SmemWr() { return *smem_wr; }
   std::shared_ptr<MemPort> SmemWrPtr() const { return smem_wr; }
   void AttachSmemWr(std::shared_ptr<MemPort> p) { smem_wr = std::move(p); }
 
@@ -87,43 +66,85 @@ class CompletionRs : public BachModule {
   uint64_t DoneTask() const { return done_task; }
   uint64_t DoneUser() const { return done_user; }
   // 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）：自启动 core 的 Bypass DataIn、
-  // 权重加载阶段的 datain。与 Reported() 互斥，同一个 Pend 只走一支。Core 层发
+  // 权重加载阶段的 datain。与 Reported() 互斥，每笔退休任务只走一支。Core 层发
   // dsa_done_noack 用 —— 波形上 DTE-DSA 的终点要靠它，不报不等于没完成。
   uint64_t NoAckCnt() const { return noack_cnt; }
   uint64_t NoAckTask() const { return noack_task; }
   uint64_t NoAckUser() const { return noack_user; }
 
-  bool Quiescent() const override { return rs.empty() && pend.empty(); }
+  bool Quiescent() const override { return rs.empty() && smem_flight.empty(); }
+  std::shared_ptr<HalfDonePort> RetiredPtr() const { return retired; }
+  void AttachCanceled(std::shared_ptr<HalfDonePort> p) {
+    canceled = std::move(p);
+  }
+  uint64_t EntryState(uint64_t seq) const {
+    auto it = rs.find(seq);
+    if (it == rs.end())
+      return 0;
+    auto const &entry = it->second;
+    return (entry.rd_drained ? 4 : 0) | (entry.wr_drained ? 8 : 0) |
+           (entry.joined ? 16 : 0) | (entry.smem_issued ? 32 : 0) |
+           (entry.smem_complete ? 64 : 0) | (entry.desc.error ? 128 : 0);
+  }
+  uint64_t Error() const { return first_error; }
+  std::shared_ptr<DteExceptionPort> ExceptionPtr() const { return exception; }
+  uint64_t ErrorEntry() const { return first_entry; }
+  uint64_t EntryError(uint64_t seq) const {
+    auto it = rs.find(seq);
+    return it == rs.end() ? 0 : it->second.desc.error;
+  }
+  uint64_t Interrupt() const { return first_error && !interrupt_mask; }
+  uint64_t InterruptMask() const { return interrupt_mask; }
+  void SetInterruptMask(uint64_t value) { interrupt_mask = value & 1; }
+  uint64_t ErrorIds() const { return error_ids; }
+  void SuppressAcks() {
+    for (auto &item : rs) {
+      item.second.desc.ack_ts_en = false;
+      if (!item.second.smem_issued)
+        item.second.desc.wr_sharemem_flag = false;
+    }
+  }
+  void ClearError(uint64_t mask) {
+    if (mask & 1)
+      first_error = error_ids = first_entry = 0;
+  }
 
- protected:
+protected:
   void Step() override {
-    // 末级先做：先把 Done Pending 里的报给 TS，腾出位置。
+    // 末级先做：先退休已完成的全局队头，腾出表项。
+    to_ts->Idle();
+    retired->Idle();
+    exception->valid = 0;
+    CollectSmem();
     Report();
     Collect();
     Join();
     TakeAdmit();
+    if (canceled && canceled->Valid()) {
+      auto it = rs.find(canceled->commit_seq.Get());
+      if (it != rs.end()) {
+        it->second.joined = true;
+        it->second.desc.ack_ts_en = false;
+        it->second.desc.wr_sharemem_flag = false;
+      }
+    }
 
-    if (!smem_used) smem_wr->IdleReq();
+    if (!smem_used)
+      smem_wr->IdleReq();
     joined = join_pending;
     reported = report_pending;
     used = rs.size();
     TracePerCycle("rs_used", rs.size());
-    TracePerCycle("done_pend", pend.size());
+    TracePerCycle("smem_outstanding", smem_flight.size());
   }
 
- private:
+private:
   struct Entry {
     Descriptor desc;
     bool rd_ok = false, wr_ok = false;
     bool rd_drained = false, wr_drained = false;
+    bool joined = false, smem_issued = false, smem_complete = false;
   };
-  struct Pend {
-    uint64_t stream_id = 0, task_id = 0, user_id = 0, reduce_seq = 0;
-    bool notify = true;   // ack_ts_en 置位的那一笔才通知 TS
-    bool smem = false;
-    uint64_t smem_addr = 0, smem_data = 0;
-  };
-
   // 收 Commit 准入的任务，占一项。Join 排在它前面，所以这一拍腾出来的位置
   // 当拍就能用上。
   // ready 在收下这一拍的任务之后算，Commit 读到它时已经算上了这一笔。
@@ -132,31 +153,39 @@ class CompletionRs : public BachModule {
     admit->DriveReady(HasRoom());
   }
   void Admit() {
-    if (!admit->Valid() || admit->Seq() == last_admit_seq) return;
+    if (!admit->Valid() || admit->Seq() == last_admit_seq)
+      return;
     auto d = admit->Desc();
-    if (!d) return;
+    if (!d)
+      return;
     last_admit_seq = admit->Seq();
     LOGCHECK(HasRoom(), "CompletionRs: 满了。Commit 应当先确认有空位。");
     LOGCHECK(rs.count(d->commit_seq) == 0,
              "CompletionRs: 同一个内部序号在未完成的上下文里重复占用。");
     Entry e;
     e.desc = *d;
+    if (d->error)
+      e.joined = true;
     rs[d->commit_seq] = e;
   }
 
   void Collect() {
     Take(*rd_done, kRd);
     Take(*wr_done, kWr);
-    for (auto const& s : sources) {
+    for (auto const &s : sources) {
       Take(*s.rd, kRd);
       Take(*s.wr, kWr);
     }
   }
 
-  void Take(HalfDonePort const& p, uint64_t which) {
-    if (!p.Valid()) return;
+  void Take(HalfDonePort const &p, uint64_t which) {
+    if (!p.Valid())
+      return;
     auto it = rs.find(p.commit_seq.Get());
-    if (it == rs.end()) return;
+    if (it == rs.end())
+      return;
+    if (p.error.Get())
+      it->second.desc.error = p.error.Get();
     bool drained = p.drained.Get() != 0;
     if (which == kRd) {
       it->second.rd_ok = true;
@@ -167,74 +196,83 @@ class CompletionRs : public BachModule {
     }
   }
 
-  // 两侧条件都满足才 Join。同一拍多个命中全部写进 Done Pending。
-  //
-  // 同一通道内按下发顺序反馈（《DTE DSA》“任务完成后顺序反馈TS”）：按内部序号扫，
-  // 一个通道有一笔还没齐，这一拍排在它后面、同一通道的都不 Join；别的通道照报。
+  // 两侧排空后标记物理完成；全局队头按接纳顺序在 Report 中退休。
   void Join() {
-    uint64_t blocked = 0;  // 这一拍已有一笔没齐的通道，按位记
-    for (auto it = rs.begin(); it != rs.end();) {
-      Entry const& e = it->second;
-      uint64_t lane_bit = 1ull << e.desc.Lane();
-      if ((blocked & lane_bit) ||
-          !(e.rd_ok && e.wr_ok && e.rd_drained && e.wr_drained)) {
-        blocked |= lane_bit;
-        ++it;
-        continue;
+    for (auto &kv : rs) {
+      Entry &e = kv.second;
+      if (!e.joined && e.rd_ok && e.wr_ok && e.rd_drained && e.wr_drained) {
+        e.joined = true;
+        ++join_pending;
       }
-      if (pend.size() >= kDonePendDepth) break;  // 串行化，不丢
-      ++join_pending;
-      // 完成了就进 Done Pending，无一例外。带 ack_ts_en 的 Report() 里报 TS；
-      // 只带 wr_sharemem_flag 的先写共享内存、下一拍走 noack；两个都不带的
-      // （ack_ts_en=0 且 wr_sharemem_flag=0）直接走 noack —— 都进 pend，好让
-      // Report() 一拍一笔地抬 noack_cnt，波形上 dsa_done_noack 才收得住这些
-      // 不报 TS 的完成，不然 DTE-DSA 那一段只能延到波形末。
-      bool notify = e.desc.ack_ts_en;
-      pend.push_back({e.desc.stream_id, e.desc.task_id, e.desc.user_id,
-                      e.desc.reduce_seq, notify, e.desc.wr_sharemem_flag,
-                      e.desc.smem_addr, e.desc.smem_data});
-      it = rs.erase(it);
     }
   }
 
-  // 向 TS 的报告是 exactly-once：这里一拍报一笔，报完就出队。带 shareMem 写的
-  // 那一笔先把它写出去，写出去了下一拍再报 TS。
+  void CollectSmem() {
+    if (!(smem_wr->RspValid() || smem_wr->WriteRspValid()))
+      return;
+    LOGCHECK(!smem_flight.empty(), "CompletionRs: 无主ShareMem写响应。");
+    uint64_t seq = smem_flight.front();
+    smem_flight.pop_front();
+    auto it = rs.find(seq);
+    LOGCHECK(it != rs.end(), "CompletionRs: SM响应命中已释放Entry。");
+    it->second.smem_complete = true;
+    if (smem_wr->WriteRspValid() ? smem_wr->WriteRspError()
+                                 : smem_wr->RspError())
+      it->second.desc.error = 7;
+  }
+
   void Report() {
     smem_used = false;
-    if (pend.empty()) {
-      to_ts->Idle();
-      return;
-    }
-    Pend& p = pend.front();
-    if (p.smem) {
-      to_ts->Idle();
-      if (!smem_wr->Ready()) return;
-      auto d = std::make_shared<ByteBlock>(4, 0);
-      for (uint64_t k = 0; k < 4; ++k) {
-        (*d)[k] = uint8_t((p.smem_data >> (8 * k)) & 0xFFu);
+    // SM Ptr按接纳序扫描，允许旧写等待响应时继续发年轻的SM写。
+    for (auto &kv : rs) {
+      Entry &e = kv.second;
+      if (!e.joined)
+        break;
+      if (!e.desc.wr_sharemem_flag || e.desc.error) {
+        e.smem_complete = true;
+        continue;
       }
-      smem_wr->Write(p.smem_addr, d);
+      if (e.smem_issued)
+        continue;
+      if (!smem_wr->Ready())
+        break;
+      auto bytes = std::make_shared<ByteBlock>(128, 0);
+      for (uint64_t k = 0; k < 4; ++k) {
+        (*bytes)[k] = uint8_t(e.desc.smem_data >> (8 * k));
+      }
+      smem_wr->Write(e.desc.smem_addr, bytes, false, 0, 4);
+      e.smem_issued = true;
+      smem_flight.push_back(kv.first);
       smem_used = true;
-      p.smem = false;
-      return;
+      break;
     }
-    if (!p.notify) {
-      // 完成了、但不报 TS（ack_ts_en = 0）：自启动 core 的链一 Bypass DataIn（保留号
-      // 63）、以及别的不上报的搬入。**不报不等于没完成** —— 记下来，波形上 DTE-DSA
-      // 的终点靠它收尾，否则那些段只能延到波形末。Report() 一拍只处理一笔，所以这里
-      // 抬计数天然是「一拍一笔」，不会互相盖掉。
+    if (rs.empty())
+      return;
+    auto head = rs.begin();
+    Entry const &e = head->second;
+    if (!e.joined || !e.smem_complete)
+      return;
+    if (e.desc.error && !first_error) {
+      first_error = e.desc.error;
+      first_entry = e.desc.entry_id;
+      if (!interrupt_mask)
+        exception->Drive(e.desc);
+      error_ids = e.desc.stream_id | (e.desc.task_id << 4) |
+                  (e.desc.user_id << 10) | (e.desc.path_id << 26);
+    }
+    if (e.desc.ack_ts_en && !e.desc.error) {
+      to_ts->Drive(e.desc.stream_id, e.desc.task_id, e.desc.user_id);
+      done_task = e.desc.task_id;
+      done_user = e.desc.user_id;
+      ++report_pending;
+    } else {
+      // 全局队头退休但不发 ACK 时，仍记录 DTE 任务的完成端点。
       ++noack_cnt;
-      noack_task = p.task_id;
-      noack_user = p.user_id;
-      pend.pop_front();
-      to_ts->Idle();
-      return;
+      noack_task = e.desc.task_id;
+      noack_user = e.desc.user_id;
     }
-    to_ts->Drive(p.stream_id, p.task_id);
-    done_task = p.task_id;
-    done_user = p.user_id;
-    pend.pop_front();
-    ++report_pending;
+    retired->Drive(head->first, kWr, true);
+    rs.erase(head);
   }
 
   struct Source {
@@ -249,7 +287,10 @@ class CompletionRs : public BachModule {
   uint64_t last_admit_seq = 0;
 
   std::map<uint64_t, Entry> rs;
-  std::deque<Pend> pend;
+  std::deque<uint64_t> smem_flight;
+  std::shared_ptr<HalfDonePort> retired, canceled;
+  uint64_t first_error = 0, error_ids = 0, first_entry = 0, interrupt_mask = 0;
+  std::shared_ptr<DteExceptionPort> exception;
   uint64_t join_pending = 0, report_pending = 0;
   // 完成了但不报 TS 的笔数与最近一笔的身份，供 Core 层发 dsa_done_noack。
   uint64_t noack_cnt = 0, noack_task = 0, noack_user = 0;
@@ -260,7 +301,7 @@ class CompletionRs : public BachModule {
   Logic64 joined, reported, used;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

@@ -36,43 +36,45 @@ enum class SendUnit : uint32_t {
 
 // TASK_RECV_UNIT：这一笔等哪几路完成 ACK（《Task Scheduler》v1.1）。
 enum class RecvUnit : uint32_t {
-  kRvOnly = 0,    // 00：只等 RV core 的 ACK
-  kDsa = 1,       // 01：只等 DSA 的 ACK，RV core 的 ACK 不算
-  kRvAndDsa = 2,  // 10：RV core 与 DSA 两路 ACK 都到才算完成
+  kRvOnly = 0,   // 00：只等 RV core 的 ACK
+  kDsa = 1,      // 01：只等 DSA 的 ACK，RV core 的 ACK 不算
+  kRvAndDsa = 2, // 10：RV core 与 DSA 两路 ACK 都到才算完成
 };
 
 // TASK_TYPE。
 enum class TaskType : uint32_t {
   kNormal = 0,
-  kReissueOut = 1,      // Broadcast / P2P 重发的搬出任务
-  kBcastReissueIn = 2,  // Broadcast 重发的搬入任务
-  kP2pReissueIn = 3,    // P2P 重发的搬入任务
-  kReduce = 4,          // 逐级 reduce 任务
-  kPidUpdate = 5,       // 完成时带回新 PID，交给紧邻的后继任务
+  kReissueOut = 1,     // Broadcast / P2P 重发的搬出任务
+  kBcastReissueIn = 2, // Broadcast 重发的搬入任务
+  kP2pReissueIn = 3,   // P2P 重发的搬入任务
+  kReduce = 4,         // 逐级 reduce 任务
+  kPidUpdate = 5,      // 完成时带回新 PID，交给紧邻的后继任务
 };
 
 // task_fsm 的五个状态。
 enum class TaskFsm : uint32_t {
-  kIdle = 0,
-  kWait = 1,     // 等外部数据唤醒，或等 credit
-  kReady = 2,    // 前置条件齐了，待发射
-  kInfly = 3,    // 已发射
+  kWait = 0,
+  kReady = 1,
+  kInfly = 2,
+  kWaitCredit = 3,
   kFinish = 4,
+  kReduceWait = 5,
+  kIdle = 6,
 };
 
 // task_chain 的一项。位域照《Task Scheduler MAS》的 TASK_CHAIN_xx_PC / ATTR。
 struct TaskEntry {
-  bool valid = false;                      // ATTR[31]：写 ATTR 时硬件置起
-  uint64_t task_pc = 0;                    // PC[31:0]
-  SendUnit send_unit = SendUnit::kDte;     // ATTR[1:0]
-  RecvUnit recv_unit = RecvUnit::kRvOnly;  // ATTR[3:2]
-  bool wait_wake = false;                  // ATTR[4]
-  TaskType task_type = TaskType::kNormal;  // ATTR[7:5]
+  bool valid = false;                     // ATTR[31]：写 ATTR 时硬件置起
+  uint64_t task_pc = 0;                   // PC[31:0]
+  SendUnit send_unit = SendUnit::kDte;    // ATTR[1:0]
+  RecvUnit recv_unit = RecvUnit::kRvOnly; // ATTR[3:2]
+  bool wait_wake = false;                 // ATTR[4]
+  TaskType task_type = TaskType::kNormal; // ATTR[7:5]
   // ATTR[13:8]：重发搬入任务配对的那个搬出任务。
   uint64_t p2p_reissue_tid = 0;
-  bool credit_en = false;                  // ATTR[14]
-  uint64_t path_id = 0;                    // ATTR[22:15]
-  bool end = false;                        // ATTR[23]
+  bool credit_en = false; // ATTR[14]
+  uint64_t path_id = 0;   // ATTR[22:15]
+  bool end = false;       // ATTR[23]
 
   bool IsDataIn() const { return wait_wake; }
   bool IsReduce() const { return task_type == TaskType::kReduce; }
@@ -81,8 +83,13 @@ struct TaskEntry {
 
 // 一项任务装进 stream 时的初始状态：要等外部数据唤醒的置 WAIT；要查 credit 的
 // 也置 WAIT，credit 到了再置 READY；其余置 READY。
-inline TaskFsm InitFsmOf(TaskEntry const& t) {
-  if (t.wait_wake || t.credit_en) return TaskFsm::kWait;
+inline TaskFsm InitFsmOf(TaskEntry const &t) {
+  if (t.wait_wake)
+    return TaskFsm::kWait;
+  if (t.IsReduce())
+    return TaskFsm::kReduceWait;
+  if (t.credit_en)
+    return TaskFsm::kWaitCredit;
   return TaskFsm::kReady;
 }
 
@@ -101,6 +108,10 @@ struct StreamEntry {
   uint64_t task_id = 0;
   TaskFsm task_fsm = TaskFsm::kIdle;
   uint64_t done_bitmap = 0;
+  uint64_t datain_claimed_mask = 0, datain_accepted_mask = 0;
+  uint64_t credit_drct = 0, drct_used = 0;
+  uint64_t allocation = 0;
+  bool datain_busy = false;
 
   // ── 当前 task 的属性，每次更新 task_id 时从 task_chain 索引得到 ──
   SendUnit task_unit = SendUnit::kDte;
@@ -117,10 +128,11 @@ struct StreamEntry {
   // 本级 Rmem 的 credit，每个用户一份：发出一笔 reduce 就占掉，Rmem 做完那一笔
   // 报回来才还。
   bool rmem_busy = false;
+  uint64_t rmem_task = 0, rmem_pid = 0;
 };
 
 // 把 task_chain 的一项摊进表项。PID 由调用方按继承规则再定。
-inline void ApplyTaskAttr(StreamEntry& e, TaskEntry const& t) {
+inline void ApplyTaskAttr(StreamEntry &e, TaskEntry const &t) {
   e.task_unit = t.send_unit;
   e.task_recv = t.recv_unit;
   e.task_type = t.task_type;
@@ -131,22 +143,22 @@ inline void ApplyTaskAttr(StreamEntry& e, TaskEntry const& t) {
 
 // 自启动 core 上一条链的起点：Task 0 的属性，还没有用户号，等 Task 0 的 RV core
 // ACK 带回来。上电建表与退休后重新激活都从它开始。
-inline StreamEntry SelfStartEntry(TaskEntry const& task0) {
+inline StreamEntry SelfStartEntry(TaskEntry const &task0) {
   StreamEntry e;
   e.valid = true;
   e.user_id_vld = false;
   e.task_id = 0;
   ApplyTaskAttr(e, task0);
-  e.task_fsm = InitFsmOf(task0);
+  e.task_fsm = TaskFsm::kReady;
   return e;
 }
 
 // 完成事件的独立 lane：DTE、MU、VU 各自的 RV core ACK 与 DSA ACK 六路，加
 // Router 的 Reduce Done 一路。第 u 个执行单元的 RV core 那一路是 2u，DSA 那一路
-// 是 2u + 1（《Task Scheduler》：接收6 路的DTE、MU和VU独立Completion Lane，可并行
-// 处理完成事件）。
-constexpr uint64_t kDoneLaneNum = 7;
-constexpr uint64_t kDoneLaneRouter = 6;
+// 是 2u + 1（《Task Scheduler》：接收6 路的DTE、MU和VU独立Completion
+// Lane，可并行 处理完成事件）。
+constexpr uint64_t kDoneLaneNum = 10;
+constexpr uint64_t kDoneLaneRouter = 9;
 
 // Stream_table 的写口，按来源命名。优先级由高到低就是这个顺序：让表项先腾空再
 // 填新的，回收类排在生成类前面，create 排最后，队头卡住时不会因为新用户不断
@@ -155,18 +167,18 @@ constexpr uint64_t kDoneLaneRouter = 6;
 // 都能写；issue 这一类有三个：三条发射通路各自独立打拍，同一拍可以并行下发 3 个
 // task，各自都要回写 READY → INFLY。同类的几个实例挨在一起排。
 enum StreamWritePort : uint32_t {
-  kWrRetirement = 0,  // 清 valid 并推 head_ptr；自启动 core 上原地重新激活
-  kWrCompletion = 1,  // 完成事件，第 k 个 lane 是 kWrCompletion + k
-  kWrInstall = kWrCompletion + kDoneLaneNum,  // Task_ctrl 生成后继，整项写
-  kWrIssueDte,        // 发射通路收到 ACCEPT 后 READY → INFLY
+  kWrRetirement = 0, // 清 valid 并推 head_ptr；自启动 core 上原地重新激活
+  kWrCompletion = 1, // 完成事件，第 k 个 lane 是 kWrCompletion + k
+  kWrInstall = kWrCompletion + kDoneLaneNum, // Task_ctrl 生成后继，整项写
+  kWrIssueDte, // 发射通路收到 ACCEPT 后 READY → INFLY
   kWrIssueMu,
   kWrIssueVu,
-  kWrCreditWake,      // credit 到了置 READY
-  kWrCreate,          // User_Match 建表或补跳过位
+  kWrCreditWake, // credit 到了置 READY
+  kWrCreate,     // User_Match 建表或补跳过位
   kWrPortNum,
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

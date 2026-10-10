@@ -6,9 +6,10 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
-#include "base/logic.h"
 #include "bach/ip/chip/core/ts/ts_types.h"
+#include "base/logic.h"
 
 namespace latch {
 namespace bach {
@@ -16,9 +17,9 @@ namespace bach {
 // TS → RV core：task 下发。
 // cmd_ready 是该 RV core 的 task_queue 有没有空槽，也就是 raw ACCEPT。
 class TaskCmdPort : public Logic {
- public:
-  Logic64 cmd_valid, task_pc, stream_id, task_id, user_id, path_id,
-      task_dsa_en, cmd_ready;
+public:
+  Logic64 cmd_valid, task_pc, stream_id, task_id, user_id, path_id, task_dsa_en,
+      cmd_ready;
   // 一笔命令连着几拍出现在端口上，收方按序号认它。B core 与 R core 的 datain
   // 任务不占 stream 表项，几笔的 stream_id 与 task_id 都是 0，只有序号分得开。
   Logic64 seq;
@@ -34,8 +35,7 @@ class TaskCmdPort : public Logic {
   }
 
   void Drive(uint64_t pc, uint64_t stream, uint64_t task, uint64_t user,
-             uint64_t path, bool dsa_en, uint64_t issue_seq,
-             uint64_t vc = 0) {
+             uint64_t path, bool dsa_en, uint64_t issue_seq, uint64_t vc = 0) {
     cmd_valid = 1;
     task_pc = pc;
     stream_id = stream;
@@ -63,10 +63,11 @@ class TaskCmdPort : public Logic {
 };
 
 // RV core / DSA → TS：完成脉冲。
-// 七路都是脉冲，Task_done 永远就绪、不向上游反压：完成事件在硬件里没有重发通路，
+// 七路都是脉冲，Task_done
+// 永远就绪、不向上游反压：完成事件在硬件里没有重发通路，
 // 接收方一旦拒收就等于把那个 stream 永远停在当前 task。
 class DonePort : public Logic {
- public:
+public:
   // pid：RV core 的 ACK 带回的 PID。只有 PID 更新任务用它，DSA 的 ACK 不带。
   // event：VU 只在 EVENT_EN 置位时才打 dsa_done，同拍把这一位拉高。TS 把这一路
   // 当普通 DSA ACK，不另处理 event。
@@ -108,6 +109,13 @@ struct StreamWrite {
 
   // 整项写（create / install）用这个。
   bool whole = false;
+  bool install = false;
+  bool special_start = false;
+  uint64_t allocation = 0;
+  bool check_allocation = false;
+  uint64_t claim_mask = 0, datain_accept_mask = 0, grant_dirs = 0;
+  bool set_datain_busy = false, datain_busy = false;
+  std::vector<std::shared_ptr<StreamWrite>> updates;
   StreamEntry entry;
 
   // 改字段用这几个。
@@ -149,10 +157,10 @@ struct StreamWrite {
 // 用 LogicPtr 搬请求而不是把字段摊平：一笔整项写含整个 StreamEntry，摊成几十个
 // Logic64 既啰嗦又慢，而 LogicPtr 只搬一个 shared_ptr。
 class StreamWritePortIf : public Logic {
- public:
+public:
   Logic64 valid;
   LogicPtr<StreamWrite> req;
-  Logic64 accepted;
+  Logic64 accepted, accepted_count;
   // 一次握手最少两拍：请求方拉 valid，Stream_table 下一拍写 accepted，请求方
   // 再下一拍才看得到并撤 valid。这中间请求方那一拍不重写端口，Latch 就回落成
   // 上一拍的值，Stream_table 会把同一笔再执行一遍，建表就变成推两次 tail。
@@ -160,8 +168,8 @@ class StreamWritePortIf : public Logic {
   Logic64 seq;
 
   explicit StreamWritePortIf(ClockPtr c)
-      : valid(c), req(c), accepted(c), seq(c) {
-    Fields(valid, req, accepted, seq);
+      : valid(c), req(c), accepted(c), accepted_count(c), seq(c) {
+    Fields(valid, req, accepted, accepted_count, seq);
   }
 
   void Drive(std::shared_ptr<StreamWrite> w) {
@@ -173,13 +181,21 @@ class StreamWritePortIf : public Logic {
     valid = 0;
     req = std::shared_ptr<StreamWrite>();
   }
-  void DriveAccepted(bool ok) { accepted = ok ? 1 : 0; }
+  void DriveAccepted(bool ok) {
+    accepted = ok ? 1 : 0;
+    accepted_count = ok ? 1 : 0;
+  }
+  void DriveAcceptedCount(uint64_t n) {
+    accepted = 1;
+    accepted_count = n;
+  }
+  uint64_t AcceptedCount() const { return accepted_count.Get(); }
   bool Accepted() const { return accepted.Get() != 0; }
   bool Valid() const { return valid.Get() != 0; }
   uint64_t Seq() const { return seq.Get(); }
   std::shared_ptr<StreamWrite> Req() const { return req.Get(); }
 
- private:
+private:
   // 请求方自己的计数，不跨模块读，所以是普通成员。
   uint64_t issue_seq = 0;
 };
@@ -194,16 +210,22 @@ struct StreamSnapshot {
   // 模，满与空都是两者相等，差值分不开，所以这个数单独带出来。上限是 CFG_REG
   // 里软件配的 stream_num，读的人自己去取。
   uint64_t in_flight = 0;
+  uint64_t slot_num = kStreamNum;
+  bool started = false;
+  std::array<uint64_t, 3> credit_count{{16, 16, 16}};
 
   uint64_t InFlight() const { return in_flight; }
+  uint64_t AllocationSid() const {
+    return in_flight == 0 ? tail_ptr : (tail_ptr + 1) % slot_num;
+  }
   // 从 head_ptr 开始的环形年龄序：越靠近 head 越老。
-  uint64_t AgeOrder(uint64_t k) const { return (head_ptr + k) % kStreamNum; }
+  uint64_t AgeOrder(uint64_t k) const { return (head_ptr + k) % slot_num; }
 };
 
 using StreamSnapshotPtr = std::shared_ptr<StreamSnapshot>;
 
 class SnapshotPort : public Logic {
- public:
+public:
   LogicPtr<StreamSnapshot> snap;
 
   explicit SnapshotPort(ClockPtr c) : snap(c) { Fields(snap); }
@@ -212,7 +234,7 @@ class SnapshotPort : public Logic {
   StreamSnapshotPtr Get() const { return snap.Get(); }
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

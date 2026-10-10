@@ -293,7 +293,7 @@
 <text x="1003" y="691" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">相邻下游 Reduce Credit</text>
 <text x="990.0" y="730" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">三路输入 3 × 160 GB/s，输出 160 GB/s，80 GFLOPS；输入后锁定到尾 flit</text>
 <text x="990.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">资源不可用时反压输入，不允许绕过 Reduce 降级为转发</text>
-<text x="990.0" y="758" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">完成后向 core 返回 UserID；收到 Retire 后待下游 credit 全部恢复才删表项</text>
+<text x="990.0" y="758" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">结果全部交付后返回UID，归还RMEM许可；收到 Retire 后待下游 credit 全部恢复才删表项</text>
 <path d="M735 520 L735 600 L819.3 600" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
 <text x="768" y="594" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="middle">Data ×3</text>
 <path d="M820 632 L800 632 L800 520" stroke="#2563eb" stroke-width="1.8" fill="none" marker-end="url(#kgab)" stroke-dasharray="6 3" stroke-linejoin="round" stroke-linecap="round"/>
@@ -491,7 +491,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **正向路：RouterStation 到 CrossBar**
 
-1. Header 先于或与首个 Payload flit 一起到达 `left_data_in_ch`。RouterStation 的 Header Parser 从包头取出 PathID、UserID、size、operation、方向 Mask 与 VC，按 PathID 查本地 RouterTable 副本，为这个包建立路由与资源上下文（目标方向、下一跳 VC、需不需要 Stream 授权、是不是 Reduce、stall_way）。
+1. Header 先于或与首个 Payload flit 一起到达 `left_data_in_ch`。RouterStation 的 Header Parser 从32B包头取PathID、UserID、pkt_length与VCID，按PathID从RouterTable取得operation、方向Mask和资源需求，为这个包建立路由与资源上下文（目标方向、下一跳 VC、需不需要 Stream 授权、是不是 Reduce、stall_way）。
 2. Payload flit 按 Header 指定的 VC 号写入对应的 VC Buffer。四个 VC 各自独立缓存、独立计 credit，一个 VC 堵住不影响其他 VC。
 3. VC 头部 flit 检查所有目标方向的资源：下游该 VC 的 credit、目标方向的 Stream 授权、要进 ReduceModule 时的 Reduce 准入。多播要所有目标方向同时到手，任一方向不足则整体等待。拿不到资源时按 stall_way 处理：留在 VC 里等，或把包转进本地 Core Mem 由 DTE 重发。
 4. 满足条件的请求带着方向 Mask、当前 flit 与下一跳 VC 进 CrossBar 仲裁。CrossBar 按输出独立仲裁，只有竞争同一输出的请求互斥；多播在同一拍向全部目标复制，任一目标没握手就不推进任何分支。握手成功后统一扣各目标的 credit、更新包上下文。
@@ -505,7 +505,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **出 core**
 
-9. DataOut DTE 按 PathID 查自己那份 RouterTable 得到 VC 号。下游的 Stream 与 Rmem 资源已由 TS 在下发任务前查好，DTE 这一侧 dispatch 时不查 VC credit，本地 DTE↔Router 的 VC 反压由 CoreStation 的 DteReady 在 flit 层兜住，经 `out_core_data_ch` 发出整包。CoreStation 拆出 Header 与 Payload，按 Header 的 VC 号写入 Core 方向输入 VC，之后与其他方向一样查表、参与仲裁。进 core 与出 core 两条路完全并行，互不共享仲裁状态。
+9. DataOut DTE使用TS命令携带的实际PID与VCID。TS提前取得普通新方向或本SID的RMEM许可；DTE按每VC credit发送hflit/pflit，四OutCh可以按flit交织。Router按每flit包头VCID区分归属。进Core的RX仍为单通道完整Packet，两个方向不共用整包锁。
 
 **Reduce**
 
@@ -518,7 +518,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 直通（Bypass） | 上游 Router 的 `<方向>_data_in_ch` | RouterStation → CrossBar → 出口 RouterStation 的 output buffer / Packet Shifter | 下游该 VC 的 credit；目标方向需要 Stream 时查本级的下游 Stream 映射表 | 下一个 Router；flit 离开本级 VC 即还上游 VC credit |
 | 多播 | 同上，flow_dir 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
 | 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
-| 出 core | DataOut DTE 的 `out_core_data_ch` | CoreStation 的 Core 方向输入 VC → CrossBar → 出口 RouterStation | DTE dispatch 时不查 VC credit（本地反压由 CoreStation 的 DteReady 在 flit 层兜住）；下游 Stream / Rmem 资源由 TS 在下发前查好 | 下一个 Router；发完向 TS 返回 UserID + PathID |
+| 出 core | DTE TX hflit/pflit | Core方向输入VC → CrossBar → RouterStation | DTE按本地目标VC credit发送，TS管理方向/RMEM许可 | Router返回链路credit；RMEM归还只恢复空间，DTE按全局Ack Ptr另报任务完成 |
 | Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Rmem 资源由 TS 在下发前申请；输出时查目标 VC credit，`reduceNeedMask` 置位的方向还查下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
 | 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
@@ -580,7 +580,7 @@ DTE 取数这一步分三段，只有两头带地址：
 
 * DTE 内按 Router 一个方向的 VC 数各有一个 Buffer，某个 VC 阻塞只阻塞对应的那个 Buffer
 * DTE 发数据到 Router 时与 CoreStation 有 credit 协议，保证 VC 有容量才发
-* 下游的 Stream 与 Rmem 资源由 TS 在下发任务前查好，不在 DTE 这一级；DTE dispatch 时不查 VC credit，本地反压由 CoreStation 的 DteReady 在 flit 层兜住
+* 下游的 Stream 与 Rmem 资源由 TS 在下发任务前查好，不在 DTE 这一级；DTE dispatch 时不查 VC credit，TX按VC信用计数逐flit发送
 * DTE 中也要有一份 RouterTable，按 PathID 查到本跳的 VC 号
 * 进 Core 与出 Core 的数据通路**完全并行**，互不共享数据通路仲裁状态
 
@@ -588,9 +588,9 @@ DTE 取数这一步分三段，只有两头带地址：
 
 Reduce 包从 core 出发这一段的本级资源由 TS 管，进了 ReduceModule 之后往下游那一段由 ReduceModule 管：
 
-* TS 为每个用户记一份本级 Rmem 的 credit，不向 Router 申请：reduce 任务下发一笔就占掉，ReduceModule 做完这一笔报回来才还；一笔 reduce 拆成链上几项时，一项做完再下发下一项
+* TS 为每个用户记一份本级 Rmem 的 credit，不向 Router 申请：Reduce在REDUCE_WAIT取得许可时就占掉，ReduceModule 做完这一笔报回来才还；一笔 reduce 拆成链上几项时，一项做完再下发下一项
 * DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC
-* DTE 搬 Reduce 包与其他出核包一样 dispatch 时不查 VC credit，本地反压由 CoreStation 的 DteReady 在 flit 层兜住
+* DTE 搬 Reduce 包与其他出核包一样 dispatch 时不查 VC credit，TX按VC信用计数逐flit发送
 * ReduceModule 做完一笔任务、结果全部交付后经 `rmem2ts_done_ch` 向 TS 报完成，TS 据此推进这个用户的下一笔 reduce 任务
 * ReduceModule 之间按用户、按任务走：`reduceNeedMask` 置位时，一笔任务头一次向某个方向发之前要取得那个方向这个用户的准入，这笔任务后面的 Packet 与 flit 复用这次准入，逐 flit 只受 VC credit 约束；下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，上游据此放开这个用户在那个方向的资源
 * 表项的删除：收到本级 core 某个 UserID 的 Retire 后本地分区回收；相邻下游各方向在途任务的 release 都回来之后，才删掉这个用户的映射给其他用户用
@@ -725,7 +725,7 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 <text x="353" y="381" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">按 UserID + 目标方向一项</text>
 <rect x="345" y="402" width="170" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
 <text x="353" y="417" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">唯一有效状态</text>
-<text x="353" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">只有 Router 负责真正申请表项</text>
+<text x="353" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router维护实体Stream表项</text>
 <text x="353" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">禁止超额分配或重复授权</text>
 <rect x="545" y="328" width="170" height="66" rx="5" fill="#f5f0ff" stroke="#7c3aed" stroke-width="1.3"/>
 <text x="553" y="343" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#7c3aed" font-weight="700" text-anchor="start">目标 core 的 Router</text>
@@ -813,15 +813,15 @@ Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走
 | - | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
 | 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID 加目标方向，一笔 Reduce 任务 |
-| 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router 是唯一有效状态（User Resource Allocation Table）；DTE 持一份 cache（User Resource Cache Table）；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 | 本级由 TS 按用户记，下发一笔 reduce 占掉、Rmem 做完才还；ReduceModule 维护相邻下游各方向的；Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 | `reduceNeedMask` 置位时，一笔任务头一次向目标方向提交前取得准入，后面的 Packet 与 flit 不再扣 |
+| 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router维护实体Stream分配表；TS维护南北/西/东计数、SID请求及drct_used；DTE旧cache接口的衔接待统一 | 本级由TS按SID记，REDUCE_WAIT取得许可时占掉、Rmem 做完才还；ReduceModule 维护相邻下游各方向的；Router 不维护 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新UserID在Router实体表占项；TS Grant按新增方向同沿扣账并READY | `reduceNeedMask` 置位时，一笔任务头一次向目标方向提交前取得准入，后面的 Packet 与 flit 不再扣 |
 | 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，经业务 credit 的静态旁路返回上游 |
-| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到 release，或收到 Retire 后删该用户全部授权表项 | 建：与用户的 ReduceModule 上下文一起建；删：收到 Retire 且相邻下游各方向在途任务的 release 都回来 |
+| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到Release删除对应方向表项；本地Retire只释放进Core方向 | 建：与用户的 ReduceModule 上下文一起建；删：收到 Retire 且相邻下游各方向在途任务的 release 都回来 |
 | 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按任务还，要等下游这一笔做完 |
 
 stream credit的两条硬规则：
 
-* **只有 Router 负责真正申请表项**，禁止超额分配或重复授权。TS 在下发任务前向 Router 查到指定 user 的授权，DTE 拿到任务时这份授权已经到手
+* **Router维护实体Stream表项**，TS独立管理三方向许可计数和已使用方向。TS在READY前原子取得全部新增方向许可，DTE实际发送时仍逐flit检查VC信用。两边按相同UID生命周期协同，不能重复申请或虚构归还。
 * **Router 的进 core 表和 TS 内部的 stream credit 表按完全一致的逻辑申请空项**。分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收”
 
 Router 另外输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
@@ -1266,9 +1266,9 @@ AXI 侧的两处特殊处理：
 * **由软件负责写入相同配置并保证三方一致，Router 硬件不同步外部副本**
 * 软件只能在 Router 提交完成后再写 DTE 和 ReduceModule
 
-### 出核前的资源监听
+### 出核前的资源监听（旧资料接口，待统一）
 
-core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项资源的职责在 Router，一次监听走三步：
+旧Router MAS将事件监听放在Router；当前TS详设采用本地三方向Credit Ctrl，不向Router发送资源注册。本节完整保留旧事件队列的字段与过程，供Owner统一接口；它不定义当前TS的外部协议。旧监听走三步：
 
 1. TS 发送注册事件
 2. Router 查资源
@@ -1282,7 +1282,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 * 进 core 重发的任务也注册到该队列，数据进 Core、资源就绪后通知 TS 重发
 * 同一 VC 的数据包要保序，当前 VC 有未重发完的数据时后续包不能提前发送
 
-> **取舍**：若改由 TS 监听，大量通信信息要塞进 TS 任务链，计算与通信不再解耦。
+> **取舍**：旧方案把事件监听放Router以减少TS通信状态；新TS方案用三方向计数和Pending请求在本地授权。实体Stream表、旧事件监听与DTE cache如何衔接仍待Owner统一，不能把两套Grant协议同时接入。
 
 ***
 
@@ -1340,7 +1340,7 @@ core 对外发数据要同时满足 VC 资源与 stream credit。监听这两项
 本文其余各节用到的两个包头位，落在上表的哪里：
 
 * `overflow_reinject` 就是 `Hardware Used` 里的 `Bypass` 位。包进 core 暂存时置 1，出 core 重发时改回 0，Router 靠它给 reissue 保序
-* `reduce_seq`（6 bit，Reduce Done 原样带回）占 Reserved 那 8 B 里的位，源文档的字段表没有单列
+* 当前仿真携带reduce_seq辅助归约任务归属；DTE详设32B包头没有冻结该字段的位置，不将它写入Reserved位的用法当作硬件编码。
 
 Header 与 Payload 走**两根独立并行总线**：
 
@@ -1393,7 +1393,7 @@ Header 与 Payload 走**两根独立并行总线**：
 
 ***
 
-配图：[Router 12 张](<Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)
+配图：[Router 12 张](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)
 
 | 编号 | 内容 |
 | - | - |
@@ -1405,12 +1405,12 @@ Header 与 Payload 走**两根独立并行总线**：
 | `06` | ReduceModule 之间 |
 | `07~12` | RouterTable / CSR / 各 Station 与 Xbar 细节 |
 
-另有 [Router OLD 1 张](<Bach/04_四、MAS（Micro Architecture SPEC）/05_Router OLD>)。
+另有 [Router OLD 1 张](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/05_Router OLD>)。
 
 内嵌表格：
 
-* [通信机制 6 子表](_sheets/_II1Rs6)（每个 path_id 在各 core 上的进出方向：broadcast、reduce、p2p、EP 多播各一张；`N8MvQ8` 是 path_id 加 path_core_mask 的编码对照）
-* [通信机制分析过程 52 子表](_sheets/_BTlDsC)（36 张同构的 path_id 路径表覆盖各切分场景，另有 message 动态字段、logic op 说明、合并前后对照）
+* [通信机制 6 子表](</home/colin/develop/perfechpitch/_sheets/_II1Rs6>)（每个 path_id 在各 core 上的进出方向：broadcast、reduce、p2p、EP 多播各一张；`N8MvQ8` 是 path_id 加 path_core_mask 的编码对照）
+* [通信机制分析过程 52 子表](</home/colin/develop/perfechpitch/_sheets/_BTlDsC>)（36 张同构的 path_id 路径表覆盖各切分场景，另有 message 动态字段、logic op 说明、合并前后对照）
 
 来源：
 

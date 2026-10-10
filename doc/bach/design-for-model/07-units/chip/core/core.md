@@ -30,9 +30,9 @@ Core 内七个单元，各一份文档：
 | 单元 | 逐拍推进的模块 | 文档 |
 | - | - | - |
 | Router | RouterStation ×3、Xbar、CoreStation、ReduceModule、RouterTable / CSR、CoreMem 重发、Retire、CoreMemCreditMonitor | [`router.md`](router.md) |
-| TS | User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check（`Stream_table` 内再展开 user_LUT、ptr_ctrl、stream_id_map、task_state_update、task_rdy_check、retire、except_check） | [`ts.md`](ts.md) |
+| TS | Task LUT、DataIn Lookup/Prepare/Candidate、Task Done/ACK FIFO、TG×16、Credit Ctrl、Stream Map与三路Arbiter | [`ts.md`](ts.md) |
 | RV core ×3 | 每个一个模块：task_queue、指令执行器、dsa_iss、dsa_rq、lsq、CSR | [`rv-core.md`](rv-core.md) |
-| DTE DSA | Header Parser、Commit、5 个物理通道（进核 1 + 出核 4，各拆读写两侧，各带 TaskQueue）、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | [`dte.md`](dte.md) |
+| DTE DSA | Config/Status、全局TaskQ、五个Channel十条lane、Buffer/Outstanding、HeaderTable、M Top和SM/Ack退休 | [`dte.md`](dte.md) |
 | MU DSA | regfile、issue_q、gen_ep_info、agu ×3 与 acu、ldq ×2、matrix exe、stq | [`mu.md`](mu.md) |
 | VU DSA | config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU ×3、VSFU ×2、MEXE、SEXE、寄存器堆与 Profile | [`vu.md`](vu.md) |
 | 存储 | Core Mem、Matrix Mem、Share Mem | [`memory.md`](memory.md) |
@@ -66,11 +66,11 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="246.0" y="168.0" font-size="8.5" fill="#475569">CFG_REG：task_chain 64 项 · datain_task 1 项 · stream_num</text>
 <text x="246.0" y="181.5" font-size="8.5" fill="#475569">　SELF_START · B_CORE_DIRECTION · TS_INIT_FINISH / TS_STATE</text>
 <text x="246.0" y="195.0" font-size="8.5" fill="#475569">User_Match · DataIn_task_table（只有 1 项，占住就反压 Router）</text>
-<text x="246.0" y="208.5" font-size="8.5" fill="#475569">Stream_table：16 项顺序 FIFO · task_fsm · done_bitmap 64 位 · 十四个写口</text>
+<text x="246.0" y="208.5" font-size="8.5" fill="#475569">Stream Map：16槽 · 完成／claimed位图 · 按字段合并</text>
 <text x="834.0" y="168.0" font-size="8.5" fill="#475569">Task_ctrl：按完成位图一拍找后继 · 原子安装 · 不越过 End</text>
-<text x="834.0" y="181.5" font-size="8.5" fill="#475569">DTE_Arb（reissue 最高）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
+<text x="834.0" y="181.5" font-size="8.5" fill="#475569">DTE_Arb（同SID DataIn优先，normal/Bypass RR）· MU_Arb · VU_Arb（从 head_ptr 环形年龄优先）</text>
 <text x="834.0" y="195.0" font-size="8.5" fill="#475569">credit 子模块：注册 / 唤醒 · retire：Head-only 退休</text>
-<text x="834.0" y="208.5" font-size="8.5" fill="#475569">Task_done：七路完成合流，reduce 拆成 DTE ack 与 Router Done 两半</text>
+<text x="834.0" y="208.5" font-size="8.5" fill="#475569">Task Done：六路ACK分类；RMEM返回独立还空间</text>
 <text x="1422" y="235" font-size="8.5" fill="#9ca3af" text-anchor="end">三种工作模式由 SELF_START 与 WEIGHTS_MODE 选定</text>
 <rect x="1524" y="130" width="300" height="86.5" rx="4" fill="#f5f3ff" stroke="#7c3aed"/>
 <text x="1536" y="151" font-size="11" fill="#111827" font-weight="600">ctrl_noc 端点</text>
@@ -124,13 +124,13 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1116.0" y="429.0" font-size="8.5" fill="#475569">ITCM 4 KB · DTCM 8 KB · gpr 就绪表 · 自定义 CSR</text>
 <text x="1422" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，一拍最多两条</text>
 <rect x="1104" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（八个模块）</text>
+<text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（五Channel十lane）</text>
 <text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头断言）· Commit（双 Bank，Bank0 优先）</text>
-<text x="1116.0" y="581.5" font-size="8.5" fill="#475569">5 通道（进核 1 + 出核 4）· 每通道 RD/WR 两侧各一个 TaskQueue（含 AGCU）</text>
+<text x="1116.0" y="581.5" font-size="8.5" fill="#475569">5通道 · RD驻留1项 · WR TaskQ4项 · 每通道Buffer8KB</text>
 <text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
-<text x="1116.0" y="608.5" font-size="8.5" fill="#475569">Completion RS（按 task_id Join）· Done Pending</text>
-<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">Hmem 288 B（16 项 × {core_mask, sw_header}）· Fast LUT 待评估</text>
-<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">RouterTable 副本 · 中央 TaskQueue</text>
+<text x="1116.0" y="608.5" font-size="8.5" fill="#475569">WR Finish回写Entry · SM/Ack全局顺序退休</text>
+<text x="1116.0" y="622.0" font-size="8.5" fill="#475569">HeaderTable800B · 每Stream32项Hardware Used</text>
+<text x="1116.0" y="635.5" font-size="8.5" fill="#475569">全局TaskQ16条持有至退休 · 模板8×128B</text>
 <text x="1116.0" y="649.0" font-size="8.5" fill="#475569">出方向 VC buffer ×4 · shareMem 写</text>
 <rect x="324" y="730" width="361.58000000000004" height="150" rx="4" fill="#fdf6ec" stroke="#b45309"/>
 <text x="336" y="751" font-size="11" fill="#111827" font-weight="600">Matrix Mem</text>
@@ -186,13 +186,10 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text transform="rotate(-90 246 424)" x="246" y="426.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">router2ts_trigger_ch</text>
 <path d="M262.0 1040.0 L262.0 245.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
 <rect x="257.0" y="498.4" width="10" height="91.1" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 262 544)" x="262" y="546.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">router2ts_credit_ch</text>
+<text transform="rotate(-90 262 544)" x="262" y="546.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">direction_return</text>
 <path d="M278.0 1040.0 L278.0 245.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
 <rect x="273.0" y="627.4" width="10" height="73.2" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 278 664)" x="278" y="666.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">rmem2ts_done_ch</text>
-<path d="M294.0 244.0 L294.0 1039.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
-<rect x="289.0" y="742.6" width="10" height="82.8" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 294 784)" x="294" y="786.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#b45309" text-anchor="middle">ts2router 资源注册</text>
+<text transform="rotate(-90 278 664)" x="278" y="666.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#0f766e" text-anchor="middle">rmem_credit_done</text>
 <path d="M310.0 244.0 L310.0 1039.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
 <rect x="305.0" y="857.2" width="10" height="93.7" fill="#ffffff" opacity="0.92"/>
 <text transform="rotate(-90 310 904)" x="310" y="906.8" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8" fill="#b45309" text-anchor="middle">retire · credit 返还</text>
@@ -305,7 +302,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 | F16 | VU 不能直接读 Matrix Mem。需要 Matrix Mem 里的数据时先由 DTE 搬到 Core Mem |
 | F17 | 特权级只支持 M 态，不实现 MMU，中断异常上报 SCP。本轮只留状态位与接口名 |
 | F18 | DTE RV core 的 `cm_lsq` 按地址范围分流到两个从端：Core Mem 的 `cmem_rv`，与 Router CoreStation 的 `hdr_rd`。包头只有这一条读取通路，DTE DSA 不另接一条 |
-| F19 | 任务身份到三个 DSA 走同一条路。本核 RV core 执行 `dsaw` 时把 CSR 里的身份抄进这笔配置请求，DSA 收下 trigger 时用请求上的那一份。DTE 取 `streamID` / `taskID` / `userID` / `pathID` / `vcid`，MU 与 VU 取前三项。软件不把身份写进 DSA 寄存器 |
+| F19 | 任务身份到三个 DSA 走同一条路。本核 RV core 执行 `dsaw` 时把 CSR 里的身份抄进这笔配置请求，DSA 收下 trigger 时用请求上的那一份。DTE 取 `streamID` / `taskID` / `userID` / `pathID` / `vcid`，MU/VU命令同样带实际PID和VCID，请求快照保留身份，DSA按本单元接口使用所需字段。软件不把身份写进 DSA 寄存器 |
 | F20 | **三个 DSA 之间没有任何直连**：DTE 进核时把 topK 写进 Core Mem 的 topK 区，MU 自己从那里读回来。DSA 之间的数据一律经存储交换，控制一律经 TS 与各自的 RV core |
 
 ***

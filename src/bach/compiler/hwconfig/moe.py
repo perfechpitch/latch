@@ -501,20 +501,33 @@ def fill_stream_need(plan, rows, cols):
             for d in (DIR_MID, DIR_LEFT, DIR_RIGHT):
                 if not e.flow_dir & flow_of(d):
                     continue
-                skipped = []
-                nxt = neighbor(chip, core, d, rows, cols)
-                while nxt is not None and (plan.bad_mask[nxt[0]] >> nxt[1]) & 1:
-                    skipped.append(nxt)
-                    nxt = neighbor(nxt[0], nxt[1], d, rows, cols)
-                if nxt is None:
-                    continue
-                down = plan.entries.get(nxt, {}).get(path)
-                if down is None or not down.stream_need & CORE_NEED:
+                def destinations(node, incoming, visited):
+                    if node is None or node in visited:
+                        return []
+                    down_entry = plan.entries.get(node, {}).get(path)
+                    if down_entry is None:
+                        return []
+                    if not (plan.bad_mask[node[0]] >> node[1]) & 1:
+                        return [()] if down_entry.stream_need & CORE_NEED else []
+                    reached = []
+                    for outgoing in (DIR_MID, DIR_LEFT, DIR_RIGHT):
+                        if not down_entry.flow_dir & flow_of(outgoing):
+                            continue
+                        next_node = neighbor(node[0], node[1], outgoing, rows, cols)
+                        for rest in destinations(next_node, opposite_of(outgoing), visited | {node}):
+                            reached.append(((node, outgoing, incoming),) + rest)
+                    return reached
+
+                routes = destinations(neighbor(chip, core, d, rows, cols), opposite_of(d), {(chip, core)})
+                if not routes:
                     continue
                 e.stream_need |= flow_of(d)
-                for bad in skipped:
-                    plan.release_route.setdefault(bad, {})[d] = \
-                        flow_of(opposite_of(d))
+                for route in routes:
+                    for bad, release_input, release_output in route:
+                        table = plan.release_route.setdefault(bad, {})
+                        # A bad core can turn a path; releases reverse that turn.
+                        table[release_input] = table.get(release_input, 0) | flow_of(release_output)
+
 
 
 def dot_core_of(col):
@@ -643,14 +656,15 @@ def compute_chain(slot):
 
     两项搬入任务标 wait_wake，Router 送来的 PID 按它匹配：token 与 FC2 输入。MU
     的两笔各在一个 task 里发几笔 DSA 任务，最后一笔置 task_last、由 DSA 报完成，
-    TS 收 RV core 与 DSA 两路。部分和出核是逐级 reduce 任务，由 Router 报完成。"""
+    MU任务使用DSA-only；部分和出核Reduce由Core/DSA双ACK完成，
+    RMEM输出后的UID返回独立归还空间。"""
     s = str(slot)
     return [
         ChainItem(0, "DTE", "DSA", ("dte", "task_dte_token_datain"),
                   path_id=IN_PATH, wait_wake=True),
         ChainItem(1, "MU", "DSA", ("mu", "task_mu_part_s" + s)),
-        ChainItem(2, "DTE", "DSA", ("dte", "task_dte_send_part"),
-                  path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
+        ChainItem(2, "DTE", "RV_DSA", ("dte", "task_dte_send_part"),
+                  path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=False),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_fc2in_datain"),
                   path_id=FC2_BCAST_PATH, wait_wake=True),
         ChainItem(4, "MU", "DSA", ("mu", "task_mu_fc2_s" + s)),
@@ -669,15 +683,15 @@ def dot_chain():
     """dot core（槽位 7）的任务链。
 
     chip 内归约结果与 7 段 concat 都是搬入任务，标 wait_wake；
-    concat 每个上游 core 一项，各对一个 PID。行链出核是逐级 reduce 任务，由
-    Router 报完成：只送本 core 那一包，上游分量由 Router 直接收进 Rmem。"""
+    concat每个上游core一项，各对一个PID。行链Reduce由Core/DSA双ACK完成，
+    只送本Core一包；网络分量直接收进RMEM，UID返回单独归还空间。"""
     s = str(DOT_SLOT)
     items = [
         ChainItem(0, "DTE", "DSA", ("dte", "task_dte_token_datain"),
                   path_id=IN_PATH, wait_wake=True),
         ChainItem(1, "MU", "DSA", ("mu", "task_mu_part_s" + s)),
-        ChainItem(2, "DTE", "DSA", ("dte", "task_dte_send_part"),
-                  path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=True),
+        ChainItem(2, "DTE", "RV_DSA", ("dte", "task_dte_send_part"),
+                  path_id=CHIP_RED_PATH, task_type="REDUCE", credit_en=False),
         ChainItem(3, "DTE", "DSA", ("dte", "task_dte_red_datain"),
                   path_id=CHIP_RED_PATH, wait_wake=True),
         ChainItem(4, "VU", "DSA", ("vu", "task_vu_gate")),
@@ -689,10 +703,10 @@ def dot_chain():
         items.append(ChainItem(DOT_CONCAT_TASK + k, "DTE", "DSA",
                                ("dte", f"task_dte_concat_datain_s{k}"),
                                path_id=CONCAT_PATH[k], wait_wake=True))
-    items.append(ChainItem(DOT_ROW_TASK, "DTE", "DSA",
+    items.append(ChainItem(DOT_ROW_TASK, "DTE", "RV_DSA",
                            ("dte", "task_dte_send_row"),
                            path_id=ROW_PATH, task_type="REDUCE",
-                           credit_en=True, end=True))
+                           credit_en=False, end=True))
     return items
 
 
@@ -722,11 +736,11 @@ def bcore_chain(out_path, next_path=0):
 def rcore_chain(out_path):
     """R core 的链二：从用户 FIFO 取一个 ready 用户，把它那一槽的两份从 Matrix Mem
     送进本级 Rmem 相加，结果直接发往下一行。送进 Rmem 那一笔是逐级 reduce 任务，
-    由 Router 报完成。"""
+    本地Core/DSA双ACK完成Task，RMEM UID返回另行释放许可。"""
     return [
         ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find")),
-        ChainItem(1, "DTE", "DSA", ("dte", "task_dte_rc_reduce"),
-                  path_id=out_path, task_type="REDUCE", credit_en=True,
+        ChainItem(1, "DTE", "RV_DSA", ("dte", "task_dte_rc_reduce"),
+                  path_id=out_path, task_type="REDUCE", credit_en=False,
                   end=True),
     ]
 
@@ -747,18 +761,20 @@ MMEM_BYTES = 36 * 1024 * 1024
 SMEM_BYTES = 32 * 1024
 TS_STREAM_NUM = 16
 BC_TOKEN_BYTES = 6144
+BC_PACKET_BYTES = 6144+192+256
+BC_SLOT_BYTES = (BC_PACKET_BYTES + 255) // 256 * 256
 RC_HALF_BYTES = 0x3080
 RC_SLOT_BYTES = 2 * RC_HALF_BYTES
 RC_SLOTS = MMEM_BYTES // RC_SLOT_BYTES
 RC_FLAG_OFF = 0
-BC_SLOTS_MM = MMEM_BYTES // BC_TOKEN_BYTES
+BC_SLOTS_MM = MMEM_BYTES // BC_SLOT_BYTES
 BC_SMEM_OVERHEAD = 4 + 4 + TS_STREAM_NUM * 4 + 4 + 4 + 4
 BC_SLOTS_SM = (SMEM_BYTES - BC_SMEM_OVERHEAD) // 8
 BC_SLOTS = min(BC_SLOTS_MM, BC_SLOTS_SM)
 BC_FLAG_OFF = 0
 DTEIN_OF_ROLE = {
     "NORMAL": (ROUTE_CM, 0, 0x0000, 0),
-    "BROADCAST": (ROUTE_MM, 1, BC_FLAG_OFF, BC_TOKEN_BYTES),
+    "BROADCAST": (ROUTE_MM, 1, BC_FLAG_OFF, BC_SLOT_BYTES),
     "REDUCTION": (ROUTE_MM, 1, RC_FLAG_OFF, RC_HALF_BYTES),
 }
 
@@ -812,7 +828,7 @@ class Plan:
         self.name = ""
 
     def self_start(self, key):
-        """B core 与 R core 是自启动模式：Task 0 不等 Router trigger 就启动。"""
+        """B/R Core配置SELF_START，首个Router Trigger才激活匿名Task0。"""
         return self.role.get(key) in ("BROADCAST", "REDUCTION")
 
     def ts_routes(self):
@@ -829,7 +845,7 @@ class Plan:
                 e = table.get(pid)
                 d = 0
                 if e is not None:
-                    d = e.flow_dir & (FLOW_MID | FLOW_LEFT | FLOW_RIGHT)
+                    d = e.stream_need & FLOW_ALL_DIR
                     if not e.path_core_bypass:
                         d |= 8
                 one[pid] = (d, VC_OF_PATH.get(pid, pid % VC_NUM))

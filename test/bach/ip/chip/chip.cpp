@@ -11,10 +11,10 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/ip/chip/chip.h"
 #include "bach/ip/link/link.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -29,14 +29,15 @@ void EnsureSlots() { RT::Reset(8, 8); }
 
 // 一个 chip 上百个模块，全部由这一个协程驱动。
 class ChipDriver : public BachModule {
- public:
-  ChipDriver(ClockPtr c, Chip& target) : BachModule(c, "driver"), chip(target) {}
+public:
+  ChipDriver(ClockPtr c, Chip &target)
+      : BachModule(c, "driver"), chip(target) {}
 
- protected:
+protected:
   void Step() override { chip.RunOutside(); }
 
- private:
-  Chip& chip;
+private:
+  Chip &chip;
 };
 
 // ── 布局与坏 core ──
@@ -162,11 +163,12 @@ TEST(BachChip, ScpBootReachesBusiness) {
   // 每个好 core 的五步之一：firmware 写进 ITCM。坏 core 跳过。
   uint64_t good = 0;
   for (uint64_t i = 0; i < chip.CoreNum(); ++i) {
-    if ((kBadMask >> i) & 1u) continue;
+    if ((kBadMask >> i) & 1u)
+      continue;
     ScpTxn t;
     t.core = i;
     t.addr = kCfgItcmBase;
-    t.data = 0x13;   // nop
+    t.data = 0x13; // nop
     chip.Scp().PushCoreTxn(t);
     ++good;
   }
@@ -221,7 +223,7 @@ TEST(BachChip, CtrlNocFlagsAddressOutOfView) {
 
   ScpTxn t;
   t.core = 1;
-  t.addr = 0xF00000;   // 超出全部段
+  t.addr = 0xF00000; // 超出全部段
   chip.Scp().PushRouterTxn(t);
 
   clk->Continue(200 * kPeriod);
@@ -267,9 +269,9 @@ TEST(BachC2c, CreditIsPrivateThenShared) {
   c.Take(0);
   EXPECT_EQ(c.Private(0), 0u);
   EXPECT_EQ(c.Shared(), 3u);
-  c.Take(0);   // private 用完了，借 shared
+  c.Take(0); // private 用完了，借 shared
   EXPECT_EQ(c.Shared(), 2u);
-  c.Give(0);   // 归还先补 private
+  c.Give(0); // 归还先补 private
   EXPECT_EQ(c.Private(0), 1u);
   EXPECT_EQ(c.Shared(), 2u);
   // 一个方向的 credit 总量不超过对侧该方向的 buffer 容量。
@@ -281,8 +283,8 @@ TEST(BachC2c, CreditIsPrivateThenShared) {
 }
 
 // 从 core 收 flit 的那一级按 Router 给这个方向的 credit 总量留位置：两个 VC 各
-// 发满 20 个 private，再用掉 20 个 shared，桥这一侧一个都不丢。对侧不还 credit，
-// 收下的一个都发不出去。
+// 发满 20 个 private，再用掉 20 个 shared，桥这一侧一个都不丢。对侧不还
+// credit， 收下的一个都发不出去。
 TEST(BachC2c, CoreSideHoldsEveryVcsPrivateAndTheShared) {
   uint64_t blocked = 0, held = 0;
   {
@@ -290,11 +292,11 @@ TEST(BachC2c, CoreSideHoldsEveryVcsPrivateAndTheShared) {
     ClockPtr clk = MakeClock(0, kPeriod);
     C2cRcVaSa rc(clk, "rc", kC2cRxPrivate, kC2cRxShared, 0, false);
     class Feeder : public BachModule {
-     public:
-      Feeder(ClockPtr c, C2cRcVaSa& target)
+    public:
+      Feeder(ClockPtr c, C2cRcVaSa &target)
           : BachModule(c, "feed"), rv(target) {}
 
-     protected:
+    protected:
       void Step() override {
         LinkEndPtr w = rv.FromCore();
         if (sent < 3 * kVcPrivateDepth) {
@@ -311,8 +313,8 @@ TEST(BachC2c, CoreSideHoldsEveryVcsPrivateAndTheShared) {
         rv.RunStep();
       }
 
-     private:
-      C2cRcVaSa& rv;
+    private:
+      C2cRcVaSa &rv;
       uint64_t sent = 0;
     };
     Feeder feed(clk, rc);
@@ -335,12 +337,13 @@ TEST(BachC2c, TxSplitsAtSegmentBoundary) {
 
   C2cBeat b;
   b.seg.vc = 1;
-  b.seg.bytes = 3 * kC2cSegBytes + 100;   // 四段
+  b.seg.bytes = 3 * kC2cSegBytes + 100; // 四段
   b.seg.tail = true;
   tx.Push(b);
 
   std::vector<C2cBeat> got;
-  while (tx.HasBeat()) got.push_back(tx.TakeBeat());
+  while (tx.HasBeat())
+    got.push_back(tx.TakeBeat());
   ASSERT_EQ(got.size(), 8u) << "四段各两拍";
   for (uint64_t i = 0; i < 4; ++i) {
     EXPECT_EQ(got[i * 2].seg.seq_id, i);
@@ -372,38 +375,40 @@ TEST(BachC2c, ReleasePassesThroughWithoutSplit) {
   EXPECT_FALSE(tx.HasBeat()) << "release 只占一拍，不按位宽拆";
 }
 
-}  // namespace
+} // namespace
 
 namespace {
 
 // 两座桥对接：一侧的 TakeOut() 喂给另一侧的 PushIn()。
 class BridgePair : public BachModule {
- public:
-  BridgePair(ClockPtr c, C2cBridge& l, C2cBridge& r)
+public:
+  BridgePair(ClockPtr c, C2cBridge &l, C2cBridge &r)
       : BachModule(c, "pair"), left(l), right(r) {}
 
- protected:
+protected:
   void Step() override {
     left.RunStep();
     right.RunStep();
-    while (left.HasOut()) right.PushIn(left.TakeOut());
-    while (right.HasOut()) left.PushIn(right.TakeOut());
+    while (left.HasOut())
+      right.PushIn(left.TakeOut());
+    while (right.HasOut())
+      left.PushIn(right.TakeOut());
   }
 
- private:
-  C2cBridge& left;
-  C2cBridge& right;
+private:
+  C2cBridge &left;
+  C2cBridge &right;
 };
 
 // 往桥的 core 侧灌一个整包，再从对侧的 core 侧收。
 class C2cFeeder : public BachModule {
- public:
+public:
   C2cFeeder(ClockPtr c, LinkEndPtr in_wire, uint64_t bytes, MessagePtr pkt)
       : BachModule(c, "feed"), wire(std::move(in_wire)), size(bytes),
         msg(std::move(pkt)) {}
   bool sent = false;
 
- protected:
+protected:
   void Step() override {
     if (sent) {
       wire->Idle();
@@ -414,29 +419,32 @@ class C2cFeeder : public BachModule {
     sent = true;
   }
 
- private:
+private:
   LinkEndPtr wire;
   uint64_t size;
   MessagePtr msg;
 };
 
 class C2cSink : public BachModule {
- public:
+public:
   C2cSink(ClockPtr c, LinkEndPtr out_wire)
       : BachModule(c, "sink"), wire(std::move(out_wire)) {}
   uint64_t got = 0, bytes = 0, user = 0, at = 0;
 
- protected:
+protected:
   void Step() override {
     FlitView f = ReadFlit(wire->flit);
-    if (!f.valid) return;
+    if (!f.valid)
+      return;
     ++got;
     bytes = f.bytes;
-    if (got == 1) at = CycleNow();
-    if (f.msg) user = f.msg->user_id;
+    if (got == 1)
+      at = CycleNow();
+    if (f.msg)
+      user = f.msg->user_id;
   }
 
- private:
+private:
   LinkEndPtr wire;
 };
 
@@ -484,10 +492,11 @@ TEST(BachC2c, BlockedVcDoesNotHoldOthers) {
     BridgePair pair(clk, a, b);
 
     class VcFeeder : public BachModule {
-     public:
-      VcFeeder(ClockPtr c, LinkEndPtr w) : BachModule(c, "feed"), wire(std::move(w)) {}
+    public:
+      VcFeeder(ClockPtr c, LinkEndPtr w)
+          : BachModule(c, "feed"), wire(std::move(w)) {}
 
-     protected:
+    protected:
       void Step() override {
         static const uint64_t kOrder[] = {0, 0, 0, 3};
         if (sent == 4) {
@@ -501,24 +510,25 @@ TEST(BachC2c, BlockedVcDoesNotHoldOthers) {
         ++sent;
       }
 
-     private:
+    private:
       LinkEndPtr wire;
       uint64_t sent = 0;
     };
     class VcSink : public BachModule {
-     public:
-      VcSink(ClockPtr c, LinkEndPtr w, std::vector<uint64_t>& out)
+    public:
+      VcSink(ClockPtr c, LinkEndPtr w, std::vector<uint64_t> &out)
           : BachModule(c, "sink"), wire(std::move(w)), got(out) {}
 
-     protected:
+    protected:
       void Step() override {
         FlitView f = ReadFlit(wire->flit);
-        if (f.valid) got.push_back(f.vc);
+        if (f.valid)
+          got.push_back(f.vc);
       }
 
-     private:
+    private:
       LinkEndPtr wire;
-      std::vector<uint64_t>& got;
+      std::vector<uint64_t> &got;
     };
     VcFeeder feed(clk, a.FromCore());
     VcSink sink(clk, b.ToCore(), vcs);
@@ -563,7 +573,7 @@ TEST(BachChip, FourBridgesPerChip) {
 
   EXPECT_EQ(uint64_t(kChipPortNum), 4u);
   // 四个口各是一座桥，互不相同。
-  std::set<C2cBridge*> seen;
+  std::set<C2cBridge *> seen;
   for (uint64_t d = 0; d < kChipPortNum; ++d) {
     seen.insert(&chip.Port(d));
   }
@@ -584,10 +594,11 @@ TEST(BachC2c, ReleaseGoesBeforeData) {
 
     // 同一拍在 core 侧既有数据又有 release。
     class BothFeeder : public BachModule {
-     public:
-      BothFeeder(ClockPtr c, LinkEndPtr w) : BachModule(c, "feed"), wire(std::move(w)) {}
+    public:
+      BothFeeder(ClockPtr c, LinkEndPtr w)
+          : BachModule(c, "feed"), wire(std::move(w)) {}
 
-     protected:
+    protected:
       void Step() override {
         if (sent) {
           wire->flit.Idle();
@@ -602,17 +613,17 @@ TEST(BachC2c, ReleaseGoesBeforeData) {
         sent = true;
       }
 
-     private:
+    private:
       LinkEndPtr wire;
       bool sent = false;
     };
     class Drain : public BachModule {
-     public:
-      Drain(ClockPtr c, C2cBridge& b) : BachModule(c, "drain"), br(b) {}
+    public:
+      Drain(ClockPtr c, C2cBridge &b) : BachModule(c, "drain"), br(b) {}
       bool first_release = false;
       bool got_any = false;
 
-     protected:
+    protected:
       void Step() override {
         br.RunStep();
         while (br.HasOut()) {
@@ -624,8 +635,8 @@ TEST(BachC2c, ReleaseGoesBeforeData) {
         }
       }
 
-     private:
-      C2cBridge& br;
+    private:
+      C2cBridge &br;
     };
     BothFeeder feed(clk, br.FromCore());
     Drain drain(clk, br);
@@ -636,7 +647,6 @@ TEST(BachC2c, ReleaseGoesBeforeData) {
   RT::Reset();
   EXPECT_TRUE(first_is_release) << "release 是小包，排在数据前面";
 }
-
 
 // VC credit 跨 C2C 从 flit 粒度转成包粒度：攒够一个包的量才传一笔，笔上带着
 // 它代表几个 flit。
@@ -651,11 +661,11 @@ TEST(BachC2c, VcCreditIsPackedAcrossC2c) {
 
     // core 侧连着还八个 flit 的 VC credit。
     class CreditFeeder : public BachModule {
-     public:
+    public:
       CreditFeeder(ClockPtr c, LinkEndPtr w)
           : BachModule(c, "feed"), wire(std::move(w)) {}
 
-     protected:
+    protected:
       void Step() override {
         wire->flit.Idle();
         if (sent < 8) {
@@ -666,28 +676,29 @@ TEST(BachC2c, VcCreditIsPackedAcrossC2c) {
         }
       }
 
-     private:
+    private:
       LinkEndPtr wire;
       uint64_t sent = 0;
     };
     class Drain : public BachModule {
-     public:
-      Drain(ClockPtr c, C2cBridge& b) : BachModule(c, "drain"), br(b) {}
+    public:
+      Drain(ClockPtr c, C2cBridge &b) : BachModule(c, "drain"), br(b) {}
       uint64_t beats = 0, total = 0;
 
-     protected:
+    protected:
       void Step() override {
         br.RunStep();
         while (br.HasOut()) {
           C2cBeat beat = br.TakeOut();
-          if (!beat.is_release || !beat.rel.vc_valid) continue;
+          if (!beat.is_release || !beat.rel.vc_valid)
+            continue;
           ++beats;
           total += beat.vc_len;
         }
       }
 
-     private:
-      C2cBridge& br;
+    private:
+      C2cBridge &br;
     };
     CreditFeeder feed(clk, br.FromCore());
     Drain drain(clk, br);
@@ -705,14 +716,15 @@ TEST(BachC2c, VcCreditIsPackedAcrossC2c) {
 // ── 空转 ──
 
 class CoreDriver : public BachModule {
- public:
-  CoreDriver(ClockPtr c, Core& target) : BachModule(c, "driver"), core(target) {}
+public:
+  CoreDriver(ClockPtr c, Core &target)
+      : BachModule(c, "driver"), core(target) {}
 
- protected:
+protected:
   void Step() override { core.RunStep(); }
 
- private:
-  Core& core;
+private:
+  Core &core;
 };
 
 TEST(BachCore, IdleCyclesDoNotClash) {
@@ -748,7 +760,7 @@ TEST(BachChip, IdleCyclesDoNotClash) {
   EXPECT_EQ(chip.CoreNum(), 10u);
 }
 
-}  // namespace
+} // namespace
 
 namespace {
 
@@ -764,7 +776,7 @@ TEST(BachChip, CtrlNocWritesReachTargets) {
   ScpTxn mu_cfg;
   mu_cfg.core = 1;
   mu_cfg.addr = kCfgMuBase + kMuPrimitiveDim;
-  mu_cfg.data = (3u << kMuKblockShift) | 5u;   // KBLOCK=3、NBLOCK=5
+  mu_cfg.data = (3u << kMuKblockShift) | 5u; // KBLOCK=3、NBLOCK=5
   chip.Scp().PushRouterTxn(mu_cfg);
 
   ScpTxn sm;
@@ -782,21 +794,22 @@ TEST(BachChip, CtrlNocWritesReachTargets) {
   clk->Continue(300 * kPeriod);
   RT::JoinAll();
 
-  Core& c = chip.GetCore(1);
+  Core &c = chip.GetCore(1);
   EXPECT_EQ(c.GetMu().Regfile().Live().kblock, 3u);
   EXPECT_EQ(c.GetMu().Regfile().Live().nblock, 5u);
 
-  auto read = [](BankedMem& mem, uint64_t at) {
+  auto read = [](BankedMem &mem, uint64_t at) {
     std::vector<uint8_t> b = mem.Peek(at, 4);
     uint64_t v = 0;
-    for (int k = 0; k < 4; ++k) v |= uint64_t(b[k]) << (8 * k);
+    for (int k = 0; k < 4; ++k)
+      v |= uint64_t(b[k]) << (8 * k);
     return v;
   };
   EXPECT_EQ(read(c.Smem(), 0x40), 0xDEADBEEFu);
   EXPECT_EQ(read(c.Cmem(), 0x80), 0x12345678u);
 }
 
-}  // namespace
+} // namespace
 
 // ── 跨 core 的端到端 ──
 
@@ -806,11 +819,12 @@ std::string ChipKernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-uint64_t ChipSymbolOf(std::string const& name, std::string const& kind) {
+uint64_t ChipSymbolOf(std::string const &name, std::string const &kind) {
   std::ifstream f(ChipKernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -837,7 +851,7 @@ MessagePtr ChipToken(uint64_t path, uint64_t user, uint64_t bytes) {
 }
 
 // 一个 core 上的两步链：收进来搬进 Core Mem，再按 out_path 发出去。
-void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
+void WriteRelayChain(Core &core, uint64_t in_path, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -856,6 +870,7 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
 
   core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   // DTE 的 path_task_map：进核搬运报完成时按它填 task_id。
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
@@ -879,9 +894,9 @@ RouteEntry ChipLeaveTo(uint64_t flow) {
 // 两个 core 与它们之间那条链路由这一个协程驱动，外面那两根线也在这里驱动与
 // 读取。出口上的 flit 是单拍脉冲，分成两个协程谁先跑不定，会整拍错过。
 class TwoCoreHarness : public BachModule {
- public:
-  TwoCoreHarness(ClockPtr c, Core& first, Core& second,
-                 std::vector<Link*> wires, uint64_t at, MessagePtr m)
+public:
+  TwoCoreHarness(ClockPtr c, Core &first, Core &second,
+                 std::vector<Link *> wires, uint64_t at, MessagePtr m)
       : BachModule(c, "harness"), c0(first), c1(second),
         links(std::move(wires)), fire_at(at), msg(std::move(m)) {}
 
@@ -890,13 +905,13 @@ class TwoCoreHarness : public BachModule {
   // 两个 core 各自的表都走空了才算这一笔真的走完。
   uint64_t head0 = 0, head1 = 0;
 
- protected:
+protected:
   void Step() override {
-    head0 = c0.GetTs().Table().HeadPtr();
-    head1 = c1.GetTs().Table().HeadPtr();
+    head0 = c0.GetTs().Table().Occupied();
+    head1 = c1.GetTs().Table().Occupied();
     LinkEndPtr in = c0.InWire(kLeftDir);
     if (CycleNow() == fire_at && msg) {
-      in->flit.Drive(0, true, true, msg->size, msg);
+      in->flit.Drive(0, true, true, msg->TotalBytes(), msg);
     } else {
       in->flit.Idle();
     }
@@ -904,30 +919,34 @@ class TwoCoreHarness : public BachModule {
     c0.BackWire(kLeftDir)->flit.Idle();
     c1.BackWire(kRightDir)->flit.Idle();
 
-    for (Link* l : links) l->RunStep();
+    for (Link *l : links)
+      l->RunStep();
     c0.RunStep();
     c1.RunStep();
 
     FlitView f = ReadFlit(c1.OutWire(kRightDir)->flit);
-    if (!f.valid) return;
+    if (!f.valid)
+      return;
     ++out_flits;
-    if (f.msg) out_msgs.push_back(f.msg);
+    if (f.msg)
+      out_msgs.push_back(f.msg);
   }
 
- private:
-  Core& c0;
-  Core& c1;
-  std::vector<Link*> links;
+private:
+  Core &c0;
+  Core &c1;
+  std::vector<Link *> links;
   uint64_t fire_at;
   MessagePtr msg;
 };
 
-}  // namespace
+} // namespace
 
 // 一个 token 走过两个 core：前一个收下搬进 Core Mem 再往右发，后一个收下搬进
 // 自己的 Core Mem 再往右发出去，出来的字节与注入的相等。
 TEST(BachChip, TokenRelaysAcrossTwoCores) {
-  if (!ChipKernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!ChipKernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   // 128 个 MXFP8，与 kernel 里的 E2E_TOKEN_BYTES 同一个数，scale 随它走。
   constexpr uint64_t kBytes = 128;
   MessagePtr token = ChipToken(3, 42, kBytes);
@@ -967,13 +986,52 @@ TEST(BachChip, TokenRelaysAcrossTwoCores) {
     heads = {harness.head0, harness.head1};
   }
   RT::Reset();
-  EXPECT_EQ(heads.first, 1u);    // 两个 core 上这个用户都退休了
-  EXPECT_EQ(heads.second, 1u);
+  EXPECT_EQ(heads.first, 0u); // 两个 core 上这个用户都退休了
+  EXPECT_EQ(heads.second, 0u);
   ASSERT_FALSE(got.empty()) << "第二个 core 的出口上一个包都没有";
   MessagePtr sent = got.front();
   EXPECT_EQ(sent->user_id, token->user_id);
-  ASSERT_EQ(sent->payload.size(), token->payload.size());
+  ASSERT_EQ(sent->payload.size(), token->TotalBytes());
   for (uint64_t i = 0; i < token->payload.size(); ++i) {
     ASSERT_EQ(sent->payload[i], token->payload[i]) << "第 " << i << " 个字节";
   }
+}
+
+TEST(BachCtrlNoc, OnlyAddressedEndpointDrivesReadResponse) {
+  RT::Reset(8, 8);
+  auto clock = MakeClock(0, 1);
+  auto bus = std::make_shared<ScpCtrlPort>(clock);
+  CtrlNocEndpoint first(clock, "first", 0, 0, false),
+      second(clock, "second", 1, 0, false);
+  first.AttachCtrl(bus);
+  second.AttachCtrl(bus);
+  struct Driver : BachModule {
+    CtrlNocEndpoint &first;
+    CtrlNocEndpoint &second;
+    std::shared_ptr<ScpCtrlPort> bus;
+    uint64_t result = 0;
+    Driver(ClockPtr c, CtrlNocEndpoint &a, CtrlNocEndpoint &b,
+           std::shared_ptr<ScpCtrlPort> p)
+        : BachModule(c, "driver"), first(a), second(b), bus(p) {}
+    void Step() override {
+      if (CycleNow() == 2)
+        bus->Drive(0, kCfgTsBase + 0x208, false, 0, false, 1);
+      else
+        bus->Idle();
+      first.RunStep();
+      second.RunStep();
+      if (first.Event().valid)
+        first.SetRdata(7);
+      if (second.Event().valid)
+        second.SetRdata(99);
+      if (CycleNow() == 8)
+        result = bus->cfg_rdata.Get();
+    }
+  } driver(clock, first, second, bus);
+  clock->Continue(10);
+  RT::JoinAll();
+  EXPECT_EQ(driver.result, 7u);
+  EXPECT_EQ(first.Taken(), 1u);
+  EXPECT_EQ(second.Taken(), 0u);
+  RT::Reset();
 }

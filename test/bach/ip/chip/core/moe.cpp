@@ -1,12 +1,14 @@
 // 一个 core 上那一段 MoE 的数值：按 EP6+TP8 的 KN 拆分，槽位 s 的 FC1、FC3 部分
-// 和，silu·dot·量化，FC2 第 s 段，全用 MXFP8 输入，结果与 reference/ 那一份逐 bit
-// 相同。
+// 和，silu·dot·量化，FC2 第 s 段，全用 MXFP8 输入，结果与 reference/ 那一份逐
+// bit 相同。
 //
 // 前两份只走计算通路，不经 TS 与 RV core：MU 任务与门控那几条 VU 宏指令由这里
-// 按顺序下发。第三份装 kernel、走任务链：这个 core 当 dot core 用，自己一个 core
-// 就是整条 chip 内归约链，部分和归约给自己，FC2 那一段写进 concat 区后沿行链出核。
+// 按顺序下发。第三份装 kernel、走任务链：这个 core 当 dot core 用，自己一个
+// core 就是整条 chip 内归约链，部分和归约给自己，FC2 那一段写进 concat
+// 区后沿行链出核。
 //
-// 一个 core 的权重约 1.2 MiB，比对向量里只给种子，两侧按同一个规则逐 tile 生成。
+// 一个 core 的权重约 1.2 MiB，比对向量里只给种子，两侧按同一个规则逐 tile
+// 生成。
 
 #include <gtest/gtest.h>
 
@@ -20,8 +22,6 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/common/numeric/formats.h"
 #include "bach/ip/chip/core/core.h"
 #include "bach/ip/chip/core/memory/core_mem.h"
@@ -29,6 +29,8 @@
 #include "bach/ip/chip/core/mu/mu.h"
 #include "bach/ip/chip/core/vu/vu.h"
 #include "bach/ip/chip/core/vu/vu_moe_static.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 #include "test/bach/ip/chip/kn_data.h"
 
 using namespace latch;
@@ -48,7 +50,7 @@ struct MoeCase {
   std::vector<std::vector<uint8_t>> act, act_scale;
 };
 
-std::vector<uint8_t> HexBytes(std::string const& s) {
+std::vector<uint8_t> HexBytes(std::string const &s) {
   std::vector<uint8_t> v;
   for (size_t i = 0; i + 1 < s.size(); i += 2) {
     v.push_back(uint8_t(std::stoul(s.substr(i, 2), nullptr, 16)));
@@ -63,12 +65,15 @@ MoeCase ReadMoeCase() {
   std::string line;
   std::map<std::string, std::string> kv;
   while (std::getline(f, line)) {
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
     size_t sp = line.find(' ');
-    if (sp == std::string::npos) continue;
+    if (sp == std::string::npos)
+      continue;
     kv[line.substr(0, sp)] = line.substr(sp + 1);
   }
-  if (kv.count("part") == 0) return c;
+  if (kv.count("part") == 0)
+    return c;
   c.group = std::stoull(kv["group"]);
   c.chip = std::stoull(kv["chip"]);
   c.slot = std::stoull(kv["slot"]);
@@ -84,14 +89,15 @@ MoeCase ReadMoeCase() {
 }
 
 // topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
-std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
+std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const &t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
   for (size_t i = 0; i < t.size(); ++i) {
     uint64_t at = i * kTopkEntryBytes;
     b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
     b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
-    for (int k = 0; k < 4; ++k) b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
+    for (int k = 0; k < 4; ++k)
+      b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
   }
   return b;
 }
@@ -101,11 +107,11 @@ constexpr uint64_t kLocal[kn::kExperts] = {1, 0};
 
 // 一个 core 要的那几样：token、topK 表、三个矩阵的那一片。
 template <typename Cmem, typename Mmem>
-void PokeCoreData(Cmem& cm, Mmem& mm, Mu& mu, MoeCase const& want) {
+void PokeCoreData(Cmem &cm, Mmem &mm, Mu &mu, MoeCase const &want) {
   cm.Poke(kn::kTokenOff, want.token);
   cm.PokeScale(kn::kTokenOff, want.token_scale);
-  // topK 表由 DTE 搬运时经专用数据线直接写进 MU 的 topK_ep_table，不落 Core Mem；
-  // 直接存组内序号。这几笔 MU 任务都走 stream 0。
+  // topK 表由 DTE 搬运时经专用数据线直接写进 MU 的 topK_ep_table，不落 Core
+  // Mem； 直接存组内序号。这几笔 MU 任务都走 stream 0。
   mu.EpInfo().WriteTopk(
       0, TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}}));
   kn::PokeCoreWeights(mm, want.group, want.chip, want.slot, kLocal);
@@ -123,12 +129,12 @@ uint64_t OpWord(uint64_t opcode, uint64_t src1 = 0, uint64_t src2 = 0) {
 }
 
 uint64_t TypeVlWord(uint64_t vl) {
-  return (vl & kVuVlMask) | (uint64_t(numeric::RoundMode::kRne)
-                             << kVuRoundModeShift);
+  return (vl & kVuVlMask) |
+         (uint64_t(numeric::RoundMode::kRne) << kVuRoundModeShift);
 }
 
 // 两组静态配置写进一个队列。几个专家共用，地址每条走动态副本。
-void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
+void GateSetup(std::deque<std::pair<uint64_t, uint64_t>> &q) {
   auto st = [&](uint64_t group, uint64_t off, uint64_t data) {
     q.push_back({kVuStaticBase + group * kVuStaticStride + off, data});
   };
@@ -154,25 +160,26 @@ void GateSetup(std::deque<std::pair<uint64_t, uint64_t>>& q) {
 
 // 两个专家拼成两条：组 1 从 red 起读 512 个 fc1，组 2 从两个专家的 fc3 起点读，
 // 写到 act。VL 走动态寄存器。与 kernel_vu.c 的 task_vu_gate 同一种写法。
-void GateFire(std::deque<std::pair<uint64_t, uint64_t>>& q, uint64_t red) {
+void GateFire(std::deque<std::pair<uint64_t, uint64_t>> &q, uint64_t red) {
   uint64_t vl = kn::kSegInter * kn::kExperts;
   q.push_back({kVuTypeVl, TypeVlWord(vl)});
   q.push_back({kVuLdAddr, red});
-  q.push_back({kVuMacroInstTrigger,
-               kVuMaskTypeVl | kVuMaskLdAddr | (1u << kVuTrigCfgIdxShift) |
-                   kVuTrigFence});
+  q.push_back({kVuMacroInstTrigger, kVuMaskTypeVl | kVuMaskLdAddr |
+                                        (1u << kVuTrigCfgIdxShift) |
+                                        kVuTrigFence});
   q.push_back({kVuLdAddr, red + kn::kExperts * kn::kPartStride});
   q.push_back({kVuStAddr, kn::kActOff});
-  q.push_back({kVuMacroInstTrigger,
-               kVuMaskTypeVl | kVuMaskLdAddr | kVuMaskStAddr |
-                   (2u << kVuTrigCfgIdxShift) | kVuTrigEventEn});
+  q.push_back(
+      {kVuMacroInstTrigger, kVuMaskTypeVl | kVuMaskLdAddr | kVuMaskStAddr |
+                                (2u << kVuTrigCfgIdxShift) | kVuTrigEventEn});
 }
 
 // 按序把配置写发进去，看见 ready 才换下一笔。
-void DriveOne(std::deque<std::pair<uint64_t, uint64_t>>& que, DsaCfgPort& port,
-              bool& busy, uint64_t& sq, DsaTaskIds ids = {}) {
+void DriveOne(std::deque<std::pair<uint64_t, uint64_t>> &que, DsaCfgPort &port,
+              bool &busy, uint64_t &sq, DsaTaskIds ids = {}) {
   if (busy) {
-    if (!port.Ready()) return;
+    if (!port.Ready())
+      return;
     que.pop_front();
     busy = false;
   }
@@ -186,22 +193,25 @@ void DriveOne(std::deque<std::pair<uint64_t, uint64_t>>& que, DsaCfgPort& port,
 
 // 一笔 MU 任务要写的那几个寄存器。
 struct MuJob {
-  uint64_t mode = 0;   // primitive_mode 的精度与类型位；专家数、reduce、task_last 由 Submit 拼
+  uint64_t mode = 0; // primitive_mode 的精度与类型位；专家数、reduce、task_last
+                     // 由 Submit 拼
   uint64_t kblock = 1, nblock = 1;
   uint64_t a_addr = 0, b_addr = 0, c_addr = 0, ac_stride = 0;
   bool ep_reduce = false;
 };
 
-void Submit(std::deque<std::pair<uint64_t, uint64_t>>& q, MuJob const& j) {
+void Submit(std::deque<std::pair<uint64_t, uint64_t>> &q, MuJob const &j) {
   uint64_t mode = j.mode | (kn::kExperts << kMuRouterExpertCountShift);
-  if (j.ep_reduce) mode |= kMuRouterEpReduceEn;
-  mode |= kMuTaskLast;   // 单 core 用例三笔各自报一次 dsa_done，全置 task_last
+  if (j.ep_reduce)
+    mode |= kMuRouterEpReduceEn;
+  mode |= kMuTaskLast; // 单 core 用例三笔各自报一次 dsa_done，全置 task_last
   q.push_back({kMuPrimitiveMode, mode});
   q.push_back({kMuPrimitiveDim, j.nblock | (j.kblock << 16)});
   q.push_back({kMuAAddr, j.a_addr});
   q.push_back({kMuBAddr, j.b_addr});
   q.push_back({kMuCAddr, j.c_addr});
-  // AC_expert_stride 拆两侧：FC2 用 token 那侧，FC1/FC3 用 output 那侧，不用的写 0。
+  // AC_expert_stride 拆两侧：FC2 用 token 那侧，FC1/FC3 用 output
+  // 那侧，不用的写 0。
   q.push_back({kMuAcExpertStride,
                j.ep_reduce ? (j.ac_stride << kMuTokenExpertStrideShift)
                            : (j.ac_stride << kMuOutputExpertStrideShift)});
@@ -210,15 +220,16 @@ void Submit(std::deque<std::pair<uint64_t, uint64_t>>& q, MuJob const& j) {
 }
 
 constexpr uint64_t kFc13Mode =
-    (1u << kMuADataTypeShift) |        // A=MXFP8
-    (1u << kMuCDataTypeShift) |        // C=BF16
-    (1u << kMuRouterEpDtypeShift);     // B=MXFP8，primitive_type = 0
-constexpr uint64_t kFc2Mode = kFc13Mode | (1u << kMuPrimTypeShift);  // 1×K64×N128
+    (1u << kMuADataTypeShift) |    // A=MXFP8
+    (1u << kMuCDataTypeShift) |    // C=BF16
+    (1u << kMuRouterEpDtypeShift); // B=MXFP8，primitive_type = 0
+constexpr uint64_t kFc2Mode =
+    kFc13Mode | (1u << kMuPrimTypeShift); // 1×K64×N128
 
 // FC1、门控、FC2 按顺序下发。MU、VU、两块存储与两条配置通路都由这一个协程驱动。
 class MoeRig : public BachModule {
- public:
-  MoeRig(ClockPtr c, Mu& m, Vu& v, CoreMem& cm, MatrixMem& mm, uint64_t slot,
+public:
+  MoeRig(ClockPtr c, Mu &m, Vu &v, CoreMem &cm, MatrixMem &mm, uint64_t slot,
          std::shared_ptr<DsaCfgPort> mu_cfg, std::shared_ptr<DsaCfgPort> vu_cfg)
       : BachModule(c, "rig"), mu(m), vu(v), cmem(cm), mmem(mm), s(slot),
         cfg(std::move(mu_cfg)), vcfg(std::move(vu_cfg)) {}
@@ -226,10 +237,12 @@ class MoeRig : public BachModule {
   uint64_t dones = 0, vdones = 0;
   bool finished = false;
 
- protected:
+protected:
   void Step() override {
-    if (mu.Done().Valid()) ++dones;
-    if (vu.Done().Valid()) ++vdones;
+    if (mu.Done().Valid())
+      ++dones;
+    if (vu.Done().Valid())
+      ++vdones;
     Advance();
     DriveOne(q, *cfg, driving, seq);
     DriveOne(vq, *vcfg, vdriving, vseq, DsaTaskIds{0, 4, 0, 0, 0});
@@ -239,7 +252,7 @@ class MoeRig : public BachModule {
     mmem.RunStep();
   }
 
- private:
+private:
   void Advance() {
     uint64_t token = kn::kTokenOff + s * kn::kSegEmbed;
     uint64_t kb = kn::kSegEmbed / kn::kFc13K, nb = kn::kSegInter / kn::kFc13N;
@@ -264,19 +277,20 @@ class MoeRig : public BachModule {
     }
     // 门控只在最后一条置 EVENT_EN，整个 task 报一次完成。
     if (stage == 3 && vdones >= 1) {
-      Submit(q, {kFc2Mode, kn::kSegInter / kn::kFc2K,
-                 kn::kSegEmbed / kn::kFc2N, kn::kActOff, kn::kMmW2,
-                 kn::ConcatOf(s), kn::kActStride, true});
+      Submit(q,
+             {kFc2Mode, kn::kSegInter / kn::kFc2K, kn::kSegEmbed / kn::kFc2N,
+              kn::kActOff, kn::kMmW2, kn::ConcatOf(s), kn::kActStride, true});
       stage = 4;
       return;
     }
-    if (stage == 4 && dones >= 3) finished = true;
+    if (stage == 4 && dones >= 3)
+      finished = true;
   }
 
-  Mu& mu;
-  Vu& vu;
-  CoreMem& cmem;
-  MatrixMem& mmem;
+  Mu &mu;
+  Vu &vu;
+  CoreMem &cmem;
+  MatrixMem &mmem;
   uint64_t s;
   std::shared_ptr<DsaCfgPort> cfg, vcfg;
   std::deque<std::pair<uint64_t, uint64_t>> q, vq;
@@ -284,11 +298,11 @@ class MoeRig : public BachModule {
   uint64_t seq = 0, vseq = 0, stage = 0;
 };
 
-}  // namespace
+} // namespace
 
 // 一个 core 上的整段：MU 算槽位 s 的 FC1 与 FC3 部分和（两个专家各出一份），
-// VU 做 silu·dot·量化，MU 算 FC2 第 s 段并把两个专家按 topK 权重合并成一份。三处
-// 中间量都与参考实现逐 bit 相同。
+// VU 做 silu·dot·量化，MU 算 FC2 第 s 段并把两个专家按 topK
+// 权重合并成一份。三处 中间量都与参考实现逐 bit 相同。
 TEST(BachMoe, OneCoreMatchesReference) {
   MoeCase want = ReadMoeCase();
   ASSERT_FALSE(want.part.empty())
@@ -328,8 +342,8 @@ TEST(BachMoe, OneCoreMatchesReference) {
     part = cmem.Peek(kn::kFc1Off, kn::kPartBytes - kn::kSwHead);
     for (uint64_t e = 0; e < kn::kExperts; ++e) {
       act.push_back(cmem.Peek(kn::kActOff + e * kn::kActStride, kn::kSegInter));
-      act_scale.push_back(cmem.PeekScale(kn::kActOff + e * kn::kActStride,
-                                         kn::kSegInter / 32));
+      act_scale.push_back(
+          cmem.PeekScale(kn::kActOff + e * kn::kActStride, kn::kSegInter / 32));
     }
     fc2 = cmem.Peek(kn::ConcatOf(want.slot), kn::kFc2Bytes);
   }
@@ -352,31 +366,33 @@ namespace {
 
 // VU 与存储、配置通路都由这一个协程驱动。
 class GateRig : public BachModule {
- public:
-  GateRig(ClockPtr c, Vu& target, CoreMem& mem,
+public:
+  GateRig(ClockPtr c, Vu &target, CoreMem &mem,
           std::shared_ptr<DsaCfgPort> cfg_port)
-      : BachModule(c, "gate"), vu(target), cmem(mem), cfg(std::move(cfg_port)) {}
+      : BachModule(c, "gate"), vu(target), cmem(mem), cfg(std::move(cfg_port)) {
+  }
 
   uint64_t dones = 0;
   std::deque<std::pair<uint64_t, uint64_t>> q;
 
- protected:
+protected:
   void Step() override {
-    if (vu.Done().Valid()) ++dones;
+    if (vu.Done().Valid())
+      ++dones;
     DriveOne(q, *cfg, driving, seq, DsaTaskIds{0, 4, 0, 0, 0});
     vu.RunStep();
     cmem.RunStep();
   }
 
- private:
-  Vu& vu;
-  CoreMem& cmem;
+private:
+  Vu &vu;
+  CoreMem &cmem;
   std::shared_ptr<DsaCfgPort> cfg;
   bool driving = false;
   uint64_t seq = 0;
 };
 
-}  // namespace
+} // namespace
 
 // silu·dot·量化这一步交给 VU 真的算一遍：部分和按 dot core 上归约结果那一包的
 // 摆法铺好，三条宏指令走完，写回 Core Mem 的那一份与它的 scale 与参考实现逐 bit
@@ -411,8 +427,8 @@ TEST(BachMoe, VuGateMatchesReference) {
     dones = rig.dones;
     for (uint64_t e = 0; e < kn::kExperts; ++e) {
       act.push_back(cmem.Peek(kn::kActOff + e * kn::kActStride, kn::kSegInter));
-      act_scale.push_back(cmem.PeekScale(kn::kActOff + e * kn::kActStride,
-                                         kn::kSegInter / 32));
+      act_scale.push_back(
+          cmem.PeekScale(kn::kActOff + e * kn::kActStride, kn::kSegInter / 32));
     }
   }
   RT::FlushRecorder();
@@ -421,7 +437,8 @@ TEST(BachMoe, VuGateMatchesReference) {
   EXPECT_EQ(dones, 1u) << "门控只在最后一条置 EVENT_EN，整个 task 报一次完成";
   for (uint64_t e = 0; e < kn::kExperts; ++e) {
     EXPECT_EQ(act[e], want.act[e]) << "第 " << e << " 个专家";
-    EXPECT_EQ(act_scale[e], want.act_scale[e]) << "第 " << e << " 个专家的 scale";
+    EXPECT_EQ(act_scale[e], want.act_scale[e])
+        << "第 " << e << " 个专家的 scale";
   }
 }
 
@@ -433,11 +450,12 @@ std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-uint64_t SymbolOf(std::string const& name, std::string const& kind) {
+uint64_t SymbolOf(std::string const &name, std::string const &kind) {
   std::ifstream f(KernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -453,7 +471,8 @@ constexpr uint64_t kTokenPath = 3;
 constexpr uint64_t kChipReducePath = 7;
 constexpr uint64_t kRowPath = 11;
 
-TaskEntry Task(SendUnit unit, RecvUnit recv, char const* name, char const* kind) {
+TaskEntry Task(SendUnit unit, RecvUnit recv, char const *name,
+               char const *kind) {
   TaskEntry t;
   t.send_unit = unit;
   t.recv_unit = recv;
@@ -463,44 +482,50 @@ TaskEntry Task(SendUnit unit, RecvUnit recv, char const* name, char const* kind)
 
 // dot core 那条链去掉广播 FC2 输入与收 concat 那几项：只有自己一个 core，没有
 // 要广播给的、也没有要收的。
-void WriteDotChain(Core& core, uint64_t slot) {
+void WriteDotChain(Core &core, uint64_t slot) {
   std::string s = std::to_string(slot);
-  TaskEntry in = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_token_datain", "dte");
+  TaskEntry in =
+      Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_token_datain", "dte");
   in.path_id = kTokenPath;
   in.wait_wake = true;
   core.GetTs().Cfg().WriteTask(0, in);
 
-  core.GetTs().Cfg().WriteTask(
-      1, Task(SendUnit::kMu, RecvUnit::kDsa,
-              ("task_mu_part_s" + s).c_str(), "mu"));
+  core.GetTs().Cfg().WriteTask(1, Task(SendUnit::kMu, RecvUnit::kDsa,
+                                       ("task_mu_part_s" + s).c_str(), "mu"));
 
-  TaskEntry part = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_send_part", "dte");
+  TaskEntry part =
+      Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_send_part", "dte");
   part.path_id = kChipReducePath;
   part.task_type = TaskType::kReduce;
-  part.credit_en = true;
+  part.credit_en = false;
+  part.recv_unit = RecvUnit::kRvAndDsa;
   core.GetTs().Cfg().WriteTask(2, part);
 
-  TaskEntry red = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_red_datain", "dte");
+  TaskEntry red =
+      Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_red_datain", "dte");
   red.path_id = kChipReducePath;
   red.wait_wake = true;
   core.GetTs().Cfg().WriteTask(3, red);
 
   core.GetTs().Cfg().WriteTask(
       4, Task(SendUnit::kVu, RecvUnit::kDsa, "task_vu_gate", "vu"));
-  core.GetTs().Cfg().WriteTask(
-      5, Task(SendUnit::kMu, RecvUnit::kDsa,
-              ("task_mu_fc2_s" + s).c_str(), "mu"));
+  core.GetTs().Cfg().WriteTask(5, Task(SendUnit::kMu, RecvUnit::kDsa,
+                                       ("task_mu_fc2_s" + s).c_str(), "mu"));
 
-  TaskEntry row = Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_send_row", "dte");
+  TaskEntry row =
+      Task(SendUnit::kDte, RecvUnit::kDsa, "task_dte_send_row", "dte");
   row.path_id = kRowPath;
   row.task_type = TaskType::kReduce;
-  row.credit_en = true;
+  row.credit_en = false;
+  row.recv_unit = RecvUnit::kRvAndDsa;
   row.end = true;
   core.GetTs().Cfg().WriteTask(6, row);
 
-  core.GetTs().Cfg().WriteRouterTable(kChipReducePath, 0, kChipReducePath % kVcNum);
+  core.GetTs().Cfg().WriteRouterTable(kChipReducePath, 0,
+                                      kChipReducePath % kVcNum);
   core.GetTs().Cfg().WriteRouterTable(kRowPath, 0, kRowPath % kVcNum);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(kTokenPath, 0);
   core.GetDte().Tables().PreloadPathTask(kChipReducePath, 3);
 }
@@ -527,8 +552,8 @@ RouteEntry ReduceAlone(uint64_t flow) {
 // core 里上百个模块与外面那两根线都由这一个协程驱动。出口上的 flit 是单拍脉冲，
 // 分到两个协程里谁先跑不定，会整拍错过。
 class ChainHarness : public BachModule {
- public:
-  ChainHarness(ClockPtr c, Core& target, uint64_t at, MessagePtr m)
+public:
+  ChainHarness(ClockPtr c, Core &target, uint64_t at, MessagePtr m)
       : BachModule(c, "chain"), core(target), fire_at(at), msg(std::move(m)) {}
 
   std::vector<MessagePtr> out_msgs;
@@ -536,16 +561,23 @@ class ChainHarness : public BachModule {
   std::array<uint64_t, 3> took_vc{};
   uint64_t head = 0, tail = 0;
 
- protected:
+protected:
   void Step() override {
     head = core.GetTs().Table().HeadPtr();
     tail = core.GetTs().Table().TailPtr();
     LinkEndPtr in = core.InWire(1);
-    if (CycleNow() == fire_at && msg) {
-      in->flit.Drive(0, true, true, msg->size, msg);
-    } else {
+    auto released = ReadRelease(core.UpBackWire(1)->release);
+    if (released.vc_valid)
+      ++input_credit;
+    if (CycleNow() >= fire_at && msg && input_offset < msg->TotalBytes() &&
+        input_credit) {
+      auto count = std::min<uint64_t>(256, msg->TotalBytes() - input_offset);
+      bool last = input_offset + count == msg->TotalBytes();
+      in->flit.Drive(0, input_offset == 0, last, count, msg);
+      input_offset += count;
+      --input_credit;
+    } else
       in->flit.Idle();
-    }
     // 出核那一路的下游：上一拍收下的 flit，这一拍把 VC 位置还回去。
     for (uint64_t d = 0; d < 3; ++d) {
       core.BackWire(d)->flit.Idle();
@@ -561,26 +593,30 @@ class ChainHarness : public BachModule {
 
     for (uint64_t d = 0; d < 3; ++d) {
       FlitView f = ReadFlit(core.OutWire(d)->flit);
-      if (!f.valid) continue;
+      if (!f.valid)
+        continue;
       took[d] = true;
       took_vc[d] = f.vc;
-      if (f.tail && f.msg) out_msgs.push_back(f.msg);
+      if (f.tail && f.msg)
+        out_msgs.push_back(f.msg);
     }
   }
 
- private:
-  Core& core;
+private:
+  Core &core;
   uint64_t fire_at;
+  uint64_t input_credit = kVcPrivateDepth + kVcSharedDepth, input_offset = 0;
   MessagePtr msg;
 };
 
-}  // namespace
+} // namespace
 
 // dot core 的链跑一遍：token 带着 scale 进核，MU 算部分和，DTE 把它发进 Router
 // 归约、链尾交回自己，VU 做 silu·dot·量化，MU 算 FC2 那一段写进 concat 区，行链
 // 出核。Core Mem 里的中间量与出口上收到的那一包都与参考实现逐 bit 相同。
 TEST(BachMoe, DotCoreChainMatchesReference) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   MoeCase want = ReadMoeCase();
   ASSERT_FALSE(want.part.empty())
       << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
@@ -623,8 +659,10 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
                           want.token_scale.end());
     token->dst_addr = kn::kTokenOff;
     token->topk_valid = 1;
-    token->topk = TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
-    // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放 payload。
+    token->topk =
+        TopkBytes({{kLocal[0], kn::kWep[0]}, {kLocal[1], kn::kWep[1]}});
+    // topK 与数据/scale 同一条数据通道，size 把它那 256 B 也算进去；字节不放
+    // payload。
     token->size = token->payload.size() + token->topk.size();
 
     ChainHarness harness(clk, core, /*at=*/2, token);
@@ -650,7 +688,8 @@ TEST(BachMoe, DotCoreChainMatchesReference) {
   EXPECT_EQ(red, want.part) << "只有自己一份的归约应当原样交回";
   for (uint64_t e = 0; e < kn::kExperts; ++e) {
     EXPECT_EQ(act[e], want.act[e]) << "第 " << e << " 个专家的 FC2 输入";
-    EXPECT_EQ(act_scale[e], want.act_scale[e]) << "第 " << e << " 个专家的 scale";
+    EXPECT_EQ(act_scale[e], want.act_scale[e])
+        << "第 " << e << " 个专家的 scale";
   }
   EXPECT_EQ(fc2, want.fc2) << "concat 区里自己那一段";
   ASSERT_EQ(got.size(), 1u) << "出口上应当收到行链那一包";
