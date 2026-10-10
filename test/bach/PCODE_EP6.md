@@ -1,6 +1,6 @@
 # pcode EP6/TP8 单 token 功能验收
 
-分支 `codex/ep6-tp8-single-token` 基于 latch 的 `pcode_dev_jxc`，起始提交为 `198c8dfaff331cb9c0d33a0004cf65f2e5052e1b`。配套 BachFlow 分支同名，起始提交为 `96853a104c0d803184a2b633ab973b2aed75c970`。
+分支 `pcode_dev_zlm` 基于 latch 的 `pcode_dev_jxc`，起始提交为 `198c8dfaff331cb9c0d33a0004cf65f2e5052e1b`。配套 BachFlow 分支同名，起始提交为 `96853a104c0d803184a2b633ab973b2aed75c970`。
 
 从配套 BachFlow 工作树执行 `./pcode/run_ep6_single_token.sh`，可完成生成、RISC-V 编译、latch 构建、两个单 token 用例和余弦验收。完整配置说明见 BachFlow 的 `pcode/EP6_SINGLE_TOKEN.md`。
 
