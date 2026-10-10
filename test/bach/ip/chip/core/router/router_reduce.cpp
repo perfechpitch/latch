@@ -97,6 +97,7 @@ class ReduceHarness : public BachModule {
     MessagePtr msg;
     bool tail = true;
     bool head = true;
+    uint64_t bytes = 0;
   };
 
   ReduceHarness(ClockPtr c, ReduceModule& target,
@@ -158,7 +159,10 @@ class ReduceHarness : public BachModule {
     std::vector<bool> drove(in.size(), false);
     for (auto const& j : jobs) {
       if (j.at != now) continue;
-      in[j.lane]->flit.Drive(0, j.head, j.tail, j.msg->size, j.msg);
+      uint64_t bytes = j.bytes ? j.bytes :
+          (j.head && j.tail ? j.msg->size :
+           (j.tail ? ((j.msg->size - 1) % kFlitBytes + 1) : kFlitBytes));
+      in[j.lane]->flit.Drive(0, j.head, j.tail, bytes, j.msg);
       drove[j.lane] = true;
     }
     for (uint64_t r = 0; r < in.size(); ++r) {
@@ -249,6 +253,43 @@ TEST(BachReduce, MultiFlitPartIsAccumulatedOnce) {
             << (8 * k);
   }
   EXPECT_FLOAT_EQ(numeric::FloatOf(last), 42.0f) << "包尾那一个也只加一遍";
+}
+
+TEST(BachReduce, ShortBeatsWaitForActualBytes) {
+  std::vector<MessagePtr> msgs;
+  uint64_t tail = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    auto entry = Relay(0b001);
+    entry.reduce_data_type = kReduceBf16;
+    entry.reduce_outdata_type = kReduceBf16;
+    b.tab->Preload(9, entry);
+    ReduceHarness h(clk, *b.rm, b.wires);
+    auto m = std::make_shared<Message>();
+    m->user_id = 77;
+    m->path_id = 9;
+    m->reduce_seq = 5;
+    m->reduce_aux_bytes = 0;
+    m->size = 1536;
+    m->payload.resize(m->size);
+    for (uint64_t i = 0; i < m->size / 2; ++i) {
+      uint16_t value = numeric::ToBf16(float(i + 1));
+      m->payload[2*i] = uint8_t(value);
+      m->payload[2*i+1] = uint8_t(value >> 8);
+    }
+    for (uint64_t at = 0; at < m->size; at += 128)
+      h.jobs.push_back({2 + at / 128, 0, m, at + 128 == m->size, at == 0, 128});
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    msgs = h.out_msgs;
+    tail = h.last_tail_at;
+    ASSERT_EQ(msgs.size(), 1u);
+    EXPECT_EQ(msgs[0]->payload, m->payload);
+  }
+  RT::Reset();
+  EXPECT_GT(tail, 13u);
 }
 
 // 收齐判据取自表里的 reduce_in_mask：只到一路时不输出，等齐了才发。
@@ -527,7 +568,12 @@ uint64_t RunOnePart(uint64_t count) {
     Bench b(clk);
     b.tab->Preload(9, Relay(0b001));
     ReduceHarness h(clk, *b.rm, b.wires);
-    h.jobs = {{2, 0, LongPart(77, 9, 5, 1.0f, count)}};
+    auto m = LongPart(77, 9, 5, 1.0f, count);
+    for (uint64_t at = 0; at < m->size; at += kFlitBytes) {
+      uint64_t bytes = std::min(kFlitBytes, m->size - at);
+      h.jobs.push_back({2 + at / kFlitBytes, 0, m,
+                       at + bytes == m->size, at == 0, bytes});
+    }
     // 结果按 flit 发，装满时 129 个 flit，留够拍数。
     clk->Continue(400 * kPeriod);
     RT::JoinAll();
@@ -558,9 +604,12 @@ TEST(BachReduce, LockedToTailAcrossInputs) {
     b.tab->Preload(9, Relay(0b011));
     ReduceHarness h(clk, *b.rm, b.wires);
     // lane0 的包分两拍：head 之后隔十拍才来 tail。中间 lane1 想插一笔。
-    h.jobs = {{2, 0, Part(77, 9, 5, 10.0f), false},
-              {4, 1, Part(77, 9, 5, 1000.0f), true},
-              {12, 0, Part(77, 9, 5, 5.0f), true}};
+    auto mid = LongPart(77, 9, 5, 10.0f, 64);
+    auto left = LongPart(77, 9, 5, 1000.0f, 64);
+    h.jobs = {{2, 0, mid, false, true},
+              {4, 1, left, false, true},
+              {5, 1, left, true, false},
+              {12, 0, mid, true, false}};
     clk->Continue(100 * kPeriod);
     RT::JoinAll();
     values = h.out_values;
@@ -569,8 +618,7 @@ TEST(BachReduce, LockedToTailAcrossInputs) {
   RT::Reset();
   EXPECT_GT(stalled, 0u) << "锁定期间 lane1 那一笔要被挡住";
   ASSERT_EQ(values.size(), 1u);
-  // 10 + 5 是 lane0 那个包的两拍，1000 是 lane1 那一份，锁定解除后才收进来。
-  EXPECT_FLOAT_EQ(values[0], 1015.0f) << "挡住的那一份不能丢";
+  EXPECT_FLOAT_EQ(values[0], 1010.0f) << "挡住的那一份不能丢";
 }
 
 // 两个分量任意顺序到齐都算数：先左后中与先中后左结果一样。

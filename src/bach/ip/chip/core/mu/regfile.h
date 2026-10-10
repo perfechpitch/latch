@@ -88,6 +88,8 @@ struct MuTaskCfg {
   uint64_t expert_count = 0;     // router_expert_count；0 表示与专家无关（FC0）
   bool ep_reduce = false;        // router_ep_reduce_en：FC2 置 1，FC1/FC3 置 0
   bool task_last = false;        // 任务包里最后一笔，完成后要反馈 TS
+  bool pcode = false;
+  uint64_t share_mask = 0;
 
   // primitive_dim：[31:16] Kblock、[15:0] Nblock。
   uint64_t kblock = 1;
@@ -134,6 +136,7 @@ class MuRegfile : public BachModule {
   // boot 期 ctrl_noc 灌配置走这一条。与 RV core 的 dsa_iss 那一条分开：两条通路
   // 同时往一个端口上写就是两个写者，而它们本来就不在同一段时间里用。
   void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
+  void SetPcodeMode(bool enabled) { pcode_mode = enabled; live.pcode = enabled; }
 
   DsaCfgPort& CfgPort() { return *cfg_port; }
   std::shared_ptr<DsaCfgPort> CfgPortPtr() const { return cfg_port; }
@@ -205,6 +208,15 @@ class MuRegfile : public BachModule {
   }
 
   void WriteReg(uint64_t addr, uint64_t v) {
+    if (pcode_mode && addr >= 0x1000 && addr < 0x1200) {
+      uint64_t field = ((addr - 0x1000) % 0x80) / 4;
+      if (field < 10) templates[(addr - 0x1000) / 0x80][field] = v;
+      return;
+    }
+    if (pcode_mode && addr >= 4 && addr <= kMuPrimitiveMode) {
+      raw[(addr - 4) / 4] = v;
+      dirty |= 1u << ((addr - 4) / 4);
+    }
     switch (addr) {
       case kMuPrimitiveDim:
         live.kblock = (v >> kMuKblockShift) & 0xFFFFu;
@@ -222,6 +234,17 @@ class MuRegfile : public BachModule {
       case kMuBExpertStride: live.b_expert_stride = v; break;
       case kMuTopkTableAddr: live.topk_table_addr = v; break;
       case kMuPrimitiveMode:
+        if (pcode_mode) {
+          live.primitive_type = v & 1u;
+          live.a_dtype = DecodeADtype((v >> 1) & 1u);
+          live.out_bf16 = ((v >> 2) & 1u) != 0;
+          live.b_dtype = DecodeBDtype((v >> 5) & 3u);
+          live.share_mask = (v >> 7) & 0xFFu;
+          live.expert_count = (v >> 15) & 0xFFu;
+          live.ep_reduce = (v & kMuRouterEpReduceEn) != 0;
+          live.task_last = (v & kMuTaskLast) != 0;
+          break;
+        }
         live.primitive_type = (v >> kMuPrimTypeShift) & 1u;
         live.a_dtype = DecodeADtype((v >> kMuADataTypeShift) & 0x3u);
         live.out_bf16 = ((v >> kMuCDataTypeShift) & 1u) != 0;
@@ -233,11 +256,24 @@ class MuRegfile : public BachModule {
       case kMuTaskTrigger:
         // 写 1 启动，硬件接收后自清零。身份信号在这一拍采样，必须最后写。
         if (v & kMuTriggerValid) {
+          if (pcode_mode) {
+            auto merged = templates[(v >> 1) & 3u];
+            for (uint64_t i = 0; i < raw.size(); ++i) {
+              if (dirty & (1u << i)) merged[i] = raw[i];
+            }
+            for (uint64_t i = 0; i < merged.size(); ++i) WriteReg(4 + i * 4, merged[i]);
+            dirty = 0;
+          }
           DsaTaskIds ids = cfg_port->TaskIds();
           live.stream_id = ids.stream;
           live.task_id = ids.task;
           live.user_id = ids.user;
           latched = live;
+          if (pcode_mode) {
+            if (latched.a_addr >= 0x48400000 && latched.a_addr < 0x48500000) latched.a_addr -= 0x48400000;
+            if (latched.c_addr >= 0x48400000 && latched.c_addr < 0x48500000) latched.c_addr -= 0x48400000;
+            if (latched.b_addr >= 0x48C00000 && latched.b_addr < 0x4AC00000) latched.b_addr -= 0x48C00000;
+          }
           pending = true;
           ++trigger_pending;
         }
@@ -264,6 +300,10 @@ class MuRegfile : public BachModule {
   };
 
   std::shared_ptr<DsaCfgPort> cfg_port;
+  bool pcode_mode = false;
+  std::array<std::array<uint64_t, 10>, 4> templates{};
+  std::array<uint64_t, 10> raw{};
+  uint64_t dirty = 0;
   std::shared_ptr<DsaRdataPort> rdata;
   std::deque<ReadBack> pending_read;
   bool rdata_used = false, busy = false;

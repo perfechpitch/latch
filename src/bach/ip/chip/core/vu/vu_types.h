@@ -689,10 +689,12 @@ struct VuMacroInst {
     return (mask & kVuMaskTypeVl) ? dyn.type_vl : dup.type_vl;
   }
   uint64_t LdAddr() const {
-    return (mask & kVuMaskLdAddr) ? dyn.ld_addr : dup.ld_addr;
+    uint64_t addr = (mask & kVuMaskLdAddr) ? dyn.ld_addr : dup.ld_addr;
+    return addr >= 0x48400000 && addr < 0x48500000 ? addr - 0x48400000 : addr;
   }
   uint64_t StAddr() const {
-    return (mask & kVuMaskStAddr) ? dyn.st_addr : dup.st_addr;
+    uint64_t addr = (mask & kVuMaskStAddr) ? dyn.st_addr : dup.st_addr;
+    return addr >= 0x48400000 && addr < 0x48500000 ? addr - 0x48400000 : addr;
   }
   uint64_t VrfRd(uint64_t port) const {
     return (mask & kVuMaskVrfRd) ? dyn.VrfRd(port) : dup.VrfRd(port);

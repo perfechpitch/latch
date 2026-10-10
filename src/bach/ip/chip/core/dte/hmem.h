@@ -49,11 +49,18 @@ struct HmemEntry {
 // + sw_header 16B），gpu_id / token_id 是模型的包身份边带，一并借这块往返。
 constexpr uint64_t kHeaderCtxBytes = 48;
 
-inline ByteBlock HeaderToBytes(HmemEntry const& h) {
-  ByteBlock b(kHeaderCtxBytes, 0);
+inline ByteBlock HeaderToBytes(HmemEntry const& h, bool pcode = false) {
+  ByteBlock b(pcode ? 32 : kHeaderCtxBytes, 0);
   auto put = [&b](uint64_t off, uint64_t v, uint64_t n) {
     for (uint64_t i = 0; i < n; ++i) b[off + i] = uint8_t((v >> (8 * i)) & 0xFFu);
   };
+  if (pcode) {
+    put(0, h.hardware_used, 1);
+    put(2, h.core_mask, 2);
+    put(16, h.gpu_id, 8);
+    put(24, h.token_id, 8);
+    return b;
+  }
   put(0, h.core_mask, 8);
   put(8, h.hardware_used, 8);
   for (uint64_t i = 0; i < h.sw_header.size(); ++i) b[16 + i] = h.sw_header[i];
@@ -62,14 +69,21 @@ inline ByteBlock HeaderToBytes(HmemEntry const& h) {
   return b;
 }
 
-inline HmemEntry BytesToHeader(ByteBlock const& b) {
+inline HmemEntry BytesToHeader(ByteBlock const& b, bool pcode = false) {
   HmemEntry h;
-  if (b.size() < kHeaderCtxBytes) return h;
+  if (b.size() < (pcode ? 32 : kHeaderCtxBytes)) return h;
   auto get = [&b](uint64_t off, uint64_t n) {
     uint64_t v = 0;
     for (uint64_t i = 0; i < n; ++i) v |= uint64_t(b[off + i]) << (8 * i);
     return v;
   };
+  if (pcode) {
+    h.hardware_used = get(0, 1);
+    h.core_mask = get(2, 2);
+    h.gpu_id = get(16, 8);
+    h.token_id = get(24, 8);
+    return h;
+  }
   h.core_mask = get(0, 8);
   h.hardware_used = get(8, 8);
   for (uint64_t i = 0; i < h.sw_header.size(); ++i) h.sw_header[i] = b[16 + i];

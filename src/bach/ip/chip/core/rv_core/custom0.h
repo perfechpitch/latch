@@ -161,6 +161,29 @@ class Custom0Loop : public Custom0Inst {
 // RV core 的功能模型系统：在标准 RV32IMC 之上接入 custom-0。dsa_base 是本核
 // 绑定的 DSA 的 IO 窗口基址（DTE / MU / VU 各不同），自定义指令的地址都是
 // 窗口内偏移，Decode 时由这里补全成绝对地址再交给指令体。
+// Hardware identity CSRs use the same synchronous task-control view as MMIO.
+class BachCsrInst : public Instruction {
+ public:
+  BachCsrInst(uint32_t w, uint64_t offset)
+      : Instruction("bach_csr", 32), word(w), at(kTaskCtrlBase + offset) {}
+  void RunOnInstance(Instance* instance) override {
+    auto* inst = static_cast<rv32::InstanceRv32*>(instance);
+    uint32_t rd = (word >> 7) & 31u, rs = (word >> 15) & 31u;
+    uint32_t op = (word >> 12) & 7u;
+    uint32_t old = instance->GetSystem()->LoadMem<uint32_t>(at);
+    uint32_t value = op >= 5 ? rs : inst->LocalSr(rs);
+    if ((op & 3u) == 1u || rs != 0) {
+      uint32_t next = (op & 3u) == 1u ? value
+                     : (op & 3u) == 2u ? old | value : old & ~value;
+      instance->GetSystem()->StoreMem<uint32_t>(at, next);
+    }
+    if (rd != 0) inst->SetLocalSr(rd, old);
+  }
+ private:
+  uint32_t word;
+  uint64_t at;
+};
+
 class SystemRv32Bach : public rv32::SystemRv32 {
  public:
   SystemRv32Bach(std::shared_ptr<ISA> isa, uint64_t pc, uint32_t thread,
@@ -170,6 +193,17 @@ class SystemRv32Bach : public rv32::SystemRv32 {
   std::shared_ptr<Instruction> Decode(
       std::shared_ptr<InstBinary> instPkg) const override {
     uint32_t w = uint32_t(instPkg->GetBinary64());
+    if ((w & 0x7Fu) == 0x73u && ((w >> 12) & 7u) != 0) {
+      uint64_t offset = ~0ull;
+      switch (w >> 20) {
+        case 0xFC0: offset = kCsrStreamId; break;
+        case 0xFC1: offset = kCsrTaskId; break;
+        case 0x7C0: offset = kCsrUserId; break;
+        case 0x7C1: offset = kCsrPathId; break;
+        case 0x7C2: offset = 0x1C; break;
+      }
+      if (offset != ~0ull) return std::make_shared<BachCsrInst>(w, offset);
+    }
     if ((w & 0x7Fu) == 0x0Bu) {
       uint32_t funct3 = (w >> 12) & 0x7u;
       bool imm = (w >> 31) & 1u;

@@ -39,6 +39,7 @@ class ReqFeeder : public BachModule {
     bool whole = false;
     // 这一笔在下游要占多少 KB。
     uint64_t require = 0;
+    bool spill = false;
   };
 
   ReqFeeder(ClockPtr c, const std::string& name,
@@ -79,7 +80,7 @@ class ReqFeeder : public BachModule {
     port->path_id = 1;
     port->user_id = j.user;
     port->enters_core = 0;
-    port->stall_way = 0;
+    port->stall_way = j.spill ? 1 : 0;
     port->stream_need = j.stream_need;
     port->whole_packet = j.whole ? 1 : 0;
     port->credit_require = j.require;
@@ -98,9 +99,9 @@ class ReqFeeder : public BachModule {
 class OutTap : public BachModule {
  public:
   OutTap(ClockPtr c, const std::string& name, LinkEndPtr from, LinkEndPtr back,
-         bool release_on)
+         bool release_on, uint64_t release_from = 0)
       : BachModule(c, name), src(std::move(from)), rel(std::move(back)),
-        on(release_on) {}
+        on(release_on), release_at(release_from) {}
 
   uint64_t got = 0;
   std::vector<uint64_t> at, vcs, users, header_vcs;
@@ -112,14 +113,16 @@ class OutTap : public BachModule {
       ++got;
       at.push_back(CycleNow());
       vcs.push_back(f.vc);
+      if (on) waiting.push_back(f.vc);
       if (f.msg) {
         users.push_back(f.msg->user_id);
         header_vcs.push_back(f.msg->vc);
       }
     }
     rel->flit.Idle();
-    if (on && f.valid) {
-      rel->release.Drive(true, f.vc, false, 0);
+    if (on && !waiting.empty() && CycleNow() >= release_at) {
+      rel->release.Drive(true, waiting.front(), false, 0);
+      waiting.pop_front();
     } else {
       rel->release.Idle();
     }
@@ -128,6 +131,8 @@ class OutTap : public BachModule {
  private:
   LinkEndPtr src, rel;
   bool on;
+  uint64_t release_at;
+  std::deque<uint64_t> waiting;
 };
 
 // 一个 Xbar 加它的三个出口。release 默认不回，用例要什么样子自己开。
@@ -170,6 +175,96 @@ std::vector<ReqFeeder::Job> Burst(uint64_t n, uint64_t out_mask, uint64_t vc,
 }
 
 }  // namespace
+
+TEST(BachXbar, OutputArbitrationDoesNotSpillPackets) {
+  uint64_t got = 0, spills = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    auto left = Burst(1, 1ull << kOutMid, 0, 100);
+    auto right = Burst(1, 1ull << kOutMid, 1, 200);
+    left[0].spill = right[0].spill = true;
+    ReqFeeder f0(clk, "f0", b.Req(kInLeft), left);
+    ReqFeeder f1(clk, "f1", b.Req(kInRight), right);
+    OutTap tap(clk, "tap", b.out[kOutMid], b.back[kOutMid], true);
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    got = tap.got;
+    spills = b.xb->OverflowCount();
+  }
+  RT::Reset();
+  EXPECT_EQ(got, 2u);
+  EXPECT_EQ(spills, 0u);
+}
+
+TEST(BachXbar, CreditStallAfterHeadDoesNotSplitThePacket) {
+  uint64_t got = 0, spills = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.xb->SetVcDepth({1,1,1,1}, 0);
+    auto packet = Burst(2, 1ull << kOutMid, 0, 100);
+    packet[0].tail = false;
+    packet[1].head = false;
+    packet[1].user = packet[0].user;
+    packet[0].spill = packet[1].spill = true;
+    ReqFeeder feed(clk, "feed", b.Req(kInLeft), packet);
+    OutTap tap(clk, "tap", b.out[kOutMid], b.back[kOutMid], true, 20);
+    clk->Continue(50 * kPeriod);
+    RT::JoinAll();
+    got = tap.got;
+    spills = b.xb->OverflowCount();
+    ASSERT_EQ(tap.at.size(), 2u);
+    EXPECT_GE(tap.at[1], 20u);
+  }
+  RT::Reset();
+  EXPECT_EQ(got, 2u);
+  EXPECT_EQ(spills, 0u);
+}
+
+TEST(BachXbar, LinkCreditStallAtHeadWaitsForCredits) {
+  uint64_t spills = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.xb->SetVcDepth({0,0,0,0}, 0);
+    auto packet = Burst(1, 1ull << kOutMid, 0, 100);
+    packet[0].spill = true;
+    ReqFeeder feed(clk, "feed", b.Req(kInLeft), packet);
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    spills = b.xb->OverflowCount();
+    EXPECT_EQ(b.xb->SentCount(kOutMid), 0u);
+  }
+  RT::Reset();
+  EXPECT_EQ(spills, 0u);
+}
+
+TEST(BachXbar, FailedCoreMemAllocationSpillsTheWholePacket) {
+  uint64_t spills = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.xb->SetCoreCredit(kOutMid, 0);
+    auto packet = Burst(2, 1ull << kOutMid, 0, 100, true);
+    packet[0].tail = false;
+    packet[1].head = false;
+    packet[1].user = packet[0].user;
+    packet[0].require = packet[1].require = 1;
+    packet[0].spill = packet[1].spill = true;
+    ReqFeeder feed(clk, "feed", b.Req(kInLeft), packet);
+    clk->Continue(40 * kPeriod);
+    RT::JoinAll();
+    spills = b.xb->OverflowCount();
+    EXPECT_EQ(b.xb->SentCount(kOutMid), 0u);
+  }
+  RT::Reset();
+  EXPECT_EQ(spills, 2u);
+}
 
 // 四个 VC 各占各的 private：VC0 把 private 与 shared 都用光之后，VC1 还能发满
 // 它自己那 20 个 private。

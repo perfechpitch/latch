@@ -86,8 +86,8 @@ inline RvRegUse RvDecodeRegs(uint32_t inst) {
       u.has_rs2 = true;
       break;
     case 0x73:                              // SYSTEM（含 CSR）
-      u.has_rd = true;
-      u.has_rs1 = true;
+      u.has_rd = ((inst >> 12) & 7u) != 0;
+      u.has_rs1 = ((inst >> 12) & 7u) >= 1 && ((inst >> 12) & 7u) <= 3;
       break;
     case 0x0B: {                            // custom-0（custom0.h，字段同 self_inst.h）
       uint32_t funct3 = (inst >> 12) & 0x7u;
@@ -220,6 +220,7 @@ class RvExec : public BachModule {
 
   // ── 对外 ──
   std::shared_ptr<TaskStartPort> StartPtr() const { return start; }
+  void SetPcodeMode(bool enabled) { pcode_mode = enabled; }
   void AttachStart(std::shared_ptr<TaskStartPort> p) { start = std::move(p); }
   std::shared_ptr<TaskDonePort> FinishPtr() const { return finish; }
   void AttachFinish(std::shared_ptr<TaskDonePort> p) { finish = std::move(p); }
@@ -308,10 +309,11 @@ class RvExec : public BachModule {
     router->AddPort(dsa_io, DsaIoBase(), DsaIoSize(), 1, 0, "dsa");
     router->AddPort(task_ctrl, kTaskCtrlBase, kTaskCtrlSize, 1, 0, "taskctrl");
     router->AddPort(share_mem, kShareMemBase, kShareMemSize, 1, 0, "smem");
-    // Core Mem 只有 DTE core 看得见。
-    if (unit == RvUnit::kDte) {
-      router->AddPort(core_mem, kCoreMemBase, kCoreMemSize, 1, 0, "cmem");
-    }
+    router->AddPort(core_mem, kCoreMemBase, kCoreMemSize, 1, 0, "cmem");
+    router->AddPort(share_mem, 0x48300000, kShareMemSize, 1,
+                    int64_t(kShareMemBase) - 0x48300000, "pcode_smem");
+    router->AddPort(core_mem, 0x48400000, kCoreMemSize, 1,
+                    int64_t(kCoreMemBase) - 0x48400000, "pcode_cmem");
 
     engine = std::make_unique<rv32::Engine>(/*maxCycles=*/~0ull);
     engine->Add(sys.get(), 0);
@@ -366,6 +368,7 @@ class RvExec : public BachModule {
     cur.path_id = start->path_id.Get();
     cur.dsa_en = start->dsa_en.Get() != 0;
     cur.vcid = start->vcid.Get();
+    if (pcode_mode) ResetAbi();
     sys->SetPC(cur.task_pc, 0);
     sys->SetHaltState(false, 0);
     running = true;
@@ -459,7 +462,9 @@ class RvExec : public BachModule {
     if ((RvIssueResOf(inst) & kResMem) == 0) return false;
     uint64_t a = MemAddr(inst);
     return InRange(a, kShareMemBase, kShareMemSize) ||
-           (unit == RvUnit::kDte && InRange(a, kCoreMemBase, kCoreMemSize));
+           InRange(a, kCoreMemBase, kCoreMemSize) ||
+           InRange(a, 0x48300000, kShareMemSize) ||
+           InRange(a, 0x48400000, kCoreMemSize);
   }
   // 这一条发 DSA 请求：DSA 读写指令，或访存落在本核 DSA 的 IO 窗口。
   bool ToDsa(uint32_t inst) const {
@@ -531,6 +536,7 @@ class RvExec : public BachModule {
     if (at == kCsrTaskId) return cur.task_id;
     if (at == kCsrUserId) return cur.user_id;
     if (at == kCsrPathId) return cur.path_id;
+    if (at == 0x1C) return cur.vcid;
     return 0;
   }
 
@@ -549,6 +555,7 @@ class RvExec : public BachModule {
       cur.task_id = r.data;
       return;
     }
+    if (at == 0x1C) { cur.vcid = r.data & 3u; return; }
     if (at == kCsrPathId) {
       // PID 更新任务：软件把新 PID 写进来，随 task_done 回 TS。
       cur.path_id = r.data;
@@ -574,6 +581,7 @@ class RvExec : public BachModule {
   }
 
   RvUnit unit;
+  bool pcode_mode = false;
   std::shared_ptr<TaskStartPort> start;
   std::shared_ptr<TaskDonePort> finish;
   std::shared_ptr<DonePort> done;

@@ -127,15 +127,18 @@ class UserMatch : public BachModule {
 
   Plan PlanFor(uint64_t path, bool reissue, uint64_t done) const {
     Plan p;
-    uint64_t t = cfg.MatchDatain(path, done);
+    // Transit reissue pairs are conditional side paths, not prerequisites of
+    // the ordinary token chain. The direct-transfer branch skips both tasks.
+    if (!reissue) p.skip = cfg.NonReissueMask();
+    uint64_t t = cfg.MatchDatain(path, done | p.skip);
     if (t >= kTaskChainNum) return p;
     TaskEntry const& in = cfg.Task(t);
     uint64_t out = 1ull << in.p2p_reissue_tid;
     if (!reissue && in.task_type == TaskType::kP2pReissueIn) {
-      p.skip = (1ull << t) | out;
+      p.skip |= (1ull << t) | out;
       return p;
     }
-    if (!reissue && in.task_type == TaskType::kBcastReissueIn) p.skip = out;
+    if (!reissue && in.task_type == TaskType::kBcastReissueIn) p.skip |= out;
     p.task_id = t;
     return p;
   }

@@ -416,3 +416,25 @@ TEST(BachCustom0, DecodeMapsEachEncoding) {
   EXPECT_EQ(dynamic_cast<Custom0Dsaw*>(decode(wft).get()), nullptr);
   EXPECT_EQ(dynamic_cast<Custom0Dsawi*>(decode(wft).get()), nullptr);
 }
+
+
+TEST(BachCustom0, HardwareCsrsReadAndUpdateTaskIdentity) {
+  auto csr = [](uint32_t number, uint32_t rd, uint32_t rs, uint32_t op) {
+    return (number << 20) | (rs << 15) | (op << 12) | (rd << 7) | 0x73u;
+  };
+  Case result = RunProgram({
+    csr(0xFC0, kA0, kX0, 2), EncDsawi(kA0, 0x40),
+    csr(0xFC1, kA1, kX0, 2), EncDsawi(kA1, 0x44),
+    csr(0x7C0, kX0, 17, 5), csr(0x7C0, kA0, kX0, 2), EncDsawi(kA0, 0x48),
+    csr(0x7C1, kX0, 13, 5), csr(0x7C1, kA0, kX0, 2), EncDsawi(kA0, 0x4C),
+    csr(0x7C2, kX0, 2, 5), csr(0x7C2, kA0, kX0, 2), EncDsawi(kA0, 0x50),
+    EncTaskDone(1)}, {});
+  ASSERT_EQ(result.writes.size(), 5u);
+  EXPECT_EQ(result.writes[0].data, kStream);
+  EXPECT_EQ(result.writes[1].data, kTask);
+  EXPECT_EQ(result.writes[2].data, 17u);
+  EXPECT_EQ(result.writes[3].data, 13u);
+  EXPECT_EQ(result.writes[4].data, 2u);
+  EXPECT_EQ(result.done_user, 17u);
+  EXPECT_EQ(result.done_path, 13u);
+}

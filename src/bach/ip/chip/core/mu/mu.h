@@ -95,12 +95,24 @@ class Mu {
   // topK 里第 i 个专家在本 EP Group 内的序号。topK 直接存组内序号，读出来就是；
   // 没配 topK 的那一档按 topK 里的先后当序号用。
   uint64_t LocalEpOf(MuInflight const& f, uint64_t i) const {
+    if (f.cfg.pcode && f.cfg.expert_count != 0) {
+      if (i == 0) return 0;
+      auto t = ep->PcodeTopk(f.cfg.stream_id, 8);
+      LOGCHECK(i <= t.size(), "pcode expert index exceeds topK count");
+      return t[i - 1].local_ep_index + 1;
+    }
     std::vector<TopkEntry> const& t = TopkOf(f);
     if (i >= t.size()) return i;
     return t[i].local_ep_index;
   }
   // topK 里第 i 个专家的权重。合并成一份时乘它。
   float WeightOf(MuInflight const& f, uint64_t i) const {
+    if (f.cfg.pcode && f.cfg.expert_count != 0) {
+      if (i == 0) return f.cfg.share_mask ? 1.0f : 0.0f;
+      auto t = ep->PcodeTopk(f.cfg.stream_id, 8);
+      LOGCHECK(i <= t.size(), "pcode expert index exceeds topK count");
+      return t[i - 1].weight;
+    }
     std::vector<TopkEntry> const& t = TopkOf(f);
     if (i >= t.size()) return 1.0f;
     return t[i].weight;
@@ -222,7 +234,9 @@ class Mu {
       // 第一步就是阻塞任务下发。
       if (drain != MuDrain::kNone) return;
       if (!mu.reg->HasPending() || !mu.iq->HasRoom()) return;
-      mu.iq->Push(mu.reg->TakePending());
+      auto task_cfg = mu.reg->TakePending();
+      if (task_cfg.pcode && task_cfg.expert_count != 0) task_cfg.expert_count = mu.ep->PcodeTopk(task_cfg.stream_id, task_cfg.expert_count).size() + 1;
+      mu.iq->Push(task_cfg);
     }
 
     // 一笔任务按 tile 走 kblock × nblock 遍。三段各找各自那一笔，所以写回第 i
@@ -305,6 +319,7 @@ class Mu {
       uint64_t ne = f->cfg.Experts();
       uint64_t ki = f->computed % kb;
       uint64_t ei = (f->computed / kb) % ne;
+      if (f->cfg.pcode && f->cfg.expert_count != 0 && ei == 0 && f->cfg.share_mask == 0) std::fill(weight.begin(), weight.end(), 0);
       mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
                     ki + 1 == kb, ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
       ++f->computed;

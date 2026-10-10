@@ -21,6 +21,8 @@
 // 要一起改。
 
 #include <fstream>
+#include <array>
+#include <tuple>
 #include <map>
 #include <sstream>
 #include <string>
@@ -68,6 +70,9 @@ struct CorePlan {
   Route dtein_route = Route::kRouterToCm;        // DTEIN 声明的落点，只用于角色校验
   bool has_dtein = false;
   std::vector<std::pair<uint64_t, uint64_t>> vu_static;  // (vu_off, data)
+  std::array<std::string, 3> kernels{};
+  std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> dsa_regs;
+  std::map<uint64_t, uint64_t> smem;
 };
 
 inline uint64_t Num(std::string const& s) {
@@ -166,6 +171,7 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
 
   std::string line;
   bool head_ok = false;
+  bool pcode = false;
   while (std::getline(fp, line)) {
     if (line.empty() || line[0] == '#') continue;
     std::istringstream ss(line);
@@ -176,8 +182,9 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     std::string const& tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && tok[1] == "10",
-               "LoadBundle: 只认 BACHIR 10 那一版产物。");
+      LOGCHECK(tok.size() == 2 && (tok[1] == "10" || tok[1] == "11"),
+               "LoadBundle: unsupported BACHIR version.");
+      pcode = tok[1] == "11";
       head_ok = true;
       continue;
     }
@@ -204,7 +211,18 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     LOGCHECK(key.second < kChipCoreNum, "LoadBundle: core 号越界。");
     CorePlan& c = plan[key];
 
-    if (tag == "CORE") {
+    if (tag == "KERNELCORE") {
+      LOGCHECK(pcode && tok.size() == 5 && Num(tok[3]) < 3,
+               "LoadBundle: invalid KERNELCORE.");
+      c.kernels[Num(tok[3])] = tok[4];
+    } else if (tag == "DSAREG") {
+      LOGCHECK(pcode && tok.size() == 6 && Num(tok[3]) < 3,
+               "LoadBundle: invalid DSAREG.");
+      c.dsa_regs.emplace_back(Num(tok[3]), Num(tok[4]), Num(tok[5]));
+    } else if (tag == "SMEM") {
+      LOGCHECK(pcode && tok.size() == 5, "LoadBundle: invalid SMEM.");
+      c.smem[Num(tok[3])] = Num(tok[4]);
+    } else if (tag == "CORE") {
       LOGCHECK(tok.size() == 4, "LoadBundle: CORE 记录要三个字段。");
       uint64_t role = Num(tok[3]);
       LOGCHECK(role <= uint64_t(CoreRole::kSpare),
@@ -340,8 +358,24 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     }
     if (core.Bad()) continue;
 
+    core.SetPcodeMode(pcode);
+    core.GetMu().Regfile().SetPcodeMode(pcode);
+    core.GetDte().Regfile().SetPcodeMode(pcode);
+    for (auto const& r : c.dsa_regs) {
+      uint64_t u = std::get<0>(r), off = std::get<1>(r), v = std::get<2>(r);
+      if (u == 0) core.GetDte().Regfile().CfgWrite(off, v);
+      if (u == 1) core.GetMu().Regfile().CfgWrite(off, v);
+      if (u == 2) core.GetVu().Preload(off, v);
+    }
+    for (auto const& r : c.smem) {
+      std::vector<uint8_t> bytes(4);
+      for (int k = 0; k < 4; ++k) bytes[k] = uint8_t(r.second >> (8 * k));
+      core.Smem().Poke(r.first, bytes);
+    }
+
     for (uint64_t i = 0; i < images.size(); ++i) {
-      if (!images[i].empty()) core.Rv(i).LoadImage(dir + "/" + images[i]);
+      std::string const& image = c.kernels[i].empty() ? images[i] : c.kernels[i];
+      if (!image.empty()) core.Rv(i).LoadImage(dir + "/" + image);
     }
     for (uint64_t path_id : c.dte_rtab) {
       auto found = c.rtab.find(path_id);

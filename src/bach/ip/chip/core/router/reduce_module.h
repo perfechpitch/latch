@@ -42,7 +42,8 @@
 // 数值：输入按 RouterTable 的 reduce_data_type 解，BF16 先扩成 FP32，FP32 直接
 // 进；中间累加固定 FP32；输出按 reduce_outdata_type 转成 FP32 或 BF16。
 //
-// 包最前面 16 B 是软件辅助信息，加法跳过这一段，原样留在输出里。
+// Legacy packets begin with 16 B of software information, copied without
+// addition. Pcode numerical reduction packets have no such prefix.
 
 #include <algorithm>
 #include <array>
@@ -155,8 +156,8 @@ class ReduceModule : public BachModule {
   bool HoldsUser(uint64_t user) const { return ctx.count(user) != 0; }
   uint64_t ContextUsed() const { return ctx.size(); }
 
-  bool CanAcceptHead(Message const& m) const {
-    uint64_t bytes = ElemsOf(m.size, rtab.Lookup(copy, m.path_id).reduce_data_type) * 4;
+  bool CanAcceptHead(Message const& m, uint64_t lane = 0) const {
+    uint64_t bytes = ElemsOf(m.size, LaneDtype(rtab.Lookup(copy, m.path_id).reduce_data_type, lane), m.reduce_aux_bytes) * 4;
     LOGCHECK(bytes <= kReduceCtxBytes, "ReduceModule: 超过 32 KiB。");
     auto it = ctx.find(m.user_id);
     if (it == ctx.end()) return ctx.size() < kReduceCtxNum;
@@ -164,8 +165,8 @@ class ReduceModule : public BachModule {
     if (c.busy || c.reserved) return c.reduce_seq == m.reduce_seq && c.path_id == m.path_id;
     return !c.retired;
   }
-  void ReserveHead(Message const& m) {
-    LOGCHECK(CanAcceptHead(m), "ReduceModule: 未获准入。");
+  void ReserveHead(Message const& m, uint64_t lane = 0) {
+    LOGCHECK(CanAcceptHead(m, lane), "ReduceModule: 未获准入。");
     auto& c = ctx[m.user_id];
     if (c.busy || c.reserved) return;
     c.reserved = true;
@@ -181,6 +182,7 @@ class ReduceModule : public BachModule {
 
   struct TaskState {
     uint64_t user_id, path_id, reduce_seq, expect_mask, in_done_mask;
+    std::array<uint64_t,3> got;
   };
   struct State {
     std::vector<TaskState> tasks;
@@ -194,7 +196,7 @@ class ReduceModule : public BachModule {
       Ctx const& c = item.second;
       if (c.busy) {
         s.tasks.push_back({item.first, c.path_id, c.reduce_seq,
-                           c.expect_mask, c.in_done_mask});
+                           c.expect_mask, c.in_done_mask, c.got});
       }
     }
     for (uint64_t r = 0; r < 3; ++r) {
@@ -257,6 +259,7 @@ class ReduceModule : public BachModule {
     std::vector<float> acc;          // FP32 中间累加结果
     std::vector<bool> seen;          // 各元素是不是已经写进过第一份
     std::vector<uint8_t> sw_head;    // 首份输入的软件辅助信息，输出时照抄
+    uint64_t aux_bytes = kReduceSwHeaderBytes;
     uint64_t in_dtype = kReduceBf16, out_dtype = kReduceBf16;
     bool retired = false;            // 收到 Retire，这笔任务交付完就放分区
     uint64_t locked_from = 3;        // 锁定到尾 flit 的那一路，3 = 没锁
@@ -329,15 +332,16 @@ class ReduceModule : public BachModule {
         c.expect_mask = e.reduce_in_mask;
         c.in_done_mask = 0;
         c.got = {};
+        c.aux_bytes = f.msg->reduce_aux_bytes;
         c.in_dtype = e.reduce_data_type;
         c.out_dtype = e.reduce_outdata_type;
-        uint64_t n = ElemsOf(f.msg->size, c.in_dtype);
+        uint64_t n = ElemsOf(f.msg->size, LaneDtype(c.in_dtype, r), c.aux_bytes);
         c.acc.assign(n, 0.0f);
         c.seen.assign(n, false);
         CheckCtxFits(c);
         c.sw_head.assign(f.msg->payload.begin(),
                          f.msg->payload.begin() +
-                             std::min<size_t>(kReduceSwHeaderBytes,
+                             std::min<size_t>(c.aux_bytes,
                                               f.msg->payload.size()));
         c.first_msg = f.msg;
         out_q.push_back({user, c.reduce_seq, nullptr, 0});
@@ -346,9 +350,11 @@ class ReduceModule : public BachModule {
       c.got[r] = 0;
     }
     uint64_t lo = c.got[r];
-    uint64_t hi = f.tail ? f.msg->size
-                         : std::min<uint64_t>(lo + kFlitBytes, f.msg->size);
-    AccumRange(c, f.msg->payload, lo, hi);
+    uint64_t hi = std::min<uint64_t>(lo + f.bytes, f.msg->size);
+    if (std::getenv("PCODE_TRACE_REDUCE"))
+      fprintf(stderr, "reduce cycle %llu id %llu lane %llu path %llu head %d tail %d lo %llu bytes %llu size %llu mask %llu dtype %llu\n", CycleNow(), Id(), r, f.msg->path_id, f.head, f.tail, lo, f.bytes, f.msg->size, c.expect_mask, c.in_dtype);
+    LOGCHECK(!f.tail || hi == f.msg->size, "ReduceModule: tail before the payload was fully received");
+    AccumRange(c, f.msg->payload, lo, hi, LaneDtype(c.in_dtype, r));
     c.got[r] = hi;
     c.locked_from = f.tail ? 3 : r;
     ++accepted_pending;
@@ -359,20 +365,21 @@ class ReduceModule : public BachModule {
   // 的那一路不再限制。有一路一个元素都还没进来就是 0。
   uint64_t ReadyBytes(Ctx const& c, uint64_t out_size) const {
     if (c.in_done_mask == c.expect_mask) return out_size;
-    uint64_t in_n = ElemBytes(c.in_dtype), out_n = ElemBytes(c.out_dtype);
+    uint64_t out_n = ElemBytes(c.out_dtype);
     uint64_t elems = ~0ull;
     for (uint64_t r = 0; r < 3; ++r) {
       if (((c.expect_mask >> r) & 1u) == 0) continue;
       if ((c.in_done_mask >> r) & 1u) continue;
-      if (c.got[r] < kReduceSwHeaderBytes + in_n) return 0;
-      elems = std::min(elems, (c.got[r] - kReduceSwHeaderBytes) / in_n);
+      uint64_t in_n = ElemBytes(LaneDtype(c.in_dtype, r));
+      if (c.got[r] < c.aux_bytes + in_n) return 0;
+      elems = std::min(elems, (c.got[r] - c.aux_bytes) / in_n);
     }
-    return std::min(out_size, kReduceSwHeaderBytes + elems * out_n);
+    return std::min(out_size, c.aux_bytes + elems * out_n);
   }
 
   // 结果包的长度：软件辅助信息加上按输出精度排的累加结果。
   static uint64_t OutSizeOf(Ctx const& c) {
-    return kReduceSwHeaderBytes + c.acc.size() * ElemBytes(c.out_dtype);
+    return c.aux_bytes + c.acc.size() * ElemBytes(c.out_dtype);
   }
 
   // 一个包的 FP32 累加结果要装得进这个用户的分区。
@@ -400,29 +407,33 @@ class ReduceModule : public BachModule {
   }
 
   // 一份分量有几个元素：软件辅助信息之后的数据段按输入精度算。
-  static uint64_t ElemsOf(uint64_t bytes, uint64_t dtype) {
-    if (bytes <= kReduceSwHeaderBytes) return 0;
-    return (bytes - kReduceSwHeaderBytes) / ElemBytes(dtype);
+  static uint64_t LaneDtype(uint64_t dtype, uint64_t lane) {
+    return (dtype & 0x100) ? ((dtype >> lane) & 1u) : dtype;
+  }
+
+  static uint64_t ElemsOf(uint64_t bytes, uint64_t dtype, uint64_t aux = kReduceSwHeaderBytes) {
+    if (bytes <= aux) return 0;
+    return (bytes - aux) / ElemBytes(dtype);
   }
 
   // 一个 flit 带来的字节段 [lo, hi) 里的元素累加进分区：一个元素归结束在这一段
   // 里的那个 flit。第一份写入，后面的读出当前值、加、写回，中间累加固定 FP32。
   // 软件辅助信息那 16 B 跳过。
   static void AccumRange(Ctx& c, std::vector<uint8_t> const& in, uint64_t lo,
-                         uint64_t hi) {
-    if (hi <= kReduceSwHeaderBytes) return;
-    uint64_t n = ElemBytes(c.in_dtype);
-    uint64_t from = lo <= kReduceSwHeaderBytes ? 0 : (lo - kReduceSwHeaderBytes) / n;
-    uint64_t to = (hi - kReduceSwHeaderBytes) / n;
+                         uint64_t hi, uint64_t dtype) {
+    if (hi <= c.aux_bytes) return;
+    uint64_t n = ElemBytes(dtype);
+    uint64_t from = lo <= c.aux_bytes ? 0 : (lo - c.aux_bytes) / n;
+    uint64_t to = (hi - c.aux_bytes) / n;
     for (uint64_t k = from; k < to; ++k) {
-      uint64_t at = kReduceSwHeaderBytes + k * n;
+      uint64_t at = c.aux_bytes + k * n;
       if (at + n > in.size()) break;
       if (k >= c.acc.size()) {
         c.acc.resize(k + 1, 0.0f);
         c.seen.resize(k + 1, false);
         CheckCtxFits(c);
       }
-      float v = ElemOf(in, at, c.in_dtype);
+      float v = ElemOf(in, at, dtype);
       c.acc[k] = c.seen[k] ? numeric::ClampNanInf(c.acc[k] + v) : v;
       c.seen[k] = true;
     }
@@ -431,14 +442,14 @@ class ReduceModule : public BachModule {
   // 结果包的字节段 [lo, hi) 按 reduce_outdata_type 从分区里转出来写进去，软件
   // 辅助信息照抄首份输入的那 16 B。发哪个 flit 之前写哪一段。
   static void PackRange(Ctx const& c, Message& m, uint64_t lo, uint64_t hi) {
-    for (uint64_t i = lo; i < hi && i < kReduceSwHeaderBytes; ++i) {
+    for (uint64_t i = lo; i < hi && i < c.aux_bytes; ++i) {
       m.payload[i] = i < c.sw_head.size() ? c.sw_head[i] : 0;
     }
-    if (hi <= kReduceSwHeaderBytes) return;
+    if (hi <= c.aux_bytes) return;
     uint64_t n = ElemBytes(c.out_dtype);
-    uint64_t from = lo <= kReduceSwHeaderBytes ? 0 : (lo - kReduceSwHeaderBytes) / n;
+    uint64_t from = lo <= c.aux_bytes ? 0 : (lo - c.aux_bytes) / n;
     for (uint64_t k = from; k < c.acc.size(); ++k) {
-      uint64_t at = kReduceSwHeaderBytes + k * n;
+      uint64_t at = c.aux_bytes + k * n;
       if (at >= hi) break;
       if (c.out_dtype == kReduceFp32) {
         uint32_t v = numeric::BitsOf(c.acc[k]);

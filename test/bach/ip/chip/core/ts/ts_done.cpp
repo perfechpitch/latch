@@ -57,7 +57,7 @@ class DoneBench : public BachModule {
     uint64_t stream = 0, task = 0, user = 0, pid = 0;
   };
   struct RouterAck {
-    uint64_t at = 0, user = 0;
+    uint64_t at = 0, user = 0, path = 0;
   };
   struct Seed {
     uint64_t at = 0;
@@ -91,7 +91,7 @@ class DoneBench : public BachModule {
       }
     }
     for (auto const& r : router_acks) {
-      if (r.at == now) done.RdcDone().Drive(r.user, 0);
+      if (r.at == now) done.RdcDone().Drive(r.user, 0, r.path);
     }
     cfg.RunStep();
     done.RunStep();
@@ -124,11 +124,12 @@ struct Bench {
 // 一条单项任务链跑一遍，返回那一项的表项。
 StreamEntry RunOne(TaskEntry const& t, std::vector<DoneBench::Ack> acks,
                    std::vector<DoneBench::RouterAck> router_acks = {},
-                   std::shared_ptr<StreamWrite> seed = nullptr) {
+                   std::shared_ptr<StreamWrite> seed = nullptr, bool pcode = false) {
   StreamEntry got;
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   Bench b(clk);
+  b.cfg->SetPcodeMode(pcode);
   b.cfg->WriteTask(0, t);
   DoneBench h(clk, *b.cfg, *b.table, *b.done);
   h.seeds = {{2, seed ? seed : Infly(0, 11, 0)}};
@@ -223,6 +224,23 @@ TEST(BachTsDone, RouterDoneFindsTheStreamByUserId) {
   RT::Reset();
   EXPECT_EQ(s1, TaskFsm::kInfly) << "没报到的那个不动";
   EXPECT_EQ(s2, TaskFsm::kFinish) << "按 user_id 找到了第二个 stream";
+}
+
+TEST(BachTsDone, PcodeTransitReductionDoesNotCompleteAnotherPath) {
+  TaskEntry t = Step(RecvUnit::kDsa);
+  t.task_type = TaskType::kReduce;
+  t.path_id = 9;
+  auto seed = [] {
+    auto w = Infly(0, 11, 0);
+    w->entry.task_path_id = 9;
+    return w;
+  };
+  auto wrong = RunOne(t, {}, {{6,11,3}}, seed(), true);
+  auto right = RunOne(t, {}, {{6,11,9}}, seed(), true);
+  EXPECT_EQ(wrong.task_fsm, TaskFsm::kInfly);
+  EXPECT_EQ(wrong.done_bitmap, 0u);
+  EXPECT_EQ(right.task_fsm, TaskFsm::kFinish);
+  EXPECT_EQ(right.done_bitmap, 1u);
 }
 
 // datain 的完成只点亮 done_bitmap 对应位，不推进 task_id、不改状态机。

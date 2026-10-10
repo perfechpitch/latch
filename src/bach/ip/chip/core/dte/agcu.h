@@ -38,6 +38,7 @@ class Agcu {
 
   // 端点译码：地址高 4 bit 选端点，其余位是端内偏移。
   static SegEndpoint Decode(uint64_t addr) {
+    addr = Tagged(addr);
     switch ((addr >> kEpShift) & kEpMask) {
       case 0x1: return SegEndpoint::kMmem;
       case 0x2: return SegEndpoint::kScale;
@@ -45,6 +46,16 @@ class Agcu {
       case 0x4: return SegEndpoint::kHeader;
       default: return SegEndpoint::kCmem;
     }
+  }
+
+  // pcode uses hardware absolute addresses; retain legacy tagged bundles.
+  static uint64_t Tagged(uint64_t a) {
+    if (a >= 0x48C00000 && a < 0x4AC00000) return 0x10000000 + a - 0x48C00000;
+    if (a >= 0x48400000 && a < 0x48500000) return a - 0x48400000;
+    if (a >= 0x48500000 && a < 0x48508000) return 0x20000000 + (a - 0x48500000) * 32;
+    if (a >= 0x4802B000 && a < 0x4802C000) return 0x40000000 + a - 0x4802B000;
+    if (a >= 0x48033000 && a < 0x48034000) return 0x30000000 + a - 0x48033000;
+    return a;
   }
 
   // 出核段位：展开源/目的地址并译码端点。route 决定哪端是 Router（那一端的地址
@@ -61,12 +72,12 @@ class Agcu {
     if (src_mem) {
       // MM→CM 源端是 Matrix Mem，软件给物理地址，不叠 stride。
       uint64_t stride = (route == Route::kMmToCm) ? 0 : s.stride;
-      s.src_addr = (s.src & kEpDataMask) + sid * stride;
+      s.src_addr = (Tagged(s.src) & kEpDataMask) + sid * stride;
     } else {
       s.src_addr = 0;
     }
     if (dst_mem) {
-      s.dst_addr = (s.dst & kEpDataMask) + sid * s.stride;
+      s.dst_addr = (Tagged(s.dst) & kEpDataMask) + sid * s.stride;
     } else {
       s.dst_addr = 0;
     }

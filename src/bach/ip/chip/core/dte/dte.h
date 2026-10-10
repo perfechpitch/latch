@@ -66,6 +66,7 @@ class Dte {
       lanes.push_back(std::make_unique<Lane>(
           clock, "lane" + std::to_string(i), i, b, gid, false));
     }
+    reg->SetHeaderReader([this](uint64_t idx) { return hmem->Entry(idx).core_mask; });
     Wire();
   }
 

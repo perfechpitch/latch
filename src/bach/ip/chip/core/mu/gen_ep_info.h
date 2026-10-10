@@ -68,6 +68,14 @@ class GenEpInfo : public BachModule {
     return parsed[stream_id];
   }
 
+  std::vector<TopkEntry> PcodeTopk(uint64_t stream, uint64_t maximum) const {
+    auto const& b = TopkBytes(stream);
+    if (b.size() < 2) return {};
+    uint64_t count = uint64_t(b[0]) | uint64_t(b[1]) << 8;
+    LOGCHECK(count <= maximum, "pcode topK count exceeds configured capacity");
+    return Parse(std::vector<uint8_t>(b.begin() + 2, b.end()), count);
+  }
+
   // 从 DTE 写进来的字节解成 topK 表。
   static std::vector<TopkEntry> Parse(std::vector<uint8_t> const& bytes,
                                       uint64_t count) {

@@ -223,8 +223,8 @@ class Router {
 
   void Wire() {
     xbar->SetReduceAdmission(
-        [this](Message const& m) { return reduce->CanAcceptHead(m); },
-        [this](Message const& m) { reduce->ReserveHead(m); });
+        [this](Message const& m, uint64_t lane) { return reduce->CanAcceptHead(m, lane); },
+        [this](Message const& m, uint64_t lane) { reduce->ReserveHead(m, lane); });
     // 三个 R2R 方向：外部链路接进站，Xbar 的出口接出去。
     for (uint64_t d = 0; d < kR2RNum; ++d) {
       in_wire.push_back(MakeWire(clk));

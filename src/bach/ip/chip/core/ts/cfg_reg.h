@@ -50,6 +50,18 @@ class CfgReg : public BachModule {
     route.fill(TsRoute{});
   }
 
+  void SetPcodeMode(bool enabled) { pcode_mode = enabled; }
+  bool PcodeMode() const { return pcode_mode; }
+  uint64_t NonReissueMask() const {
+    if (!pcode_mode) return 0;
+    uint64_t mask = 0;
+    for (uint64_t t = 0; t < kTaskChainNum; ++t) {
+      if (chain[t].valid && chain[t].task_type == TaskType::kP2pReissueIn)
+        mask |= (1ull << t) | (1ull << chain[t].p2p_reissue_tid);
+    }
+    return mask;
+  }
+
   // ── 配置面。boot 期由 ctrl_noc 逐项写，这里给的是等价的直接接口 ──
   // 一项任务的 PC 与 ATTR 一起写；写 ATTR 时硬件把 TASK_VALID 置起来。
   void WriteTask(uint64_t idx, TaskEntry e) {
@@ -137,6 +149,7 @@ class CfgReg : public BachModule {
   }
 
  private:
+  bool pcode_mode = false;
   void DeriveMasks() {
     data_in_mask = through_end_mask = 0;
     for (uint64_t i = 0; i < kTaskChainNum; ++i) {

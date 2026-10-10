@@ -1,3 +1,4 @@
+#include <functional>
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_REGFILE_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_REGFILE_
 
@@ -143,6 +144,9 @@ class DteRegfile : public BachModule {
         triggers(clock),
         writes(clock) {}
 
+  void SetHeaderReader(std::function<uint64_t(uint64_t)> fn) { header_reader = std::move(fn); }
+  void SetPcodeMode(bool enabled) { pcode_mode = enabled; }
+
   // ── 对外 ──
   DsaCfgPort& Cfg() { return *cfg; }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return cfg; }
@@ -212,6 +216,10 @@ class DteRegfile : public BachModule {
 
   // 地址空间三段落地的只有 Config 与 Template 两段；Ctrl/Status、Profile、Debug
   // 与 TaskQ 回读都不参与起任务（TaskQ/HeaderTable 只读回读返回 0）。
+ public:
+  void CfgWrite(uint64_t at, uint64_t data) { WriteReg(at, data); }
+
+ private:
   void WriteReg(uint64_t at, uint64_t data) {
     // CFG_TRIGGER：写 0x0000 就是提交任务。
     if (at == kDteRegTrigger) {
@@ -238,6 +246,7 @@ class DteRegfile : public BachModule {
   }
 
   uint64_t ReadReg(uint64_t at) const {
+    if (pcode_mode && at >= 0x3000 && at < 0x23000 && header_reader) return header_reader((at - 0x3000) / 128);
     if (at >= kDteConfigBase + 0x004 && at <= kDteRegTransMode) {
       return cfg_file.Field((at - 0x004) / 4);
     }
@@ -270,6 +279,7 @@ class DteRegfile : public BachModule {
 
     auto d = std::make_shared<Descriptor>();
     d->valid = true;
+    d->pcode = pcode_mode;
     // 身份是这笔 trigger 写带进来的：RV 在发出 dsaw 那一拍从 CSR 抄下。出核走
     // 哪个 VC 用同一份里的 VCID。
     DsaTaskIds ids = cfg->TaskIds();
@@ -286,6 +296,7 @@ class DteRegfile : public BachModule {
     // TRANS_MODE 时就不置这一位。
     d->ack_ts_en = (merged.trans_mode & kDteAckTsEn) != 0;
     d->smem_addr = merged.smem_addr;
+    if (d->smem_addr >= 0x48300000 && d->smem_addr < 0x48310000) d->smem_addr -= 0x48300000;
     d->smem_data = merged.smem_data;
 
     // 逐段拷贝配置：段 0（包头）恒参与，段 1~3 由 seg_valid[i-1] 决定是否参与。
@@ -312,6 +323,8 @@ class DteRegfile : public BachModule {
     dirty = 0;
   }
 
+  std::function<uint64_t(uint64_t)> header_reader;
+  bool pcode_mode = false;
   Agcu agcu;
   std::shared_ptr<DsaCfgPort> cfg;
   std::shared_ptr<DescPort> out;

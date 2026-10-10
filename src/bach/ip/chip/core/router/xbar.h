@@ -135,6 +135,14 @@ class Xbar : public BachModule {
   uint64_t Granted() const { return granted.Get(); }
   uint64_t Stalled() const { return stalled.Get(); }
   uint64_t Overflow() const { return overflow.Get(); }
+  uint64_t OverflowCount() const { return overflow_pending; }
+  std::vector<std::pair<uint64_t, XbarReqView>> InspectRequests() const {
+    std::vector<std::pair<uint64_t, XbarReqView>> pending;
+    for (uint64_t in = 0; in < kXbarInNum; ++in)
+      for (uint64_t vc = 0; vc < kVcNum; ++vc)
+        if (!in_q[in][vc].empty()) pending.push_back({in, in_q[in][vc].front()});
+    return pending;
+  }
 
   // 验收要查的 credit 守恒：一轮跑完后所有方向所有类型的 credit 回到初值。
   uint64_t VcCredit(uint64_t o, uint64_t v) const { return private_cr[o][v]; }
@@ -164,8 +172,8 @@ class Xbar : public BachModule {
   bool StreamHolds(uint64_t o, uint64_t user) const {
     return stream_tab.at(o).count(user) != 0;
   }
-  void SetReduceAdmission(std::function<bool(Message const&)> check,
-                          std::function<void(Message const&)> reserve) {
+  void SetReduceAdmission(std::function<bool(Message const&, uint64_t)> check,
+                          std::function<void(Message const&, uint64_t)> reserve) {
     reduce_admission = std::move(check);
     reduce_reserve = std::move(reserve);
   }
@@ -351,19 +359,32 @@ class Xbar : public BachModule {
   }
 
   // 一个入口这一拍：vcs 是它各 VC 的队首按先后排好的次序，授予了一笔返回真。
+  static uint64_t ReduceLane(uint64_t mask) {
+    for (uint64_t lane = 0; lane < 3; ++lane) if (mask & (1ull << (kOutReduce0 + lane))) return lane;
+    return 0;
+  }
+
   bool TryInput(uint64_t in, std::vector<uint64_t> const& vcs,
                 std::array<bool, kXbarOutNum>& taken) {
     for (uint64_t k = 0; k < vcs.size(); ++k) {
       std::deque<XbarReqView>& q = in_q[in][vcs[k]];
       XbarReqView const& v = q.front();
+      if (spill_packet[in][vcs[k]]) {
+        if (overflow_used) continue;
+        Spill(v);
+        spill_packet[in][vcs[k]] = !v.tail;
+        q.pop_front();
+        return true;
+      }
       constexpr uint64_t reduce_mask = (1ull << kOutReduce0) |
           (1ull << kOutReduce1) | (1ull << kOutReduce2);
       if (v.head && (v.out_mask & reduce_mask) && reduce_admission && v.msg &&
-          !reduce_admission(*v.msg)) continue;
+          !reduce_admission(*v.msg, ReduceLane(v.out_mask))) continue;
 
       // 多播全有全无：先看所有目标出口是不是都空着、资源都够。另一个入口的包
       // 正占着这个出口的这个 VC 时只能等，不算资源不够，不走转存。
-      bool ok = true, owner_busy = false;
+      bool ok = true, owner_busy = false, arbitration_busy = false;
+      bool business_blocked = false;
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
         if (!OwnerOk(o, v.vc, in)) {
@@ -371,7 +392,18 @@ class Xbar : public BachModule {
           ok = false;
           break;
         }
-        if (taken[o] || !ResourceOk(o, v)) {
+        if (taken[o]) {
+          arbitration_busy = true;
+          ok = false;
+          break;
+        }
+        if (!ResourceOk(o, v)) {
+          // VC credit is transport backpressure, not a failed allocation of
+          // downstream stream/CoreMem space. Wait for returned link credits.
+          business_blocked = !pass_through && Needs(v, o) &&
+              (!StreamOk(o, v.user_id) ||
+               (o < kR2RNum && !stream_tab[o].count(v.user_id) &&
+                core_credit[o] < v.credit_require));
           ok = false;
           break;
         }
@@ -385,25 +417,20 @@ class Xbar : public BachModule {
         // 同一份数据记了两处。Router 上的 Bypass 因此被映射成“进 core 加出 core”
         // 两段。每拍最多转存一笔，因为端口一拍只搬一个 flit。转存只看这个入口
         // 最早的那一笔，转存了这个入口这一拍就不再试别的 VC。
-        if (k == 0 && v.stall_way && !owner_busy && !overflow_used) {
-          FlitView f;
-          f.valid = true;
-          f.vc = v.vc;
-          f.head = v.head;
-          f.tail = v.tail;
-          f.bytes = v.bytes;
-          f.msg = v.msg;
-          overflow_port->Drive(f);
-          overflow_used = true;
+        // Choose direct forwarding or spill at the packet head. Once direct
+        // forwarding starts, credit starvation stalls the remaining flits.
+        if (k == 0 && v.head && v.stall_way && business_blocked &&
+            !owner_busy && !arbitration_busy && !overflow_used) {
+          Spill(v);
+          spill_packet[in][vcs[k]] = !v.tail;
           q.pop_front();
-          ++overflow_pending;
           return false;
         }
         continue;
       }
 
       if (v.head && (v.out_mask & reduce_mask) && reduce_reserve && v.msg) {
-        reduce_reserve(*v.msg);
+        reduce_reserve(*v.msg, ReduceLane(v.out_mask));
       }
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
@@ -425,6 +452,19 @@ class Xbar : public BachModule {
   }
 
   // 这个入口最早交进来、还在等的那一笔；没有返回空。
+  void Spill(XbarReqView const& v) {
+    FlitView f;
+    f.valid = true;
+    f.vc = v.vc;
+    f.head = v.head;
+    f.tail = v.tail;
+    f.bytes = v.bytes;
+    f.msg = v.msg;
+    overflow_port->Drive(f);
+    overflow_used = true;
+    ++overflow_pending;
+  }
+
   XbarReqView const* Oldest(uint64_t in) const {
     XbarReqView const* p = nullptr;
     for (uint64_t v = 0; v < kVcNum; ++v) {
@@ -582,14 +622,15 @@ class Xbar : public BachModule {
   std::array<uint64_t, kR2RNum> core_credit{};
   std::array<std::map<uint64_t, uint64_t>, kR2RNum> taken_kb;
   bool force_ready = false;
-  std::function<bool(Message const&)> reduce_admission;
-  std::function<void(Message const&)> reduce_reserve;
+  std::function<bool(Message const&, uint64_t)> reduce_admission;
+  std::function<void(Message const&, uint64_t)> reduce_reserve;
   bool overflow_used = false;
   bool pass_through = false;
   std::array<uint64_t, kXbarOutNum> sent_total{};
   std::array<std::array<std::deque<XbarReqView>, kVcNum>, kXbarInNum> in_q;
   std::array<uint64_t, kXbarInNum> last_seq{};
   std::array<bool, kXbarInNum> in_packet{};
+  std::array<std::array<bool, kVcNum>, kXbarInNum> spill_packet{};
   // 各出口各 VC 正被哪个入口的包占着：入口号加一，0 表示空着。
   std::array<std::array<uint64_t, kVcNum>, kXbarOutNum> vc_owner{};
   uint64_t rr_last = 0;

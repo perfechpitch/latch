@@ -163,11 +163,11 @@ class Commit : public BachModule {
     ++stall_pending;
   }
 
-  // 走归约路径出核的包，包头的 reduce_seq 打上发方的 task_id：ReduceModule 靠它
-  // 分开同一个用户前后两笔 reduce 任务。一条归约链上各 core 的任务链一样，同一
-  // 笔任务的 task_id 也一样。
+  // Legacy bundles share task IDs along a reduction chain. Pcode task IDs
+  // differ across cores; the route PID identifies their common reduction.
   void MarkReducePkt(Descriptor& d) {
     if (d.route != Route::kCmToRouter && d.route != Route::kMmToRouter) return;
+    if (d.pcode) { d.reduce_seq = d.path_id; return; }
     if (hmem.Rtab(d.path_id).operation == Operation::kForward) return;
     d.reduce_seq = d.task_id;
   }
@@ -178,6 +178,7 @@ class Commit : public BachModule {
   // 目的标识（dst）跟着 path_id 的表项走。
   void MakeOutboundMsg(Descriptor& d) const {
     auto m = std::make_shared<Message>();
+    m->reduce_aux_bytes = d.pcode ? 0 : kReduceSwHeaderBytes;
     m->user_id = d.user_id;
     m->path_id = d.path_id;
     m->dst = hmem.Rtab(d.path_id).ext_dst;
@@ -190,8 +191,9 @@ class Commit : public BachModule {
     if (d.seg[0].src_kind == SegEndpoint::kHeader) {
       h = hmem.Entry(d.stream_id);
     } else {
-      h = BytesToHeader(cmem_sync->Peek(d.seg[0].src_addr, kHeaderCtxBytes));
+      h = BytesToHeader(cmem_sync->Peek(d.seg[0].src_addr, d.pcode ? 32 : kHeaderCtxBytes), d.pcode);
     }
+    m->path_core_mask = h.core_mask;
     m->gpu_id = h.gpu_id;
     m->token_id = h.token_id;
     // 带 scale 的包：数据后面接 scale。包长把 payload 各段都算上，topK 也算进去

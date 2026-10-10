@@ -149,6 +149,11 @@ class Core : public BachModule {
   }
 
   // ── 观测 ──
+  void SetPcodeMode(bool enabled) {
+    pcode_mode = enabled;
+    ts->Cfg().SetPcodeMode(enabled);
+    for (auto& r : rv) r->Exec().SetPcodeMode(enabled);
+  }
   Router& GetRouter() { return *router; }
   Ts& GetTs() { return *ts; }
   RvCore& Rv(uint64_t i) { return *rv.at(i); }
@@ -447,6 +452,7 @@ class Core : public BachModule {
   }
 
  private:
+  bool pcode_mode = false;
   void Wire() {
     // B core 的搬出查的是广播那几个方向的下游资源。方向由软件写进 TS 的
     // B_CORE_DIRECTION，Router 用的时候现读；为 0 时按本 core 的进核资源查。
@@ -460,7 +466,10 @@ class Core : public BachModule {
   // Router 与 TS 之间的四条控制线。
   void WireRouterToTs() {
     // Core 统一驱动子模块；归约只接收本核已准入用户，并在首 flit 授予时预留数据区。
-    router->GetXbar().SetReduceAdmission([this](Message const& m) {
+    router->GetXbar().SetReduceAdmission([this](Message const& m, uint64_t lane) {
+      // Pcode also uses Router reductions on transit cores after their local
+      // compute stream has retired; Rmem owns its own bounded contexts.
+      if (pcode_mode) return router->GetReduce().CanAcceptHead(m, lane);
       bool admitted = ts->Cfg().SelfStartCore() ||
                       router->GetXbar().StreamHolds(kOutCore, m.user_id);
       uint64_t done = 0;
@@ -484,10 +493,10 @@ class Core : public BachModule {
           path = current->task_path_id;
         }
         return m.reduce_seq == t && m.path_id == path &&
-               router->GetReduce().CanAcceptHead(m);
+               router->GetReduce().CanAcceptHead(m, lane);
       }
       return false;
-    }, [this](Message const& m) { router->GetReduce().ReserveHead(m); });
+    }, [this](Message const& m, uint64_t lane) { router->GetReduce().ReserveHead(m, lane); });
     ts->AttachTrigger(router->TriggerPtr());
     ts->AttachCreditReq(router->CreditReqPtr());
     ts->AttachCreditGrant(router->CreditGrantPtr());
@@ -567,9 +576,11 @@ class Core : public BachModule {
     // B/R core 的包头上下文落 Core Mem（不是 Hmem），DTE 出核造包与进核落库都要
     // 用 Core Mem 的同步 Poke/Peek，把 Core Mem 的 BankedMem 指过去。
     dte->AttachCmemSync(cmem.get());
-    // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
-    // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
+    // Each RV core has an independent CoreMem port. The DTE RV core also
+    // exposes the Router header read port.
     rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));
+    rv[1]->AttachCmem(cmem->PortPtr(kCmemMuRv));
+    rv[2]->AttachCmem(cmem->PortPtr(kCmemVuRv));
     rv[0]->AttachHdr(router->HdrPtr());
   }
 

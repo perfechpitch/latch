@@ -143,6 +143,11 @@ class TaskDone : public BachModule {
         for (uint64_t i = 0; i < kStreamNum; ++i) {
           StreamEntry const& e = s->entry[i];
           if (e.valid && e.user_id_vld && e.user_id == user) {
+            // A transit reduction can finish while this core is executing a
+            // different local reduction for the same user.
+            if (cfg.PcodeMode() &&
+                (!cfg.Task(e.task_id).IsReduce() ||
+                 e.task_path_id != rdc_done->path_id.Get())) break;
             q[kDoneLaneRouter].push_back({0, i, e.task_id, false, true, user, 0});
             break;
           }

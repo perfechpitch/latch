@@ -52,6 +52,7 @@ struct Message {
   uint64_t path_core_mask = 0;
   uint64_t size = 0;           // 数据通道上的字节数（含 topK），收齐判定按它
   uint64_t vc = 0;             // 包头 loopback[3:2]，每一跳被改写
+  uint64_t reduce_aux_bytes = kReduceSwHeaderBytes;
   uint64_t reduce_seq = 0;     // TS 按它给 reduce task 配对
   uint64_t reissue = 0;        // 这一笔是不是 Core Mem 重发出来的
   // 这个用户在目的 core 上占的槽位。各 core 按到达顺序环形分配，分出来的号

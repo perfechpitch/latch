@@ -198,7 +198,7 @@ class Lane : public BachModule {
       h.hardware_used = 1;
       h.gpu_id = m->gpu_id;
       h.token_id = m->token_id;
-      cmem_sync->Poke(d.seg[0].dst_addr, HeaderToBytes(h));
+      cmem_sync->Poke(d.seg[0].dst_addr, HeaderToBytes(h, d.pcode));
     }
   }
 
@@ -459,8 +459,9 @@ class Lane : public BachModule {
                        b.msg);
       c.sent_first = true;
       router_used = true;
+      bool last = b.last;
       buffer.Pop(idx);
-      if (b.last) {
+      if (last) {
         if (has_topk) c.topk_pending = true;
         else c.issue_done = true;
       }
@@ -494,6 +495,10 @@ class Lane : public BachModule {
       // topK 段：不落存储，随包的 topk 字段走，经专用数据线写进 MU 的 topK_ep_table。
       // 写进哪一项由 topK 段的端内偏移给：计算 core 是 stream_id，B core 是 user_id。
       std::vector<uint8_t> topk = b.msg ? b.msg->topk : std::vector<uint8_t>();
+      if (topk.empty() && c.desc.pcode) {
+        auto part = whole ? data : SliceBlock(data, c.part, take);
+        if (part) topk = *part;
+      }
       if (mu_topk) {
         mu_topk->Drive(c.desc.TopkIndex(),
                        std::make_shared<ByteBlock>(std::move(topk)));

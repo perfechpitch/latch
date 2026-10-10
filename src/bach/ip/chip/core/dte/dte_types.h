@@ -139,6 +139,7 @@ struct Descriptor {
   // 与 R core 用，存的是 user_id 与 token entry 的 valid 标志。对应 CFG_TRANS_MODE[8]
   // 的 wr_sharemem_flag + CFG_SM_W_ADDR / CFG_SM_W_DATA。
   bool wr_sharemem_flag = false;
+  bool pcode = false;
   uint64_t smem_addr = 0, smem_data = 0;
 
   // 进核任务带着原包，出核任务带着要发出去的包。
@@ -213,10 +214,10 @@ struct Descriptor {
   uint64_t TopkIndex() const {
     for (auto const& s : seg) {
       if (s.valid && s.dst_kind == SegEndpoint::kTopk) {
-        return s.dst & kEpDataMask;
+        return pcode && s.dst >= 0x48033000 && s.dst < 0x48034000 ? (s.dst - 0x48033000) / 256 : s.dst & kEpDataMask;
       }
       if (s.valid && s.src_kind == SegEndpoint::kTopk) {
-        return s.src & kEpDataMask;
+        return pcode && s.src >= 0x48033000 && s.src < 0x48034000 ? (s.src - 0x48033000) / 256 : s.src & kEpDataMask;
       }
     }
     return 0;

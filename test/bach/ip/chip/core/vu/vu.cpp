@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <functional>
 #include <sstream>
 
 #include <deque>
@@ -198,9 +199,13 @@ class DoneSink : public BachModule {
 class VuDriver : public BachModule {
  public:
   VuDriver(ClockPtr c, Vu& target) : BachModule(c, "driver"), vu(target) {}
+  std::function<void(uint64_t)> after_step;
 
  protected:
-  void Step() override { vu.RunStep(); }
+  void Step() override {
+    vu.RunStep();
+    if (after_step) after_step(CycleNow());
+  }
 
  private:
   Vu& vu;
@@ -2220,17 +2225,17 @@ TEST(Vu, Mxfp8ValuStartsOnFirstGrain) {
   std::vector<uint8_t> want_scale =
       numeric::EncodeScale(numeric::DataType::kMxfp8, scale);
 
-  struct Watch : BachModule {
-    Watch(ClockPtr c, Vu& v, MemPort& st, uint32_t bits)
-        : BachModule(c, "watch"), vu(v), store(st), sig_bits(bits) {}
-    void Step() override {
+  struct Watch {
+    Watch(Vu& v, MemPort& st, uint32_t bits)
+        : vu(v), store(st), sig_bits(bits) {}
+    void Observe(uint64_t cycle) {
       float tail = vu.Regfiles().ReadVrf(kSig + kEntries - 1, 1, false)[0];
       if (numeric::BitsOf(tail) != sig_bits && vu.Valu(0).BusyCycles() > 0) {
         valu0_before_tail = true;
       }
       if (first_wr == 0 && store.req_valid.Get() != 0 &&
           store.req_we.Get() != 0) {
-        first_wr = CycleNow();
+        first_wr = cycle;
         valu1_at_wr = vu.Valu(1).BusyCycles();
       }
     }
@@ -2240,7 +2245,10 @@ TEST(Vu, Mxfp8ValuStartsOnFirstGrain) {
     bool valu0_before_tail = false;
     uint64_t first_wr = 0, valu1_at_wr = 0;
   };
-  Watch watch(rig.clk, *rig.vu, *rig.st, sig_bits);
+  Watch watch(*rig.vu, *rig.st, sig_bits);
+  // These counters and VRF entries are ordinary state. Observe them from the
+  // VU driver's coroutine at the same cycle, rather than racing another clock.
+  rig.driver->after_step = [&watch](uint64_t cycle) { watch.Observe(cycle); };
   rig.Run(1200);
 
   EXPECT_TRUE(watch.valu0_before_tail);
