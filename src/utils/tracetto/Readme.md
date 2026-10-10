@@ -168,7 +168,7 @@ moe_lpu.tracetto-index/
 | DSA | `dsa_start` / `dsa_start_task` / `dsa_start_user`、`dsa_done` / `dsa_done_task` / `dsa_done_user` |
 | DTE 那个不报的完成 | `dsa_done_noack` / `dsa_done_noack_task` / `dsa_done_noack_user` —— 只有 DTE 抬 bit0 |
 | 一笔任务在单元里的两端 | `dsa_task_trigger` / `dsa_task_trigger_task` / `dsa_task_trigger_user`（被收下）、`dsa_task_dispatch` / `dsa_task_dispatch_task` / `dsa_task_dispatch_user`（真正发行）|
-| MU 那段计算的两端 | `dsa_calc_start` / `dsa_calc_start_task` / `dsa_calc_start_user`（第一个 tile 进矩阵执行单元）、`dsa_calc_done` / `dsa_calc_done_task` / `dsa_calc_done_user`（最后一个 tile 的后一拍）|
+| MU 那段计算的两端 | `dsa_calc_start` / `dsa_calc_start_task` / `dsa_calc_start_user`（第一个 tile 进矩阵执行单元）、`dsa_calc_done` / `dsa_calc_done_task` / `dsa_calc_done_user`（最后一个 tile 的后一拍）；另带 `dsa_calc_start_expert` / `dsa_calc_start_k` / `dsa_calc_start_n` / `dsa_calc_start_kblock` / `dsa_calc_start_nblock` / `dsa_calc_start_prim_k` / `dsa_calc_start_prim_n` / `dsa_calc_start_adtype` / `dsa_calc_start_bdtype` / `dsa_calc_start_outbf16` 十条标量（GEMM 规模：专家数、全尺寸 K/N、K/N 分块、原语 K/N、token/weight dtype 码、输出是否 BF16，M 恒为 1）|
 
 边沿的起点是各家“过门槛”那一拍（DTE 过 Commit 准入、MU 进 issue_q、VU 被 ISQ 收下；
 RV core 是执行器接下队头那笔），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
@@ -208,6 +208,17 @@ MU 抬 bit1、VU 抬 bit2，DTE 恒 0：
 
 两个点都按 tile 数走，与流水线深度那个常数无关；越界那一笔不经过正常计算，两端都不计
 （它没有计算阶段）。`MU-DSA-CALC` 取这两拍，整段落在 `MU-DSA` 里面。
+
+CALC 起点还另带十条标量尺寸 `dsa_calc_start_expert` / `dsa_calc_start_k` /
+`dsa_calc_start_n` / `dsa_calc_start_kblock` / `dsa_calc_start_nblock` /
+`dsa_calc_start_prim_k` / `dsa_calc_start_prim_n` / `dsa_calc_start_adtype` /
+`dsa_calc_start_bdtype` / `dsa_calc_start_outbf16`，与 task / user 在
+`computed == 0` 那一拍一起锁存：专家数 `Experts()`、`K = PrimK × kblock`、
+`N = PrimN × nblock`、K/N 各分几块（`kblock` / `nblock`）、原语 `PrimK()` /
+`PrimN()`、token/weight 的 dtype 码、输出是否 BF16，M 恒为 1（一条原语就是
+1×K×N）。`trace2perfetto.py` 把它写进 `MU-DSA-CALC` 段的 args（`expert_num` / `M` /
+`K` / `N` / `block_k` / `block_n` / `prim_k` / `prim_N` / `a_dtype` / `b_dtype` /
+`out_dtype`），tracetto 的索引与前端不存这几条。
 
 波形里缺 `ts_user`、边沿信号或「装进 stream」那几条时，启动会提醒缺哪几条，缺的那些行是空的。
 

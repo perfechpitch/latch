@@ -84,6 +84,20 @@ SIG_CALC_START_USER = "dsa_calc_start_user"
 SIG_CALC_DONE = "dsa_calc_done"
 SIG_CALC_DONE_TASK = "dsa_calc_done_task"
 SIG_CALC_DONE_USER = "dsa_calc_done_user"
+# CALC 起点的尺寸与数据类型（标量，只有 MU 有）：专家数 / K / N（M 恒为 1，不存）、
+# K/N 各分几块、原语本身的 K/N、token/weight 的 dtype 码、输出是否 BF16。在 calc_start
+# 那一拍与 task / user 一起锁存（mu.h Ctrl::Compute），Perfetto 的 MU-DSA-CALC args
+# 靠它们带上 expert_num 与 M×K×N 等 GEMM 规模。
+SIG_CALC_START_EXPERT = "dsa_calc_start_expert"
+SIG_CALC_START_K = "dsa_calc_start_k"
+SIG_CALC_START_N = "dsa_calc_start_n"
+SIG_CALC_START_KBLOCK = "dsa_calc_start_kblock"
+SIG_CALC_START_NBLOCK = "dsa_calc_start_nblock"
+SIG_CALC_START_PRIM_K = "dsa_calc_start_prim_k"
+SIG_CALC_START_PRIM_N = "dsa_calc_start_prim_n"
+SIG_CALC_START_ADTYPE = "dsa_calc_start_adtype"
+SIG_CALC_START_BDTYPE = "dsa_calc_start_bdtype"
+SIG_CALC_START_OUTBF16 = "dsa_calc_start_outbf16"
 
 # 三对边沿，每组六条：起点的位掩码 / task / user，终点的位掩码 / task / user。
 RV_EDGE = (SIG_RV_START, SIG_RV_START_TASK, SIG_RV_START_USER,
@@ -104,13 +118,20 @@ CALC_EDGE = (SIG_CALC_START, SIG_CALC_START_TASK, SIG_CALC_START_USER,
 # 「装进 stream」那两条：也是六条，但是计数器不是位掩码，凑不成一对边沿，单独成组。
 STEP_SIGS = (SIG_TS_CREATE, SIG_TS_CREATE_TASK, SIG_TS_CREATE_USER,
              SIG_TS_INSTALL, SIG_TS_INSTALL_TASK, SIG_TS_INSTALL_USER)
+# CALC 起点的尺寸与数据类型（标量）。老波形没有，缺了 MU-DSA-CALC 的 args 里就没有尺寸。
+CALC_DIM_SIGS = (SIG_CALC_START_EXPERT, SIG_CALC_START_K, SIG_CALC_START_N,
+                 SIG_CALC_START_KBLOCK, SIG_CALC_START_NBLOCK,
+                 SIG_CALC_START_PRIM_K, SIG_CALC_START_PRIM_N,
+                 SIG_CALC_START_ADTYPE, SIG_CALC_START_BDTYPE,
+                 SIG_CALC_START_OUTBF16)
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
-             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE)
+             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE +
+             CALC_DIM_SIGS)
 # 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那些也在
 # 这里 —— TS-MU / TS-VU 与 MU-DSA-CALC 现在要读它们，老波形缺了那些行就是空的。
 NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS +
-            CALC_EDGE + NOACK_EDGE)
+            CALC_EDGE + NOACK_EDGE + CALC_DIM_SIGS)
 
 # 索引里一个 core 的十三条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
@@ -558,6 +579,45 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
 def lanes_of(spans: Dict[str, List[List[List[int]]]]) -> List[List[List[int]]]:
     """core_spans 的产物 → 一个 core 的十三条通道，顺序与 `LANES` 一致。"""
     return [spans[group][u] for _, group, u in LANES]
+
+
+def calc_dims(reader: TraceReader, sigs: Dict[str, int]) -> Dict[int, Dict[str, int]]:
+    """每个 CALC 起点那一拍的尺寸字典，键是起点时间。M 恒为 1，不存。
+
+    这些是标量信号：只在某笔任务 calc_start（mu.h Ctrl::Compute 的 computed == 0）
+    那一拍锁存一次，所以起点那拍 `val_at` 取到的正好是这笔的值；相邻两笔尺寸相同也
+    不会再记一笔，`val_at` 仍取到上一次的值。老波形缺这几条时返回空 dict。
+    """
+    out: Dict[int, Dict[str, int]] = {}
+
+    def ev(name: str) -> Tuple[list, list]:
+        sid = sigs.get(name)
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    st, sv = ev(SIG_CALC_START)
+    fields = {
+        "expert": ev(SIG_CALC_START_EXPERT),
+        "k": ev(SIG_CALC_START_K),
+        "n": ev(SIG_CALC_START_N),
+        "kblock": ev(SIG_CALC_START_KBLOCK),
+        "nblock": ev(SIG_CALC_START_NBLOCK),
+        "prim_k": ev(SIG_CALC_START_PRIM_K),
+        "prim_n": ev(SIG_CALC_START_PRIM_N),
+        "a_dtype": ev(SIG_CALC_START_ADTYPE),
+        "b_dtype": ev(SIG_CALC_START_BDTYPE),
+        "out_bf16": ev(SIG_CALC_START_OUTBF16),
+    }
+    if any(not ts for ts, _ in fields.values()):
+        return out
+    prev = 0
+    for t, v in zip(st, sv):
+        on = (v >> 1) & 1          # bit1 = MU
+        if on and not prev:
+            out[t] = {name: val_at(ts, vs, t) for name, (ts, vs) in fields.items()}
+        prev = on
+    return out
 
 
 def missing_signals(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> List[str]:

@@ -31,8 +31,11 @@ chrome://tracing。
 所以这里的 ts / dur 就是拍号本身，读数的时候把 ms 看成千拍。
 
 精简（都是实测省下来的）：
-  · 不写 args —— Perfetto 自己会显示起止与时长，再塞一份 user/task 是白给；
-  · 字段只留 name/ph/ts/dur/pid/tid 六样；
+  · 字段只留 name/ph/ts/dur/pid/tid 六样，外加 args 里 user/task 两个键值（段名里
+    已有，这里作为结构化字段，点选 slice 时在详情面板看）；MU-DSA-CALC 那段还多
+    expert_num / M / K / N / block_k / block_n / prim_k / prim_N / a_dtype /
+    b_dtype / out_dtype 十一个键值（GEMM 规模：全尺寸、K/N 分块、原语尺寸、三处
+    数据类型），在详情面板看这段算了多大的矩阵乘；
   · 不发 cat（140 KB）：它不参与上色（颜色按段上的名字走），只对“按分类过滤”
     有用，而这个转换器给不出有意义的分类；
   · 分隔符用最紧的写法，整数不写小数，一行一个事件（方便 grep，代价 ~1 B/行）。
@@ -59,6 +62,11 @@ from tracetto.reader import TraceReader   # noqa: E402
 # 带着行前缀（TS-DTE / CORE-DTE / DSA-DTE …）。Perfetto 按段上的名字上色，十三个槽
 # 名字两两不同，十三行才分得开 —— 原来 TS 行的 DTE 段与 DTE-Core 行的段都叫
 # `User_id x DTE y`，就撞成了一个色。
+
+
+# DataType 码 → 名字（bach/common/numeric/mx.h 的 DataType 枚举）。a_dtype / b_dtype
+# 在波形里存的是这个码，args 里转成人能读的名字。
+DTYPE_NAME = {0: "BF16", 1: "MXFP8", 2: "MXFP4", 3: "NVFP4", 4: "FP32"}
 
 
 def label_of(unit: str, seg) -> str:
@@ -117,15 +125,31 @@ def build(prefix: str) -> dict:
         for ordinal, (_chip, _core, key) in enumerate(ordered):
             pid = ordinal + 1
             lanes = S.lanes_of(S.core_spans(r, core_sig[key], t_end))
+            # MU-DSA-CALC 那一段的 GEMM 尺寸：按 calc_start 那拍取，键是起点时间。
+            # 只有 MU 有，M 恒为 1（见 spans.calc_dims）。老波形缺这三条时是空 dict。
+            dims = S.calc_dims(r, core_sig[key])
             for row, (_name, parts) in enumerate(S.ROWS):
                 tid = row + 1
                 row_events: List[dict] = []
                 for lane, slot in parts:
                     unit = S.SLOT_UNITS[slot % len(S.SLOT_UNITS)]
                     for seg in lanes[lane]:
-                        t0, t1, _user, _task = seg
+                        t0, t1, user, task = seg
+                        args = {"user": user, "task": task}
+                        if _name == "MU-DSA-CALC" and t0 in dims:
+                            d = dims[t0]
+                            args.update({
+                                "expert_num": d["expert"], "M": 1,
+                                "K": d["k"], "N": d["n"],
+                                "block_k": d["kblock"], "block_n": d["nblock"],
+                                "prim_k": d["prim_k"], "prim_N": d["prim_n"],
+                                "a_dtype": DTYPE_NAME.get(d["a_dtype"], "?"),
+                                "b_dtype": DTYPE_NAME.get(d["b_dtype"], "?"),
+                                "out_dtype": "BF16" if d["out_bf16"] else "FP32",
+                            })
                         ev = {"name": label_of(unit, seg), "ph": "X",
-                              "ts": t0, "dur": t1 - t0, "pid": pid, "tid": tid}
+                              "ts": t0, "dur": t1 - t0, "pid": pid, "tid": tid,
+                              "args": args}
                         row_events.append(ev)
                         spans_cnt += 1
                 row_events.sort(key=lambda e: e["ts"])

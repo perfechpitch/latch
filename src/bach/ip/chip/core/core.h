@@ -430,6 +430,20 @@ class Core : public BachModule {
     TracePerCycle("dsa_calc_start", calcmask);
     TracePerCycle("dsa_calc_start_task", calctask);
     TracePerCycle("dsa_calc_start_user", calcuser);
+    // 这笔计算的尺寸与数据类型（标量，只有 MU 有）：专家数 / K / N（M 恒为 1）、K/N
+    // 各分几块、原语本身的 K/N、token/weight 的 dtype 与输出是否 BF16。spans 里
+    // calc_dims 在 calc_start 那一拍取它们，Perfetto 的 MU-DSA-CALC args 靠它们带上
+    // GEMM 规模。
+    TracePerCycle("dsa_calc_start_expert", mu->CalcStartExpert());
+    TracePerCycle("dsa_calc_start_k", mu->CalcStartK());
+    TracePerCycle("dsa_calc_start_n", mu->CalcStartN());
+    TracePerCycle("dsa_calc_start_kblock", mu->CalcStartKblock());
+    TracePerCycle("dsa_calc_start_nblock", mu->CalcStartNblock());
+    TracePerCycle("dsa_calc_start_prim_k", mu->CalcStartPrimK());
+    TracePerCycle("dsa_calc_start_prim_n", mu->CalcStartPrimN());
+    TracePerCycle("dsa_calc_start_adtype", mu->CalcStartADtype());
+    TracePerCycle("dsa_calc_start_bdtype", mu->CalcStartBDtype());
+    TracePerCycle("dsa_calc_start_outbf16", mu->CalcStartOutBf16());
     TracePerCycle("dsa_calc_done", cendmask);
     TracePerCycle("dsa_calc_done_task", cendtask);
     TracePerCycle("dsa_calc_done_user", cenduser);

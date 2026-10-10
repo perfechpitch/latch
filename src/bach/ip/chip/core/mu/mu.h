@@ -132,6 +132,16 @@ class Mu {
   uint64_t CalcStartCnt() const { return ctrl->CalcStartCnt(); }
   uint64_t CalcStartTask() const { return ctrl->CalcStartTask(); }
   uint64_t CalcStartUser() const { return ctrl->CalcStartUser(); }
+  uint64_t CalcStartExpert() const { return ctrl->CalcStartExpert(); }
+  uint64_t CalcStartK() const { return ctrl->CalcStartK(); }
+  uint64_t CalcStartN() const { return ctrl->CalcStartN(); }
+  uint64_t CalcStartKblock() const { return ctrl->CalcStartKblock(); }
+  uint64_t CalcStartNblock() const { return ctrl->CalcStartNblock(); }
+  uint64_t CalcStartPrimK() const { return ctrl->CalcStartPrimK(); }
+  uint64_t CalcStartPrimN() const { return ctrl->CalcStartPrimN(); }
+  uint64_t CalcStartADtype() const { return ctrl->CalcStartADtype(); }
+  uint64_t CalcStartBDtype() const { return ctrl->CalcStartBDtype(); }
+  uint64_t CalcStartOutBf16() const { return ctrl->CalcStartOutBf16(); }
   uint64_t CalcDoneCnt() const { return ctrl->CalcDoneCnt(); }
   uint64_t CalcDoneTask() const { return ctrl->CalcDoneTask(); }
   uint64_t CalcDoneUser() const { return ctrl->CalcDoneUser(); }
@@ -201,6 +211,18 @@ class Mu {
     uint64_t CalcStartCnt() const { return calc_start_cnt; }
     uint64_t CalcStartTask() const { return calc_start_task; }
     uint64_t CalcStartUser() const { return calc_start_user; }
+    // 这笔任务的 GEMM 规模：专家数、K 与 N（M 恒为 1，不单列）。Core 层发
+    // dsa_calc_start_expert / k / n 用，好让 Perfetto 里 MU-DSA-CALC 的 args 带上尺寸。
+    uint64_t CalcStartExpert() const { return calc_start_expert; }
+    uint64_t CalcStartK() const { return calc_start_k; }
+    uint64_t CalcStartN() const { return calc_start_n; }
+    uint64_t CalcStartKblock() const { return calc_start_kblock; }
+    uint64_t CalcStartNblock() const { return calc_start_nblock; }
+    uint64_t CalcStartPrimK() const { return calc_start_prim_k; }
+    uint64_t CalcStartPrimN() const { return calc_start_prim_n; }
+    uint64_t CalcStartADtype() const { return calc_start_adtype; }
+    uint64_t CalcStartBDtype() const { return calc_start_bdtype; }
+    uint64_t CalcStartOutBf16() const { return calc_start_outbf16; }
     uint64_t CalcDoneCnt() const { return calc_done_cnt; }
     uint64_t CalcDoneTask() const { return calc_done_task; }
     uint64_t CalcDoneUser() const { return calc_done_user; }
@@ -357,6 +379,18 @@ class Mu {
         ++calc_start_cnt;
         calc_start_task = f->cfg.task_id;
         calc_start_user = f->cfg.user_id;
+        // 尺寸一并锁存，供波形带出去：专家数、K = PrimK × kblock、N = PrimN × nblock，
+        // M 恒为 1（一条原语就是 1×K×N）。另带原语本身的 K/N 与三处数据类型。
+        calc_start_expert = f->cfg.Experts();
+        calc_start_k = f->cfg.PrimK() * f->cfg.kblock;
+        calc_start_n = f->cfg.PrimN() * f->cfg.nblock;
+        calc_start_kblock = f->cfg.kblock;
+        calc_start_nblock = f->cfg.nblock;
+        calc_start_prim_k = f->cfg.PrimK();
+        calc_start_prim_n = f->cfg.PrimN();
+        calc_start_adtype = static_cast<uint64_t>(f->cfg.a_dtype);
+        calc_start_bdtype = static_cast<uint64_t>(f->cfg.b_dtype);
+        calc_start_outbf16 = f->cfg.out_bf16 ? 1 : 0;
       }
       // 最后一个 tile：这一拍只记身份、置 pending，下一个 Step() 开头再补 calc_done，
       // 好让段长按 tile 数闭合而不是少一拍。
@@ -423,6 +457,10 @@ class Mu {
     uint64_t dispatch_cnt = 0, dispatch_task = 0, dispatch_user = 0;
     // 这一笔的第一个 tile 进矩阵执行单元、最后一个 tile 后一拍那一拍的笔数与身份。
     uint64_t calc_start_cnt = 0, calc_start_task = 0, calc_start_user = 0;
+    uint64_t calc_start_expert = 0, calc_start_k = 0, calc_start_n = 0;
+    uint64_t calc_start_kblock = 0, calc_start_nblock = 0;
+    uint64_t calc_start_prim_k = 0, calc_start_prim_n = 0;
+    uint64_t calc_start_adtype = 0, calc_start_bdtype = 0, calc_start_outbf16 = 0;
     uint64_t calc_done_cnt = 0, calc_done_task = 0, calc_done_user = 0;
     // 最后一个 tile 已算完、等下一拍补 calc_done 的标志。
     bool calc_done_pending = false;
