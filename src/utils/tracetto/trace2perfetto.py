@@ -27,8 +27,9 @@ chrome://tracing。
 才分得开。不给 cname（只能填十来个具名色，里面近似的不少）、也不给 cat（不参与
 上色）。
 
-时间：**1 拍 = 1 µs**。Perfetto 的 JSON 里时间戳单位固定是微秒，没有别的选择，
-所以这里的 ts / dur 就是拍号本身，读数的时候把 ms 看成千拍。
+时间：**1 拍 = 1 ns**。Perfetto 的 JSON 里时间戳单位固定是微秒，没有别的选择，
+所以这里的 ts / dur 要把拍号乘 1/1000 折成微秒（1 ns = 0.001 µs），Perfetto 里
+读到的才是纳秒。
 
 精简（都是实测省下来的）：
   · 字段只留 name/ph/ts/dur/pid/tid 六样，外加 args 里 user/task 两个键值（段名里
@@ -40,7 +41,8 @@ chrome://tracing。
     mmem、topk 落 topk_table 的存储位置；
   · 不发 cat（140 KB）：它不参与上色（颜色按段上的名字走），只对“按分类过滤”
     有用，而这个转换器给不出有意义的分类；
-  · 分隔符用最紧的写法，整数不写小数，一行一个事件（方便 grep，代价 ~1 B/行）。
+  · 分隔符用最紧的写法，一行一个事件（方便 grep，代价 ~1 B/行）。时间按 1 拍 = 1 ns
+    折成微秒，所以 ts / dur 是带小数的微秒（1.319 µs = 1319 ns）。
 
 要更小就把整份 gzip：实测 1.31 MB → ~89 KB（它太重复了 —— 九千多个段只有 72 种
 不同的名字，408 个 core 的元数据块字面一样）。
@@ -80,6 +82,10 @@ DTE_TRACKS = ("lan0_rd", "lan0_wr", "lan1_rd", "lan1_wr",
 DTE_SLOT_UNITS = ("DTE-L0-RD", "DTE-L0-WR", "DTE-L1-RD", "DTE-L1-WR",
                   "DTE-L2-RD", "DTE-L2-WR", "DTE-L3-RD", "DTE-L3-WR",
                   "DTE-L4-RD", "DTE-L4-WR")
+
+# 时间：1 拍 = 1 ns。Perfetto 的 ts / dur 单位固定是微秒，1 ns = 0.001 µs，所以把
+# 拍号乘这个系数折成微秒，Perfetto 里读到的才是纳秒。
+NS_TO_US = 1e-3
 
 
 def label_of(unit: str, seg) -> str:
@@ -218,7 +224,8 @@ def build(prefix: str) -> dict:
                                 "out_dtype": "BF16" if d["out_bf16"] else "FP32",
                             })
                         ev = {"name": label_of(unit, seg), "ph": "X",
-                              "ts": t0, "dur": t1 - t0, "pid": pid, "tid": tid,
+                              "ts": t0 * NS_TO_US, "dur": (t1 - t0) * NS_TO_US,
+                              "pid": pid, "tid": tid,
                               "args": args}
                         row_events.append(ev)
                         spans_cnt += 1
@@ -240,7 +247,8 @@ def build(prefix: str) -> dict:
                         args = lane_args(seg)
                         dte_events.append({
                             "name": dte_label(DTE_SLOT_UNITS[t], seg),
-                            "ph": "X", "ts": t0, "dur": t1 - t0,
+                            "ph": "X", "ts": t0 * NS_TO_US,
+                            "dur": (t1 - t0) * NS_TO_US,
                             "pid": pid, "tid": tid, "args": args})
                         spans_cnt += 1
                 dte_events.sort(key=lambda e: e["ts"])
@@ -273,7 +281,7 @@ def main(argv=None) -> int:
     if not args.quiet:
         size = path.stat().st_size
         print(f"[trace2perfetto] {n_core} 个 core / {n_span} 段 → {path}（{size} B）")
-        print("   1 拍 = 1 µs；拖进 https://ui.perfetto.dev")
+        print("   1 拍 = 1 ns；拖进 https://ui.perfetto.dev")
     return 0
 
 

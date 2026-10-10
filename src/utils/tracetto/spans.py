@@ -269,22 +269,26 @@ def val_at(ts: list, vs: list, t: int) -> int:
 
 def issue_events(unit_ts: list, unit_vs: list, task_ts: list, task_vs: list,
                  user_ts: list, user_vs: list, bit: int) -> List[dict]:
-    """某一位上 0→1 的事件，带上那一拍该路的 task 与 user。
+    """某一位上的事件，带上那一拍该路的 task 与 user。
 
     `ts_unit` 与两条打包信号都是“本拍这一路有没有”的形状，所以下发、RV 起、RV 完、
     DSA 起、DSA 完这五种事件都走这一个函数。
+
+    这些位掩码是**一拍一笔的脉冲**（各家 `EmitXxx` 里每拍从 0 重新算、只在笔数变了的
+    那一拍置位）：同一路连着两拍都有完成时，掩码两拍同值（都是 1）、波形上只有一段，
+    按 0→1 边沿只数得到第一笔，第二笔会被并进上一笔，段就一直延到波形末。身份信号
+    task / user 每拍跟着变，把它们的时间点并进来就能把这一段展开成一拍一笔
+    （moe_lpu_tokens 上 DTE-DSA 那 2032 段正是这么漏的）。
     """
     out: List[dict] = []
-    prev = 0
-    for t, v in zip(unit_ts, unit_vs):
-        on = (v >> bit) & 1
-        if on and not prev:
+    times = sorted(set(unit_ts) | set(task_ts) | set(user_ts))
+    for t in times:
+        if (val_at(unit_ts, unit_vs, t) >> bit) & 1:
             out.append({
                 "t": t,
                 "task": (val_at(task_ts, task_vs, t) >> (8 * bit)) & 0xFF,
                 "user": (val_at(user_ts, user_vs, t) >> (16 * bit)) & 0xFFFF,
             })
-        prev = on
     return out
 
 
@@ -580,7 +584,7 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         core_rows.append(user_spans(rv_starts, rv_dones, t_end))
         # DTE 那一路的 DSA 有**两个**终点：`dsa_done`（报给 TS 的）与 `dsa_done_noack`
         # （完成了但不报的，链一/自启动 Bypass 走这条）。两者互斥，所以按时间并成一条
-        # 完成流就完事 —— 不并的话那 3311 笔只能延到波形末。
+        # 完成流就完事 —— 不并的话那 1279 笔只能延到波形末。
         if u == 0:
             na = issue_events(*ev(SIG_DSA_NOACK), *ev(SIG_DSA_NOACK_TASK),
                               *ev(SIG_DSA_NOACK_USER), 0)

@@ -829,9 +829,9 @@ trace2perfetto 据此为每个有 DTE 活动的 core 在它进程下挂十条线
   <text x="250" y="80" font-size="12" fill="#111827">Completion RS · 两侧都齐才算完</text>
   <text x="250" y="102" font-size="10.5" fill="#475569">1. rd_done[task_id] |= RD 侧 drained；wr_done[task_id] |= WR 侧 drained</text>
   <text x="250" y="122" font-size="10.5" fill="#475569">2. join = rd_done &amp;&amp; wr_done &amp;&amp; 同一通道排在前面的都已 join</text>
-  <text x="250" y="142" font-size="10.5" fill="#475569">3. join &amp;&amp; ack_ts_en → done_pend.push({stream_id, task_id})</text>
+  <text x="250" y="142" font-size="10.5" fill="#475569">3. join → done_pend.push（不筛 ack_ts_en，全进）</text>
   <text x="250" y="162" font-size="10.5" fill="#475569">4. 同一拍多个 join 全部写入 done_pend，不覆盖不丢失</text>
-  <text x="250" y="186" font-size="10" fill="#9ca3af">ack_ts_en 之外的分片完成后不通知 TS</text>
+  <text x="250" y="186" font-size="10" fill="#9ca3af">ack_ts_en 之外的分片完成后不通知 TS，由 Report 发 dsa_done_noack 收尾</text>
   <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#are7)" fill="none"/>
   <path d="M188 137 L231 137" stroke="#475569" marker-end="url(#are7)" fill="none"/>
   <line x1="188" y1="205" x2="228" y2="205" stroke="#475569" marker-end="url(#are7)"/>

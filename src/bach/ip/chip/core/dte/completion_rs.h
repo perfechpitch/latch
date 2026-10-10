@@ -184,13 +184,15 @@ class CompletionRs : public BachModule {
       }
       if (pend.size() >= kDonePendDepth) break;  // 串行化，不丢
       ++join_pending;
-      // 只有带 ack_ts_en 的那一笔完成后才通知 TS。
+      // 完成了就进 Done Pending，无一例外。带 ack_ts_en 的 Report() 里报 TS；
+      // 只带 wr_sharemem_flag 的先写共享内存、下一拍走 noack；两个都不带的
+      // （ack_ts_en=0 且 wr_sharemem_flag=0）直接走 noack —— 都进 pend，好让
+      // Report() 一拍一笔地抬 noack_cnt，波形上 dsa_done_noack 才收得住这些
+      // 不报 TS 的完成，不然 DTE-DSA 那一段只能延到波形末。
       bool notify = e.desc.ack_ts_en;
-      if (notify || e.desc.wr_sharemem_flag) {
-        pend.push_back({e.desc.stream_id, e.desc.task_id, e.desc.user_id,
-                        e.desc.reduce_seq, notify, e.desc.wr_sharemem_flag,
-                        e.desc.smem_addr, e.desc.smem_data});
-      }
+      pend.push_back({e.desc.stream_id, e.desc.task_id, e.desc.user_id,
+                      e.desc.reduce_seq, notify, e.desc.wr_sharemem_flag,
+                      e.desc.smem_addr, e.desc.smem_data});
       it = rs.erase(it);
     }
   }
