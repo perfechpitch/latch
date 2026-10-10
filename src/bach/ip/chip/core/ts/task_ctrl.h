@@ -55,6 +55,15 @@ class TaskCtrl : public BachModule {
   uint64_t NextUser() const { return next_user; }
   bool NextUserValid() const { return next_user_vld; }
 
+  // **被表收下的那一笔**的身份。发波形要用这两个，不能用上面那三个 ——
+  // Installed() 数的是“表收下了”，而 Step() 里收下之后同一拍又 Generate() 出一个
+  // 新候选，next_task / next_user 当场就被换成下一笔了。拿它们配 Installed() 的话，
+  // 计数涨的那一拍报出来的是下一笔的身份，被收下那一笔的身份从头到尾没进过波形
+  // （实测 moe_lpu_tokens 上丢掉约 2~4%）。
+  uint64_t AcceptedTask() const { return accepted_task; }
+  uint64_t AcceptedUser() const { return accepted_user; }
+  bool AcceptedUserValid() const { return accepted_user_vld; }
+
   bool Quiescent() const override { return !pending; }
 
  protected:
@@ -63,6 +72,11 @@ class TaskCtrl : public BachModule {
       if (install->Accepted()) {
         pending = false;
         ++install_pending;
+        // 身份先截下来：下面 Generate() 会把 next_task / next_user 换成新候选，
+        // 不截的话 Core 层报出去的就是下一笔的身份。
+        accepted_task = next_task;
+        accepted_user = next_user;
+        accepted_user_vld = next_user_vld;
       } else {
         // 整项写失败后要重读最新表内容再来，所以这里不保持旧请求，下一拍重算。
         pending = false;
@@ -127,6 +141,9 @@ class TaskCtrl : public BachModule {
   // 身份，user 由 next_user_vld 说是真值还是占位。
   uint64_t next_task = 0, next_user = 0;
   bool next_user_vld = false;
+  // 被表收下的那一笔的身份（见上面 AcceptedTask() 的注释）。
+  uint64_t accepted_task = 0, accepted_user = 0;
+  bool accepted_user_vld = false;
 
   Logic64 installed, skipped;
 };

@@ -308,11 +308,14 @@ class Core : public BachModule {
     bool next = install != ts_install_seq;
     ts_install_seq = install;
     TracePerCycle("ts_install", install);
+    // 身份取「被表收下的那一笔」（AcceptedTask），不是 NextTask —— 后者在表收下
+    // 的同一拍就被 Generate() 换成下一笔了，拿它配 Installed() 会让被收下那一笔
+    // 的身份永远进不了波形。见 task_ctrl.h 的 AcceptedTask()。
     TracePerCycle("ts_install_task",
-                  next ? (ts->Ctrl().NextTask() & 0xFFu) : 0xFFu);
+                  next ? (ts->Ctrl().AcceptedTask() & 0xFFu) : 0xFFu);
     TracePerCycle("ts_install_user",
-                  (next && ts->Ctrl().NextUserValid())
-                      ? (ts->Ctrl().NextUser() & 0xFFFFu)
+                  (next && ts->Ctrl().AcceptedUserValid())
+                      ? (ts->Ctrl().AcceptedUser() & 0xFFFFu)
                       : 0xFFFFu);
   }
 

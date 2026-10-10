@@ -132,8 +132,18 @@ moe_lpu.tracetto-index/
   归 `TS-DTE`。两个队列都**按位置对齐**（同一身份的第 i 次下发对第 i 笔 load / 第 i 个
   `rv_start`），不是“取最早那个还没用掉的” —— 后者会漂：一笔晚到的 load 若谁都不要，
   会一直挂在队首、被很远以后的同身份下发认走，画出一根几千拍的长条。
-  MU / VU 的仲裁器（`mu_vu_arb.h`）**没有 DataIn 通路**，所以它们不拆行，那两行里
-  「没装进来那一拍」的单拍段是「搬入任务提前下发」那一路，不是 DataIn。
+  MU / VU 的仲裁器（`mu_vu_arb.h`）**没有 DataIn 通路** —— 它的候选只从 stream_table
+  的快照取（`if (!e.valid || e.task_fsm != kReady || e.task_unit != unit) continue;`），
+  DataIn 那条路严格只喂 DTE。所以它们不拆行；那两行里「没装进来那一拍」的单拍段
+  **不是 DataIn，而是 `ts_install` 的身份流有洞**（见下一条）。
+- **`ts_install` 的笔数与身份必须一起定格**。`Installed()` 数的是「这一拍表收下了一笔
+  装后继」，而 `TaskCtrl::Step()` 里收下之后**同一拍**又 `Generate()` 出一个新候选，
+  `next_task` / `next_user` 当场就被换成下一笔了。早先 `EmitStep()` 拿 `NextTask()` 配
+  `Installed()`，于是**计数涨的那一拍报出来的是下一笔的身份**，被收下那一笔的身份
+  从头到尾没进过波形。后果：少数任务被误判成「没装进 stream」—— 实测 `moe_lpu_tokens`
+  上 VU 62 笔、MU 1510 笔（MU / VU 全是这个洞，不存在别的通路），DTE 上则与真正的
+  DataIn 叠在一起。现在身份改取 `AcceptedTask()`（在 `install->Accepted()` 那一支里先
+  截下来），两边就对齐了。
 - **`ts_unit` 数下发要逐拍展开**。一条命令在端口上被持有期间不会被重新驱动
   （`mu_vu_arb.h` 的 `Select()` 里 `if (held) return;`），所以那一位抬起来就是这一拍
   新驱动了一条命令；同一路连着几拍都下发时位一直是 1、波形上只有一段，**事件却是一拍
