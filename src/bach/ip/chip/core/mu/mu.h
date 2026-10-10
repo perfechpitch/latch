@@ -127,6 +127,7 @@ class Mu {
   uint64_t DispatchCnt() const { return ctrl->DispatchCnt(); }
   uint64_t DispatchTask() const { return ctrl->DispatchTask(); }
   uint64_t DispatchUser() const { return ctrl->DispatchUser(); }
+  uint64_t DispatchCfgCount() const { return ctrl->DispatchCfgCount(); }
   // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
   // dsa_calc_done 用。
   uint64_t CalcStartCnt() const { return ctrl->CalcStartCnt(); }
@@ -204,6 +205,8 @@ class Mu {
     uint64_t DispatchCnt() const { return dispatch_cnt; }
     uint64_t DispatchTask() const { return dispatch_task; }
     uint64_t DispatchUser() const { return dispatch_user; }
+    // 这笔任务配置过的寄存器数，随发行那一拍带出去（Perfetto 的 MU-DSA args）。
+    uint64_t DispatchCfgCount() const { return dispatch_cfg_count; }
     // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
     // dsa_calc_done 用。起点是第一个 tile 进 exe、终点是最后一个 tile 的后一拍，量的是
     // 这笔任务的真实 MAC 时间（kblock × 专家数 × nblock 拍），不把 10 级流水深度算进去。
@@ -297,6 +300,9 @@ class Mu {
         ++dispatch_cnt;
         dispatch_task = f->cfg.task_id;
         dispatch_user = f->cfg.user_id;
+        // 这笔任务配置过的寄存器数，随发行那一拍带出去，Perfetto 的 MU-DSA args 靠它
+        // 带上「这一笔任务配置了多少个寄存器」。
+        dispatch_cfg_count = f->cfg.cfg_count;
       }
       MuStep s = f->agu.Next();
       // acu 查越界与对齐。查出来走 Drain & Trap，本轮只留状态位：这一笔的余下
@@ -455,6 +461,8 @@ class Mu {
     uint64_t done_cnt = 0, done_task = 0, done_user = 0;
     // 真正发行（第一个 tile 开始发起访存）的笔数与身份，同上。
     uint64_t dispatch_cnt = 0, dispatch_task = 0, dispatch_user = 0;
+    // 这笔任务配置过的寄存器数，随发行那一拍带出去。
+    uint64_t dispatch_cfg_count = 0;
     // 这一笔的第一个 tile 进矩阵执行单元、最后一个 tile 后一拍那一拍的笔数与身份。
     uint64_t calc_start_cnt = 0, calc_start_task = 0, calc_start_user = 0;
     uint64_t calc_start_expert = 0, calc_start_k = 0, calc_start_n = 0;

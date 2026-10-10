@@ -115,6 +115,10 @@ struct MuTaskCfg {
   uint64_t task_id = 0;
   uint64_t user_id = 0;
 
+  // 这一笔任务配置过的寄存器数：从上一笔 trigger 到写 TASK_TRIGGER 之间，软件写
+  // 任务配置寄存器（0x004~0x028）的次数。写 trigger 那一刻锁存，供波形带出去。
+  uint64_t cfg_count = 0;
+
   // 一条原语的 K 与 N，由 primitive_type 从物理阵列折出。
   uint64_t PrimK() const { return primitive_type == 1 ? kMuArrayK / 2 : kMuArrayK; }
   uint64_t PrimN() const { return primitive_type == 1 ? kMuArrayN * 2 : kMuArrayN; }
@@ -209,6 +213,11 @@ class MuRegfile : public BachModule {
   }
 
   void WriteReg(uint64_t addr, uint64_t v) {
+    // 任务配置寄存器（0x004~0x028）每写一次记一笔：一笔任务配置过多少个寄存器。
+    // TASK_TRIGGER（0x000）是启动位不算配置，静态配置（0x400+）走 default 也不计。
+    if (addr >= kMuPrimitiveDim && addr <= kMuPrimitiveMode) {
+      ++cfg_write_cnt;
+    }
     switch (addr) {
       case kMuPrimitiveDim:
         live.kblock = (v >> kMuKblockShift) & 0xFFFFu;
@@ -241,6 +250,8 @@ class MuRegfile : public BachModule {
           live.stream_id = ids.stream;
           live.task_id = ids.task;
           live.user_id = ids.user;
+          live.cfg_count = cfg_write_cnt;
+          cfg_write_cnt = 0;
           latched = live;
           pending = true;
           ++trigger_pending;
@@ -275,6 +286,9 @@ class MuRegfile : public BachModule {
   bool pending = false;
   uint64_t last_seq = 0;
   uint64_t trigger_pending = 0;
+  // 从上一笔 trigger 到这一拍，任务配置寄存器（0x004~0x028）被写了几次。写 trigger
+  // 那一刻锁进 latched.cfg_count 再清零，好让下一笔任务重新数。
+  uint64_t cfg_write_cnt = 0;
 
   Logic64 triggers;
 };

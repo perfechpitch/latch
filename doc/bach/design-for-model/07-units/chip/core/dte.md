@@ -553,9 +553,9 @@ DTE 在波形里另留了逐拍事件，供 trace2perfetto 把每个任务的读
 
 - **Regfile** 每笔任务发两个脉冲：`dsa_cfg_start`（第一次写 19 项 Config 区寄存器那一拍，F14 配置序列的起点）与 `dsa_trigger`（写 `CFG_TRIGGER` 那一拍，F65），各带这一笔配置写送进来的 STUPV 身份。
 - **五条 Lane** 各发四个脉冲，把这一半的读/写拆成两条轨道：读侧 `rd_start`（RD 半在 Activate 里激活这个任务那一拍）→ `rd_done`（RD 半做完、数据全回来那一拍，出核在 ReportDrained、进核在 StepRd 收尾），写侧 `wr_start`（WR 半激活）→ `wr_done`（最后一拍 wreq 发完、MarkWreq 那一拍）。四个脉冲的身份统一取 desc 的 `task_id` / `user_id`——读写两半各自从激活到做完带的是同一份 desc，进核/出核两侧都配对得上（旧版只用 rresp/wreq 两脉冲，进核 rresp 走包头 Message 身份对不上 desc，才换成这套激活→做完）。
-- **字节画像**：`rd_start` / `wr_start` 那一拍另发 `rd_start_data` / `rd_start_scale` / `rd_start_topk` 与写侧同名三路，是这笔任务按 `ByteProfile` 拆出的字节数——data（Cmem/Mmem 数据段）、scale 旁带、topK 各多少字节（段长统一按字节，scale/topK 看任一端 tag）。
+- **字节画像**：`rd_start` / `wr_start` 那一拍另发 `rd_start_data` / `rd_start_scale` / `rd_start_topk` 与写侧同名三路，是这笔任务按 `ByteProfile` 拆出的字节数——data（Cmem/Mmem 数据段）、scale 旁带、topK 各多少字节（段长统一按字节，scale/topK 看任一端 tag）。同一拍再发 `rd_start_cmem` / `wr_start_cmem` 记 data/scale 落哪块存储（1 = Core Mem、0 = Matrix Mem，按 F3c 的 route 编码：读侧 `FromCm`、写侧 `ToCm`）；scale 随 data 落同一块，topK 恒走 topk_table，不单列信号。
 
-trace2perfetto 据此为每个有 DTE 活动的 core 在它进程下挂十一条线程：轨道 0 `dte_rvcore`（`dsa_cfg_start` → `dsa_trigger`，即“配置到触发”），轨道 1~10 `lan0_rd`/`lan0_wr`~`lan4_rd`/`lan4_wr`（读 = `rd_start` → `rd_done`，写 = `wr_start` → `wr_done`）。段按 (user, task) 配对，身份缺失填 -1。每条 lane 轨道的段标签再带上字节画像：`bytes` = data+scale+topk 一共搬的字节，`ideal` = ceil(bytes/256) 按 256B/拍 算的理论最少拍数，`blocked` = max(0, 实际拍 − ideal) 即超出部分（堵塞拍）。
+trace2perfetto 据此为每个有 DTE 活动的 core 在它进程下挂十一条线程：轨道 0 `dte_rvcore`（`dsa_cfg_start` → `dsa_trigger`，即“配置到触发”），轨道 1~10 `lan0_rd`/`lan0_wr`~`lan4_rd`/`lan4_wr`（读 = `rd_start` → `rd_done`，写 = `wr_start` → `wr_done`）。段按 (user, task) 配对，身份缺失填 -1。每条 lane 轨道的段 args 再带上字节画像与落库：`bytes` = data+scale+topk 一共搬的字节，`data` / `scale` / `topk` 各多少字节，`data_loc` / `scale_loc` 落 `cmem` 还是 `mmem`，`topk_loc` 恒 `topk_table`。
 
 ***
 

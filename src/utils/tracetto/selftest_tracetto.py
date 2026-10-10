@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tracetto 的自检。
 
-造几份合成波形，把读波形、分段、标签、十三条行、建索引、窗口查询、服务各查一遍，不碰 C++
+造几份合成波形，把读波形、分段、标签、十三条通道与十一行、建索引、窗口查询、服务各查一遍，不碰 C++
 那一边的构建产物。全过就退出码 0，有一处不对就打印差在哪并退出码非零 —— 与
 compiler/selftest_hwconfig.py 收尾方式一致。
 """
@@ -546,7 +546,7 @@ def check_index_roundtrip(prefix):
     d = index.index_dir(prefix)
     plan = idxbuild.plan(trace)
     expect(manifest["t_end"], plan["t_end"], "manifest 里的 t_end")
-    expect(len(manifest["lane_n"]), 13, "一条 core 十三条行")
+    expect(len(manifest["lane_n"]), 13, "一条 core 十三条通道")
     expect_true(manifest["core_size"][0] > 0, "core0 的索引文件大小记下来了")
 
     bad = 0
@@ -564,7 +564,7 @@ def check_index_roundtrip(prefix):
                 if bad <= 2:
                     FAILS.append(f"索引往返 {key} row{row}：{got[:3]} vs {want[row][:3]}")
         cf.close()
-    expect(lanes_checked, 13, "查过的行数")
+    expect(lanes_checked, 13, "查过的通道数")
     expect(bad, 0, "索引往返应当逐段一致")
 
 
@@ -746,30 +746,30 @@ def check_http(prefix):
         expect(init["build"], index.build_id(manifest["source"]), "/api/init 的 build")
         expect(init["t_end"], 80, "/api/init 的 t_end")
         expect(init["rows"], ["TS-DTE-DATAIN", "TS-DTE", "TS-MU", "TS-VU",
-                              "DTE-Core", "DTE-DSA", "MU-Core", "MU-DSA-ISQ",
-                              "MU-DSA", "MU-DSA-CALC", "VU-Core", "VU-DSA-ISQ",
-                              "VU-DSA"],
-               "/api/init 的十三行与顺序")
+                              "DTE-Core", "MU-Core", "MU-DSA", "MU-DSA-CALC",
+                              "VU-Core", "VU-DSA-ISQ", "VU-DSA"],
+               "/api/init 的十一行与顺序")
         expect(init["chips"][0][1][0][1], 1, "core0 派了角色")
         expect(len(init["lane_n"]), 13, "/api/init 的行段数")
         expect(init["lanes_per_core"], 13, "/api/init 的通道步长")
-        # 每行一条通道；十二种颜色各有其主。通道号与行序不是一回事：TS-DTE-DATAIN
-        # 在第 0 行取第 10 条通道，MU-DSA-ISQ 在第 7 行取第 11 条。段上印的名字由
-        # spans.SLOT_UNITS 按颜色号取，两张表必须一样长。
+        # 每行一条通道；十一种颜色各有其主，空出 DTE-DSA（4）与 MU-DSA-ISQ（11）两个槽。
+        # 通道号与行序不是一回事：TS-DTE-DATAIN 在第 0 行取第 10 条通道，MU-DSA-CALC 在
+        # 第 7 行取第 12 条。段上印的名字由 spans.SLOT_UNITS 按颜色号取，两张表必须一样长。
         expect(init["row_parts"][0], [{"lane": 10, "color": 10,
                                        "unit": "DATAIN-DTE"}],
                "/api/init 里 TS-DTE-DATAIN 那一行的一条通道")
         expect(init["row_parts"][1], [{"lane": 0, "color": 0, "unit": "TS-DTE"}],
                "/api/init 里 TS-DTE 那一行的一条通道")
-        expect(init["row_parts"][7], [{"lane": 11, "color": 11, "unit": "DSA-ISQ-MU"}],
-               "/api/init 里 MU-DSA-ISQ 那一行")
-        expect(init["row_parts"][9], [{"lane": 12, "color": 12,
+        expect(init["row_parts"][7], [{"lane": 12, "color": 12,
                                        "unit": "DSA-CALC-MU"}],
                "/api/init 里 MU-DSA-CALC 那一行")
-        expect(init["row_parts"][11], [{"lane": 9, "color": 9, "unit": "DSA-ISQ-VU"}],
+        expect(init["row_parts"][9], [{"lane": 9, "color": 9, "unit": "DSA-ISQ-VU"}],
                "/api/init 里 VU-DSA-ISQ 那一行")
+        expect(init["row_parts"][10], [{"lane": 7, "color": 8, "unit": "DSA-VU"}],
+               "/api/init 里 VU-DSA 那一行")
         used = [p["color"] for row in init["row_parts"] for p in row]
-        expect(sorted(used), list(range(13)), "/api/init 的十三种颜色各用一次")
+        expect(sorted(used), [0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 12],
+               "/api/init 的十一种颜色各用一次")
 
         with get("/") as r:
             page = r.read()

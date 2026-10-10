@@ -427,6 +427,9 @@ class Core : public BachModule {
     TracePerCycle("dsa_task_dispatch", disp_mask);
     TracePerCycle("dsa_task_dispatch_task", disp_task);
     TracePerCycle("dsa_task_dispatch_user", disp_user);
+    // 这一笔任务配置过的寄存器数（标量，只有 MU 有）。在发行那一拍与 task / user
+    // 一起锁存，Perfetto 的 MU-DSA args 靠它带上「这笔任务配置了多少个寄存器」。
+    TracePerCycle("dsa_dispatch_cfg_count", mu->DispatchCfgCount());
     TracePerCycle("dsa_calc_start", calcmask);
     TracePerCycle("dsa_calc_start_task", calctask);
     TracePerCycle("dsa_calc_start_user", calcuser);

@@ -146,6 +146,8 @@ class Lane : public BachModule {
     wr_done_task = 0xFFu; wr_done_user = 0xFFFFu;
     rd_start_data = 0; rd_start_scale = 0; rd_start_topk = 0;
     wr_start_data = 0; wr_start_scale = 0; wr_start_topk = 0;
+    rd_start_cmem = 0;
+    wr_start_cmem = 0;
 
     // 末级先做：先收响应、再发新请求、最后激活下一个任务。
     TakeAdmit();
@@ -193,6 +195,10 @@ class Lane : public BachModule {
     TracePerCycle("wr_start_data", wr_start_data);
     TracePerCycle("wr_start_scale", wr_start_scale);
     TracePerCycle("wr_start_topk", wr_start_topk);
+    // rd_start / wr_start 那一拍 data/scale 落在哪块存储：1 = Core Mem，0 = Matrix
+    // Mem。scale 旁带随它的数据落在同一块存储；topK 恒走 topk_table，不用信号。
+    TracePerCycle("rd_start_cmem", rd_start_cmem);
+    TracePerCycle("wr_start_cmem", wr_start_cmem);
   }
 
  private:
@@ -412,6 +418,7 @@ class Lane : public BachModule {
         rd_start_data = data_b;
         rd_start_scale = scale_b;
         rd_start_topk = topk_b;
+        rd_start_cmem = FromCm(d.route) ? 1 : 0;
       } else {
         wr_start_ev = true;
         wr_start_task = d.task_id & 0xFFu;
@@ -419,6 +426,7 @@ class Lane : public BachModule {
         wr_start_data = data_b;
         wr_start_scale = scale_b;
         wr_start_topk = topk_b;
+        wr_start_cmem = ToCm(d.route) ? 1 : 0;
       }
       q[h].Pop();
     }
@@ -688,6 +696,10 @@ class Lane : public BachModule {
   // rd_start / wr_start 那一拍带上这笔任务的字节画像：data / scale / topk 各多少字节。
   uint64_t rd_start_data = 0, rd_start_scale = 0, rd_start_topk = 0;
   uint64_t wr_start_data = 0, wr_start_scale = 0, wr_start_topk = 0;
+  // rd_start / wr_start 那一拍 data/scale 落在哪块存储：1 = Core Mem，0 = Matrix Mem。
+  // scale 旁带随它的数据落在同一块存储；topK 恒走 topk_table，不单列。
+  uint64_t rd_start_cmem = 0;
+  uint64_t wr_start_cmem = 0;
   // 出核：上一次报过 rresp 起点的 commit_seq，用它认“新任务的第一笔响应”。
   uint64_t rd_seen_commit = ~0ull;
 };
