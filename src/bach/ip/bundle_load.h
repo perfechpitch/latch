@@ -359,7 +359,9 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     if (core.Bad()) continue;
 
     core.SetPcodeMode(pcode);
-    core.GetRouter().GetCoreStation().SetSoftwareHeaderQueue(!pcode || c.self_start);
+    // pcode kernels receive identity from TS and header context via DTE into
+    // Hmem (compute) or Cmem (B/R); none reads the legacy Router header FIFO.
+    core.GetRouter().GetCoreStation().SetSoftwareHeaderQueue(!pcode);
     core.GetMu().Regfile().SetPcodeMode(pcode);
     core.GetDte().Regfile().SetPcodeMode(pcode);
     for (auto const& r : c.dsa_regs) {

@@ -36,7 +36,7 @@
 
 1. BachFlow `latch_export.py`：pcode 的 packet mask 筛选既有 CORE 目的地，而 latch 的 mask-enable 覆盖 bypass。只转发的广播源启用 mask 会变成进核目的地，引起自身包重新进入并重复广播。转换时只有原始方向包含 CORE 才启用 mask。
 2. latch `dte_types.h`：pcode 的 TopK 表下标使用 AGCU 展开的地址，包含 `SID × stride`，不再只用原始基址。否则第二个 stream 写入第一份 TopK 表。新增 SID 0、1、15 的进核和出核检查。
-3. latch `core_station.h` / `bundle_load.h`：pcode 非自启动计算 core 的包头随 DTE 数据通路写入 Hmem，无需 RV 读取 Router 软件包头 FIFO。装载时关闭这些 core 的软件包头副本，保留完整数据和 TS trigger；B/R 自启动 core 及原 latch 程序仍使用软件 FIFO。此前 concat 两包累计超过 16 个包头后，软件 FIFO 满导致后续数据停滞。新增超过 FIFO 深度的 20 包测试，并保留原软件 FIFO 反压测试。
+3. latch `core_station.h` / `bundle_load.h`：pcode 包头随 DTE 数据通路写入 Hmem（计算 core）或 CoreMem（B/R core），身份由 TS CSR 提供，无需 RV 读取 Router 软件包头 FIFO。装载 pcode 时关闭无人读取的软件包头副本，保留完整数据和 TS trigger；原 latch 程序仍使用软件 FIFO。此前 concat 两包累计超过 16 个包头后，软件 FIFO 满导致后续数据停滞。新增超过 FIFO 深度的 20 包测试，并保留原软件 FIFO 反压测试。
 4. latch `agcu.h`：pcode 的 scale 地址和 stride 以 scale 字节计量，DTE lane 则以对应数据字节定位旁带。地址转换时同时把 stride 乘 32，使 SID 1 的 scale 落在数据偏移 65536，而非 2048。新增 SID 0、1、15 的双向地址测试，修复前 SID 1/15 测试失败。
 
 测试驱动新增按入口 credit 发送两包的回调；没有使用旧 MoE 用例的 B-core 落点规则，也没有在两包之间修改硬件配置。

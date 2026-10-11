@@ -10,8 +10,8 @@
 //   发，那一笔留在它那个 VC 上等，VC 还有空位时照样能继续从上游收（F-021）。
 //   到这里的包已经过了那一档，一定有 Core Mem 空间，不再查 Core 方向的 VC credit。
 //
-//   软件管理的 Header 写进 HeaderFIFO；pcode 计算 core 的 Header 随数据由 DTE
-//   写入 Hmem，不留无人读取的软件副本。Payload 写进 OutputBuffer，保持包的顺序与
+//   软件管理的 Header 写进 HeaderFIFO；pcode Header 随数据由 DTE 写入 Hmem 或
+//   CoreMem，不留无人读取的软件副本。Payload 写进 OutputBuffer，保持包的顺序与
 //   边界。Header 就绪即通知 TS，不等整包收完，OutputBuffer 因此是流水缓冲
 //   而不是整包缓冲，进 core 的包长不受它的容量约束。
 //
@@ -107,8 +107,8 @@ class CoreStation : public BachModule {
   std::shared_ptr<MemPort> HdrPtr() const { return hdr; }
   void AttachHdr(std::shared_ptr<MemPort> p) { hdr = std::move(p); }
   uint64_t HeaderDepth() const { return hdr_fifo.size(); }
-  // Generated pcode datain kernels deliver header context through DTE/Hmem;
-  // only software-managed B/R kernels read and pop the Router header FIFO.
+  // Generated pcode datain kernels deliver header context through DTE into
+  // Hmem/Cmem; legacy software-managed kernels read/pop the Router header FIFO.
   void SetSoftwareHeaderQueue(bool enabled) { software_headers = enabled; }
   // 进核那一段还压着几个 flit。
   uint64_t OutBufDepth() const { return out_buf.size(); }
