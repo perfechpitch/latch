@@ -277,6 +277,23 @@ TEST(BachAgcu, EndpointIsDecodedFromTheAddressRange) {
   EXPECT_EQ(Agcu::Decode(0x40001000ull), SegEndpoint::kHeader);
 }
 
+TEST(BachAgcu, PcodeTopkUsesExpandedStreamAddress) {
+  Agcu agcu;
+  for (uint64_t sid : {0u, 1u, 15u}) {
+    for (Route route : {Route::kRouterToCm, Route::kCmToRouter}) {
+      Descriptor d;
+      d.pcode = true;
+      auto& s = d.seg[1];
+      s.valid = true;
+      s.stride = 256;
+      if (route == Route::kRouterToCm) s.dst = 0x48033000;
+      else s.src = 0x48033000;
+      agcu.ExpandOut(s, sid, route);
+      EXPECT_EQ(d.TopkIndex(), sid);
+    }
+  }
+}
+
 // 段地址逐段展开：stream_start = CfgAddr + SID × stride。Cmem 一侧按段地址与
 // 偏移展开，Mmem 一侧给物理地址不叠；MM→CM 源端不叠 stride。
 TEST(BachAgcu, ExpandOutExpandsPerSegmentAddress) {

@@ -214,10 +214,10 @@ struct Descriptor {
   uint64_t TopkIndex() const {
     for (auto const& s : seg) {
       if (s.valid && s.dst_kind == SegEndpoint::kTopk) {
-        return pcode && s.dst >= 0x48033000 && s.dst < 0x48034000 ? (s.dst - 0x48033000) / 256 : s.dst & kEpDataMask;
+        return pcode && s.dst >= 0x48033000 && s.dst < 0x48034000 ? s.dst_addr / 256 : s.dst & kEpDataMask;
       }
       if (s.valid && s.src_kind == SegEndpoint::kTopk) {
-        return pcode && s.src >= 0x48033000 && s.src < 0x48034000 ? (s.src - 0x48033000) / 256 : s.src & kEpDataMask;
+        return pcode && s.src >= 0x48033000 && s.src < 0x48034000 ? s.src_addr / 256 : s.src & kEpDataMask;
       }
     }
     return 0;

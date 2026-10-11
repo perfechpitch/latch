@@ -409,6 +409,10 @@ class SpreadHarness : public BachModule {
   // tokens 里排在前面的先发。这些 token 一律送进 B core，落点按送出的笔数在发
   // 的时候填。
   std::vector<MessagePtr> tokens;
+  // Alternative ingress for exported programs with their own landing/stream
+  // allocation. The source chooses timing; this harness still enforces credit.
+  std::function<MessagePtr(uint64_t)> input_source;
+  uint64_t expected_outputs = 1;
   static constexpr uint64_t kGpuUnlimited = ~uint64_t{0};
   uint64_t credit = kGpuUnlimited;
   uint64_t token_gap = 0;
@@ -499,6 +503,12 @@ class SpreadHarness : public BachModule {
   // 再发 token。
   MessagePtr Pick() {
     uint64_t now = CycleNow();
+    if (input_source) {
+      if (now < fire_at || feed_room == 0) return MessagePtr();
+      auto next = input_source(now);
+      if (next) --feed_room;
+      return next;
+    }
     if (!tokens.empty()) return PickToken(now);
     if (weights.empty()) return now == fire_at ? msg : MessagePtr();
     LOGCHECK(weights_gap != 0, "SpreadHarness: weights 那一段要给注入间隔。");
@@ -520,7 +530,9 @@ class SpreadHarness : public BachModule {
   }
 
   // 出口上要收到几包结果。
-  uint64_t OutWanted() const { return tokens.empty() ? 1 : tokens.size(); }
+  uint64_t OutWanted() const {
+    return input_source ? expected_outputs : tokens.empty() ? 1 : tokens.size();
+  }
 
   // 连续发的那一段：入口桥收得下，就发排在最前面、R core 上那个槽空着的那一个
   // token。credit 不是 kGpuUnlimited 时还要看 GPU 额度。token_gap 非 0 时距上一

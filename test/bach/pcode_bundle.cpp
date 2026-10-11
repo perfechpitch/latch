@@ -66,7 +66,7 @@ void LoadFixtureWeights(std::vector<Chip*> const& all, std::string const& root,
   }
 }
 
-TEST(PcodeBundle, Ep6OneToken) {
+TEST(PcodeBundle, Ep6ExportedTokens) {
   char const* root = std::getenv("PCODE_BUNDLE_ROOT");
   ASSERT_NE(root, nullptr) << "set PCODE_BUNDLE_ROOT to the exported bundle root";
   std::string case_name = std::getenv("PCODE_CASE") ? std::getenv("PCODE_CASE") : "full";
@@ -77,6 +77,12 @@ TEST(PcodeBundle, Ep6OneToken) {
   for (uint64_t ep = 0; ep < 6; ++ep) if (counts[ep]) active_mask |= 1ull << ep;
   std::unique_ptr<pcode_test::Fixture> fixture;
   if (auto path = std::getenv("PCODE_CASE_FILE")) fixture = std::make_unique<pcode_test::Fixture>(path);
+  std::unique_ptr<pcode_test::Fixture> second;
+  if (auto path = std::getenv("PCODE_SECOND_CASE_FILE")) {
+    ASSERT_NE(fixture, nullptr);
+    second = std::make_unique<pcode_test::Fixture>(path);
+  }
+  size_t expected_outputs = second ? 2 : 1;
   if (auto threads = std::getenv("PCODE_THREADS")) {
     uint64_t n = std::stoull(threads); ASSERT_GT(n,0u); ASSERT_LE(n,16u);
     RT::Reset(n, (600 + n - 1) / n);
@@ -92,6 +98,7 @@ TEST(PcodeBundle, Ep6OneToken) {
         std::cerr << "reduce id " << all[c]->GetCore(p).GetRouter().GetReduce().Id() << " chip " << c << " core " << p << "\n";
   if (fixture) fixture->Load(all,root);
   else LoadFixtureWeights(all, root, counts);
+  if (second) second->Load(all,root);
   auto m = std::make_shared<Message>();
   m->path_id = 63;
   m->path_core_mask = active_mask;
@@ -116,6 +123,32 @@ TEST(PcodeBundle, Ep6OneToken) {
   if (char const* cap = std::getenv("PCODE_MAX_CYCLES")) max_cycles = std::stoull(cap);
   PcodeHarness h(clk, all, GridLinks(12, 4), feed, sink, 0, kChipW, 47,
                   kChipE, 2, max_cycles, m);
+  std::vector<MessagePtr> inputs{m};
+  if (second) inputs.push_back(second->Message());
+  std::vector<uint64_t> sent_at;
+  if (second) {
+    ASSERT_FALSE(inputs[0]->user_id == inputs[1]->user_id &&
+                 inputs[0]->token_id == inputs[1]->token_id);
+    std::string mode = std::getenv("PCODE_INJECT_MODE") ? std::getenv("PCODE_INJECT_MODE") : "overlap";
+    ASSERT_TRUE(mode == "overlap" || mode == "sequential");
+    uint64_t gap = std::getenv("PCODE_TOKEN_GAP") ? std::stoull(std::getenv("PCODE_TOKEN_GAP")) : 1;
+    h.expected_outputs = expected_outputs;
+    h.input_source = [&, mode, gap](uint64_t now) -> MessagePtr {
+      size_t index = sent_at.size();
+      if (index == inputs.size() || now < 2 + index * gap) return {};
+      if (mode == "sequential" && index > 0) {
+        if (h.out_msgs.size() < index || now < h.out_at.back() + 32) return {};
+        for (auto* chip : all)
+          for (uint64_t core = 0; core < 10; ++core)
+            if (!chip->GetCore(core).Bad() && !chip->GetCore(core).GetTs().Cfg().SelfStartCore() &&
+                chip->GetCore(core).GetTs().Table().InFlight()) return {};
+      }
+      sent_at.push_back(now);
+      std::cerr << "pcode sent token " << index << " at " << now << " user "
+                << inputs[index]->user_id << " token " << inputs[index]->token_id << "\n";
+      return inputs[index];
+    };
+  }
   clk->Continue();
   RT::JoinAll();
   if (auto prefix = std::getenv("PCODE_SNAPSHOT_PREFIX")) {
@@ -137,7 +170,7 @@ TEST(PcodeBundle, Ep6OneToken) {
     for (uint64_t p = 0; p < 10; ++p) {
       auto& core = all[c]->GetCore(p);
       if (core.Bad()) continue;
-      if (h.out_msgs.size() != 1 && (c < 8 || p == 4)) {
+      if (h.out_msgs.size() != expected_outputs && (c < 8 || p == 4)) {
         for (auto const& request : core.GetRouter().GetXbar().InspectRequests()) {
           auto const& f = request.second;
           std::cerr << "queued xbar chip " << c << " core " << p << " input " << request.first << " path " << f.path_id << " head " << f.head << " tail " << f.tail << " mask " << f.out_mask << " size " << (f.msg ? f.msg->size : 0) << "\n";
@@ -156,7 +189,7 @@ TEST(PcodeBundle, Ep6OneToken) {
         if (!core.GetTs().Cfg().SelfStartCore()) {
           EXPECT_FALSE(e.valid && e.user_id_vld) << "pending compute chip " << c << " core " << p;
         }
-        if (h.out_msgs.size() != 1 && e.valid && (e.user_id_vld || e.task_id > 0)) {
+        if (h.out_msgs.size() != expected_outputs && e.valid && (e.user_id_vld || e.task_id > 0)) {
           std::cerr << "pending chip " << c << " core " << p << " stream " << s
                     << " task " << e.task_id << " path " << e.task_path_id << " RV PC "
                     << core.Rv(0).Exec().Pc() << " " << core.Rv(1).Exec().Pc() << "\n";
@@ -165,14 +198,23 @@ TEST(PcodeBundle, Ep6OneToken) {
       }
     }
   }
-  ASSERT_EQ(h.out_msgs.size(), 1u);
-  auto const& result = *h.out_msgs.front();
-  EXPECT_EQ(result.user_id, m->user_id);
-  EXPECT_EQ(result.token_id, m->token_id);
-  EXPECT_EQ(result.payload.size(), 6144u * 2);
+  ASSERT_EQ(h.out_msgs.size(), expected_outputs);
   std::string actual_path = std::getenv("PCODE_ACTUAL") ? std::getenv("PCODE_ACTUAL") : "build-ep6/actual-" + case_name + ".bf16";
-  std::ofstream actual(actual_path, std::ios::binary);
-  ASSERT_TRUE(actual.good());
-  actual.write(reinterpret_cast<char const*>(result.payload.data()), result.payload.size());
+  std::set<std::pair<uint64_t,uint64_t>> seen;
+  for (size_t i = 0; i < h.out_msgs.size(); ++i) {
+    auto const& result = *h.out_msgs[i];
+    size_t index = inputs.size();
+    for (size_t j = 0; j < inputs.size(); ++j)
+      if (result.user_id == inputs[j]->user_id && result.token_id == inputs[j]->token_id) index = j;
+    ASSERT_LT(index, inputs.size()) << "unexpected output identity";
+    ASSERT_TRUE(seen.insert({result.user_id,result.token_id}).second) << "duplicate output";
+    ASSERT_EQ(result.payload.size(), 6144u * 2);
+    std::cerr << "pcode received token " << index << " at " << h.out_at[i] << " user "
+              << result.user_id << " token " << result.token_id << "\n";
+    auto path = second ? actual_path + ".token" + std::to_string(index) + ".bf16" : actual_path;
+    std::ofstream actual(path, std::ios::binary);
+    ASSERT_TRUE(actual.good());
+    actual.write(reinterpret_cast<char const*>(result.payload.data()), result.payload.size());
+  }
 }
 }

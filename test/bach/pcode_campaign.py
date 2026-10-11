@@ -122,12 +122,18 @@ def make_fixture(spec,tpl,logical,directory,routes=None):
         rows=(t[0]&65535)*128;kdim=(t[0]>>16)*64
         experts=[0]+[i+1 for i in ids[ep]]
         for expert in experts:
+            # Paired tokens use an immutable common model: its coefficients
+            # depend on the matrix identity, never on token/order/topK.
+            matrix_seed=spec.get('matrix_seed',spec['seed'])
+            matrix_profile=spec.get('matrix_profile',profile)
+            wrng=(np.random.default_rng(np.random.SeedSequence([matrix_seed,chip,core,stage,expert]))
+                  if 'matrix_seed' in spec else rng)
             if routing: indices=np.array([0],np.uint32)
             else:
-                tile=(spec['seed']+slot+part+stage)%(kdim//64)
+                tile=(matrix_seed+slot+part+stage)%(kdim//64)
                 other=(tile+kdim//128)%(kdim//64)
                 indices=np.array([tile*64, tile*64+31,other*64+32,other*64+63],np.uint32)
-                if (spec['seed']-20261010)%16==0:
+                if (matrix_seed-20261010)%16==0:
                     # Exercise accumulation through every K tile, including
                     # both scale blocks and the final element of each tile.
                     indices=np.array([k*64+i for k in range(kdim//64)
@@ -144,14 +150,14 @@ def make_fixture(spec,tpl,logical,directory,routes=None):
                 scales=np.full((rows,taps),127,np.uint8)
             else:
                 pool=np.array([0,0x08,0x10,0x18,0x20],np.uint8) # 1/64..1/8
-                values=rng.choice(pool,(rows,taps))
+                values=wrng.choice(pool,(rows,taps))
                 if stage==1:
                     # A column's sign is consistent across TP contributors;
                     # activation signs still exercise arithmetic cancellation.
                     values[np.arange(rows)%2==1]|=128
                 scales=np.full((rows,taps),127,np.uint8)
-                if profile=='mixed_scale':
-                    scales[:, :]=rng.integers(125,129,(rows,1),dtype=np.uint8)
+                if matrix_profile=='mixed_scale':
+                    scales[:, :]=wrng.integers(125,129,(rows,1),dtype=np.uint8)
             records.append((chip,core,stage,expert,rows,indices,values,scales))
             decoded=FP8[values]*np.exp2(scales.astype(int)-127).astype(np.float32)
             if stage==0:
@@ -208,7 +214,7 @@ def make_fixture(spec,tpl,logical,directory,routes=None):
     f=directory/(spec['name']+'.fixture')
     with f.open('wb') as out:
         def u32(*v):out.write(struct.pack('<'+'I'*len(v),*map(int,v)))
-        out.write(b'PCDTST02');u32(spec['user'],1000+spec['seed']%100000,spec['mask'])
+        out.write(b'PCDTST02');u32(spec['user'],spec.get('token',1000+spec['seed']%100000),spec['mask'])
         for ep in range(6):
             u32(len(ids[ep]))
             for eid,w in zip(ids[ep],weights[ep]):u32(eid);out.write(struct.pack('<f',w))
