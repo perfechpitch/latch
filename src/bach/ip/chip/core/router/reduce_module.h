@@ -140,38 +140,47 @@ class ReduceModule : public BachModule {
   void AttachRetire(std::shared_ptr<RetireBroadcastPort> p) {
     retire_in = std::move(p);
   }
+  // Pcode routes several independent reductions through the same core. They
+  // share a user's 32 KiB partition, rather than blocking each other by PID.
+  void SetPcodeMode(bool enabled) { pcode_mode = enabled; }
 
   // User Retire 放本地分区（F-037）：这个用户没有在做的任务就当场放，有就等结果
   // 交付完再放。
   void RetireUser(uint64_t user) {
-    auto it = ctx.find(user);
-    if (it == ctx.end()) return;
-    if (it->second.busy || it->second.reserved) {
-      it->second.retired = true;
-      return;
+    auto it = ctx.lower_bound({user, 0});
+    while (it != ctx.end() && it->first.first == user) {
+      if (it->second.busy || it->second.reserved) {
+        it->second.retired = true;
+        ++it;
+      } else {
+        it = EraseCtx(it);
+      }
     }
-    ctx.erase(it);
   }
   // 这个用户占着一个本地分区。
-  bool HoldsUser(uint64_t user) const { return ctx.count(user) != 0; }
-  uint64_t ContextUsed() const { return ctx.size(); }
+  bool HoldsUser(uint64_t user) const { return users.count(user) != 0; }
+  uint64_t ContextUsed() const { return users.size(); }
 
   bool CanAcceptHead(Message const& m, uint64_t lane = 0) const {
-    uint64_t bytes = ElemsOf(m.size, LaneDtype(rtab.Lookup(copy, m.path_id).reduce_data_type, lane), m.reduce_aux_bytes) * 4;
+    uint64_t bytes = ContextBytes(m, lane);
     LOGCHECK(bytes <= kReduceCtxBytes, "ReduceModule: 超过 32 KiB。");
-    auto it = ctx.find(m.user_id);
-    if (it == ctx.end()) return ctx.size() < kReduceCtxNum;
-    auto const& c = it->second;
-    if (c.busy || c.reserved) return c.reduce_seq == m.reduce_seq && c.path_id == m.path_id;
-    return !c.retired;
+    auto it = ctx.find(KeyOf(m.user_id, m.path_id));
+    if (it != ctx.end()) {
+      auto const& c = it->second;
+      if (c.busy || c.reserved) return c.reduce_seq == m.reduce_seq && c.path_id == m.path_id;
+      if (c.retired) return false;
+    }
+    if (!HoldsUser(m.user_id) && ContextUsed() >= kReduceCtxNum) return false;
+    return UserBytes(m.user_id) + bytes <= kReduceCtxBytes;
   }
   void ReserveHead(Message const& m, uint64_t lane = 0) {
     LOGCHECK(CanAcceptHead(m, lane), "ReduceModule: 未获准入。");
-    auto& c = ctx[m.user_id];
+    auto& c = EnsureCtx(m.user_id, m.path_id);
     if (c.busy || c.reserved) return;
     c.reserved = true;
     c.reduce_seq = m.reduce_seq;
     c.path_id = m.path_id;
+    c.live_bytes = ContextBytes(m, lane);
   }
 
   // 正在做的任务有几笔：从首份输入进来到结果尾 flit 交付。
@@ -195,7 +204,7 @@ class ReduceModule : public BachModule {
     for (auto const& item : ctx) {
       Ctx const& c = item.second;
       if (c.busy) {
-        s.tasks.push_back({item.first, c.path_id, c.reduce_seq,
+        s.tasks.push_back({item.first.first, c.path_id, c.reduce_seq,
                            c.expect_mask, c.in_done_mask, c.got});
       }
     }
@@ -232,7 +241,7 @@ class ReduceModule : public BachModule {
     emitted = emitted_pending;
     stalled = stalled_pending;
     TracePerCycle("out_q", out_q.size());
-    TracePerCycle("ctx", ctx.size());
+    TracePerCycle("ctx", ContextUsed());
   }
 
  private:
@@ -250,6 +259,7 @@ class ReduceModule : public BachModule {
   // 一个用户的本地分区，以及它正在做的那一笔任务。
   struct Ctx {
     bool reserved = false;
+    uint64_t live_bytes = 0;
     bool busy = false;               // 有一笔任务在做：首份输入进来到结果尾 flit 交付
     uint64_t path_id = 0;
     uint64_t reduce_seq = 0;
@@ -270,6 +280,7 @@ class ReduceModule : public BachModule {
     uint64_t user_id = 0, reduce_seq = 0;
     MessagePtr msg;             // 结果包，发首 flit 之前按累加结果造
     uint64_t sent = 0;          // 已经发出去的字节
+    uint64_t path_id = 0;
   };
 
   // 这一拍线上到的 flit 先进本路的输入缓冲。
@@ -293,16 +304,17 @@ class ReduceModule : public BachModule {
     LOGCHECK(e.reduce_in_mask != 0,
              "ReduceModule: 这条 path 在本级 reduce_in_mask 是 0，不该进来。");
 
-    auto it = ctx.find(user);
+    auto it = ctx.find(KeyOf(user, f.msg->path_id));
     if (it == ctx.end()) {
       // 用户第一笔任务真正进来时才分配分区（F-029）。16 个都占着就反压，等有
       // 用户 Retire 放出一个。
       LOGCHECK(f.head, "ReduceModule: 没有分区的用户来的不是首 flit。");
-      if (ctx.size() >= kReduceCtxNum) {
+      if (!CanAcceptHead(*f.msg, r)) {
         ++stalled_pending;
         return;
       }
-      it = ctx.emplace(user, Ctx{}).first;
+      EnsureCtx(user, f.msg->path_id);
+      it = ctx.find(KeyOf(user, f.msg->path_id));
     }
     Ctx& c = it->second;
 
@@ -313,7 +325,12 @@ class ReduceModule : public BachModule {
     }
 
     // 上下文保护：当前任务的结果全部发出之前，同一 User 的下一笔任务不得进来。
-    if ((c.busy || c.reserved) && c.reduce_seq != f.msg->reduce_seq) {
+    if ((c.busy || c.reserved) &&
+        (c.reduce_seq != f.msg->reduce_seq || c.path_id != f.msg->path_id)) {
+      ++stalled_pending;
+      return;
+    }
+    if (f.head && !c.busy && !c.reserved && !CanAcceptHead(*f.msg, r)) {
       ++stalled_pending;
       return;
     }
@@ -337,6 +354,7 @@ class ReduceModule : public BachModule {
         c.out_dtype = e.reduce_outdata_type;
         uint64_t n = ElemsOf(f.msg->size, LaneDtype(c.in_dtype, r), c.aux_bytes);
         c.acc.assign(n, 0.0f);
+        c.live_bytes = n * 4;
         c.seen.assign(n, false);
         CheckCtxFits(c);
         c.sw_head.assign(f.msg->payload.begin(),
@@ -344,7 +362,7 @@ class ReduceModule : public BachModule {
                              std::min<size_t>(c.aux_bytes,
                                               f.msg->payload.size()));
         c.first_msg = f.msg;
-        out_q.push_back({user, c.reduce_seq, nullptr, 0});
+        out_q.push_back({user, c.reduce_seq, nullptr, 0, c.path_id});
       }
       // 这一路一个新包开始，收了多少从包头起算。
       c.got[r] = 0;
@@ -479,7 +497,7 @@ class ReduceModule : public BachModule {
       return;
     }
     OutItem& it = out_q.front();
-    auto cit = ctx.find(it.user_id);
+    auto cit = ctx.find(KeyOf(it.user_id, it.path_id));
     LOGCHECK(cit != ctx.end(), "ReduceModule: 输出时分区已经没了。");
     Ctx& c = cit->second;
 
@@ -529,20 +547,20 @@ class ReduceModule : public BachModule {
     // 结果全部交付后向 core 返回 UserID 与包头里的 reduce_seq（F-034）。这笔任务
     // 做完，分区空出来给这个用户的下一笔；收到过 Retire 的就放掉分区。
     done->Drive(it.user_id, it.reduce_seq, it.msg->path_id);
-    uint64_t user = it.user_id;
     out_q.pop_front();
     c.busy = false;
+    c.live_bytes = 0;
     c.in_done_mask = 0;
     c.got = {};
     c.locked_from = 3;
-    if (c.retired) ctx.erase(user);
+    if (c.retired) EraseCtx(cit);
     ++emitted_pending;
   }
 
   // 队头还没开始发时，挑最早一笔首 flit 已经算好的任务挪到队头。
   bool PickNext() {
     for (auto i = out_q.begin(); i != out_q.end(); ++i) {
-      Ctx const& c = ctx.at(i->user_id);
+      Ctx const& c = ctx.at(KeyOf(i->user_id, i->path_id));
       uint64_t size = OutSizeOf(c);
       if (ReadyBytes(c, size) < std::min(size, kFlitBytes)) continue;
       // 结果包的包头照抄首份输入，数据按 flit 填：发哪个 flit 之前写哪一段。
@@ -577,7 +595,33 @@ class ReduceModule : public BachModule {
 
   // Step 独占。
   std::array<std::deque<FlitView>, 3> in_buf;
-  std::map<uint64_t, Ctx> ctx;
+  using ContextKey = std::pair<uint64_t, uint64_t>;
+  ContextKey KeyOf(uint64_t user, uint64_t path) const {
+    return {user, pcode_mode ? path : 0};
+  }
+  uint64_t ContextBytes(Message const& m, uint64_t lane) const {
+    return ElemsOf(m.size, LaneDtype(rtab.Lookup(copy, m.path_id).reduce_data_type, lane),
+                   m.reduce_aux_bytes) * 4;
+  }
+  uint64_t UserBytes(uint64_t user) const {
+    uint64_t bytes = 0;
+    for (auto it = ctx.lower_bound({user, 0}); it != ctx.end() && it->first.first == user; ++it)
+      if (it->second.busy || it->second.reserved) bytes += it->second.live_bytes;
+    return bytes;
+  }
+  Ctx& EnsureCtx(uint64_t user, uint64_t path) {
+    auto result = ctx.emplace(KeyOf(user, path), Ctx{});
+    if (result.second) ++users[user];
+    return result.first->second;
+  }
+  std::map<ContextKey, Ctx>::iterator EraseCtx(std::map<ContextKey, Ctx>::iterator it) {
+    auto user = it->first.first;
+    if (--users.at(user) == 0) users.erase(user);
+    return ctx.erase(it);
+  }
+  bool pcode_mode = false;
+  std::map<ContextKey, Ctx> ctx;
+  std::map<uint64_t, uint64_t> users;
   std::deque<OutItem> out_q;
   uint64_t req_seq = 0;
   uint64_t accepted_pending = 0, emitted_pending = 0, stalled_pending = 0;

@@ -138,19 +138,27 @@ class CreditMonitor : public BachModule {
   void TakeRequest() {
     bool room = q.size() < kMonitorQDepth;
     req->DriveReady(room);
-    if (!req->Valid() || !room) return;
+    if (!req->Valid()) {
+      // Deduplicate only a held request. A retired token may later reuse the
+      // same user/task (and, after the stream ring wraps, the same stream).
+      last_seen.reset();
+      return;
+    }
+    if (!room) return;
     uint64_t user = req->user_id.Get();
     uint64_t task = req->task_id.Get();
-    // 同一笔会连着两拍出现在端口上，按 (user, task) 认它。
-    if (last_seen && user == last_seen->user && task == last_seen->task) return;
+    uint64_t stream = req->stream_id.Get();
+    uint64_t path = req->path_id.Get();
+    if (last_seen && user == last_seen->user && task == last_seen->task &&
+        stream == last_seen->stream && path == last_seen->path) return;
     Event e;
     e.user_id = user;
-    e.stream_id = req->stream_id.Get();
+    e.stream_id = stream;
     e.task_id = task;
-    e.path_id = req->path_id.Get();
+    e.path_id = path;
     e.enqueue_seq = next_seq++;
     q.push_back(e);
-    last_seen = LastSeen{user, task};
+    last_seen = LastSeen{user, task, stream, path};
   }
 
   // 多个事件同时满足时按 StreamID 仲裁，选最老的任务通知 TS。
@@ -184,10 +192,12 @@ class CreditMonitor : public BachModule {
   // Step 独占。
   std::deque<Event> q;
   uint64_t next_seq = 0;
-  // 上一笔收下、还连着两拍出现在端口上的 (user, task)，按它去重。
+  // Identity of the request held continuously on the port.
   struct LastSeen {
     uint64_t user = 0;
     uint64_t task = 0;
+    uint64_t stream = 0;
+    uint64_t path = 0;
   };
   std::optional<LastSeen> last_seen;
   uint64_t notified_pending = 0;

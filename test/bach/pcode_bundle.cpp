@@ -177,7 +177,7 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
         for (auto depth : state.input_depth)
           EXPECT_EQ(depth, 0u) << "queued reduction input chip " << c << " core " << p;
       }
-      if (h.out_msgs.size() != expected_outputs && (c < 8 || p == 4)) {
+      if (h.out_msgs.size() != expected_outputs) {
         auto& station = core.GetRouter().GetCoreStation();
         if (station.HeaderDepth() || station.OutBufDepth())
           std::cerr << "station chip " << c << " core " << p << " headers "
@@ -203,10 +203,18 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
         if (h.out_msgs.size() != expected_outputs && e.valid && (e.user_id_vld || e.task_id > 0)) {
           std::cerr << "pending chip " << c << " core " << p << " stream " << s
                     << " user " << e.user_id << " task " << e.task_id << " path " << e.task_path_id << " RV PC "
-                    << core.Rv(0).Exec().Pc() << " " << core.Rv(1).Exec().Pc() << "\n";
-          break;
+                    << core.Rv(0).Exec().Pc() << " " << core.Rv(1).Exec().Pc()
+                    << " fsm " << uint64_t(e.task_fsm) << " rmem " << e.rmem_busy
+                    << " done " << e.done_bitmap << "\n";
+          if (core.GetTs().Cfg().SelfStartCore()) break;
         }
       }
+      if (h.out_msgs.size() != expected_outputs && !core.GetTs().Cfg().SelfStartCore() &&
+          core.GetTs().Table().Occupied())
+        std::cerr << "dte chip " << c << " core " << p << " sent "
+                  << core.GetDte().OutArb().Sent() << " local forwarded "
+                  << core.GetRouter().Station(3).FwdCount() << " credit requests "
+                  << core.GetRouter().GetMonitor().QueueLen() << "\n";
     }
   }
   ASSERT_EQ(h.out_msgs.size(), expected_outputs);

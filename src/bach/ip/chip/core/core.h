@@ -152,6 +152,7 @@ class Core : public BachModule {
   void SetPcodeMode(bool enabled) {
     pcode_mode = enabled;
     ts->Cfg().SetPcodeMode(enabled);
+    router->GetReduce().SetPcodeMode(enabled);
     for (auto& r : rv) r->Exec().SetPcodeMode(enabled);
   }
   Router& GetRouter() { return *router; }

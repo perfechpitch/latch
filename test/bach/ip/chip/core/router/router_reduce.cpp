@@ -712,3 +712,79 @@ TEST(BachReduce, SoftwareHeaderIsSkippedAndKept) {
   EXPECT_FLOAT_EQ(value, 7.0f) << "只有数据段参与加法";
   EXPECT_EQ(head, 0xA5) << "那 16 B 原样留在输出里，没被加进去";
 }
+
+TEST(BachReduce, PcodeInterleavedPathsDoNotBlockOneUser) {
+  std::map<uint64_t, float> values;
+  {
+    EnsureSlots();
+    auto clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.rm->SetPcodeMode(true);
+    b.tab->Preload(9, Relay(0b011));
+    b.tab->Preload(10, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    // The second path on lane 1 precedes the first path's missing operand.
+    // A context keyed only by user blocks both paths permanently.
+    h.jobs = {{2, 0, Part(77, 9, 9, 3)}, {3, 1, Part(77, 10, 10, 40)},
+              {4, 0, Part(77, 10, 10, 30)}, {6, 1, Part(77, 9, 9, 4)}};
+    h.retire_at = 4;
+    h.retire_user = 77;
+    clk->Continue(60 * kPeriod);
+    RT::JoinAll();
+    for (auto const& msg : h.out_msgs) values[msg->path_id] = WordOf(msg->payload);
+    EXPECT_EQ(h.out_msgs.size(), 2u);
+    EXPECT_EQ(b.rm->ContextUsed(), 0u);
+    EXPECT_FALSE(b.rm->HoldsUser(77));
+    EXPECT_TRUE(b.rm->Inspect().tasks.empty());
+  }
+  RT::Reset();
+  EXPECT_FLOAT_EQ(values[9], 7);
+  EXPECT_FLOAT_EQ(values[10], 70);
+}
+
+TEST(BachReduce, PcodePathsShareTheUserByteBudget) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  b.rm->SetPcodeMode(true);
+  for (uint64_t path : {9u, 10u, 11u}) b.tab->Preload(path, Relay(0b011));
+  auto a = LongPart(77, 9, 9, 1, kReduceCtxBytes / 8);
+  auto bpart = LongPart(77, 10, 10, 1, kReduceCtxBytes / 8);
+  b.rm->ReserveHead(*a);
+  ASSERT_TRUE(b.rm->CanAcceptHead(*bpart));
+  b.rm->ReserveHead(*bpart);
+  EXPECT_EQ(b.rm->ContextUsed(), 1u);
+  EXPECT_FALSE(b.rm->CanAcceptHead(*Part(77, 11, 11, 1)));
+  EXPECT_TRUE(b.rm->CanAcceptHead(*a));
+  EXPECT_FALSE(b.rm->CanAcceptHead(*LongPart(77, 9, 99, 1, kReduceCtxBytes / 8)));
+  b.rm->RetireUser(77);
+  // Reserved operands remain live until the corresponding result completes.
+  EXPECT_EQ(b.rm->ContextUsed(), 1u);
+}
+
+TEST(BachReduce, PcodePartitionLimitCountsUsersNotPaths) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  b.rm->SetPcodeMode(true);
+  b.tab->Preload(9, Relay(0b011));
+  b.tab->Preload(10, Relay(0b011));
+  for (uint64_t user = 0; user < kReduceCtxNum; ++user) {
+    b.rm->ReserveHead(*Part(user, 9, 9, 1));
+    EXPECT_TRUE(b.rm->CanAcceptHead(*Part(user, 10, 10, 1)));
+    b.rm->ReserveHead(*Part(user, 10, 10, 1));
+  }
+  EXPECT_EQ(b.rm->ContextUsed(), kReduceCtxNum);
+  EXPECT_FALSE(b.rm->CanAcceptHead(*Part(kReduceCtxNum, 9, 9, 1)));
+}
+
+TEST(BachReduce, LegacyPathsRemainSerializedPerUser) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  b.tab->Preload(9, Relay(0b011));
+  b.tab->Preload(10, Relay(0b011));
+  b.rm->ReserveHead(*Part(77, 9, 9, 1));
+  EXPECT_FALSE(b.rm->CanAcceptHead(*Part(77, 10, 10, 1)));
+  EXPECT_TRUE(b.rm->CanAcceptHead(*Part(77, 9, 9, 1)));
+}

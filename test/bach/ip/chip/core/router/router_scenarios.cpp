@@ -339,6 +339,37 @@ TEST(BachRouterScenario, RetireFreesTheCoreEntryAndKeepsTheDownstreamOnes) {
   EXPECT_TRUE(down_after) << "下游那几项不跟着本级退休放";
 }
 
+// Held requests are accepted once; a later token may reuse all four IDs.
+TEST(BachRouterScenario, MonitorAcceptsReusedIdentityAfterIdle) {
+  std::vector<uint64_t> grants;
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    RouterTable rtab(clk, "rtab");
+    CreditMonitor mon(clk, "mon", rtab, 0);
+    mon.SetCheck([](uint64_t, uint64_t) { return true; });
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr c, CreditMonitor& m) : BachModule(c, "driver"), mon(m) {}
+      std::vector<uint64_t> grants;
+     protected:
+      void Step() override {
+        uint64_t now = CycleNow();
+        if ((now >= 2 && now <= 5) || (now >= 12 && now <= 15))
+          mon.Req().Drive(0, 1, 2, 1);
+        else mon.Req().Idle();
+        if (mon.Grant().Valid()) grants.push_back(mon.Grant().stream_id.Get());
+      }
+     private:
+      CreditMonitor& mon;
+    } driver(clk, mon);
+    clk->Continue(30 * kPeriod);
+    RT::JoinAll();
+    grants = driver.grants;
+  }
+  RT::Reset();
+  EXPECT_EQ(grants, (std::vector<uint64_t>{1, 1}));
+}
+
 // CreditMonitor：多个事件同时满足时按 StreamID 选最老的。
 TEST(BachRouterScenario, MonitorPicksLowestStreamId) {
   std::vector<uint64_t> order;
