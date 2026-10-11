@@ -436,3 +436,33 @@ TEST(BachCoreStation, FullHeaderFifoBackpressures) {
   EXPECT_EQ(fed + held, 20u) << "剩下的压在上游，不是丢了";
   EXPECT_GT(held, 0u) << "电平低下来之后确实压住了";
 }
+
+TEST(BachCoreStation, HardwareHeadersDoNotFillSoftwareFifo) {
+  uint64_t depth = 0, fed = 0, held = 0, admitted = 0;
+  std::vector<MessagePtr> delivered;
+  std::vector<uint64_t> users;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.cs->SetSoftwareHeaderQueue(false);
+    StationHarness h(clk, *b.cs, b.in_wire, b.out_wire);
+    h.honor_level = true;
+    for (uint64_t i = 0; i < 20; ++i)
+      h.in_jobs.push_back({1 + i * 2, MakeMsg(100 + i, 3), true, true, 0});
+    clk->Continue(120 * kPeriod);
+    RT::JoinAll();
+    depth = b.cs->HeaderDepth();
+    fed = h.fed; held = h.held; admitted = h.admitted_seen;
+    delivered = h.dte_msgs; users = h.trig_users;
+  }
+  RT::Reset();
+  EXPECT_EQ(depth, 0u);
+  EXPECT_EQ(fed, 20u); EXPECT_EQ(held, 0u); EXPECT_EQ(admitted, 20u);
+  ASSERT_EQ(delivered.size(), 20u);
+  ASSERT_EQ(users.size(), 20u);
+  for (uint64_t i = 0; i < 20; ++i) {
+    EXPECT_EQ(delivered[i]->user_id, 100 + i);
+    EXPECT_EQ(users[i], 100 + i);
+  }
+}

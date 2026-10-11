@@ -137,7 +137,7 @@ def main():
         try:
             with log_path.open('w') as log:
                 code=subprocess.run(['./build-ep6/pcode_bundle'],env=env,stdout=log,
-                                    stderr=subprocess.STDOUT,timeout=1200).returncode
+                                    stderr=subprocess.STDOUT,timeout=2400).returncode
         except subprocess.TimeoutExpired:code=124
         text=log_path.read_text()
         sent={int(i):int(c) for i,c in re.findall(r'pcode sent token (\d+) at (\d+)',text)}

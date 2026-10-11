@@ -277,6 +277,21 @@ TEST(BachAgcu, EndpointIsDecodedFromTheAddressRange) {
   EXPECT_EQ(Agcu::Decode(0x40001000ull), SegEndpoint::kHeader);
 }
 
+TEST(BachAgcu, PcodeScaleStreamStrideUsesDataByteUnits) {
+  Agcu agcu;
+  for (uint64_t sid : {0u, 1u, 15u}) {
+    Segment in, out;
+    in.dst = 0x48500018; in.stride = 0x800;
+    out.src = in.dst; out.stride = in.stride;
+    agcu.ExpandOut(in, sid, Route::kRouterToCm);
+    agcu.ExpandOut(out, sid, Route::kCmToRouter);
+    EXPECT_EQ(in.dst_kind, SegEndpoint::kScale);
+    EXPECT_EQ(out.src_kind, SegEndpoint::kScale);
+    EXPECT_EQ(in.dst_addr, 0x300 + sid * 0x10000);
+    EXPECT_EQ(out.src_addr, 0x300 + sid * 0x10000);
+  }
+}
+
 TEST(BachAgcu, PcodeTopkUsesExpandedStreamAddress) {
   Agcu agcu;
   for (uint64_t sid : {0u, 1u, 15u}) {

@@ -58,6 +58,12 @@ class Agcu {
     return a;
   }
 
+  // Hardware scale addresses/strides count scale bytes; the lane's scale
+  // endpoint uses the corresponding data-byte address (32 data bytes/scale).
+  static uint64_t EndpointStride(uint64_t address, uint64_t stride) {
+    return address >= 0x48500000 && address < 0x48508000 ? stride * 32 : stride;
+  }
+
   // 出核段位：展开源/目的地址并译码端点。route 决定哪端是 Router（那一端的地址
   // 无意义），memory 端按 stream_start = CfgAddr + SID × stride 算；route 100
   // （Mmem→Cmem）源端不叠 stride。展开结果写回 seg 的 src_addr / dst_addr 与
@@ -72,12 +78,12 @@ class Agcu {
     if (src_mem) {
       // MM→CM 源端是 Matrix Mem，软件给物理地址，不叠 stride。
       uint64_t stride = (route == Route::kMmToCm) ? 0 : s.stride;
-      s.src_addr = (Tagged(s.src) & kEpDataMask) + sid * stride;
+      s.src_addr = (Tagged(s.src) & kEpDataMask) + sid * EndpointStride(s.src, stride);
     } else {
       s.src_addr = 0;
     }
     if (dst_mem) {
-      s.dst_addr = (Tagged(s.dst) & kEpDataMask) + sid * s.stride;
+      s.dst_addr = (Tagged(s.dst) & kEpDataMask) + sid * EndpointStride(s.dst, s.stride);
     } else {
       s.dst_addr = 0;
     }

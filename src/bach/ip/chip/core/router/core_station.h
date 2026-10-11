@@ -10,7 +10,8 @@
 //   发，那一笔留在它那个 VC 上等，VC 还有空位时照样能继续从上游收（F-021）。
 //   到这里的包已经过了那一档，一定有 Core Mem 空间，不再查 Core 方向的 VC credit。
 //
-//   Header 写进 HeaderFIFO，Payload 写进 OutputBuffer，两者保持同一包的顺序与
+//   软件管理的 Header 写进 HeaderFIFO；pcode 计算 core 的 Header 随数据由 DTE
+//   写入 Hmem，不留无人读取的软件副本。Payload 写进 OutputBuffer，保持包的顺序与
 //   边界。Header 就绪即通知 TS，不等整包收完，OutputBuffer 因此是流水缓冲
 //   而不是整包缓冲，进 core 的包长不受它的容量约束。
 //
@@ -106,6 +107,9 @@ class CoreStation : public BachModule {
   std::shared_ptr<MemPort> HdrPtr() const { return hdr; }
   void AttachHdr(std::shared_ptr<MemPort> p) { hdr = std::move(p); }
   uint64_t HeaderDepth() const { return hdr_fifo.size(); }
+  // Generated pcode datain kernels deliver header context through DTE/Hmem;
+  // only software-managed B/R kernels read and pop the Router header FIFO.
+  void SetSoftwareHeaderQueue(bool enabled) { software_headers = enabled; }
   // 进核那一段还压着几个 flit。
   uint64_t OutBufDepth() const { return out_buf.size(); }
   uint64_t Popped() const { return pop_cnt; }
@@ -118,7 +122,7 @@ class CoreStation : public BachModule {
   // 缓冲都要留得出这两格，包头队列按每个 flit 都是头 flit 算。
   bool CoreReady() const {
     return out_buf.size() + 2 <= kOutBufFlits &&
-           hdr_fifo.size() + 2 <= kHeaderFifoDepth;
+           (!software_headers || hdr_fifo.size() + 2 <= kHeaderFifoDepth);
   }
   std::shared_ptr<ReadyLevelPort> LevelPtr() const { return level; }
 
@@ -217,13 +221,13 @@ class CoreStation : public BachModule {
     uint64_t user = f.msg->user_id;
     LOGCHECK(out_buf.size() < kOutBufFlits,
              "CoreStation: 进核缓冲满了还发进来，Xbar 没按准入电平停。");
-    LOGCHECK(!f.head || hdr_fifo.size() < kHeaderFifoDepth,
+    LOGCHECK(!software_headers || !f.head || hdr_fifo.size() < kHeaderFifoDepth,
              "CoreStation: 包头队列满了还发进来，Xbar 没按准入电平停。");
     out_buf.push_back(f);
     ++admitted_pending;
-    // 头 flit 同时进 HeaderFIFO，并排一笔 trigger。
+    // 每个头 flit 排一笔 trigger；软件管理的包头另留在 HeaderFIFO。
     if (f.head) {
-      hdr_fifo.push_back(f.msg);
+      if (software_headers) hdr_fifo.push_back(f.msg);
       trig_q.push_back({user, f.msg->path_id, f.msg->reissue != 0});
     }
   }
@@ -330,6 +334,7 @@ class CoreStation : public BachModule {
   std::shared_ptr<ReadyLevelPort> level;
 
   // Step 独占。
+  bool software_headers = true;
   std::deque<FlitView> out_buf;
   std::deque<MessagePtr> hdr_fifo;
   std::deque<Pending> trig_q;

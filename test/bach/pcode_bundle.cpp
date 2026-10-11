@@ -171,6 +171,10 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
       auto& core = all[c]->GetCore(p);
       if (core.Bad()) continue;
       if (h.out_msgs.size() != expected_outputs && (c < 8 || p == 4)) {
+        auto& station = core.GetRouter().GetCoreStation();
+        if (station.HeaderDepth() || station.OutBufDepth())
+          std::cerr << "station chip " << c << " core " << p << " headers "
+                    << station.HeaderDepth() << " payload flits " << station.OutBufDepth() << "\n";
         for (auto const& request : core.GetRouter().GetXbar().InspectRequests()) {
           auto const& f = request.second;
           std::cerr << "queued xbar chip " << c << " core " << p << " input " << request.first << " path " << f.path_id << " head " << f.head << " tail " << f.tail << " mask " << f.out_mask << " size " << (f.msg ? f.msg->size : 0) << "\n";

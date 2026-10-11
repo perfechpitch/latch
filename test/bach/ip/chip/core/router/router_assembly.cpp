@@ -75,6 +75,7 @@ class Downstream : public BachModule {
   uint64_t first_at = 0;
   std::vector<uint64_t> users, ats;
   std::vector<uint8_t> last_payload;
+  uint64_t release_from = 0;
 
  protected:
   void Step() override {
@@ -89,8 +90,10 @@ class Downstream : public BachModule {
       }
     }
     rel->flit.Idle();
-    if (on && f.valid) {
-      rel->release.Drive(true, f.vc, false, 0);
+    if (on && f.valid) pending_credits.push_back(f.vc);
+    if (on && CycleNow() >= release_from && !pending_credits.empty()) {
+      rel->release.Drive(true, pending_credits.front(), false, 0);
+      pending_credits.pop_front();
     } else {
       rel->release.Idle();
     }
@@ -99,6 +102,7 @@ class Downstream : public BachModule {
  private:
   LinkEndPtr src, rel;
   bool on;
+  std::deque<uint64_t> pending_credits;
 };
 
 // 扮演 DTE 与 TS：一直拉 ready 收进核数据，并把 trigger 收下。
@@ -587,29 +591,28 @@ TEST(BachRouterAsm, OverflowGoesToReissue) {
   EXPECT_EQ(occ, 0u);
 }
 
-// credit 真耗光时才转存：把 40 个 credit 全用掉，第 41 笔起走 stall_way。
-TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
+// Transport VC credit exhaustion waits for credits, independently of the
+// stream/CoreMem allocation failure controlled by stall_way.
+TEST(BachRouterAsm, TransportCreditWaitsAndResumesWithoutSpill) {
   uint64_t overflow = 0, stored = 0, got = 0;
+  std::vector<uint64_t> users, ats;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterCfg cfg;
-    // 要转存 10 笔，暂存区就得配得下 10 笔。配少了 CoreMemReissue 会直接停。
-    // 那是设计要的行为：不覆盖已暂存的包，也不退回“留在当前 VC 等”，免得同一个
-    // stall_way 配置在两种容量下走出两种行为。
     cfg.reissue_pkts_per_vc = 16;
     Router rt(clk, "router", cfg);
     rt.Preload(3, Forward(kFlowRight, false, /*stall_way=*/true));
 
-    // 一个方向的 credit 是 private 20 加 shared 20 共 40。前 40 笔把它用光，
-    // 之后的没资源可拿，stall_way 选转存就落进 Core Mem。发出去的 flit 会把
-    // VC Buffer 的槽腾出来，所以灌 50 笔不会把 buffer 撑爆。
+    // Consume all 40 link credits, then return them from cycle 150. The last
+    // ten packets must remain pending and resume without loss or spill.
     std::vector<Pusher::Job> jobs;
     for (uint64_t i = 0; i < 50; ++i) {
       jobs.push_back({1 + i, MakeMsg(3, 500 + i)});
     }
     Pusher push(clk, rt.InWire(kLeft), jobs);
-    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), false);
+    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+    down.release_from = 150;
     CoreSide core(clk, rt);
     AsmProbe probe(clk, rt);
     clk->Continue(300 * kPeriod);
@@ -617,12 +620,15 @@ TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
     overflow = probe.overflow;
     stored = probe.stored;
     got = down.got;
+    users = down.users; ats = down.ats;
   }
   RT::Reset();
-  // 40 个 credit 用完，剩下的 10 笔都转存
-  EXPECT_EQ(got, 40u);
-  EXPECT_EQ(overflow, 10u);
-  EXPECT_EQ(stored, overflow);
+  EXPECT_EQ(got, 50u);
+  EXPECT_EQ(overflow, 0u);
+  EXPECT_EQ(stored, 0u);
+  EXPECT_EQ(std::count_if(ats.begin(), ats.end(), [](uint64_t at) { return at < 150; }), 40);
+  ASSERT_EQ(users.size(), 50u);
+  for (uint64_t i = 0; i < 50; ++i) EXPECT_EQ(users[i], 500 + i);
 }
 
 // 坏 core：core_bad_mask 里本 core 那一位为 1，整个 Router 进透传档，不投递本

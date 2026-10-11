@@ -359,6 +359,7 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     if (core.Bad()) continue;
 
     core.SetPcodeMode(pcode);
+    core.GetRouter().GetCoreStation().SetSoftwareHeaderQueue(!pcode || c.self_start);
     core.GetMu().Regfile().SetPcodeMode(pcode);
     core.GetDte().Regfile().SetPcodeMode(pcode);
     for (auto const& r : c.dsa_regs) {
