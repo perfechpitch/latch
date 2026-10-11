@@ -180,7 +180,7 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
           std::cerr << "queued xbar chip " << c << " core " << p << " input " << request.first << " path " << f.path_id << " head " << f.head << " tail " << f.tail << " mask " << f.out_mask << " size " << (f.msg ? f.msg->size : 0) << "\n";
         }
         auto state = core.GetRouter().GetReduce().Inspect();
-        for (auto const& task : state.tasks) std::cerr << "reduce chip " << c << " core " << p << " path " << task.path_id << " seq " << task.reduce_seq << " expect " << task.expect_mask << " done " << task.in_done_mask << " got " << task.got[0] << "/" << task.got[1] << "/" << task.got[2] << "\n";
+        for (auto const& task : state.tasks) std::cerr << "reduce chip " << c << " core " << p << " user " << task.user_id << " path " << task.path_id << " seq " << task.reduce_seq << " expect " << task.expect_mask << " done " << task.in_done_mask << " got " << task.got[0] << "/" << task.got[1] << "/" << task.got[2] << "\n";
         for (uint64_t lane = 0; lane < 3; ++lane) {
           auto const& f = state.input_heads[lane];
           if (f.valid && f.msg) std::cerr << "queued reduce chip " << c << " core " << p << " lane " << lane << " path " << f.msg->path_id << " seq " << f.msg->reduce_seq << "\n";
@@ -195,7 +195,7 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
         }
         if (h.out_msgs.size() != expected_outputs && e.valid && (e.user_id_vld || e.task_id > 0)) {
           std::cerr << "pending chip " << c << " core " << p << " stream " << s
-                    << " task " << e.task_id << " path " << e.task_path_id << " RV PC "
+                    << " user " << e.user_id << " task " << e.task_id << " path " << e.task_path_id << " RV PC "
                     << core.Rv(0).Exec().Pc() << " " << core.Rv(1).Exec().Pc() << "\n";
           break;
         }
