@@ -170,6 +170,13 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
     for (uint64_t p = 0; p < 10; ++p) {
       auto& core = all[c]->GetCore(p);
       if (core.Bad()) continue;
+      if (h.out_msgs.size() == expected_outputs) {
+        auto state = core.GetRouter().GetReduce().Inspect();
+        EXPECT_TRUE(state.tasks.empty()) << "unfinished reduction chip " << c << " core " << p;
+        EXPECT_EQ(core.GetRouter().GetReduce().OutQueued(), 0u) << "chip " << c << " core " << p;
+        for (auto depth : state.input_depth)
+          EXPECT_EQ(depth, 0u) << "queued reduction input chip " << c << " core " << p;
+      }
       if (h.out_msgs.size() != expected_outputs && (c < 8 || p == 4)) {
         auto& station = core.GetRouter().GetCoreStation();
         if (station.HeaderDepth() || station.OutBufDepth())
