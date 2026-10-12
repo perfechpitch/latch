@@ -5,6 +5,7 @@
 #include <map>
 #include "test/bach/ip/chip/moe_common.h"
 #include "test/bach/pcode_case.h"
+#include "test/bach/pcode_dense_model.h"
 
 namespace {
 using namespace latch;
@@ -99,6 +100,13 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   if (fixture) fixture->Load(all,root);
   else LoadFixtureWeights(all, root, counts);
   if (second) second->Load(all,root);
+  if (auto model = std::getenv("PCODE_DENSE_MODEL")) {
+    ASSERT_NE(fixture, nullptr);
+    ASSERT_EQ(second, nullptr);
+    ASSERT_TRUE(fixture->weights.empty());
+    pcode_test::ValidateDenseFixture(*fixture);
+    pcode_test::LoadDenseModel(all,model,root);
+  }
   auto m = std::make_shared<Message>();
   m->path_id = 63;
   m->path_core_mask = active_mask;

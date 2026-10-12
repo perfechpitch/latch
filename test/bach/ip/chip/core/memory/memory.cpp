@@ -84,6 +84,42 @@ ByteBlockPtr Bytes(std::vector<uint8_t> v) {
 
 }  // namespace
 
+TEST(BachMatrixMem, CompleteImagePreservesPartialDataAndScaleWrites) {
+  auto clk = MakeClock(0, kPeriod);
+  MatrixMem mem(clk, "image", 0, false);
+  auto bytes = std::make_shared<ByteBlock>(264);
+  for (uint64_t i = 0; i < 256; ++i) (*bytes)[i] = i;
+  for (uint64_t i = 0; i < 8; ++i) (*bytes)[256+i] = 120+i;
+  mem.PreloadImage(128,256,bytes->data(),bytes->data()+256,bytes);
+  EXPECT_EQ(mem.Peek(124,8), (ByteBlock{0,0,0,0,0,1,2,3}));
+  EXPECT_EQ(mem.Peek(380,8), (ByteBlock{252,253,254,255,0,0,0,0}));
+  EXPECT_EQ(mem.PeekScale(128,8), (ByteBlock{120,121,122,123,124,125,126,127}));
+  mem.Poke(160,ByteBlock{99,98});
+  EXPECT_EQ(mem.Peek(158,6), (ByteBlock{30,31,99,98,34,35}));
+  mem.PokeScale(192,ByteBlock{77});
+  EXPECT_EQ(mem.PeekScale(128,4), (ByteBlock{120,121,77,123}));
+  EXPECT_EQ((*bytes)[32],32u);  // image remains immutable
+  EXPECT_EQ((*bytes)[258],122u);
+}
+
+TEST(BachMatrixMem, CompleteImageUsesNormalMuPortLatency) {
+  uint64_t issue=0,response=0;
+  ByteBlockPtr got;
+  {
+    auto clk=MakeClock(0,kPeriod);
+    MatrixMem mem(clk,"mapped");
+    auto bytes=std::make_shared<ByteBlock>(128,17);
+    mem.PreloadImage(0,128,bytes->data(),nullptr,bytes);
+    MemDriver read(clk,mem.Port(kMmemMu),1,0,128);
+    clk->Continue(60*kPeriod);RT::JoinAll();
+    issue=read.issue_cycle;response=read.rsp_cycle;got=read.got;
+  }
+  RT::Reset();
+  ASSERT_NE(got,nullptr);
+  EXPECT_EQ(*got,ByteBlock(128,17));
+  EXPECT_EQ(response-issue,8u);
+}
+
 // 写进去再读出来，字节要一样。
 TEST(BachCoreMem, WriteThenRead) {
   ByteBlockPtr got;

@@ -27,6 +27,8 @@
 // 接口名，不注错。
 
 #include <cstdio>
+#include <algorithm>
+#include <memory>
 #include <deque>
 #include <map>
 #include <set>
@@ -149,6 +151,21 @@ class BankedMem : public BachModule {
   }
   ByteBlock Peek(uint64_t addr, uint64_t bytes) const {
     return ReadBytes(addr, bytes);
+  }
+
+  // Preloaded SRAM contents. Reads still pass through the ordinary bank and
+  // latency pipeline; subsequent writes create ordinary mutable row overlays.
+  // The owner keeps the complete immutable image alive (e.g. an mmap file).
+  void PreloadImage(uint64_t addr, uint64_t bytes, uint8_t const* data,
+                    uint8_t const* scale, std::shared_ptr<void> owner) {
+    LOGCHECK(bytes && addr % cfg.granule == 0 && bytes % cfg.granule == 0,
+             "BankedMem: image must cover whole rows.");
+    LOGCHECK(addr + bytes <= cfg.capacity && data && owner,
+             "BankedMem: invalid image bounds.");
+    for (auto const& image : images)
+      LOGCHECK(addr + bytes <= image.addr || image.addr + image.bytes <= addr,
+               "BankedMem: overlapping preload images.");
+    images.push_back({addr, bytes, data, scale, std::move(owner)});
   }
 
   bool Quiescent() const override {
@@ -353,12 +370,24 @@ class BankedMem : public BachModule {
   // 一组 scale 落在哪一行的第几个字节。
   uint64_t ScaleAt(uint64_t addr) const {
     auto it = scale_store.find(addr / cfg.granule);
-    if (it == scale_store.end()) return 0;
+    if (it == scale_store.end()) {
+      for (auto const& image : images)
+        if (image.scale && addr >= image.addr && addr < image.addr + image.bytes)
+          return image.scale[(addr - image.addr) / kScaleGroupBytes];
+      return 0;
+    }
     return it->second[(addr % cfg.granule) / kScaleGroupBytes];
   }
   void SetScaleAt(uint64_t addr, uint8_t v) {
     ByteBlock& line = scale_store[addr / cfg.granule];
-    if (line.empty()) line.assign(cfg.scale_bytes, 0);
+    if (line.empty()) {
+      line.assign(cfg.scale_bytes, 0);
+      uint64_t begin = addr / cfg.granule * cfg.granule;
+      for (auto const& image : images)
+        if (image.scale && begin >= image.addr && begin < image.addr + image.bytes)
+          for (uint64_t i = 0; i < cfg.scale_bytes; ++i)
+            line[i] = image.scale[(begin - image.addr) / kScaleGroupBytes + i];
+    }
     line[(addr % cfg.granule) / kScaleGroupBytes] = v;
   }
 
@@ -396,7 +425,13 @@ class BankedMem : public BachModule {
       uint64_t n = cfg.granule - in_row;
       if (n > end - from - off) n = end - from - off;
       ByteBlock& line = store[row];
-      if (line.empty()) line.assign(cfg.granule, 0);
+      if (line.empty()) {
+        line.assign(cfg.granule, 0);
+        uint64_t begin = row * cfg.granule;
+        for (auto const& image : images)
+          if (begin >= image.addr && begin < image.addr + image.bytes)
+            std::copy_n(image.data + begin - image.addr, cfg.granule, line.begin());
+      }
       for (uint64_t i = 0; i < n; ++i) line[in_row + i] = bytes[from + off + i];
       off += n;
     }
@@ -414,6 +449,10 @@ class BankedMem : public BachModule {
       auto it = store.find(row);
       if (it != store.end()) {
         for (uint64_t i = 0; i < n; ++i) out[off + i] = it->second[in_row + i];
+      } else {
+        for (auto const& image : images)
+          if (a >= image.addr && a + n <= image.addr + image.bytes)
+            std::copy_n(image.data + a - image.addr, n, out.begin() + off);
       }
       off += n;
     }
@@ -431,6 +470,13 @@ class BankedMem : public BachModule {
   std::map<uint64_t, ByteBlockPtr> rsp_this_cycle;
   std::map<uint64_t, ByteBlock> store;        // 按行稀疏
   std::map<uint64_t, ByteBlock> scale_store;  // 每行一份 scale
+  struct Image {
+    uint64_t addr, bytes;
+    uint8_t const* data;
+    uint8_t const* scale;
+    std::shared_ptr<void> owner;
+  };
+  std::vector<Image> images;
   std::set<uint64_t> masked;                  // 被非全 1 的 byte_mask 写过的行
   std::vector<uint64_t> ecc_single, ecc_double;
   uint64_t next_seq = 0;
