@@ -91,6 +91,14 @@ ROUTER_DIRS = ("mid", "left", "right", "core")
 # 段上印的单元名，与 ROUTER_DIRS 一一对应。四个名字两两不同。
 ROUTER_SLOT_UNITS = ("RTR-MID", "RTR-LEFT", "RTR-RIGHT", "RTR-CORE")
 
+# Reduce 模块三路入口 + 一路出口各一条轨道，挂在 chip.core.router.reduce 下，段由
+# spans.reduce_spans 折好；与那十三行、DTE 十条、Router 四入口同属一个 core 进程，
+# 排在 Router 入口轨道之后。入口每段是「收包头 → 收完包尾」，出口是「写包头 → 写完
+# 包尾」。mid/left/right 与 reduce_in_mask 三位同一套编号。
+REDUCE_SIDES = ("mid", "left", "right", "out")
+# 段上印的单元名，与 REDUCE_SIDES 一一对应。四个名字两两不同。
+REDUCE_SLOT_UNITS = ("RTR-RED-MID", "RTR-RED-LEFT", "RTR-RED-RIGHT", "RTR-RED-OUT")
+
 # 时间：1 拍 = 1 ns。Perfetto 的 ts / dur 单位固定是微秒，1 ns = 0.001 µs，所以把
 # 拍号乘这个系数折成微秒，Perfetto 里读到的才是纳秒。
 NS_TO_US = 1e-3
@@ -186,6 +194,17 @@ def build(prefix: str) -> dict:
             if any(spans[d] for d in ROUTER_DIRS):
                 rtr_spans_by_core[key] = spans
 
+        # Reduce 模块三路入口 + 一路出口的段先折好：没段（这个 core 整场没做 reduce）
+        # 的 core 不发那四条轨道，口径与 DTE / Router 入口一致。
+        red_sigs = S.reduce_paths(r)
+        red_spans_by_core = {}
+        for _chip, _core, key in ordered:
+            if key not in red_sigs:
+                continue
+            spans = S.reduce_spans(r, red_sigs[key], t_end)
+            if any(spans[s] for s in REDUCE_SIDES):
+                red_spans_by_core[key] = spans
+
         # 元数据：每个 core 一个进程名，十三行各一条 thread_name。
         #
         # 顺序靠这两组排序键钉死：**Perfetto 是按名字排轨道的，不按 pid / tid**
@@ -221,6 +240,16 @@ def build(prefix: str) -> dict:
                     tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + d
                     meta.append({"ph": "M", "pid": pid, "tid": tid,
                                  "name": "thread_name", "args": {"name": dname}})
+                    meta.append({"ph": "M", "pid": pid, "tid": tid,
+                                 "name": "thread_sort_index",
+                                 "args": {"sort_index": tid}})
+            # Reduce 模块三路入口 + 一路出口作为本 core 进程的四条线程，排在 Router
+            # 入口轨道之后。
+            if key in red_spans_by_core:
+                for s, sname in enumerate(REDUCE_SLOT_UNITS):
+                    tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + len(ROUTER_DIRS) + s
+                    meta.append({"ph": "M", "pid": pid, "tid": tid,
+                                 "name": "thread_name", "args": {"name": sname}})
                     meta.append({"ph": "M", "pid": pid, "tid": tid,
                                  "name": "thread_sort_index",
                                  "args": {"sort_index": tid}})
@@ -315,6 +344,25 @@ def build(prefix: str) -> dict:
                         spans_cnt += 1
                 rtr_events.sort(key=lambda e: e["ts"])
                 slices.extend(rtr_events)
+            # Reduce 模块三路入口 + 一路出口：入口每段是一个包（收包头 → 收完包尾）、
+            # 出口是（写包头 → 写完包尾），args 带 user/path/bytes。轨道号与元数据那边
+            # 同一个公式，段按 REDUCE_SIDES 顺序排。
+            if key in red_spans_by_core:
+                red_events: List[dict] = []
+                for s, sname in enumerate(REDUCE_SLOT_UNITS):
+                    tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + len(ROUTER_DIRS) + s
+                    for seg in red_spans_by_core[key][REDUCE_SIDES[s]]:
+                        t0, t1, user, path, size = seg
+                        red_events.append({
+                            "name": router_label(sname, seg),
+                            "ph": "X", "ts": t0 * NS_TO_US,
+                            "dur": (t1 - t0) * NS_TO_US,
+                            "pid": pid, "tid": tid,
+                            "args": {"user": user, "path": path,
+                                     "bytes": size}})
+                        spans_cnt += 1
+                red_events.sort(key=lambda e: e["ts"])
+                slices.extend(red_events)
 
     out["traceEvents"] = meta + slices
     return out, len(ordered), spans_cnt

@@ -269,9 +269,35 @@ class ReduceModule : public BachModule {
     uint64_t sent = 0;          // 已经发出去的字节
   };
 
+  // 逐 flit 的入口/出口观测：Perfetto 的 reduce 入口/出口轨道按它折「收包头 → 收完
+  // 包尾」/「写包头 → 写完包尾」。side 0..2 是三路入口，与 reduce_in_mask 三位同一套
+  // 编号（bit0 mid、bit1 left、bit2 right），3 是出口 out。挂在
+  // chip.core.router.reduce 下。
+  void TraceReduceFlit(uint64_t side, uint64_t head, uint64_t tail, uint64_t user,
+                       uint64_t path, uint64_t size) {
+    static const char* kName[4][5] = {
+        {"mid_flit_head", "mid_flit_tail", "mid_flit_user", "mid_flit_path",
+         "mid_flit_size"},
+        {"left_flit_head", "left_flit_tail", "left_flit_user", "left_flit_path",
+         "left_flit_size"},
+        {"right_flit_head", "right_flit_tail", "right_flit_user", "right_flit_path",
+         "right_flit_size"},
+        {"out_flit_head", "out_flit_tail", "out_flit_user", "out_flit_path",
+         "out_flit_size"},
+    };
+    uint64_t v[5] = {head, tail, user, path, size};
+    for (uint64_t k = 0; k < 5; ++k) TracePerCycle(kName[side][k], v[k]);
+  }
+
   // 这一拍线上到的 flit 先进本路的输入缓冲。
   void TakeIn(uint64_t r) {
     FlitView f = ReadFlit(in_wire[r]->flit);
+    // 入口逐 flit 观测：无效拍全 0，保证 TracePerCycle 逐拍提交、脉冲不粘连。side = r
+    // 就是三路方向。flit_size 是包 size（数据通道字节数，含 topK），挂在 Message 上。
+    TraceReduceFlit(r, f.valid && f.head ? 1u : 0u, f.valid && f.tail ? 1u : 0u,
+                    f.valid && f.msg ? f.msg->user_id : 0u,
+                    f.valid && f.msg ? f.msg->path_id : 0u,
+                    f.valid && f.msg ? f.msg->size : 0u);
     if (!f.valid || !f.msg) return;
     LOGCHECK(in_buf[r].size() < kReduceInDepth,
              "ReduceModule: 输入缓冲满了，Xbar 没按准入电平停。");
@@ -457,6 +483,9 @@ class ReduceModule : public BachModule {
   // 结果没好就占着输出等，不换别的包。
   void EmitOne() {
     // 与各 RouterStation 同一套：Xbar 那一侧上一拍说收得下就发，发了当场出队。
+    // 出口逐 flit 观测：本拍没发的先记 0，发出去了在下面覆写成本拍的真实值，保证
+    // TracePerCycle 逐拍提交、脉冲不粘连。
+    TraceReduceFlit(3, 0, 0, 0, 0, 0);
     if (!req->RoomFor(kReduceVc) || out_q.empty()) {
       req->IdleReq();
       done->Idle();
@@ -511,6 +540,9 @@ class ReduceModule : public BachModule {
     req->msg = it.msg;
     req->seq = ++req_seq;
     it.sent += bytes;
+    // 这一拍真的发出了一笔结果 flit，覆写顶部那组 0：head/tail/user/path/size。
+    TraceReduceFlit(3, head ? 1u : 0u, tail ? 1u : 0u, it.user_id,
+                    it.msg->path_id, it.msg->size);
     if (!tail) {
       done->Idle();
       return;

@@ -348,6 +348,8 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F113 | 三路输入与 `reduce_in_mask` 同一套编号：bit0 上下、bit1 左、bit2 右。本 core 自己那一份分量从 core 方向进来，也占其中一路，走哪一路由本表项 `flow_dir` 的 reduce1 与 reduce2 两位指定：两位都不置走 bit0，置 reduce1 走 bit1，置 reduce2 走 bit2。既收上游分量又出自己那一份的 core 靠这两位把两者错开 |
 | F113a | 两位都置是 Core 多操作数：一笔 reduce 任务的几份操作数都从本 core 出来，core 方向把同一用户在这条 path 上先后送出的几包依次分到 `reduce_in_mask` 置位的几路，第 k 包走第 k 个置位的那一路，走满一轮从头计。一包在首 flit 定下走哪一路，后面的 flit 跟着走；首 flit 真正发出才计这一份。依据是线上版《Router》：“Rmem支持一个方向来的多个操作数（需要配置特殊模式），但是不支持操作数精度不一致” |
 
+观测：ReduceModule 每拍把三路输入（`mid / left / right`，与 `reduce_in_mask` 的 bit0/1/2 同一套编号）收到的那笔 flit 记成 `{mid,left,right}_flit_head / _flit_tail / _flit_user / _flit_path / _flit_size`，把出口写出的那笔结果 flit 记成 `out_flit_*` 五个信号（无效拍全 0，`flit_size` 取 `msg->size`）。这是纯观测、不改行为，Perfetto 里每个入口 / 出口一条轨道：入口按「收包头 → 收完包尾」折成一段包，出口按「写包头 → 写完包尾」折成一段包，args 带 user_id / path_id / bytes。
+
 ### RouterTable / CSR
 
 | 编号 | 功能 |

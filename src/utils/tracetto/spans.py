@@ -204,6 +204,12 @@ RTR_FLIT_SIGS = (SIG_RTR_FLIT_HEAD, SIG_RTR_FLIT_TAIL, SIG_RTR_FLIT_USER,
 # 四个入口方向，与 router.h 的 kStationName 同一套顺序。
 ROUTER_DIRS = ("mid", "left", "right", "core")
 
+# Reduce 模块三路入口 + 一路出口的 flit 信号，挂在 chip<i>.core<j>.router.reduce 下
+# （信号名 mid/left/right/out 由 reduce_module.h 的 TraceReduceFlit 定）。字段名与
+# RTR_FLIT_SIGS 同一套（flit_head/tail/user/path/size）。入口是「收包头 → 收完包尾」，
+# 出口是「写包头 → 写完包尾」。三路入口与 reduce_in_mask 三位同一套编号：mid/left/right。
+REDUCE_SIDES = ("mid", "left", "right", "out")
+
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
              DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE +
              CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,))
@@ -288,6 +294,8 @@ RE_DTE_REGFILE = re.compile(r"^chip(\d+)\.core(\d+)\.dte\.regfile\.(\w+)$")
 RE_DTE_LANE = re.compile(r"^chip(\d+)\.core(\d+)\.dte\.lane(\d+)\.(\w+)$")
 RE_ROUTER_STATION = re.compile(
     r"^chip(\d+)\.core(\d+)\.router\.st_(mid|left|right|core)\.(\w+)$")
+RE_REDUCE = re.compile(
+    r"^chip(\d+)\.core(\d+)\.router\.reduce\.(mid|left|right|out)_(flit_\w+)$")
 
 
 def val_at(ts: list, vs: list, t: int) -> int:
@@ -893,6 +901,31 @@ def router_ingress_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, i
     return out
 
 
+def reduce_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, int]]]:
+    """扫模块树，找出每个 core 的 ReduceModule 三路入口 + 一路出口的 flit 信号。
+
+    返回 `{"chip.core": {"mid": {sig: id}, "left": {...}, "right": {...},
+    "out": {...}}}`。reduce 每个 core 都有，但没派角色的 core 一整场都不动、信号全
+    是常数，读回来也是空；有没有段由调用方折段时看。
+    """
+    paths = reader.tree_paths()
+    out: Dict[str, Dict[str, Dict[str, int]]] = {}
+    for sig_id in reader.signals():
+        name = paths.get(sig_id)
+        if not name:
+            continue
+        m = RE_REDUCE.match(name)
+        if not m:
+            continue
+        c, k, side, leaf = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+        if leaf not in RTR_FLIT_SIGS:
+            continue
+        key = f"{c}.{k}"
+        out.setdefault(key, {s: {} for s in REDUCE_SIDES})
+        out[key][side][leaf] = sig_id
+    return out
+
+
 def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
     """head/tail flit 事件折成段 `[t0, t1, user, path, size]`。
 
@@ -924,6 +957,38 @@ def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
     return out
 
 
+def _flit_spans(reader: TraceReader, flat: Dict[str, int],
+                t_end: int) -> List[List[int]]:
+    """一路（router 一个方向 / reduce 一个 side）的 flit 段。`flat` 是 {sig: id}。
+
+    段形状 `[t0, t1, user, path, size]`：t0 是包头 flit 进站（或写出）那一拍，t1 是
+    包尾 flit 进站（或写完）那一拍。事件时间取 head/tail/user/path/size 五条信号时间
+    点的并集 —— 只取 head/tail 的话，同一 user/path 的连续两拍 head 被 `TracePerCycle`
+    压成一段（值没变），第二笔会被漏掉；user/path/size 逐 flit 变，把它们的时间点并
+    进来才展开成一拍一笔。
+    """
+
+    def ev(sid):
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    ht, hv = ev(flat.get(SIG_RTR_FLIT_HEAD))
+    tt, tv = ev(flat.get(SIG_RTR_FLIT_TAIL))
+    ut, uv = ev(flat.get(SIG_RTR_FLIT_USER))
+    pt, pv = ev(flat.get(SIG_RTR_FLIT_PATH))
+    st, sv = ev(flat.get(SIG_RTR_FLIT_SIZE))
+    evts = []
+    for t in sorted(set(ht) | set(tt) | set(ut) | set(pt) | set(st)):
+        head = val_at(ht, hv, t) == 1
+        tail = val_at(tt, tv, t) == 1
+        if not (head or tail):
+            continue
+        evts.append((t, head, tail, val_at(ut, uv, t), val_at(pt, pv, t),
+                     val_at(st, sv, t)))
+    return fold_flits(evts, t_end)
+
+
 def router_ingress_spans(reader: TraceReader,
                          sigs: Dict[str, Dict[str, int]],
                          t_end: int) -> Dict[str, List[List[int]]]:
@@ -932,34 +997,21 @@ def router_ingress_spans(reader: TraceReader,
 
     返回 `{"mid": [...], "left": [...], "right": [...], "core": [...]}`，段形状
     `[t0, t1, user, path, size]`：t0 是包头 flit 进站那一拍，t1 是包尾 flit 进站那
-    一拍。事件时间取 head/tail/user/path/size 五条信号时间点的并集 —— 只取 head/tail
-    的话，同一 user/path 的连续两拍 head 被 `TracePerCycle` 压成一段（值没变），第二
-    笔会被漏掉；user/path/size 逐 flit 变，把它们的时间点并进来才展开成一拍一笔。
+    一拍。
     """
+    return {d: _flit_spans(reader, sigs.get(d, {}), t_end) for d in ROUTER_DIRS}
 
-    def ev(sid):
-        if sid is None:
-            return [], []
-        return reader.events(sid)
 
-    out: Dict[str, List[List[int]]] = {}
-    for d in ROUTER_DIRS:
-        flat = sigs.get(d, {})
-        ht, hv = ev(flat.get(SIG_RTR_FLIT_HEAD))
-        tt, tv = ev(flat.get(SIG_RTR_FLIT_TAIL))
-        ut, uv = ev(flat.get(SIG_RTR_FLIT_USER))
-        pt, pv = ev(flat.get(SIG_RTR_FLIT_PATH))
-        st, sv = ev(flat.get(SIG_RTR_FLIT_SIZE))
-        evts = []
-        for t in sorted(set(ht) | set(tt) | set(ut) | set(pt) | set(st)):
-            head = val_at(ht, hv, t) == 1
-            tail = val_at(tt, tv, t) == 1
-            if not (head or tail):
-                continue
-            evts.append((t, head, tail, val_at(ut, uv, t), val_at(pt, pv, t),
-                         val_at(st, sv, t)))
-        out[d] = fold_flits(evts, t_end)
-    return out
+def reduce_spans(reader: TraceReader, sigs: Dict[str, Dict[str, int]],
+                 t_end: int) -> Dict[str, List[List[int]]]:
+    """一个 core 的 ReduceModule 三路入口 + 一路出口各自的 flit 段。`sigs` 是
+    `reduce_paths` 里那一个 core 的值（按 side 分的信号表）。
+
+    返回 `{"mid": [...], "left": [...], "right": [...], "out": [...]}`，段形状
+    `[t0, t1, user, path, size]`：入口 t0 是包头 flit 进站那一拍、t1 是包尾 flit 进
+    站那一拍；出口 t0 是包头 flit 写出那一拍、t1 是包尾 flit 写完那一拍。
+    """
+    return {s: _flit_spans(reader, sigs.get(s, {}), t_end) for s in REDUCE_SIDES}
 
 
 def missing_signals(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> List[str]:

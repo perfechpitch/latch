@@ -518,6 +518,48 @@ def check_router_ingress():
     expect(spans["core"], [], "没信号的 core 方向空")
 
 
+def check_reduce_flits():
+    """reduce_paths / reduce_spans：把 chip.core.router.reduce 下的 mid/left/right/out
+    四条 flit 信号折成段。折段本身走与 router 入口同一套 _flit_spans，这里只验证扫描
+    与 side 分派：mid 入口一笔多 flit 包、out 出口一笔单 flit 包，left/right 没信号空。
+    """
+    names = {
+        200: "mid_flit_head", 201: "mid_flit_tail", 202: "mid_flit_user",
+        203: "mid_flit_path", 204: "mid_flit_size",
+        210: "out_flit_head", 211: "out_flit_tail", 212: "out_flit_user",
+        213: "out_flit_path", 214: "out_flit_size",
+    }
+    modules = [(1, 0, "chip0"), (2, 1, "core0"), (3, 2, "router"),
+               (4, 3, "reduce")]
+    modules += [(sid, 4, names[sid]) for sid in sorted(names)]
+    signals = {
+        # mid 入口：一笔多 flit 包（head@10 → tail@13）。
+        200: [(10, 1), (13, 0)],                 # head
+        201: [(13, 1), (14, 0)],                 # tail
+        202: [(10, 77), (14, 0)],                # user
+        203: [(10, 3), (14, 0)],                 # path
+        204: [(10, 1024), (14, 0)],              # size
+        # out 出口：一笔单 flit 包（head&&tail@20）。
+        210: [(20, 1), (21, 0)],                 # head
+        211: [(20, 1), (21, 0)],                 # tail
+        212: [(20, 88), (21, 0)],                # user
+        213: [(20, 7), (21, 0)],                 # path
+        214: [(20, 64), (21, 0)],                # size
+    }
+    with tempfile.TemporaryDirectory() as d:
+        prefix = str(Path(d) / "red")
+        write_trace(prefix + ".trace", modules, signals)
+        with TraceReader(prefix) as r:
+            sigs = S.reduce_paths(r)["0.0"]
+            spans = S.reduce_spans(r, sigs, 50)
+    expect(spans["mid"], [[10, 13, 77, 3, 1024]],
+           "reduce mid 入口 flit 折段：多 flit 包")
+    expect(spans["out"], [[20, 21, 88, 7, 64]],
+           "reduce out 出口 flit 折段：单 flit 包")
+    expect(spans["left"], [], "没信号的 left 入口空")
+    expect(spans["right"], [], "没信号的 right 入口空")
+
+
 def check_done(prefix):
     r = TraceReader(prefix)
     try:
@@ -920,6 +962,7 @@ def main():
     with_trace(check_labels)
     check_dte_spans()
     check_router_ingress()
+    check_reduce_flits()
     check_step_chain()
     check_user_spans()
     check_window()
