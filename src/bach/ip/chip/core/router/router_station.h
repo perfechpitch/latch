@@ -126,6 +126,14 @@ class RouterStation : public BachModule {
   // M1：按包头的 VC 号写进对应 VC Buffer，private 满了借 shared。
   void AcceptFlit() {
     FlitView f = ReadFlit(up->flit);
+    // 逐 flit 的入口观测：Perfetto 的 router 入口轨道按它折「收包头 → 收完包尾」。
+    // 无效拍全 0，保证 TracePerCycle 逐拍提交、脉冲不粘连。flit_size 是包 size
+    // （数据通道字节数，含 topK），挂在 Message 上、整包共享。
+    TracePerCycle("flit_head", f.valid && f.head ? 1u : 0u);
+    TracePerCycle("flit_tail", f.valid && f.tail ? 1u : 0u);
+    TracePerCycle("flit_user", f.valid && f.msg ? f.msg->user_id : 0u);
+    TracePerCycle("flit_path", f.valid && f.msg ? f.msg->path_id : 0u);
+    TracePerCycle("flit_size", f.valid && f.msg ? f.msg->size : 0u);
     if (!f.valid) return;
     uint64_t v = f.vc;
     LOGCHECK(v < kVcNum, "RouterStation: 包头的 VC 号越界。");

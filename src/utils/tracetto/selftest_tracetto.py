@@ -477,6 +477,47 @@ def check_dte_spans():
            "两笔晚到的各归自己那次下发，不漂到下一次")
 
 
+def check_router_ingress():
+    """router_ingress_spans 折段：head→tail 按 (user, path) 配对，单 flit 包、连续
+    两拍 head（不同 path）、配不上的 tail / head 各踩一遍。
+
+    波形里的 flit_* 是逐拍提交的标量：值不变的那一拍不记，所以 A 的 head@10 与 B 的
+    head@11 两拍 head 都是 1，flit_head 上只有一段；靠 flit_path 在 11 那拍的变化把
+    第二笔展开出来 —— 这正是 issue_events 注释里讲过的坑。
+    """
+    names = {200: "flit_head", 201: "flit_tail", 202: "flit_user",
+             203: "flit_path", 204: "flit_size"}
+    modules = [(1, 0, "chip0"), (2, 1, "core0"), (3, 2, "router"),
+               (4, 3, "st_mid")]
+    modules += [(sid, 4, names[sid]) for sid in sorted(names)]
+    signals = {
+        200: [(10, 1), (12, 0), (20, 1), (21, 0), (40, 1), (41, 0)],   # head
+        201: [(12, 1), (14, 0), (20, 1), (21, 0), (30, 1), (31, 0)],   # tail
+        202: [(10, 77), (14, 0), (20, 88), (21, 0), (30, 99), (31, 0),
+              (40, 100), (41, 0)],                                     # user
+        203: [(10, 3), (11, 5), (13, 3), (14, 0), (20, 7), (21, 0),
+              (30, 9), (31, 0), (40, 11), (41, 0)],                    # path
+        204: [(10, 1024), (11, 512), (13, 1024), (14, 0), (20, 128),
+              (21, 0), (30, 256), (31, 0), (40, 64), (41, 0)],         # size
+    }
+    with tempfile.TemporaryDirectory() as d:
+        prefix = str(Path(d) / "rtr")
+        write_trace(prefix + ".trace", modules, signals)
+        with TraceReader(prefix) as r:
+            sigs = S.router_ingress_paths(r)["0.0"]
+            spans = S.router_ingress_spans(r, sigs, 50)
+    expect(spans["mid"], [
+        [10, 13, 77, 3, 1024],
+        [11, 12, 77, 5, 512],
+        [20, 21, 88, 7, 128],
+        [30, 31, 99, 9, 256],
+        [40, 50, 100, 11, 64],
+    ], "router 入口 flit 折段：多 flit、连续 head、单 flit、配不上的 tail/head")
+    expect(spans["left"], [], "没信号的 left 方向空")
+    expect(spans["right"], [], "没信号的 right 方向空")
+    expect(spans["core"], [], "没信号的 core 方向空")
+
+
 def check_done(prefix):
     r = TraceReader(prefix)
     try:
@@ -878,6 +919,7 @@ def main():
     with_trace(check_http)
     with_trace(check_labels)
     check_dte_spans()
+    check_router_ingress()
     check_step_chain()
     check_user_spans()
     check_window()

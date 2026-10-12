@@ -190,6 +190,20 @@ DTE_RD_LOC = (SIG_DTE_RD_START_HEAD_LOC, SIG_DTE_RD_START_DATA_LOC,
 DTE_WR_LOC = (SIG_DTE_WR_START_HEAD_LOC, SIG_DTE_WR_START_DATA_LOC,
               SIG_DTE_WR_START_SCALE_LOC, SIG_DTE_WR_START_TOPK_LOC)
 
+# ── Router 四个入口站（st_mid / st_left / st_right / st_core）的 flit 信号，挂在
+#    chip<i>.core<j>.router.st_<dir> 下，由 router_ingress_paths 单独扫。每个 flit
+#    进站那一拍记：是不是包头/包尾、user_id、path_id、包 size（数据通道字节数，含
+#    topK）。Perfetto 的 router 入口轨道按它折「收包头 → 收完包尾」一段。
+SIG_RTR_FLIT_HEAD = "flit_head"
+SIG_RTR_FLIT_TAIL = "flit_tail"
+SIG_RTR_FLIT_USER = "flit_user"
+SIG_RTR_FLIT_PATH = "flit_path"
+SIG_RTR_FLIT_SIZE = "flit_size"
+RTR_FLIT_SIGS = (SIG_RTR_FLIT_HEAD, SIG_RTR_FLIT_TAIL, SIG_RTR_FLIT_USER,
+                 SIG_RTR_FLIT_PATH, SIG_RTR_FLIT_SIZE)
+# 四个入口方向，与 router.h 的 kStationName 同一套顺序。
+ROUTER_DIRS = ("mid", "left", "right", "core")
+
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
              DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE +
              CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,))
@@ -272,6 +286,8 @@ def row_parts() -> List[List[dict]]:
 RE_CORE = re.compile(r"^chip(\d+)\.core(\d+)\.(\w+)$")
 RE_DTE_REGFILE = re.compile(r"^chip(\d+)\.core(\d+)\.dte\.regfile\.(\w+)$")
 RE_DTE_LANE = re.compile(r"^chip(\d+)\.core(\d+)\.dte\.lane(\d+)\.(\w+)$")
+RE_ROUTER_STATION = re.compile(
+    r"^chip(\d+)\.core(\d+)\.router\.st_(mid|left|right|core)\.(\w+)$")
 
 
 def val_at(ts: list, vs: list, t: int) -> int:
@@ -850,6 +866,100 @@ def dte_lane_spans(reader: TraceReader, sigs: Dict, t_end: int):
         rd_lanes.append(lane_user_spans(rd_starts, rd_dones, t_end))
         wr_lanes.append(lane_user_spans(wr_starts, wr_dones, t_end))
     return rd_lanes, wr_lanes
+
+
+def router_ingress_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, int]]]:
+    """扫模块树，找出每个 core 的 router 四个入口站的 flit 信号。
+
+    返回 `{"chip.core": {"mid": {sig: id}, "left": {...}, "right": {...},
+    "core": {...}}}`。router 每个 core 都有这四个站，但没派角色的 core 一整场都不
+    动、信号全是常数，读回来也是空；有没有段由调用方折段时看。
+    """
+    paths = reader.tree_paths()
+    out: Dict[str, Dict[str, Dict[str, int]]] = {}
+    for sig_id in reader.signals():
+        name = paths.get(sig_id)
+        if not name:
+            continue
+        m = RE_ROUTER_STATION.match(name)
+        if not m:
+            continue
+        c, k, d, leaf = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+        if leaf not in RTR_FLIT_SIGS:
+            continue
+        key = f"{c}.{k}"
+        out.setdefault(key, {d: {} for d in ROUTER_DIRS})
+        out[key][d][leaf] = sig_id
+    return out
+
+
+def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
+    """head/tail flit 事件折成段 `[t0, t1, user, path, size]`。
+
+    `evts` 里的元素是 `(t, is_head, is_tail, user, path, size)`。同一 `(user, path)`
+    的 head 与 tail 先到先配；`head && tail` 的单 flit 包直接成 `[t, t+1]`。配不上
+    head 的 tail 只记 `[t, t+1]`（波形从中间开始记），配不上 tail 的 head 延到波形
+    末（确实还没收完）。配对语义同 `user_spans`。
+    """
+    pending: Dict[Tuple[int, int], List[tuple]] = {}
+    out: List[List[int]] = []
+    for t, head, tail, user, path, size in evts:
+        if head and tail:
+            out.append([t, t + 1, user, path, size])
+            continue
+        key = (user, path)
+        if head:
+            pending.setdefault(key, []).append((t, size))
+            continue
+        q = pending.get(key)
+        if q:
+            t0, sz = q.pop(0)
+            out.append([t0, t, user, path, sz])
+        else:
+            out.append([t, t + 1, user, path, size])
+    for (user, path), lst in pending.items():
+        for t0, sz in lst:
+            out.append([t0, t_end, user, path, sz])
+    out.sort(key=lambda s: (s[0], s[1]))
+    return out
+
+
+def router_ingress_spans(reader: TraceReader,
+                         sigs: Dict[str, Dict[str, int]],
+                         t_end: int) -> Dict[str, List[List[int]]]:
+    """一个 core 的 router 四个入口站各自的 flit 段。`sigs` 是 `router_ingress_paths`
+    里那一个 core 的值（按方向分的信号表）。
+
+    返回 `{"mid": [...], "left": [...], "right": [...], "core": [...]}`，段形状
+    `[t0, t1, user, path, size]`：t0 是包头 flit 进站那一拍，t1 是包尾 flit 进站那
+    一拍。事件时间取 head/tail/user/path/size 五条信号时间点的并集 —— 只取 head/tail
+    的话，同一 user/path 的连续两拍 head 被 `TracePerCycle` 压成一段（值没变），第二
+    笔会被漏掉；user/path/size 逐 flit 变，把它们的时间点并进来才展开成一拍一笔。
+    """
+
+    def ev(sid):
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    out: Dict[str, List[List[int]]] = {}
+    for d in ROUTER_DIRS:
+        flat = sigs.get(d, {})
+        ht, hv = ev(flat.get(SIG_RTR_FLIT_HEAD))
+        tt, tv = ev(flat.get(SIG_RTR_FLIT_TAIL))
+        ut, uv = ev(flat.get(SIG_RTR_FLIT_USER))
+        pt, pv = ev(flat.get(SIG_RTR_FLIT_PATH))
+        st, sv = ev(flat.get(SIG_RTR_FLIT_SIZE))
+        evts = []
+        for t in sorted(set(ht) | set(tt) | set(ut) | set(pt) | set(st)):
+            head = val_at(ht, hv, t) == 1
+            tail = val_at(tt, tv, t) == 1
+            if not (head or tail):
+                continue
+            evts.append((t, head, tail, val_at(ut, uv, t), val_at(pt, pv, t),
+                         val_at(st, sv, t)))
+        out[d] = fold_flits(evts, t_end)
+    return out
 
 
 def missing_signals(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> List[str]:

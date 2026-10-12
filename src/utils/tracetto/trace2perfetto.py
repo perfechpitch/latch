@@ -84,6 +84,13 @@ DTE_SLOT_UNITS = ("DTE-L0-RD", "DTE-L0-WR", "DTE-L1-RD", "DTE-L1-WR",
                   "DTE-L2-RD", "DTE-L2-WR", "DTE-L3-RD", "DTE-L3-WR",
                   "DTE-L4-RD", "DTE-L4-WR")
 
+# Router 四个入口站各一条轨道，挂在 chip.core.router.st_<dir> 下，段由
+# spans.router_ingress_spans 折好；与上面那十三行、DTE 十条轨道同属一个 core 进程，
+# 排在 DTE 轨道之后。每段是一个包：收包头 flit → 收完包尾 flit。
+ROUTER_DIRS = ("mid", "left", "right", "core")
+# 段上印的单元名，与 ROUTER_DIRS 一一对应。四个名字两两不同。
+ROUTER_SLOT_UNITS = ("RTR-MID", "RTR-LEFT", "RTR-RIGHT", "RTR-CORE")
+
 # 时间：1 拍 = 1 ns。Perfetto 的 ts / dur 单位固定是微秒，1 ns = 0.001 µs，所以把
 # 拍号乘这个系数折成微秒，Perfetto 里读到的才是纳秒。
 NS_TO_US = 1e-3
@@ -105,6 +112,13 @@ def dte_label(unit: str, seg) -> str:
     if user < 0 or task < 0:
         return "?"
     return f"User_id {user} {unit} {task} {t1 - t0}拍"
+
+
+def router_label(unit: str, seg) -> str:
+    """Router 入口轨道的段上那行字：`User_id 77 RTR-MID path 3 7拍`。段是 5 元，
+    取前四项（t0/t1/user/path），size 只进 args 不进名字。"""
+    t0, t1, user, path = seg[0], seg[1], seg[2], seg[3]
+    return f"User_id {user} {unit} path {path} {t1 - t0}拍"
 
 
 # DteLoc 位置编码 → 名字（与 lane.h 的 DteLoc 一致）：0 = none（这一半不搬这份内容，
@@ -160,6 +174,18 @@ def build(prefix: str) -> dict:
             # DTE-Core 那一行的 args 要带配置寄存器数，按 (user, task) 对上 trigger 拍。
             dte_cfg_by_core[key] = S.dte_cfg_count(r, dte_sigs[key])
 
+        # Router 四个入口站的段先折好：没段（这个方向整场没进包）的 core 不发那条
+        # 轨道，口径与 DTE 一致。只有派过角色、有任务的 core 才画（坏 core / 只透传
+        # 的 core 不在 `ordered` 里）。
+        rtr_sigs = S.router_ingress_paths(r)
+        rtr_spans_by_core = {}
+        for _chip, _core, key in ordered:
+            if key not in rtr_sigs:
+                continue
+            spans = S.router_ingress_spans(r, rtr_sigs[key], t_end)
+            if any(spans[d] for d in ROUTER_DIRS):
+                rtr_spans_by_core[key] = spans
+
         # 元数据：每个 core 一个进程名，十三行各一条 thread_name。
         #
         # 顺序靠这两组排序键钉死：**Perfetto 是按名字排轨道的，不按 pid / tid**
@@ -186,6 +212,15 @@ def build(prefix: str) -> dict:
                     tid = len(S.ROWS) + 1 + t
                     meta.append({"ph": "M", "pid": pid, "tid": tid,
                                  "name": "thread_name", "args": {"name": tname}})
+                    meta.append({"ph": "M", "pid": pid, "tid": tid,
+                                 "name": "thread_sort_index",
+                                 "args": {"sort_index": tid}})
+            # Router 四个入口站作为本 core 进程的四条线程，排在 DTE 轨道之后。
+            if key in rtr_spans_by_core:
+                for d, dname in enumerate(ROUTER_SLOT_UNITS):
+                    tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + d
+                    meta.append({"ph": "M", "pid": pid, "tid": tid,
+                                 "name": "thread_name", "args": {"name": dname}})
                     meta.append({"ph": "M", "pid": pid, "tid": tid,
                                  "name": "thread_sort_index",
                                  "args": {"sort_index": tid}})
@@ -262,6 +297,24 @@ def build(prefix: str) -> dict:
                         spans_cnt += 1
                 dte_events.sort(key=lambda e: e["ts"])
                 slices.extend(dte_events)
+            # Router 四个入口站：每段是一个包（收包头 → 收完包尾），args 带 user/
+            # path/bytes。轨道号与元数据那边同一个公式，段按 ROUTER_DIRS 顺序排。
+            if key in rtr_spans_by_core:
+                rtr_events: List[dict] = []
+                for d, dname in enumerate(ROUTER_SLOT_UNITS):
+                    tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + d
+                    for seg in rtr_spans_by_core[key][ROUTER_DIRS[d]]:
+                        t0, t1, user, path, size = seg
+                        rtr_events.append({
+                            "name": router_label(dname, seg),
+                            "ph": "X", "ts": t0 * NS_TO_US,
+                            "dur": (t1 - t0) * NS_TO_US,
+                            "pid": pid, "tid": tid,
+                            "args": {"user": user, "path": path,
+                                     "bytes": size}})
+                        spans_cnt += 1
+                rtr_events.sort(key=lambda e: e["ts"])
+                slices.extend(rtr_events)
 
     out["traceEvents"] = meta + slices
     return out, len(ordered), spans_cnt

@@ -794,6 +794,8 @@ chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC �
 </svg>
 ```
 
+观测：M1 每拍把收到的那笔 flit 记成 `flit_head / flit_tail / flit_user / flit_path / flit_size` 五个信号（无效拍全 0，`flit_size` 取包头的 `msg->size`）。这是纯观测、不改行为，Perfetto 里每个入口站一条轨道，按「收包头 → 收完包尾」折成一段包。
+
 ### M2 · RC 查表
 
 ```svg
