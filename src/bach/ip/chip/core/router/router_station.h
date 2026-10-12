@@ -178,6 +178,18 @@ class RouterStation : public BachModule {
       // Xbar 那一侧这个 VC 的入口缓冲快满了，这个 VC 本拍不发，队列原地不动。
       uint64_t nvc = NextVcOf(e, mask, f.vc);
       if (!req->RoomFor(nvc)) continue;
+      // Several incoming VCs may map to the same next-hop VC. Keep each
+      // packet contiguous before entering Xbar's per-input/per-VC FIFO;
+      // Xbar only distinguishes input ports and cannot untangle that FIFO.
+      bool owned_by_other = false;
+      for (uint64_t o = 0; o < kXbarOutNum; ++o) {
+        if (!(mask & (1ull << o))) continue;
+        if (next_vc_owner[o][nvc] && next_vc_owner[o][nvc] != v + 1) {
+          owned_by_other = true;
+          break;
+        }
+      }
+      if (owned_by_other) continue;
       req->valid = 1;
       req->out_mask = mask;
       req->vc = nvc;
@@ -194,6 +206,8 @@ class RouterStation : public BachModule {
       req->credit_require = pass_through ? 0 : RequireOf(e, mask);
       req->msg = f.msg;
       req->seq = ++req_seq;
+      for (uint64_t o = 0; o < kXbarOutNum; ++o)
+        if (mask & (1ull << o)) next_vc_owner[o][nvc] = f.tail ? 0 : v + 1;
       rr_last = v;
       if (CoreOperands(e) && f.head) TakeOperand(e, *f.msg, lane, v);
       // flit 离开本级 VC Buffer 就归还 VC credit，走共享总线，一拍最多一个 VC。
@@ -349,6 +363,7 @@ class RouterStation : public BachModule {
   // Core 多操作数：各 VC 上正在发的那个包走哪一路；每个 (path, 用户) 这一轮已经
   // 发出几份。
   std::array<uint64_t, kVcNum> cur_lane{};
+  std::array<std::array<uint64_t, kVcNum>, kXbarOutNum> next_vc_owner{};
   std::map<std::pair<uint64_t, uint64_t>, uint64_t> operand_seen;
   uint64_t rr_last = 0;
   uint64_t req_seq = 0;

@@ -136,6 +136,9 @@ class Xbar : public BachModule {
   uint64_t Stalled() const { return stalled.Get(); }
   uint64_t Overflow() const { return overflow.Get(); }
   uint64_t OverflowCount() const { return overflow_pending; }
+  uint64_t PacketOwner(uint64_t output, uint64_t vc) const {
+    return vc_owner.at(output).at(vc);
+  }
   std::vector<std::pair<uint64_t, XbarReqView>> InspectRequests() const {
     std::vector<std::pair<uint64_t, XbarReqView>> pending;
     for (uint64_t in = 0; in < kXbarInNum; ++in)
@@ -507,7 +510,9 @@ class Xbar : public BachModule {
   // 个包才调度下一个。下游 CoreStation 到 DTE 只有一条通路，不按 VC 分开缓冲。
   bool OwnerOk(uint64_t o, uint64_t vc, uint64_t in) const {
     LOGCHECK(vc < kVcNum, "Xbar: VC 号越界。");
-    if (o == kOutCore) {
+    // Core and each reduce lane have one receive FIFO, shared by all VCs.
+    // Keep a packet contiguous there even when another incoming VC is ready.
+    if (o == kOutCore || o >= kOutReduce0) {
       for (uint64_t v = 0; v < kVcNum; ++v) {
         if (v != vc && vc_owner[o][v] != 0) return false;
       }

@@ -176,6 +176,42 @@ std::vector<ReqFeeder::Job> Burst(uint64_t n, uint64_t out_mask, uint64_t vc,
 
 }  // namespace
 
+namespace {
+void CheckReducePacketOwnership(bool independent_lane) {
+  {
+    EnsureSlots();auto clk=MakeClock(0,kPeriod);Bench b(clk);
+    b.xb->ForceReady(true);
+    auto first=MakeWire(clk),other=MakeWire(clk);
+    b.xb->AttachReduceOut(0,first);b.xb->AttachReduceOut(1,other);
+    auto a=Burst(2,1ull<<kOutReduce0,0,100);
+    auto c=Burst(2,1ull<<(kOutReduce0+(independent_lane?1:0)),1,200);
+    a[0].at=2;a[0].tail=false;a[1].at=12;a[1].head=false;a[1].user=100;
+    c[0].at=4;c[0].tail=false;c[1].at=14;c[1].head=false;c[1].user=200;
+    ReqFeeder left(clk,"left",b.Req(kInLeft),a);
+    ReqFeeder right(clk,"right",b.Req(kInRight),c);
+    OutTap first_tap(clk,"first",first,MakeWire(clk),false);
+    OutTap other_tap(clk,"other",other,MakeWire(clk),false);
+    clk->Continue(40);RT::JoinAll();
+    if (independent_lane) {
+      EXPECT_EQ(first_tap.users,(std::vector<uint64_t>{100,100}));
+      EXPECT_EQ(other_tap.users,(std::vector<uint64_t>{200,200}));
+      ASSERT_EQ(other_tap.at.size(),2u);EXPECT_LT(other_tap.at[0],12u);
+    } else {
+      EXPECT_EQ(first_tap.users,(std::vector<uint64_t>{100,100,200,200}));
+      EXPECT_TRUE(other_tap.users.empty());
+    }
+  }
+  RT::Reset();
+}
+}
+
+TEST(BachXbar, ReduceLaneKeepsPacketsContiguousAcrossVcs) {
+  CheckReducePacketOwnership(false);
+}
+TEST(BachXbar, IndependentReduceLanesStillProgress) {
+  CheckReducePacketOwnership(true);
+}
+
 TEST(BachXbar, OutputArbitrationDoesNotSpillPackets) {
   uint64_t got = 0, spills = 0;
   {

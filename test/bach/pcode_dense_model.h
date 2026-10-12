@@ -25,7 +25,7 @@ inline void ValidateDenseFixture(Fixture const& fixture) {
   }
   uint64_t shared = fixture.user % 6;
   LOGCHECK(count == 8 && std::abs(sum-1) < 1e-6 && fixture.user <= 1023,
-           "invalid GLM5 single-token identity/topK");
+           "invalid GLM5 token identity/topK");
   LOGCHECK(fixture.mask == (routed | (1ull << shared)), "GLM5 EP mask mismatch");
   std::cerr << "pcode mask routed " << routed << ", shared EP " << shared
             << ", actual " << fixture.mask << "\n";

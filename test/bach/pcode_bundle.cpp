@@ -15,9 +15,40 @@ using namespace latch::bach::moetest;
 class PcodeHarness : public SpreadHarness {
  public:
   using SpreadHarness::SpreadHarness;
+  std::vector<Chip*> observed_chips;
+  std::set<uint64_t> observed_users;
+  uint64_t compute_overlap_cycle = 0;
  protected:
   void Step() override {
     SpreadHarness::Step();
+    if (observed_users.size() == 2 && !compute_overlap_cycle) {
+      std::set<uint64_t> active;
+      std::set<uint64_t> snapshot_users;
+      for (auto* chip : observed_chips) {
+        for (uint64_t core_id = 0; core_id < 10; ++core_id) {
+          auto& core = chip->GetCore(core_id);
+          if (core.Bad() || core.GetTs().Cfg().SelfStartCore()) continue;
+          auto snapshot = core.GetTs().Table().SnapPtr()->Get();
+          if (!snapshot) continue;
+          for (auto const& entry : snapshot->entry) {
+            if (entry.valid && entry.user_id_vld) snapshot_users.insert(entry.user_id);
+            if (entry.valid && entry.user_id_vld && observed_users.count(entry.user_id))
+              active.insert(entry.user_id);
+          }
+        }
+      }
+      if (CycleNow() % 1000 == 0) {
+        std::cerr << "pcode snapshot active users";
+        for (auto user : snapshot_users) std::cerr << " " << user;
+        std::cerr << "\n";
+      }
+      if (active == observed_users) {
+        compute_overlap_cycle = CycleNow();
+        std::cerr << "pcode concurrent compute users at " << compute_overlap_cycle;
+        for (auto user : active) std::cerr << " " << user;
+        std::cerr << "\n";
+      }
+    }
     if (CycleNow() % 1000 == 0)
       std::cerr << "pcode cycle " << CycleNow() << ", output packets " << out_msgs.size() << "\n";
   }
@@ -93,6 +124,10 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   std::vector<Chip*> all;
   for (auto& c : owned) all.push_back(c.get());
   LoadBundle(all, root, "pcode_ep6_tp8");
+  if (std::getenv("PCODE_TRACE_HEADER"))
+    for (uint64_t c = 0; c < all.size(); ++c)
+      for (uint64_t p = 0; p < 10; ++p)
+        std::cerr << "parser id " << all[c]->GetCore(p).GetDte().Parser().Id() << " chip " << c << " core " << p << "\n";
   if (std::getenv("PCODE_TRACE_REDUCE"))
     for (uint64_t c = 0; c < all.size(); ++c)
       for (uint64_t p = 0; p < 10; ++p)
@@ -102,9 +137,12 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   if (second) second->Load(all,root);
   if (auto model = std::getenv("PCODE_DENSE_MODEL")) {
     ASSERT_NE(fixture, nullptr);
-    ASSERT_EQ(second, nullptr);
     ASSERT_TRUE(fixture->weights.empty());
     pcode_test::ValidateDenseFixture(*fixture);
+    if (second) {
+      ASSERT_TRUE(second->weights.empty());
+      pcode_test::ValidateDenseFixture(*second);
+    }
     pcode_test::LoadDenseModel(all,model,root);
   }
   auto m = std::make_shared<Message>();
@@ -134,11 +172,20 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   std::vector<MessagePtr> inputs{m};
   if (second) inputs.push_back(second->Message());
   std::vector<uint64_t> sent_at;
+  bool require_compute_overlap = false;
   if (second) {
     ASSERT_FALSE(inputs[0]->user_id == inputs[1]->user_id &&
                  inputs[0]->token_id == inputs[1]->token_id);
     std::string mode = std::getenv("PCODE_INJECT_MODE") ? std::getenv("PCODE_INJECT_MODE") : "overlap";
     ASSERT_TRUE(mode == "overlap" || mode == "sequential");
+    if (mode == "overlap") {
+      ASSERT_NE(inputs[0]->user_id, inputs[1]->user_id);
+      h.observed_chips = all;
+      h.observed_users = {inputs[0]->user_id, inputs[1]->user_id};
+      // Legacy sparse campaigns only require overlapping packet lifetimes.
+      // Dense GLM5 pairs explicitly request simultaneous compute occupancy.
+      require_compute_overlap = std::getenv("PCODE_REQUIRE_COMPUTE_OVERLAP") != nullptr;
+    }
     uint64_t gap = std::getenv("PCODE_TOKEN_GAP") ? std::stoull(std::getenv("PCODE_TOKEN_GAP")) : 1;
     h.expected_outputs = expected_outputs;
     h.input_source = [&, mode, gap](uint64_t now) -> MessagePtr {
@@ -192,7 +239,14 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
                     << station.HeaderDepth() << " payload flits " << station.OutBufDepth() << "\n";
         for (auto const& request : core.GetRouter().GetXbar().InspectRequests()) {
           auto const& f = request.second;
-          std::cerr << "queued xbar chip " << c << " core " << p << " input " << request.first << " path " << f.path_id << " head " << f.head << " tail " << f.tail << " mask " << f.out_mask << " size " << (f.msg ? f.msg->size : 0) << "\n";
+          std::cerr << "queued xbar chip " << c << " core " << p << " input " << request.first << " vc " << f.vc << " user " << f.user_id << " path " << f.path_id << " head " << f.head << " tail " << f.tail << " mask " << f.out_mask << " size " << (f.msg ? f.msg->size : 0) << "\n";
+          auto& xbar=core.GetRouter().GetXbar();
+          for (uint64_t output=0;output<kXbarOutNum;++output) {
+            if (!(f.out_mask & (1ull<<output))) continue;
+            std::cerr << "xbar owner chip " << c << " core " << p << " output " << output << " vc " << f.vc << " input+1 " << xbar.PacketOwner(output,f.vc);
+            if (output<kR2RNum) std::cerr << " private credit " << xbar.VcCredit(output,f.vc) << " shared credit " << xbar.SharedCredit(output);
+            std::cerr << "\n";
+          }
         }
         auto state = core.GetRouter().GetReduce().Inspect();
         for (auto const& task : state.tasks) std::cerr << "reduce chip " << c << " core " << p << " user " << task.user_id << " path " << task.path_id << " seq " << task.reduce_seq << " expect " << task.expect_mask << " done " << task.in_done_mask << " got " << task.got[0] << "/" << task.got[1] << "/" << task.got[2] << "\n";
@@ -243,5 +297,6 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
     ASSERT_TRUE(actual.good());
     actual.write(reinterpret_cast<char const*>(result.payload.data()), result.payload.size());
   }
+  if (require_compute_overlap) ASSERT_GT(h.compute_overlap_cycle, 0u);
 }
 }

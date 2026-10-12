@@ -96,6 +96,10 @@ class HeaderParser : public BachModule {
       keep_sum += d.bytes;
       payload_driven = true;
       if (d.last) {
+        if (keep_sum < byte_count || std::getenv("PCODE_TRACE_HEADER"))
+          std::fprintf(stderr, "header parser id %llu cycle %llu frame %llu user %llu token %llu path %llu bytes %llu expected %llu seq %llu\n",
+                       Id(), CycleNow(), cur_frame, d.msg->user_id, d.msg->token_id,
+                       d.msg->path_id, keep_sum, byte_count, d.seq);
         LOGCHECK(keep_sum >= byte_count,
                  "HeaderParser: TLAST 时累计的有效字节少于包头写的 byte_count。");
         in_frame = false;
@@ -111,6 +115,10 @@ class HeaderParser : public BachModule {
 
     ++parse_pending;
     byte_count = d.msg->size;
+    if (std::getenv("PCODE_TRACE_HEADER"))
+      std::fprintf(stderr, "header start id %llu cycle %llu frame %llu user %llu token %llu path %llu expected %llu seq %llu\n",
+                   Id(), CycleNow(), frame_cnt+1, d.msg->user_id, d.msg->token_id,
+                   d.msg->path_id, byte_count, d.seq);
     keep_sum = d.bytes;
     cur_frame = ++frame_cnt;
     in_frame = !d.last;

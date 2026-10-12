@@ -298,3 +298,78 @@ TEST(BachRouter, StopsWhenCreditRunsOut) {
   EXPECT_EQ(cr, 0u);
   EXPECT_EQ(shared, kVcSharedDepth);
 }
+
+namespace {
+// Two incoming VCs converge on one outgoing VC. The first packet pauses after
+// its head; a later packet must not enter the same output FIFO in that gap.
+class VcRemapHarness : public BachModule {
+ public:
+  VcRemapHarness(ClockPtr c, RouterStation& station, LinkEnd& wire)
+      : BachModule(c,"vc_remap_harness"), st(station), input(wire) {
+    for (uint64_t i=0;i<3;++i) {
+      auto m=std::make_shared<Message>();m->user_id=100+i;m->path_id=10+i;
+      m->size=i==2?256:768;messages.push_back(m);
+    }
+  }
+  std::vector<uint64_t> users, vcs, cycles;
+ protected:
+  void Step() override {
+    uint64_t now=CycleNow();auto request=ReadXbarReq(st.Req());
+    if (request.valid && request.seq!=last_seq) {
+      last_seq=request.seq;users.push_back(request.user_id);
+      vcs.push_back(request.vc);cycles.push_back(now);
+    }
+    st.Req().DriveRoom((1ull<<kVcNum)-1);
+    input.flit.Idle();input.release.Idle();
+    if (now==2)input.flit.Drive(0,true,false,256,messages[0]);
+    if (now==3)input.flit.Drive(1,true,false,256,messages[1]);
+    if (now==4)input.flit.Drive(2,true,true,256,messages[2]);
+    if (now==10)input.flit.Drive(0,false,false,256,messages[0]);
+    if (now==11)input.flit.Drive(1,false,false,256,messages[1]);
+    if (now==12)input.flit.Drive(0,false,true,256,messages[0]);
+    if (now==13)input.flit.Drive(1,false,true,256,messages[1]);
+    st.RunStep();
+  }
+ private:
+  RouterStation& st;LinkEnd& input;std::vector<MessagePtr> messages;
+  uint64_t last_seq=0;
+};
+
+std::vector<uint64_t> RunVcRemap(bool same_vc,bool same_direction) {
+  std::vector<uint64_t> result;
+  {
+    RT::Reset(8,8);auto clock=MakeClock(0,1);
+    RouterTable table(clock,"vc_table",0,false);
+    auto a=ForwardRight(false),b=a,c=a;
+    b.nxt_vc[2]=same_vc?0:1;c.nxt_vc[2]=2;
+    if (!same_direction) {b.flow_dir=kFlowLeft;b.nxt_vc[1]=0;}
+    table.Preload(10,a);table.Preload(11,b);table.Preload(12,c);
+    RouterStation station(clock,"station",kDirLeft,table,0,0,false);
+    auto wire=MakeWire(clock);station.AttachUp(wire);
+    VcRemapHarness harness(clock,station,*wire);
+    clock->Continue(40);RT::JoinAll();result=harness.users;
+    EXPECT_EQ(result.size(),7u);EXPECT_EQ(station.QueueDepth(),0u);
+    auto found=std::find(result.begin(),result.end(),102);
+    EXPECT_NE(found,result.end());
+    if (found!=result.end()) EXPECT_LT(harness.cycles[found-result.begin()],10u)
+        << "unrelated outgoing VC remains usable while the first packet pauses";
+  }
+  RT::Reset();return result;
+}
+}
+
+TEST(BachRouter, VcRemappingKeepsEachOutgoingPacketContiguous) {
+  auto users=RunVcRemap(true,true);
+  users.erase(std::remove(users.begin(),users.end(),102),users.end());
+  EXPECT_EQ(users,(std::vector<uint64_t>{100,100,100,101,101,101}));
+}
+TEST(BachRouter, DistinctOutgoingVcsStillProgressIndependently) {
+  auto users=RunVcRemap(false,true);
+  auto a=std::find(users.begin(),users.end(),101);
+  EXPECT_LT(a-users.begin(),3);
+}
+TEST(BachRouter, DistinctDirectionsCanUseTheSameVcIndependently) {
+  auto users=RunVcRemap(true,false);
+  auto a=std::find(users.begin(),users.end(),101);
+  EXPECT_LT(a-users.begin(),3);
+}
