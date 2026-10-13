@@ -85,6 +85,7 @@ constexpr uint64_t kDteTempIndexMask = 0x7;
 constexpr uint64_t kDteModeMask = 0x7;              // [2:0] transfer_mode
 constexpr uint64_t kDteSegValidShift = 3;           // [5:3] seg_valid[2:0]（段1~3；段0 恒参与）
 constexpr uint64_t kDteSegValidMask = 0x7;
+constexpr uint64_t kDteHwHeaderOp = 1ull << 7;      // [7] 源端为 Router 时 1 = 丢包头
 constexpr uint64_t kDteWrSharememFlag = 1ull << 8;  // [8] 完成后写 ShareMem
 constexpr uint64_t kDteAckTsEn = 1ull << 9;         // [9] 完成后通知 TS（原 task_last）
 
@@ -144,6 +145,7 @@ class DteRegfile : public BachModule {
         writes(clock) {}
 
   // ── 对外 ──
+  void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
   DsaCfgPort& Cfg() { return *cfg; }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return cfg; }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return rdata; }
@@ -281,11 +283,12 @@ class DteRegfile : public BachModule {
     d->route = Route(merged.trans_mode & kDteModeMask);
     uint64_t seg_valid = (merged.trans_mode >> kDteSegValidShift) &
                          kDteSegValidMask;
+    d->hw_header_drop = (merged.trans_mode & kDteHwHeaderOp) != 0;
     d->wr_sharemem_flag = (merged.trans_mode & kDteWrSharememFlag) != 0;
     // 源文档只有一个「是否通知 TS」的位（ack_ts_en），不通知的任务由 kernel 配
     // TRANS_MODE 时就不置这一位。
     d->ack_ts_en = (merged.trans_mode & kDteAckTsEn) != 0;
-    d->smem_addr = merged.smem_addr;
+    d->smem_addr = Agcu::SmemOffset(merged.smem_addr);
     d->smem_data = merged.smem_data;
 
     // 逐段拷贝配置：段 0（包头）恒参与，段 1~3 由 seg_valid[i-1] 决定是否参与。

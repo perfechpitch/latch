@@ -158,6 +158,7 @@ class Core : public BachModule {
   CoreMem& Cmem() { return *cmem; }
   MatrixMem& Mmem() { return *mmem; }
   ShareMem& Smem() { return *smem; }
+  void PokeSmemWord(uint64_t offset, uint64_t data) { PokeWord(*smem, offset, data); }
 
   // 末级先做：一笔活在一拍里最多前进一级。存储排在最前，因为它是各条通路的末端。
   // 坏 core 只有 Router 步进。
@@ -205,6 +206,7 @@ class Core : public BachModule {
     EmitStep();
     EmitDsa();
     EmitRv();
+    EmitSteps();
   }
 
   // Router 里设计文档画出来的那几个方框，各记一两个量：
@@ -252,22 +254,25 @@ class Core : public BachModule {
   // 只留一路。
   void EmitIssue() {
     TaskCmdPort* cmd[3] = {&ts->DteCmd(), &ts->MuCmd(), &ts->VuCmd()};
-    uint64_t mask = 0, pack = 0, users = 0;
+    uint64_t mask = 0, pack = 0, users = 0, streams = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       uint64_t s = cmd[u]->Seq();
-      uint64_t id = 0xFFu, user = 0xFFFFu;
+      uint64_t id = 0xFFu, user = 0xFFFFu, stream = 0xFFu;
       if (s != issue_seq[u]) {
         issue_seq[u] = s;
         mask |= 1ull << u;
         id = cmd[u]->task_id.Get() & 0xFFu;
         user = cmd[u]->user_id.Get() & 0xFFFFu;
+        stream = cmd[u]->stream_id.Get() & 0xFFu;
       }
       pack |= id << (8 * u);
       users |= user << (16 * u);
+      streams |= stream << (8 * u);
     }
     TracePerCycle("ts_unit", mask);
     TracePerCycle("ts_task", pack);
     TracePerCycle("ts_user", users);
+    TracePerCycle("ts_stream", streams);
   }
 
   // 本拍 TS 里新出现的这一步，与它被下发那一拍。
@@ -303,6 +308,10 @@ class Core : public BachModule {
                   (fresh && ts->Matcher().MadeUserValid())
                       ? (ts->Matcher().MadeUser() & 0xFFFFu)
                       : 0xFFFFu);
+    TracePerCycle("ts_create_stream",
+                  fresh ? (ts->Matcher().MadeStream() & 0xFFu)
+                        : (renewed ? (ts->Credit().ReactivatedStream() & 0xFFu)
+                                   : 0xFFu));
 
     uint64_t install = ts->Ctrl().Installed();
     bool next = install != ts_install_seq;
@@ -314,6 +323,8 @@ class Core : public BachModule {
                   (next && ts->Ctrl().NextUserValid())
                       ? (ts->Ctrl().NextUser() & 0xFFFFu)
                       : 0xFFFFu);
+    TracePerCycle("ts_install_stream",
+                  next ? (ts->Ctrl().NextStream() & 0xFFu) : 0xFFu);
   }
 
   // 三个 DSA 各自对一笔 task 的执行时间，两个端点各发三个信号。
@@ -347,17 +358,19 @@ class Core : public BachModule {
   // 只有 VU 有，位掩码上永远只抬 bit2。判据见 config_register.h 的 Trigger() 与
   // pipe_ctrl.h 的 Accept()。
   void EmitDsa() {
-    uint64_t start_mask = 0, start_task = 0, start_user = 0;
-    uint64_t done_mask = 0, done_task = 0, done_user = 0;
-    uint64_t trig_mask = 0, trig_task = 0, trig_user = 0;
-    uint64_t disp_mask = 0, disp_task = 0, disp_user = 0;
+    uint64_t start_mask = 0, start_task = 0, start_user = 0, start_stream = 0;
+    uint64_t done_mask = 0, done_task = 0, done_user = 0, done_stream = 0;
+    uint64_t trig_mask = 0, trig_task = 0, trig_user = 0, trig_stream = 0;
+    uint64_t disp_mask = 0, disp_task = 0, disp_user = 0, disp_stream = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       DsaEv s = DsaStartOf(u);
+      uint64_t ss = 0xFFu, ds = 0xFFu, trig_s = 0xFFu, ps = 0xFFu;
       if (s.seq != dsa_start_seq[u]) {
         dsa_start_seq[u] = s.seq;
         start_mask |= 1ull << u;
         start_task |= (s.task & 0xFFu) << (8 * u);
         start_user |= (s.user & 0xFFFFu) << (16 * u);
+        ss = s.stream;
       }
       DsaEv d = DsaDoneOf(u);
       if (d.seq != dsa_done_seq[u]) {
@@ -365,6 +378,7 @@ class Core : public BachModule {
         done_mask |= 1ull << u;
         done_task |= (d.task & 0xFFu) << (8 * u);
         done_user |= (d.user & 0xFFFFu) << (16 * u);
+        ds = d.stream;
       }
       DsaEv t = DsaTaskTriggerOf(u);
       if (t.seq != dsa_task_trig_seq[u]) {
@@ -372,6 +386,7 @@ class Core : public BachModule {
         trig_mask |= 1ull << u;
         trig_task |= (t.task & 0xFFu) << (8 * u);
         trig_user |= (t.user & 0xFFFFu) << (16 * u);
+        trig_s = t.stream;
       }
       DsaEv p = DsaTaskDispatchOf(u);
       if (p.seq != dsa_task_disp_seq[u]) {
@@ -379,20 +394,29 @@ class Core : public BachModule {
         disp_mask |= 1ull << u;
         disp_task |= (p.task & 0xFFu) << (8 * u);
         disp_user |= (p.user & 0xFFFFu) << (16 * u);
+        ps = p.stream;
       }
+      start_stream |= (ss & 0xFFu) << (8 * u);
+      done_stream |= (ds & 0xFFu) << (8 * u);
+      trig_stream |= (trig_s & 0xFFu) << (8 * u);
+      disp_stream |= (ps & 0xFFu) << (8 * u);
     }
     TracePerCycle("dsa_start", start_mask);
     TracePerCycle("dsa_start_task", start_task);
     TracePerCycle("dsa_start_user", start_user);
+    TracePerCycle("dsa_start_stream", start_stream);
     TracePerCycle("dsa_done", done_mask);
     TracePerCycle("dsa_done_task", done_task);
     TracePerCycle("dsa_done_user", done_user);
+    TracePerCycle("dsa_done_stream", done_stream);
     TracePerCycle("dsa_task_trigger", trig_mask);
     TracePerCycle("dsa_task_trigger_task", trig_task);
     TracePerCycle("dsa_task_trigger_user", trig_user);
+    TracePerCycle("dsa_task_trigger_stream", trig_stream);
     TracePerCycle("dsa_task_dispatch", disp_mask);
     TracePerCycle("dsa_task_dispatch_task", disp_task);
     TracePerCycle("dsa_task_dispatch_user", disp_user);
+    TracePerCycle("dsa_task_dispatch_stream", disp_stream);
   }
 
   // 三个 RV core 各自对一笔 task 的执行时间，两个端点各发三个信号。
@@ -409,16 +433,18 @@ class Core : public BachModule {
   // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()），不含 DSA 自己的执行时间。
   // VU 写完最后一条 trigger 就交还：身份已经锁在那笔请求上。
   void EmitRv() {
-    uint64_t start_mask = 0, start_task = 0, start_user = 0;
-    uint64_t done_mask = 0, done_task = 0, done_user = 0;
+    uint64_t start_mask = 0, start_task = 0, start_user = 0, start_stream = 0;
+    uint64_t done_mask = 0, done_task = 0, done_user = 0, done_stream = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       RvTaskQueue& tq = rv[u]->TaskQueue();
       uint64_t s = tq.Started();
+      uint64_t ss = 0xFFu, ds = 0xFFu;
       if (s != rv_start_seq[u]) {
         rv_start_seq[u] = s;
         start_mask |= 1ull << u;
         start_task |= (tq.StartTask() & 0xFFu) << (8 * u);
         start_user |= (tq.StartUser() & 0xFFFFu) << (16 * u);
+        ss = tq.StartStream();
       }
       uint64_t d = tq.Finishes();
       if (d != rv_done_seq[u]) {
@@ -426,14 +452,107 @@ class Core : public BachModule {
         done_mask |= 1ull << u;
         done_task |= (tq.DoneTask() & 0xFFu) << (8 * u);
         done_user |= (tq.DoneUser() & 0xFFFFu) << (16 * u);
+        ds = tq.DoneStream();
       }
+      start_stream |= (ss & 0xFFu) << (8 * u);
+      done_stream |= (ds & 0xFFu) << (8 * u);
     }
     TracePerCycle("rv_start", start_mask);
     TracePerCycle("rv_start_task", start_task);
     TracePerCycle("rv_start_user", start_user);
+    TracePerCycle("rv_start_stream", start_stream);
     TracePerCycle("rv_done", done_mask);
     TracePerCycle("rv_done_task", done_task);
     TracePerCycle("rv_done_user", done_user);
+    TracePerCycle("rv_done_stream", done_stream);
+  }
+
+  // DTE / MU 内部步骤。整段 DSA 在波形上仍是 dsa_start→dsa_done 那一块，Perfetto
+  // 另用这里的起止把排队、读、写、加载、计算、写回拆开。计数器只在变化那一拍
+  // 把身份一起记下。
+  void EmitSteps() {
+    EmitDteSteps();
+    EmitMuSteps();
+  }
+
+  void EmitDteSteps() {
+    Commit& c = dte->Committer();
+    if (c.QBeginCnt() != dte_q_begin_seen) {
+      dte_q_begin_seen = c.QBeginCnt();
+      TracePerCycle("dte_q_b_user", c.QBeginUser());
+      TracePerCycle("dte_q_b_task", c.QBeginTask());
+      TracePerCycle("dte_q_b_stream", c.QBeginStream());
+      TracePerCycle("dte_q_begin", dte_q_begin_seen);
+    }
+    if (c.QEndCnt() != dte_q_end_seen) {
+      dte_q_end_seen = c.QEndCnt();
+      TracePerCycle("dte_q_e_user", c.QEndUser());
+      TracePerCycle("dte_q_e_task", c.QEndTask());
+      TracePerCycle("dte_q_e_stream", c.QEndStream());
+      TracePerCycle("dte_q_end", dte_q_end_seen);
+    }
+    for (uint64_t i = 0; i < dte->LaneCount() && i < dte_rd_begin_seen.size();
+         ++i) {
+      Lane& lane = dte->GetLane(i);
+      EmitHalf(i, "rd", lane.RdPulse(), dte_rd_begin_seen[i], dte_rd_end_seen[i]);
+      EmitHalf(i, "wr", lane.WrPulse(), dte_wr_begin_seen[i], dte_wr_end_seen[i]);
+    }
+  }
+
+  void EmitHalf(uint64_t lane, const char* half, Lane::HalfPulse const& p,
+                uint64_t& begin_seen, uint64_t& end_seen) {
+    std::string base = "dte_l" + std::to_string(lane) + "_" + half;
+    if (p.begin_cnt != begin_seen) {
+      begin_seen = p.begin_cnt;
+      TracePerCycle(base + "_b_user", p.b_user);
+      TracePerCycle(base + "_b_task", p.b_task);
+      TracePerCycle(base + "_b_stream", p.b_stream);
+      TracePerCycle(base + "_b_bytes", p.b_bytes);
+      TracePerCycle(base + "_begin", begin_seen);
+    }
+    if (p.end_cnt != end_seen) {
+      end_seen = p.end_cnt;
+      TracePerCycle(base + "_e_user", p.e_user);
+      TracePerCycle(base + "_e_task", p.e_task);
+      TracePerCycle(base + "_e_stream", p.e_stream);
+      TracePerCycle(base + "_end", end_seen);
+    }
+  }
+
+  void EmitMuPhase(const char* name, Mu::PhasePulse const& p,
+                   uint64_t& begin_seen, uint64_t& end_seen, bool dims) {
+    std::string base = name;
+    if (p.begin_cnt != begin_seen) {
+      begin_seen = p.begin_cnt;
+      TracePerCycle(base + "_b_user", p.b_user);
+      TracePerCycle(base + "_b_task", p.b_task);
+      TracePerCycle(base + "_b_stream", p.b_stream);
+      if (dims) {
+        TracePerCycle(base + "_m", p.m);
+        TracePerCycle(base + "_k", p.k);
+        TracePerCycle(base + "_n", p.n);
+        TracePerCycle(base + "_experts", p.experts);
+        TracePerCycle(base + "_kblock", p.kblock);
+        TracePerCycle(base + "_nblock", p.nblock);
+      }
+      TracePerCycle(base + "_begin", begin_seen);
+    }
+    if (p.end_cnt != end_seen) {
+      end_seen = p.end_cnt;
+      TracePerCycle(base + "_e_user", p.e_user);
+      TracePerCycle(base + "_e_task", p.e_task);
+      TracePerCycle(base + "_e_stream", p.e_stream);
+      TracePerCycle(base + "_end", end_seen);
+    }
+  }
+
+  void EmitMuSteps() {
+    EmitMuPhase("mu_load", mu->LoadPhase(), mu_load_begin_seen, mu_load_end_seen,
+                false);
+    EmitMuPhase("mu_comp", mu->CompPhase(), mu_comp_begin_seen, mu_comp_end_seen,
+                true);
+    EmitMuPhase("mu_store", mu->StorePhase(), mu_store_begin_seen,
+                mu_store_end_seen, false);
   }
 
   bool Quiescent() const override {
@@ -475,24 +594,37 @@ class Core : public BachModule {
         }
       }
       if (!admitted) return false;
+      // 同一笔归约里各核的 task_id 各自编号，不能拿发送方 reduce_seq 对本地任务号。
+      // 有未做完的本地 type-4 时，只收它那条 path，避免后面的汇聚插到前面。
+      // 这条 path 在任务链里根本没有 type-4（只汇上游分量、再按 flow_dir 送走，
+      // 链上只留 stall_way 的 reissue）时也要收：否则包进不了归约模块，
+      // reissue 又等不到进核的包，两边都停。
+      bool has_local = false;
       for (uint64_t t = 0; t < kTaskChainNum; ++t) {
         auto const& task = ts->Cfg().Task(t);
-        if (!task.valid || !task.IsReduce() || (done & (1ull << t))) continue;
+        if (!task.valid || !task.IsReduce()) continue;
         uint64_t path = task.path_id;
         if (current && (current->task_id == t ||
                         (current->pid_pending && current->task_id + 1 == t))) {
           path = current->task_path_id;
         }
-        return m.reduce_seq == t && m.path_id == path &&
-               router->GetReduce().CanAcceptHead(m);
+        if (m.path_id != path) {
+          if ((done & (1ull << t)) == 0) return false;
+          continue;
+        }
+        has_local = true;
+        if (done & (1ull << t)) continue;
+        return router->GetReduce().CanAcceptHead(m);
       }
-      return false;
+      if (has_local) return false;
+      return router->GetReduce().CanAcceptHead(m);
     }, [this](Message const& m) { router->GetReduce().ReserveHead(m); });
     ts->AttachTrigger(router->TriggerPtr());
     ts->AttachCreditReq(router->CreditReqPtr());
     ts->AttachCreditGrant(router->CreditGrantPtr());
     ts->AttachRetire(router->RetireReqPtr());
     ts->AttachReduceDone(router->ReduceDonePtr());
+    ts->AttachRtab(&router->Table());
     // Router 的 CoreMem 重发完成后报给 TS，TS 据此清掉那一项的重发标记。
     ts->AttachReissueDone(router->GetReissue().DonePtr());
   }
@@ -570,6 +702,8 @@ class Core : public BachModule {
     // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
     // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
     rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));
+    rv[1]->AttachCmem(cmem->PortPtr(kCmemRvMu));
+    rv[2]->AttachCmem(cmem->PortPtr(kCmemRvVu));
     rv[0]->AttachHdr(router->HdrPtr());
   }
 
@@ -582,33 +716,33 @@ class Core : public BachModule {
   CoreContext ctx;
   // 三个 DSA 的两个端点各要从一家的访问器上读。u：0 DTE、1 MU、2 VU。
   struct DsaEv {
-    uint64_t seq = 0, task = 0, user = 0xFFFFu;
+    uint64_t seq = 0, task = 0, user = 0xFFFFu, stream = 0xFFu;
   };
 
   DsaEv DsaStartOf(uint64_t u) {
     if (u == 0) {
       Commit& c = dte->Committer();
-      return {c.RvAdmitted(), c.StartTask(), c.StartUser()};
+      return {c.RvAdmitted(), c.StartTask(), c.StartUser(), c.StartStream()};
     }
     if (u == 1) {
       MuIssueQ& iq = mu->IssueQ();
-      return {iq.Issued(), iq.StartTask(), iq.StartUser()};
+      return {iq.Issued(), iq.StartTask(), iq.StartUser(), iq.StartStream()};
     }
     VuIsq& isq = vu->Isq();
-    return {isq.Started(), isq.StartTask(), isq.StartUser()};
+    return {isq.Started(), isq.StartTask(), isq.StartUser(), isq.StartStream()};
   }
 
   DsaEv DsaDoneOf(uint64_t u) {
     if (u == 0) {
       CompletionRs& c = dte->Completion();
-      return {c.Reported(), c.DoneTask(), c.DoneUser()};
+      return {c.Reported(), c.DoneTask(), c.DoneUser(), c.DoneStream()};
     }
     if (u == 1) {
-      return {mu->DoneCnt(), mu->DoneTask(), mu->DoneUser()};
+      return {mu->DoneCnt(), mu->DoneTask(), mu->DoneUser(), mu->DoneStream()};
     }
     // VU 只在置了 EVENT_EN 的宏指令退休时报，与它发给 TS 的是同一拍。
     return {vu->Retire().MacroDoneCnt(), vu->Retire().MacroDoneTask(),
-            vu->Retire().MacroDoneUser()};
+            vu->Retire().MacroDoneUser(), vu->Retire().MacroDoneStream()};
   }
 
   // VU 那条 task 起点宏指令的两端：trigger 被 config_register 收下、以及它真正发行
@@ -617,13 +751,15 @@ class Core : public BachModule {
   DsaEv DsaTaskTriggerOf(uint64_t u) {
     if (u != 2) return {};
     VuConfigRegister& c = vu->ConfigRegister();
-    return {c.TaskTriggers(), c.TaskTriggerTask(), c.TaskTriggerUser()};
+    return {c.TaskTriggers(), c.TaskTriggerTask(), c.TaskTriggerUser(),
+            c.TaskTriggerStream()};
   }
 
   DsaEv DsaTaskDispatchOf(uint64_t u) {
     if (u != 2) return {};
     VuPipeCtrl& p = vu->PipeCtrl();
-    return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser()};
+    return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser(),
+            p.TaskDispatchStream()};
   }
 
   // 三条发射通路上一次见到的 seq，EmitIssue() 用它认新下发的那一笔。
@@ -636,6 +772,13 @@ class Core : public BachModule {
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
   // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。
   uint64_t ts_create_seq = 0, ts_reactivate_seq = 0, ts_install_seq = 0;
+  // DTE 排队与五个通道读写两半、MU 三段的上一次笔数。EmitSteps 用它们认新的一步。
+  uint64_t dte_q_begin_seen = 0, dte_q_end_seen = 0;
+  std::array<uint64_t, 5> dte_rd_begin_seen{}, dte_rd_end_seen{};
+  std::array<uint64_t, 5> dte_wr_begin_seen{}, dte_wr_end_seen{};
+  uint64_t mu_load_begin_seen = 0, mu_load_end_seen = 0;
+  uint64_t mu_comp_begin_seen = 0, mu_comp_end_seen = 0;
+  uint64_t mu_store_begin_seen = 0, mu_store_end_seen = 0;
   std::unique_ptr<Router> router;
   std::unique_ptr<Ts> ts;
   std::array<std::unique_ptr<RvCore>, 3> rv;

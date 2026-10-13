@@ -20,10 +20,12 @@
 // 记录的字段顺序与 compiler/hwconfig/bachir.py 的 render_plan 一一对应，改一边
 // 要一起改。
 
+#include <array>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -68,6 +70,9 @@ struct CorePlan {
   Route dtein_route = Route::kRouterToCm;        // DTEIN 声明的落点，只用于角色校验
   bool has_dtein = false;
   std::vector<std::pair<uint64_t, uint64_t>> vu_static;  // (vu_off, data)
+  std::array<std::string, 3> images{};  // KERNELCORE：按 RV 号覆盖全局 KERNEL
+  std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> dsa_regs;  // unit, off, val
+  std::vector<std::pair<uint64_t, uint64_t>> smem;  // off, val
 };
 
 inline uint64_t Num(std::string const& s) {
@@ -100,7 +105,8 @@ inline void CheckBadCore(CoreKey const& key, CorePlan const& c) {
   Require(c.role == CoreRole::kSpare, key, "坏 core 的角色要是不派角色");
   Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
               c.ts_route.empty() && c.dte_rtab.empty() && c.path_task.empty() &&
-              c.vu_static.empty(),
+              c.vu_static.empty() && c.dsa_regs.empty() && c.smem.empty() &&
+              c.images[0].empty() && c.images[1].empty() && c.images[2].empty(),
           key, "坏 core 上只能有 RTAB 与 RELROUTE");
   for (auto const& one : c.rtab) {
     RouteEntry const& e = one.second;
@@ -176,8 +182,9 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     std::string const& tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && tok[1] == "10",
-               "LoadBundle: 只认 BACHIR 10 那一版产物。");
+      LOGCHECK(tok.size() == 2 && (tok[1] == "10" || tok[1] == "11"),
+               "LoadBundle: 只认 BACHIR 10 与 11。");
+      DtePayloadAuxBytes() = tok[1] == "11" ? 0 : kReduceSwHeaderBytes;
       head_ok = true;
       continue;
     }
@@ -264,6 +271,19 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     } else if (tag == "VUSTATIC") {
       LOGCHECK(tok.size() == 5, "LoadBundle: VUSTATIC 记录要四个字段。");
       c.vu_static.push_back({Num(tok[3]), Num(tok[4])});
+    } else if (tag == "KERNELCORE") {
+      LOGCHECK(tok.size() == 5, "LoadBundle: KERNELCORE 记录要四个字段。");
+      uint64_t rv = Num(tok[3]);
+      LOGCHECK(rv < c.images.size(), "LoadBundle: KERNELCORE 的 RV core 号越界。");
+      c.images[rv] = tok[4];
+    } else if (tag == "DSAREG") {
+      LOGCHECK(tok.size() == 6, "LoadBundle: DSAREG 记录要五个字段。");
+      uint64_t unit = Num(tok[3]);
+      LOGCHECK(unit <= 2, "LoadBundle: DSAREG 的 unit 只有 0 DTE、1 MU、2 VU。");
+      c.dsa_regs.push_back({unit, Num(tok[4]), Num(tok[5])});
+    } else if (tag == "SMEM") {
+      LOGCHECK(tok.size() == 5, "LoadBundle: SMEM 记录要四个字段。");
+      c.smem.push_back({Num(tok[3]), Num(tok[4])});
     } else if (tag == "RTAB") {
       LOGCHECK(tok.size() == 31, "LoadBundle: RTAB 记录要三十个字段。");
       RouteEntry e;
@@ -341,8 +361,17 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     if (core.Bad()) continue;
 
     for (uint64_t i = 0; i < images.size(); ++i) {
-      if (!images[i].empty()) core.Rv(i).LoadImage(dir + "/" + images[i]);
+      std::string const& img = c.images[i].empty() ? images[i] : c.images[i];
+      if (!img.empty()) core.Rv(i).LoadImage(dir + "/" + img);
     }
+    for (auto const& one : c.dsa_regs) {
+      uint64_t unit = std::get<0>(one), off = std::get<1>(one),
+               val = std::get<2>(one);
+      if (unit == 0) core.GetDte().Regfile().CfgWrite(off, val);
+      else if (unit == 1) core.GetMu().Regfile().CfgWrite(off, val);
+      else core.GetVu().Preload(off, val);
+    }
+    for (auto const& one : c.smem) core.PokeSmemWord(one.first, one.second);
     for (uint64_t path_id : c.dte_rtab) {
       auto found = c.rtab.find(path_id);
       LOGCHECK(found != c.rtab.end(),

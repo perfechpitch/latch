@@ -409,7 +409,11 @@ TEST(BachDte, HeaderLandsInCoreMemForBroadcastCore) {
     want.token_id = 21;
   }
   RT::Reset();
-  EXPECT_EQ(got, HeaderToBytes(want));
+  ByteBlock expect = HeaderToBytes(want);
+  // Byte8-9 改写为包里的 user_id，check flag 从这里认用户。
+  expect[8] = 11;
+  expect[9] = 0;
+  EXPECT_EQ(got, expect);
 }
 
 // 带 scale 的包：payload 是 MXFP8 数据后面接 scale。数据段落 Core Mem，scale 段

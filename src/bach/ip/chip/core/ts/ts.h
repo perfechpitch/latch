@@ -91,6 +91,7 @@ class Ts {
   void AttachReduceDone(std::shared_ptr<ReduceDonePort> p) {
     task_done->AttachRdcDone(std::move(p));
   }
+  void AttachRtab(RouterTable* t) { task_done->AttachRtab(t); }
   void AttachReissueDone(std::shared_ptr<ReissueDonePort> p) {
     credit->AttachReissueDone(std::move(p));
   }

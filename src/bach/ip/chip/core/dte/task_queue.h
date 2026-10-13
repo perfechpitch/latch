@@ -14,7 +14,9 @@
 //
 // 这两样都只被所属 Lane 的 Step() 触碰，所以是普通类，不是 ClkModule。
 
+#include <cstdint>
 #include <deque>
+#include <vector>
 
 #include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
@@ -44,6 +46,11 @@ struct ActiveCtx {
   // 进核：这一笔的包头上下文落库没有（收下第一拍时落一次；落 Hmem 还是 Core Mem
   // 看段 0 端点）。
   bool hdr_stored = false;
+  // 进核 topK 段：pcode 把 topK 放在 payload 里，按段长攒齐再写 MU。
+  std::vector<uint8_t> topk_acc;
+  // 出核读请求的发出顺序：1 读 Core Mem，0 读 Matrix Mem。两块存储延迟不同，
+  // 响应按到达先收进各自的队列，再按这个顺序配回。
+  std::deque<uint8_t> rd_mem;
 };
 
 class TaskQueue {

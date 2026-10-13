@@ -86,6 +86,7 @@ class UserMatch : public BachModule {
   uint64_t Made() const { return made_cnt; }
   uint64_t MadeTask() const { return made_task; }
   uint64_t MadeUser() const { return made_user; }
+  uint64_t MadeStream() const { return made_stream; }
   // 建出来的那一项有没有用户身份。
   bool MadeUserValid() const { return made_user_vld; }
 
@@ -125,7 +126,7 @@ class UserMatch : public BachModule {
     uint64_t skip = 0;
   };
 
-  Plan PlanFor(uint64_t path, bool reissue, uint64_t done) const {
+  Plan PlanFor(uint64_t path, bool reissue, uint64_t done, bool skip_only) const {
     Plan p;
     uint64_t t = cfg.MatchDatain(path, done);
     if (t >= kTaskChainNum) return p;
@@ -135,6 +136,8 @@ class UserMatch : public BachModule {
       p.skip = (1ull << t) | out;
       return p;
     }
+    // 归约已经收下这一包。不是 P2P reissue 就不派、也不跳。
+    if (skip_only) return p;
     if (!reissue && in.task_type == TaskType::kBcastReissueIn) p.skip = out;
     p.task_id = t;
     return p;
@@ -155,11 +158,12 @@ class UserMatch : public BachModule {
 
   // 建表这一笔记下来：笔数加一，身份留下。老用户那条重发/跳过的写不算；自启动
   // core 上的原地重新激活不经这里，由 credit 与退休那一侧计数。
-  void NoteMade(StreamEntry const& e) {
+  void NoteMade(StreamEntry const& e, uint64_t stream) {
     ++made_cnt;
     made_task = e.task_id;
     made_user = e.user_id;
     made_user_vld = e.user_id_vld;
+    made_stream = stream;
   }
 
   bool Handle() {
@@ -169,6 +173,7 @@ class UserMatch : public BachModule {
     uint64_t user = trigger->user_id.Get();
     uint64_t path = trigger->path_id.Get();
     bool reissue = trigger->reissue.Get() != 0;
+    bool skip_only = trigger->skip_only.Get() != 0;
 
     StreamSnapshotPtr s = snap->Get();
     if (!s) return false;
@@ -176,6 +181,11 @@ class UserMatch : public BachModule {
     // Bypass：自启动 core 与权重加载模式不建 stream 表项，进来的包只把 datain
     // 任务登记进 DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID / TID。
     if (cfg.WeightsMode() || cfg.SelfStartCore()) {
+      // 包进了归约、没进 DTE。自启动核不要为此再派一笔搬入。
+      if (skip_only) {
+        last_trigger_seq = trigger->Seq();
+        return true;
+      }
       if (!cfg.DatainValid()) return false;
       if (hold.valid) {
         ++stall_pending;
@@ -195,7 +205,11 @@ class UserMatch : public BachModule {
     for (uint64_t i = 0; i < kStreamNum; ++i) {
       StreamEntry const& e = s->entry[i];
       if (!e.valid || !e.user_id_vld || e.user_id != user) continue;
-      Plan p = PlanFor(path, reissue, e.done_bitmap);
+      Plan p = PlanFor(path, reissue, e.done_bitmap, skip_only);
+      if (skip_only && p.skip == 0) {
+        last_trigger_seq = trigger->Seq();
+        return true;
+      }
       if (p.task_id >= kTaskChainNum && p.skip == 0) {
         spdlog::error("UserMatch 第 {} 拍：用户 {} 在 stream {} 上已经没有 path {} "
                       "还没做的搬入任务", CycleNow(), user, i, path);
@@ -232,7 +246,16 @@ class UserMatch : public BachModule {
       ++stall_pending;
       return false;
     }
-    Plan p = PlanFor(path, reissue, 0);
+    if (skip_only) {
+      last_trigger_seq = trigger->Seq();
+      return true;
+    }
+    // 这个核没有 kernel。不能从地址 0 取指，也不建一条走不完的链。
+    if (cfg.Task(0).task_pc == 0) {
+      last_trigger_seq = trigger->Seq();
+      return true;
+    }
+    Plan p = PlanFor(path, reissue, 0, false);
     if (p.task_id < kTaskChainNum && hold.valid) {
       ++stall_pending;
       return false;
@@ -255,7 +278,7 @@ class UserMatch : public BachModule {
     e.task_fsm = (p.skip & 1u) ? TaskFsm::kFinish : InitFsmOf(t0);
     create_port->Drive(w);
     pending = true;
-    NoteMade(e);
+    NoteMade(e, slot);
     just_created.insert(user);
     Register(p, user, path, slot);
     last_trigger_seq = trigger->Seq();
@@ -287,7 +310,7 @@ class UserMatch : public BachModule {
   uint64_t created_pending = 0, matched_pending = 0, stall_pending = 0;
 
   // 建表的笔数与最近建出来的那一步的身份，供 Core 层发波形。
-  uint64_t made_cnt = 0, made_task = 0, made_user = 0;
+  uint64_t made_cnt = 0, made_task = 0, made_user = 0, made_stream = 0;
   bool made_user_vld = false;
 
   Logic64 created, matched, stalls;

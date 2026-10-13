@@ -3,25 +3,24 @@
 
 // AGCU：地址生成与端点译码。
 //
-// 对齐飞书《DTE DSA》后，地址公式逐段位算：
-//
 //   stream_start_i = CFG_ADDRi + SID × CFG_STRIDEi
 //
-// stride 配 0 退化为纯物理地址（Mmem 段软件给物理地址）；route 100（Mmem→Cmem）
-// 源端不叠 stride。每段的端点（Mmem / Cmem / scale 旁带 / topK_table / header_table）
-// 由该段地址所在的地址范围译码决定，不再由 route 决定。
+// 端点有两套写法。模型内部用地址高 4 bit 作 tag（latch 自己的 kernel 与用例）：
 //
-// 端点地址范围是建模约定：飞书文档只说“由地址范围译码”，未给具体数值。这里取
-// 地址高 4 bit 作端点 tag，低位为端内偏移：
+//   0x0_______  Cmem 数据（低 20 bit，1 MB）
+//   0x1_______  Mmem 数据（低 26 bit，36 MB）
+//   0x2_______  Scale 旁带
+//   0x3_______  topK_table
+//   0x4_______  header_table
 //
-//   0x0_______  Cmem 数据（低 20 bit 有效，1 MB）
-//   0x1_______  Mmem 数据（低 26 bit 有效，36 MB）
-//   0x2_______  Scale 旁带（低位给对应数据地址，len 是 scale 字节数）
-//   0x3_______  topK_table（低位给 stream_id）
-//   0x4_______  header_table（低位给 stream_id）
+// 文档绝对地址（pcode 产物）在叠过 SID × stride 之后换成 tag：
 //
-// 数据布局仅支持连续一维搬运，当前不支持 stride（这里说的 stride 是数据内部的
-// 跨步，与上面按 stream 分片的那个 stride 不是一回事）。
+//   0x4840_0000 + o          Cmem 数据     → tag 0
+//   0x4850_0000 + o          Cmem SF       → tag 2，偏移 o×32
+//   0x48C0_0000 + o          Mmem 数据     → tag 1（容量检查仍按 36 MB）
+//   0x4AC0_0000 + o          Mmem SF       → tag 2，偏移 o×32
+//   0x4802_B000 + n×0x80     header_table  → tag 4
+//   0x4803_3000 + n×0x100    topK_table    → tag 3
 
 #include <cstdint>
 
@@ -30,13 +29,60 @@
 namespace latch {
 namespace bach {
 
-// 端点 tag 的位宽与掩码（地址高 4 bit）定义在 dte_types.h（kEpShift/kEpMask/
-// kEpDataMask），与 SegEndpoint 同处。
+constexpr uint64_t kDocCmemBase = 0x48400000;
+constexpr uint64_t kDocCmemBytes = 1024 * 1024;
+constexpr uint64_t kDocCmemSfBase = 0x48500000;
+constexpr uint64_t kDocCmemSfBytes = 32 * 1024;
+constexpr uint64_t kDocMmemBase = 0x48C00000;
+constexpr uint64_t kDocMmemBytes = 32ull * 1024 * 1024;
+constexpr uint64_t kDocMmemSfBase = 0x4AC00000;
+constexpr uint64_t kDocMmemSfBytes = 4ull * 1024 * 1024;
+constexpr uint64_t kDocHeaderTableBase = 0x4802B000;
+constexpr uint64_t kDocHeaderTableBytes = 4 * 1024;
+constexpr uint64_t kDocHeaderEntryBytes = 0x80;
+constexpr uint64_t kDocTopkTableBase = 0x48033000;
+constexpr uint64_t kDocTopkTableBytes = 4 * 1024;
+constexpr uint64_t kDocTopkEntryBytes = 0x100;
+constexpr uint64_t kDocSfGroupBytes = 32;
+constexpr uint64_t kDocSmemBase = 0x48300000;
+constexpr uint64_t kDocSmemBytes = 32 * 1024;
 
 class Agcu {
  public:
+  static uint64_t SmemOffset(uint64_t addr) {
+    if (InDoc(addr, kDocSmemBase, kDocSmemBytes)) return addr - kDocSmemBase;
+    return addr;
+  }
+  static bool IsDocAddr(uint64_t addr) {
+    return InDoc(addr, kDocCmemBase, kDocCmemBytes) ||
+           InDoc(addr, kDocCmemSfBase, kDocCmemSfBytes) ||
+           InDoc(addr, kDocMmemBase, kDocMmemBytes) ||
+           InDoc(addr, kDocMmemSfBase, kDocMmemSfBytes) ||
+           InDoc(addr, kDocHeaderTableBase, kDocHeaderTableBytes) ||
+           InDoc(addr, kDocTopkTableBase, kDocTopkTableBytes);
+  }
+  static uint64_t FromDoc(uint64_t addr) {
+    if (InDoc(addr, kDocCmemBase, kDocCmemBytes)) {
+      return Tag(0x0, addr - kDocCmemBase);
+    }
+    if (InDoc(addr, kDocCmemSfBase, kDocCmemSfBytes)) {
+      return Tag(0x2, (addr - kDocCmemSfBase) * kDocSfGroupBytes);
+    }
+    if (InDoc(addr, kDocMmemBase, kDocMmemBytes)) {
+      return Tag(0x1, addr - kDocMmemBase);
+    }
+    if (InDoc(addr, kDocMmemSfBase, kDocMmemSfBytes)) {
+      return Tag(0x2, (addr - kDocMmemSfBase) * kDocSfGroupBytes);
+    }
+    if (InDoc(addr, kDocHeaderTableBase, kDocHeaderTableBytes)) {
+      return Tag(0x4, (addr - kDocHeaderTableBase) / kDocHeaderEntryBytes);
+    }
+    if (InDoc(addr, kDocTopkTableBase, kDocTopkTableBytes)) {
+      return Tag(0x3, (addr - kDocTopkTableBase) / kDocTopkEntryBytes);
+    }
+    return addr;
+  }
 
-  // 端点译码：地址高 4 bit 选端点，其余位是端内偏移。
   static SegEndpoint Decode(uint64_t addr) {
     switch ((addr >> kEpShift) & kEpMask) {
       case 0x1: return SegEndpoint::kMmem;
@@ -47,31 +93,42 @@ class Agcu {
     }
   }
 
-  // 出核段位：展开源/目的地址并译码端点。route 决定哪端是 Router（那一端的地址
-  // 无意义），memory 端按 stream_start = CfgAddr + SID × stride 算；route 100
-  // （Mmem→Cmem）源端不叠 stride。展开结果写回 seg 的 src_addr / dst_addr 与
-  // src_kind / dst_kind，lane 直接用。
   void ExpandOut(Segment& s, uint64_t sid, Route route) const {
-    s.src_kind = Decode(s.src);
-    s.dst_kind = Decode(s.dst);
     bool src_mem = route == Route::kCmToRouter || route == Route::kMmToRouter ||
                    route == Route::kMmToCm;
     bool dst_mem = route == Route::kRouterToCm || route == Route::kRouterToMm ||
                    route == Route::kMmToCm;
+    uint64_t src_stride = (route == Route::kMmToCm) ? 0 : s.stride;
+    uint64_t dst_stride = s.stride;
+    if (IsDocAddr(s.src)) {
+      s.src = FromDoc(s.src + sid * src_stride);
+      src_stride = 0;
+    }
+    if (IsDocAddr(s.dst)) {
+      s.dst = FromDoc(s.dst + sid * dst_stride);
+      dst_stride = 0;
+    }
+    s.src_kind = Decode(s.src);
+    s.dst_kind = Decode(s.dst);
     if (src_mem) {
-      // MM→CM 源端是 Matrix Mem，软件给物理地址，不叠 stride。
-      uint64_t stride = (route == Route::kMmToCm) ? 0 : s.stride;
-      s.src_addr = (s.src & kEpDataMask) + sid * stride;
+      s.src_addr = (s.src & kEpDataMask) + sid * src_stride;
     } else {
       s.src_addr = 0;
     }
     if (dst_mem) {
-      s.dst_addr = (s.dst & kEpDataMask) + sid * s.stride;
+      s.dst_addr = (s.dst & kEpDataMask) + sid * dst_stride;
     } else {
       s.dst_addr = 0;
     }
   }
 
+ private:
+  static bool InDoc(uint64_t a, uint64_t base, uint64_t bytes) {
+    return a >= base && a < base + bytes;
+  }
+  static uint64_t Tag(uint64_t tag, uint64_t off) {
+    return (tag << kEpShift) | (off & kEpDataMask);
+  }
 };
 
 }  // namespace bach

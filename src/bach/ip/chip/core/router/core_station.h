@@ -28,6 +28,8 @@
 #include <deque>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/log.h"
 #include "bach/ip/chip/core/ports.h"
@@ -38,9 +40,13 @@
 namespace latch {
 namespace bach {
 
-// HeaderFIFO 与 OutputBuffer 的深度，建模计划的默认值。60 flit 取自 DATA_NOC
-// HAS 的 DTE-local 桥接 Router→DTE 60 flits。
-constexpr uint64_t kHeaderFifoDepth = 16;
+// HeaderFIFO 与 OutputBuffer 的深度。60 flit 取自 DATA_NOC HAS 的
+// DTE-local 桥接 Router→DTE 60 flits。
+//
+// 包头槽在用户退休时释放（pcode 的 DTE kernel 不写 hdr_pop）。16 名用户同时
+// 在途、每人还占着前一条 path 的包头时，16 深的队列会顶满，下一路的包头进
+// 不来，读包头的任务又在等这一路。深度按 16 用户 × 每用户若干包留余量。
+[[maybe_unused]] constexpr uint64_t kHeaderFifoDepth = 16;
 constexpr uint64_t kOutBufFlits = 60;
 
 // 包头读口的地址布局：队头那个包的包头按 4 B 一项排开，读哪一项由地址的低位定。
@@ -72,6 +78,7 @@ class CoreStation : public BachModule {
         from_dte(std::make_shared<CoreDataPort>(clock)),
         trigger(std::make_shared<TriggerPort>(clock)),
         level(std::make_shared<ReadyLevelPort>(clock)),
+        data_level(std::make_shared<ReadyLevelPort>(clock)),
         to_station(std::make_shared<LinkEnd>(clock)),
         hdr(std::make_shared<MemPort>(clock)),
         admitted(clock),
@@ -106,6 +113,20 @@ class CoreStation : public BachModule {
   std::shared_ptr<MemPort> HdrPtr() const { return hdr; }
   void AttachHdr(std::shared_ptr<MemPort> p) { hdr = std::move(p); }
   uint64_t HeaderDepth() const { return hdr_fifo.size(); }
+  uint64_t TriggerDepth() const { return trig_q.size() + (trig_hold ? 1 : 0); }
+  // 本级退休广播。这个用户留下的包头槽在 Step 里删掉。
+  void AttachRetire(std::shared_ptr<RetireBroadcastPort> p) {
+    retire_in = std::move(p);
+  }
+  // 停钟后看包头队列里每一笔的 user 与 path。队头在前。
+  std::vector<std::pair<uint64_t, uint64_t>> HeaderIds() const {
+    std::vector<std::pair<uint64_t, uint64_t>> out;
+    for (MessagePtr const& m : hdr_fifo) {
+      if (!m) continue;
+      out.emplace_back(m->user_id, m->path_id);
+    }
+    return out;
+  }
   // 进核那一段还压着几个 flit。
   uint64_t OutBufDepth() const { return out_buf.size(); }
   uint64_t Popped() const { return pop_cnt; }
@@ -113,14 +134,23 @@ class CoreStation : public BachModule {
   uint64_t Admitted() const { return admitted.Get(); }
   uint64_t Triggers() const { return triggers.Get(); }
 
-  // Xbar 读它决定 core 方向能不能收。电平每拍发布，Xbar 读上一拍的值，所以拉高
-  // 之后路上最多还有两个 flit：一个上一拍已经发出，一个照着这一拍的电平发。两处
-  // 缓冲都要留得出这两格，包头队列按每个 flit 都是头 flit 算。
-  bool CoreReady() const {
-    return out_buf.size() + 2 <= kOutBufFlits &&
-           hdr_fifo.size() + 2 <= kHeaderFifoDepth;
+  // 归约模块收下了这一包。只跳过同 path 的 P2P reissue，不另开一条链。
+  void NoteSkipReissue(uint64_t user, uint64_t path) {
+    trig_q.push_back({user, path, false, true});
   }
+
+  // Xbar 读它决定 core 方向能不能收新的包头。电平每拍发布，Xbar 读上一拍的值，
+  // 所以拉高之后路上最多还有两个 flit。数据缓冲要留得出这两格。
+  // 已经进核的那个包，后面的 flit 不再占包头槽，只看 DataReady。
+  //
+  // 包头队列的深度检查暂时拿掉。飞书 Router 的 Core 边界不设 HeaderFIFO，pcode
+  // 又不写 hdr_pop，16 深会把后续 path 的包头挡在核外。队列仍按到达顺序收下
+  // 包头并通知 TS，只是不再用深度反压。
+  bool DataReady() const { return out_buf.size() + 2 <= kOutBufFlits; }
+  bool HeaderReady() const { return true; }
+  bool CoreReady() const { return DataReady() && HeaderReady(); }
   std::shared_ptr<ReadyLevelPort> LevelPtr() const { return level; }
+  std::shared_ptr<ReadyLevelPort> DataLevelPtr() const { return data_level; }
 
   bool Quiescent() const override {
     return out_buf.empty() && !trig_hold;
@@ -128,7 +158,9 @@ class CoreStation : public BachModule {
 
  protected:
   void Step() override {
-    // 末级先做。
+    // 末级先做。退休的用户不会再读包头，先把它占着的槽让出来，
+    // 后面的用户才进得来。
+    TakeRetire();
     ServeHdr();
     DrainToDte();
     PushTrigger();
@@ -138,6 +170,7 @@ class CoreStation : public BachModule {
 
     // 准入电平：本拍末算出来，Xbar 下一拍读到。
     level->Drive(CoreReady());
+    data_level->Drive(DataReady());
     from_dte->DriveReady(DteReady());
     admitted = admitted_pending;
     triggers = trigger_pending;
@@ -149,7 +182,26 @@ class CoreStation : public BachModule {
   struct Pending {
     uint64_t user_id = 0, path_id = 0;
     bool reissue = false;
+    bool skip_only = false;
   };
+
+  // 本级退休：这个用户的搬运已经结束，它留在包头队列里的槽不会再被 hdr_pop
+  // 读走。不删的话队列顶满，下一个用户的包头进不来，任务又在等那个包。
+  void TakeRetire() {
+    if (!retire_in || !retire_in->Valid()) return;
+    if (retire_in->Seq() == last_retire_seq) return;
+    last_retire_seq = retire_in->Seq();
+    uint64_t user = retire_in->User();
+    std::deque<MessagePtr> kept;
+    for (MessagePtr const& m : hdr_fifo) {
+      if (m && m->user_id == user) {
+        ++pop_cnt;
+        continue;
+      }
+      kept.push_back(m);
+    }
+    hdr_fifo.swap(kept);
+  }
 
   // 包头读口的从端：读队头那个包的包头，写 kHdrPopOffset 把它弹出。
   void ServeHdr() {
@@ -217,8 +269,6 @@ class CoreStation : public BachModule {
     uint64_t user = f.msg->user_id;
     LOGCHECK(out_buf.size() < kOutBufFlits,
              "CoreStation: 进核缓冲满了还发进来，Xbar 没按准入电平停。");
-    LOGCHECK(!f.head || hdr_fifo.size() < kHeaderFifoDepth,
-             "CoreStation: 包头队列满了还发进来，Xbar 没按准入电平停。");
     out_buf.push_back(f);
     ++admitted_pending;
     // 头 flit 同时进 HeaderFIFO，并排一笔 trigger。
@@ -245,7 +295,7 @@ class CoreStation : public BachModule {
     }
     Pending p = trig_q.front();
     trig_q.pop_front();
-    trigger->Drive(p.user_id, p.path_id, p.reissue);
+    trigger->Drive(p.user_id, p.path_id, p.reissue, p.skip_only);
     trig_hold = true;
   }
 
@@ -327,11 +377,13 @@ class CoreStation : public BachModule {
   std::shared_ptr<MemPort> hdr;
   std::shared_ptr<CoreDataPort> to_dte, from_dte;
   std::shared_ptr<TriggerPort> trigger;
-  std::shared_ptr<ReadyLevelPort> level;
+  std::shared_ptr<ReadyLevelPort> level, data_level;
 
   // Step 独占。
   std::deque<FlitView> out_buf;
   std::deque<MessagePtr> hdr_fifo;
+  std::shared_ptr<RetireBroadcastPort> retire_in;
+  uint64_t last_retire_seq = 0;
   std::deque<Pending> trig_q;
   bool trig_hold = false, sent_hold = false;
   ByteBlockPtr hdr_rsp;

@@ -39,9 +39,8 @@ class RvCore {
     exec = std::make_unique<RvExec>(clock, "exec", which, gid, false);
     iss = std::make_unique<DsaIss>(clock, "dsa_iss", gid, false);
     rq = std::make_unique<DsaRq>(clock, "dsa_rq", gid, false);
-    // cm_lsq 只有 DTE core 有。
-    lsq = std::make_unique<RvLsq>(clock, "lsq", which == RvUnit::kDte,
-                                  gid, false);
+    // 三个 RV 都能经文档绝对地址访问 Core Mem。Router 包头读口仍只有 DTE。
+    lsq = std::make_unique<RvLsq>(clock, "lsq", true, gid, false);
     Bind();
   }
 

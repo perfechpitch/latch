@@ -308,8 +308,33 @@ TEST(BachReduce, UpstreamPartWaitsInTheContext) {
   EXPECT_EQ(emit_at, 1u);
 }
 
-// 行链（task 14）先占住用户分区后，chip 内归约（task 2）的两个操作数都到齐，
-// 仍不能进入。行链的本地分量若依赖 task 2，二者就会互等；RMW 不改变任务边界。
+// 同一条归约链上各核的 task id 各自编号。两路输入的 reduce_seq 不同，只要
+// user 与 path 相同，就加进同一个分区。
+TEST(BachReduce, DifferentTaskIdSameUserAdds) {
+  std::vector<float> values;
+  std::vector<uint64_t> seqs;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(9, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 0, Part(77, 9, 3, 10.0f)},
+              {6, 1, Part(77, 9, 2, 32.0f)}};
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    values = h.out_values;
+    seqs = h.done_seqs;
+  }
+  RT::Reset();
+  ASSERT_EQ(values.size(), 1u);
+  EXPECT_FLOAT_EQ(values[0], 42.0f);
+  ASSERT_EQ(seqs.size(), 1u);
+  EXPECT_EQ(seqs[0], 3u);
+}
+
+// 行链（path 7）先占住用户分区后，另一条 path 的两个操作数都到齐，仍不进入
+// 当前分区。它们留在各自输入缓冲的队头，不改这一笔的边界。
 TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
   ReduceModule::State state;
   uint64_t results = 0;
@@ -336,13 +361,10 @@ TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
   EXPECT_EQ(state.tasks[0].reduce_seq, 14u);
   EXPECT_EQ(state.tasks[0].in_done_mask, 0b010u);
   EXPECT_EQ(state.tasks[0].expect_mask, 0b011u);
-  for (uint64_t lane : {0u, 1u}) {
-    EXPECT_EQ(state.input_depth[lane], 1u);
-    ASSERT_TRUE(state.input_heads[lane].msg);
-    EXPECT_EQ(state.input_heads[lane].msg->user_id, 40u);
-    EXPECT_EQ(state.input_heads[lane].msg->path_id, 3u);
-    EXPECT_EQ(state.input_heads[lane].msg->reduce_seq, 2u);
-  }
+  EXPECT_EQ(state.input_depth, (std::array<uint64_t, 3>{1, 1, 0}));
+  EXPECT_EQ(state.input_heads[0].msg->path_id, 3u);
+  EXPECT_EQ(state.input_heads[1].msg->path_id, 3u);
+  EXPECT_TRUE(state.parked.empty());
 }
 
 // 上游保证 task 2 先完成时，同一个用户分区可继续做 task 14，两笔结果分别计算。
@@ -377,7 +399,7 @@ TEST(BachReduce, EarlierTaskCompletesBeforeLaterTaskEnters) {
 }
 
 // 上下文保护：当前任务的结果还没全部发出时，同一个 user 的下一笔不得覆盖它。
-// 挡住的那个包留在输入缓冲里，前一笔的结果发完之后再进来。
+// 挡住的那个包收在 park 里，前一笔的结果发完之后再进来。
 TEST(BachReduce, NextPacketOfTheSameUserDoesNotOverwrite) {
   std::vector<float> values;
   std::vector<uint64_t> seqs;

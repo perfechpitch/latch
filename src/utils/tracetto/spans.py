@@ -78,8 +78,35 @@ TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
 STEP_SIGS = (SIG_TS_CREATE, SIG_TS_CREATE_TASK, SIG_TS_CREATE_USER,
              SIG_TS_INSTALL, SIG_TS_INSTALL_TASK, SIG_TS_INSTALL_USER)
 
+def _detail_names():
+    """Perfetto 要的身份与步骤信号。tracetto 的十行不读它们，但 core_paths 得把
+    它们收进每个 core 的信号表，转换器才找得到。"""
+    names = [
+        "ts_stream", "ts_create_stream", "ts_install_stream",
+        "rv_start_stream", "rv_done_stream",
+        "dsa_start_stream", "dsa_done_stream",
+        "dsa_task_trigger_stream", "dsa_task_dispatch_stream",
+        "dte_q_begin", "dte_q_b_user", "dte_q_b_task", "dte_q_b_stream",
+        "dte_q_end", "dte_q_e_user", "dte_q_e_task", "dte_q_e_stream",
+    ]
+    for i in range(5):
+        for half in ("rd", "wr"):
+            for leaf in ("begin", "b_user", "b_task", "b_stream", "b_bytes",
+                         "end", "e_user", "e_task", "e_stream"):
+                names.append(f"dte_l{i}_{half}_{leaf}")
+    for phase in ("mu_load", "mu_comp", "mu_store"):
+        for leaf in ("begin", "b_user", "b_task", "b_stream",
+                     "end", "e_user", "e_task", "e_stream"):
+            names.append(f"{phase}_{leaf}")
+    for leaf in ("m", "k", "n", "experts", "kblock", "nblock"):
+        names.append(f"mu_comp_{leaf}")
+    return tuple(names)
+
+
+DETAIL_SIGS = _detail_names()
+
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
-             DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
+             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + DETAIL_SIGS)
 # 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那六条也在
 # 这里 —— TS-MU / TS-VU 现在要读它们，老波形缺了那两行就是空的，得让人看见。
 NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS)

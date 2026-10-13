@@ -27,10 +27,12 @@
 namespace latch {
 namespace bach {
 
-// 每份 topK 上限 256 B，每项 {local_ep_index 2 B, weight 4 B}。
+// 每份 topK 上限 256 B。布局是文档那一档：开头 2 B ep_counter，接着
+// local_ep_index 各 2 B，再接着 W_ep 各 4 B（FP32）。传输长 2 + count×6。
 constexpr uint64_t kTopkBytesPerStream = 256;
 // topK_ep_table 能存几份。下标越界就是上游给的 user_id 超出了这张表。
 constexpr uint64_t kTopkTableNum = 1024;
+// 一个专家占的序号 + 权重字节。ep_counter 另计 2 B，不在这一项里。
 constexpr uint64_t kTopkEntryBytes = 6;
 
 struct TopkEntry {
@@ -68,21 +70,24 @@ class GenEpInfo : public BachModule {
     return parsed[stream_id];
   }
 
-  // 从 DTE 写进来的字节解成 topK 表。
+  // 从 DTE 写进来的字节解成 topK 表。count 用 primitive_mode 里的路由专家数，
+  // 开头 2 B 的 ep_counter 只是线上的计数字段，不拿来改这个数。
   static std::vector<TopkEntry> Parse(std::vector<uint8_t> const& bytes,
                                       uint64_t count) {
     std::vector<TopkEntry> out;
+    uint64_t idx_at = 2;
+    uint64_t w_at = 2 + count * 2;
     for (uint64_t i = 0; i < count; ++i) {
-      uint64_t off = i * kTopkEntryBytes;
-      if (off + kTopkEntryBytes > bytes.size()) break;
+      if (idx_at + 2 > bytes.size() || w_at + 4 > bytes.size()) break;
       TopkEntry e;
-      e.local_ep_index = uint64_t(bytes[off]) | (uint64_t(bytes[off + 1]) << 8);
+      e.local_ep_index =
+          uint64_t(bytes[idx_at]) | (uint64_t(bytes[idx_at + 1]) << 8);
       uint32_t w = 0;
-      for (int k = 0; k < 4; ++k) {
-        w |= uint32_t(bytes[off + 2 + k]) << (8 * k);
-      }
+      for (int k = 0; k < 4; ++k) w |= uint32_t(bytes[w_at + k]) << (8 * k);
       e.weight = numeric::FloatOf(w);
       out.push_back(e);
+      idx_at += 2;
+      w_at += 4;
     }
     return out;
   }

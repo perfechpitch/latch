@@ -53,6 +53,7 @@ class TaskCtrl : public BachModule {
   // 它下发那一拍对起来就是这一步在 TS 里等的时间。
   uint64_t NextTask() const { return next_task; }
   uint64_t NextUser() const { return next_user; }
+  uint64_t NextStream() const { return next_stream; }
   bool NextUserValid() const { return next_user_vld; }
 
   bool Quiescent() const override { return !pending; }
@@ -112,6 +113,7 @@ class TaskCtrl : public BachModule {
       next_task = next;
       next_user = e.user_id;
       next_user_vld = e.user_id_vld;
+      next_stream = i;
       return;  // 一拍只装一个
     }
   }
@@ -125,7 +127,7 @@ class TaskCtrl : public BachModule {
 
   // 刚装进去的那一步的身份，供 Core 层发波形。自启动 core 上表项可能还没有用户
   // 身份，user 由 next_user_vld 说是真值还是占位。
-  uint64_t next_task = 0, next_user = 0;
+  uint64_t next_task = 0, next_user = 0, next_stream = 0;
   bool next_user_vld = false;
 
   Logic64 installed, skipped;

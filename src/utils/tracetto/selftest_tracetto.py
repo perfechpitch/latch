@@ -768,6 +768,175 @@ def check_cmake_path():
                 "CMakeLists 没指着 selftest")
 
 
+def check_perfetto(prefix):
+    """Perfetto：一个 core 一个进程，TS 三路收成一行，Core 改名 RVCore。
+    这份合成波形没有步骤信号，DTE/MU 的 DSA 仍是整段。"""
+    from tracetto import trace2perfetto as P
+    data, n_core, n_span = P.build(prefix)
+    expect(n_core, 1, "合成波形只有一个 core")
+    expect_true(n_span > 0, "Perfetto 至少有一段")
+    procs, threads, names = set(), set(), []
+    for ev in data["traceEvents"]:
+        if ev.get("name") == "process_name":
+            procs.add(ev["args"]["name"])
+        elif ev.get("name") == "thread_name":
+            threads.add(ev["args"]["name"])
+        elif ev.get("ph") in ("X", "b"):
+            names.append(ev["name"])
+    expect(len(procs), 1, f"一个 core 只该有一个进程，得到 {procs}")
+    expect_true(all(p.startswith("tray") and "phy" in p and " TS" not in p
+                    and p.split()[-1] not in ("DTE", "MU", "VU") for p in procs),
+                f"进程名应按 tray/chip/phy，得到 {procs}")
+    expect_true("TS" in threads and "TS-DTE" not in threads and "TS-MU" not in threads
+                and "TS-VU" not in threads,
+                f"TS-DTE/MU/VU 要收成一行 TS，得到 {threads}")
+    expect_true("DTE-RVCore" in threads and "MU-RVCore" in threads and "VU-RVCore" in threads,
+                f"Core 要改成 RVCore，得到 {threads}")
+    expect_true("VU-DSA" in threads and "VU-DSA-ISQ" not in threads,
+                f"VU 的 ISQ 与 Exec 要收成 VU-DSA，得到 {threads}")
+    expect_true("DTE-Core" not in threads and "MU-Core" not in threads, "旧的 Core 行名不该再出现")
+    expect_true(any(n.startswith("Issue: uid=") and ", sid=" in n and ", tid=" in n
+                    for n in names),
+                f"TS 的下发步骤应为 Issue 加 uid/sid/tid，得到 {names[:8]}")
+    expect_true(any(n.startswith("TaskDone: uid=") for n in names),
+                f"TS 的完成步骤应为 TaskDone，得到 {[n for n in names if n.startswith('Task')][:4]}")
+    expect_true(not any(n.startswith(("TS:", "DTE: uid=", "MU: uid=", "VU: uid="))
+                        for n in names),
+                "TS 轨道按生命周期拆，段名不再是 TS 或 DTE/MU/VU")
+    expect_true(any(n.startswith("RVCore: uid=") for n in names), "RV core 的事件名应以 RVCore 开头")
+    xs = [ev for ev in data["traceEvents"] if ev.get("ph") == "X"]
+    expect_true(xs and all(0 < ev["dur"] < 1 for ev in xs),
+                "Duration 应按纳秒记：JSON 里的微秒数要小于 1，Perfetto 乘 1000 后才是拍数")
+    # 没有步骤信号时 DSA 仍是整段，名字是 DSA 而不是 Queue/Read。
+    expect_true(any(n.startswith("DSA: uid=") for n in names), "旧波形的 DSA 仍画成一整段")
+    expect_true(not any(n.startswith("Read:") for n in names), "没有步骤信号时不该出现 Read")
+
+
+def check_perfetto_steps():
+    """带上 DTE 读/写与 MU 计算的步骤信号时，拆开画，并带上字节数与维度。"""
+    from tracetto import trace2perfetto as P
+    modules = list(MODULES)
+    signals = {k: list(v) for k, v in SIGNALS.items()}
+    # 在现有信号号之后追加。DTE：排队 12→14，读 14→20（4096 B），写 16→28。
+    # MU：计算 44→60，M=1 K=128 N=64，8 个专家。
+    extra = {
+        "dte_q_begin": [(12, 1)], "dte_q_b_user": [(12, 77)],
+        "dte_q_b_task": [(12, 3)], "dte_q_b_stream": [(12, 4)],
+        "dte_q_end": [(14, 1)], "dte_q_e_user": [(14, 77)],
+        "dte_q_e_task": [(14, 3)], "dte_q_e_stream": [(14, 4)],
+        "dte_l0_rd_begin": [(14, 1)], "dte_l0_rd_b_user": [(14, 77)],
+        "dte_l0_rd_b_task": [(14, 3)], "dte_l0_rd_b_stream": [(14, 4)],
+        "dte_l0_rd_b_bytes": [(14, 4096)],
+        "dte_l0_rd_end": [(20, 1)], "dte_l0_rd_e_user": [(20, 77)],
+        "dte_l0_rd_e_task": [(20, 3)], "dte_l0_rd_e_stream": [(20, 4)],
+        "dte_l0_wr_begin": [(16, 1)], "dte_l0_wr_b_user": [(16, 77)],
+        "dte_l0_wr_b_task": [(16, 3)], "dte_l0_wr_b_stream": [(16, 4)],
+        "dte_l0_wr_b_bytes": [(16, 4096)],
+        "dte_l0_wr_end": [(28, 1)], "dte_l0_wr_e_user": [(28, 77)],
+        "dte_l0_wr_e_task": [(28, 3)], "dte_l0_wr_e_stream": [(28, 4)],
+        "mu_comp_begin": [(44, 1)], "mu_comp_b_user": [(44, 77)],
+        "mu_comp_b_task": [(44, 5)], "mu_comp_b_stream": [(44, 2)],
+        "mu_comp_m": [(44, 1)], "mu_comp_k": [(44, 128)], "mu_comp_n": [(44, 64)],
+        "mu_comp_experts": [(44, 8)], "mu_comp_kblock": [(44, 1)],
+        "mu_comp_nblock": [(44, 1)],
+        "mu_comp_end": [(60, 1)], "mu_comp_e_user": [(60, 77)],
+        "mu_comp_e_task": [(60, 5)], "mu_comp_e_stream": [(60, 2)],
+        "ts_stream": [(10, 4), (40, 2 << 8)],
+        # 在途 0→1→0，剩余槽 16→15→16。右口 flit 在 10、11、20 各发一条。
+        "ts_inflight": [(0, 0), (10, 1), (40, 0)],
+        "out_right": [(0, 0), (10, 1), (11, 2), (20, 3)],
+    }
+    nxt = max(mid for mid, _, _ in modules) + 1
+    for name, ev in extra.items():
+        modules.append((nxt, 2, name))
+        signals[nxt] = ev
+        nxt += 1
+    with tempfile.TemporaryDirectory() as d:
+        prefix = str(Path(d) / "steps")
+        write_trace(prefix + ".trace", modules, signals)
+        data, _n, _ns = P.build(prefix)
+    threads, names, slices = set(), [], []
+    tid_name = {}
+    for ev in data["traceEvents"]:
+        if ev.get("name") == "thread_name":
+            threads.add(ev["args"]["name"])
+            tid_name[(ev["pid"], ev["tid"])] = ev["args"]["name"]
+        elif ev.get("ph") in ("X", "b"):
+            names.append(ev["name"])
+            slices.append(ev)
+    def on_thread(ev, thread):
+        return tid_name.get((ev["pid"], ev["tid"])) == thread
+    expect_true("TS" in threads and "TS-DTE" not in threads and "TS-MU" not in threads,
+                f"TS 三路要收成一行，得到 {threads}")
+    expect_true("DTE-DSA" in threads and "DTE-Queue" not in threads
+                and "DTE-Read" not in threads and "DTE-Write" not in threads,
+                f"DTE 三步要收成 DTE-DSA，得到 {threads}")
+    expect_true("MU-DSA" in threads and "MU-Load" not in threads
+                and "MU-Compute" not in threads and "MU-Store" not in threads,
+                f"MU 三步要收成 MU-DSA，得到 {threads}")
+    expect_true(any(n == "Read: uid=77, sid=4, tid=3" for n in names),
+                f"读搬运的名字只留 uid/sid/tid，得到 {[n for n in names if n.startswith('Read')]}")
+    expect_true(any(ev["name"] == "Read: uid=77, sid=4, tid=3"
+                    and ev.get("args", {}).get("bytes") == 4096 for ev in slices),
+                "读搬运的字节数要在 Details（args）里")
+    expect_true(any(n == "Queue: uid=77, sid=4, tid=3" for n in names),
+                f"排队步骤的名字不对，得到 {[n for n in names if n.startswith('Queue')]}")
+    expect_true(any(n == "Compute: uid=77, sid=2, tid=5" for n in names),
+                f"计算的名字只留 uid/sid/tid，得到 {[n for n in names if n.startswith('Compute')]}")
+    expect_true(any(ev["name"] == "Compute: uid=77, sid=2, tid=5"
+                    and ev.get("args") == {"M": 1, "K": 128, "N": 64, "experts": 8,
+                                           "kblock": 1, "nblock": 1}
+                    for ev in slices),
+                "计算的维度和专家数要在 Details（args）里")
+    expect_true(not any(", bytes=" in n or ", M=" in n for n in names),
+                "名字上不该再带字节数或矩阵维度")
+    expect_true(any(n == "Issue: uid=77, sid=4, tid=3" for n in names),
+                f"下发步骤要带上 stream，得到 {[n for n in names if n.startswith('Issue')]}")
+    expect_true(any(n == "TaskDone: uid=77, sid=4, tid=3" for n in names),
+                f"完成步骤要带上同一笔的身份，得到 {[n for n in names if n.startswith('TaskDone')]}")
+    expect_true(any(ev["name"] == "Issue: uid=77, sid=4, tid=3"
+                    and ev.get("args", {}).get("unit") == "DTE" for ev in slices),
+                "是哪一路只写在 Details 的 unit 里")
+    expect_true(any(n == "Wait: uid=77, sid=2, tid=5" for n in names),
+                f"装进 stream 到下发应画成 Wait，得到 {[n for n in names if n.startswith('Wait')]}")
+    def counters(name):
+        return [ev for ev in data["traceEvents"]
+                if ev.get("ph") == "C" and ev.get("name") == name]
+    credits = counters("Credit")
+    expect_true(any(ev.get("args", {}).get("value") == 15 and on_thread(ev, "TS")
+                    and ev["ts"] == (10 + 0.5) / 1000 for ev in credits),
+                "TS 上要有 Credit 计数，在途 1 时还剩 15")
+    expect_true(any(ev.get("args", {}).get("value") == 16 and on_thread(ev, "TS")
+                    for ev in credits),
+                "在途回到 0 时 Credit 应回到 16")
+    busy = counters("Busy")
+    expect_true(any(ev.get("args", {}).get("value") == 1 and on_thread(ev, "MU-DSA")
+                    and ev["ts"] == (44 + 0.5) / 1000 for ev in busy),
+                "MU-DSA 的 Busy 应在 Compute 开始时变成 1")
+    expect_true(any(ev.get("args", {}).get("value") == 0 and on_thread(ev, "MU-DSA")
+                    and ev["ts"] == (60 + 0.5) / 1000 for ev in busy),
+                "MU-DSA 的 Busy 应在 Compute 结束时回到 0")
+    expect_true("Router" in threads, f"发出过 R2R 的核要有 Router 线程，得到 {threads}")
+    r2r = counters("R2R right")
+    expect_true(any(ev.get("args", {}).get("value") == 256 and on_thread(ev, "Router")
+                    and ev["ts"] == (10 + 0.5) / 1000 for ev in r2r),
+                "Router 上右口每发一条 flit 应记 256 字节")
+    expect_true(any(ev.get("args", {}).get("value") == 0 and on_thread(ev, "Router")
+                    and ev["ts"] == (12 + 0.5) / 1000 for ev in r2r),
+                "连发结束后下一拍带宽应回到 0")
+
+
+def check_busy_seam():
+    """两段 Compute 只隔 1 拍时 Busy 保持 1；隔开更远才回到 0。"""
+    from tracetto.trace2perfetto import _busy_samples
+    seam = _busy_samples([{"t0": 10, "t1": 20}, {"t0": 21, "t1": 30}])
+    expect_true(seam == [(10, 1), (30, 0)],
+                f"只隔 1 拍的 Compute，Busy 不应中间掉到 0，得到 {seam}")
+    apart = _busy_samples([{"t0": 10, "t1": 20}, {"t0": 22, "t1": 30}])
+    expect_true(apart == [(10, 1), (20, 0), (22, 1), (30, 0)],
+                f"隔开 2 拍的 Compute，Busy 应在中间回到 0，得到 {apart}")
+
+
 def main():
     with_trace(check_tree)
     with_trace(check_bits)
@@ -779,6 +948,9 @@ def main():
     with_trace(check_parallel_determinism)
     with_trace(check_http)
     with_trace(check_labels)
+    with_trace(check_perfetto)
+    check_perfetto_steps()
+    check_busy_seam()
     check_chain()
     check_step_chain()
     check_user_spans()

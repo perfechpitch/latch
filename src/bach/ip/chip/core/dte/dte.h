@@ -133,6 +133,8 @@ class Dte {
   DteOutArb& OutArb() { return *out_arb; }
   Commit& Committer() { return *commit; }
   CompletionRs& Completion() { return *comp; }
+  uint64_t LaneCount() const { return lanes.size(); }
+  Lane& GetLane(uint64_t i) { return *lanes[i]; }
   DteBuffer& OutBuf() { return *out_buf; }
 
   void RunStep() {

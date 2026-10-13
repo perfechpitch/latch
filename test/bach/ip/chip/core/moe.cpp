@@ -83,15 +83,19 @@ MoeCase ReadMoeCase() {
   return c;
 }
 
-// topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
+// topK 表：2 B ep_counter，随后全部序号，再随后全部 FP32 权重。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
+  uint64_t n = t.size();
+  b[0] = uint8_t(n & 0xFFu);
+  b[1] = uint8_t((n >> 8) & 0xFFu);
   for (size_t i = 0; i < t.size(); ++i) {
-    uint64_t at = i * kTopkEntryBytes;
+    uint64_t at = 2 + i * 2;
     b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
     b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
-    for (int k = 0; k < 4; ++k) b[at + 2 + k] = uint8_t((w >> (8 * k)) & 0xFFu);
+    uint64_t wat = 2 + n * 2 + i * 4;
+    for (int k = 0; k < 4; ++k) b[wat + k] = uint8_t((w >> (8 * k)) & 0xFFu);
   }
   return b;
 }

@@ -70,6 +70,17 @@ class Commit : public BachModule {
   uint64_t RvAdmitted() const { return admit_cnt; }
   uint64_t StartTask() const { return start_task; }
   uint64_t StartUser() const { return start_user; }
+  uint64_t StartStream() const { return start_stream; }
+  // 进中央队列、以及从队列 dispatch 出去，各记一笔。Core 层据此把排队和真正
+  // 搬运拆开画。同一拍最多各一笔，身份分两套留。
+  uint64_t QBeginCnt() const { return q_begin_cnt; }
+  uint64_t QBeginUser() const { return q_b_user; }
+  uint64_t QBeginTask() const { return q_b_task; }
+  uint64_t QBeginStream() const { return q_b_stream; }
+  uint64_t QEndCnt() const { return q_end_cnt; }
+  uint64_t QEndUser() const { return q_e_user; }
+  uint64_t QEndTask() const { return q_e_task; }
+  uint64_t QEndStream() const { return q_e_stream; }
   uint64_t Stalled() const { return stalled.Get(); }
   uint64_t Queued() const { return queued.Get(); }
 
@@ -113,6 +124,10 @@ class Commit : public BachModule {
     Descriptor nd = *d;
     MarkReducePkt(nd);
     central_q.push_back(nd);
+    q_b_user = nd.user_id;
+    q_b_task = nd.task_id;
+    q_b_stream = nd.stream_id;
+    ++q_begin_cnt;
     last_rv_seq = from_rv->Seq();
     from_rv->DriveAccepted(true);
   }
@@ -152,6 +167,11 @@ class Commit : public BachModule {
       // Hmem，这里不再写）。身份要在 erase 之前取，d 就指着要 dispatch 的那一项。
       start_task = d.task_id;
       start_user = d.user_id;
+      start_stream = d.stream_id;
+      q_e_user = d.user_id;
+      q_e_task = d.task_id;
+      q_e_stream = d.stream_id;
+      ++q_end_cnt;
       if (!desc->msg && !IsInbound(desc->route)) MakeOutboundMsg(*desc);
       held = Held{std::move(desc), lane};
       ++admit_cnt;
@@ -163,9 +183,9 @@ class Commit : public BachModule {
     ++stall_pending;
   }
 
-  // 走归约路径出核的包，包头的 reduce_seq 打上发方的 task_id：ReduceModule 靠它
-  // 分开同一个用户前后两笔 reduce 任务。一条归约链上各 core 的任务链一样，同一
-  // 笔任务的 task_id 也一样。
+  // 走归约路径出核的包，包头的 reduce_seq 打上发方的 task_id，Reduce Done
+  // 原样带回。各核任务链各自编号，这个号不要求相同。归约按 user_id 与 path
+  // 把各路输入收成一笔，TS 按 user_id 完成当前任务，不看这个号。
   void MarkReducePkt(Descriptor& d) {
     if (d.route != Route::kCmToRouter && d.route != Route::kMmToRouter) return;
     if (hmem.Rtab(d.path_id).operation == Operation::kForward) return;
@@ -198,6 +218,7 @@ class Commit : public BachModule {
     // （它走同一数据通道，占 size 的 flit 换算）；但 payload 正文只放数据 + scale，
     // topK 字节随包的 topk 字段走。
     m->size = d.PayloadBytes();
+    m->payload_aux = DtePayloadAuxBytes();
     m->scale_valid = d.HasScale() ? 1 : 0;
     // 带 topK 的包（B core 广播那一笔）：从 MU 的 topK_ep_table 按段内偏移取这一
     // 份原样附回，收方 DTE 再按 stream_id 写进它的 MU。
@@ -253,7 +274,9 @@ class Commit : public BachModule {
   uint64_t last_rv_seq = 0;
   uint64_t admit_pending = 0, stall_pending = 0;
   // 过 dispatch 门槛的笔数与刚过的那一笔的身份，供 Core 层发波形。
-  uint64_t admit_cnt = 0, start_task = 0, start_user = 0;
+  uint64_t admit_cnt = 0, start_task = 0, start_user = 0, start_stream = 0;
+  uint64_t q_begin_cnt = 0, q_b_user = 0, q_b_task = 0, q_b_stream = 0;
+  uint64_t q_end_cnt = 0, q_e_user = 0, q_e_task = 0, q_e_stream = 0;
 
   Logic64 admitted, stalled, queued;
 };

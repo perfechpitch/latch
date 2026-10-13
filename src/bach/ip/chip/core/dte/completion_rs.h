@@ -86,6 +86,7 @@ class CompletionRs : public BachModule {
   // task（Drive 的第三参默认 0），user 取自描述符里 RV core 采下来的那一份。
   uint64_t DoneTask() const { return done_task; }
   uint64_t DoneUser() const { return done_user; }
+  uint64_t DoneStream() const { return done_stream; }
 
   bool Quiescent() const override { return rs.empty() && pend.empty(); }
 
@@ -218,6 +219,7 @@ class CompletionRs : public BachModule {
     to_ts->Drive(p.stream_id, p.task_id);
     done_task = p.task_id;
     done_user = p.user_id;
+    done_stream = p.stream_id;
     pend.pop_front();
     ++report_pending;
   }
@@ -238,7 +240,7 @@ class CompletionRs : public BachModule {
   uint64_t join_pending = 0, report_pending = 0;
 
   // 刚报到 TS 那一笔的身份，供 Core 层发波形。
-  uint64_t done_task = 0, done_user = 0;
+  uint64_t done_task = 0, done_user = 0, done_stream = 0;
 
   Logic64 joined, reported, used;
 };

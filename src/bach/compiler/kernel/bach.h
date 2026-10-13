@@ -365,15 +365,16 @@ static inline u32 dte_template(u32 idx) {
 /* TASK_TRIGGER 位域：[0] Temp Valid、[2:1] Temp Index */
 #define MU_TRIGGER_VALID (1u << 0)
 
-/* primitive_mode 位域：[0] primitive_type、[2:1] A_data_type、[3] C_data_type、
- * [9:7] router_ep_data_type、[21:14] router_expert_count、[23] router_ep_reduce_en、
- * [24] task_last */
+/* primitive_mode 位域，文档 v0.2：
+ * [0] primitive_type、[1] A_data_type、[2] C_data_type、[4:3] share_ep_data_type、
+ * [6:5] router_ep_data_type、[14:7] share_en_mask、[22:15] router_expert_count、
+ * [23] router_ep_reduce_en、[24] task_last */
 #define MU_PRIM_TYPE_K64_N128 (1u << 0)          /* [0] 1 = 1×K64×N128；0 = 1×K128×N64 */
-#define MU_A_DTYPE_MXFP8      (1u << 1)          /* [2:1] token = 01（MXFP8） */
-#define MU_C_DTYPE_BF16       (1u << 3)          /* [3] out = BF16 */
-#define MU_ROUTER_EP_DTYPE_SHIFT 7               /* [9:7] weight */
+#define MU_A_DTYPE_MXFP8      (1u << 1)          /* [1] token = 1（MXFP8） */
+#define MU_C_DTYPE_BF16       (1u << 2)          /* [2] out = BF16 */
+#define MU_ROUTER_EP_DTYPE_SHIFT 5               /* [6:5] weight */
 #define MU_ROUTER_EP_DTYPE_MXFP8 (1u << MU_ROUTER_EP_DTYPE_SHIFT)
-#define MU_ROUTER_EXPERT_SHIFT 14                /* [21:14] 路由专家数 */
+#define MU_ROUTER_EXPERT_SHIFT 15                /* [22:15] 路由专家数 */
 #define MU_ROUTER_EP_REDUCE_EN (1u << 23)
 #define MU_TASK_LAST          (1u << 24)
 

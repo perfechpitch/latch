@@ -35,6 +35,7 @@
 
 #include "base/log.h"
 #include "bach/ip/chip/core/router/reduce_module.h"
+#include "bach/ip/chip/core/router/router_table.h"
 #include "bach/ip/chip/core/ts/cfg_reg.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
 #include "bach/ip/module_base.h"
@@ -74,6 +75,7 @@ class TaskDone : public BachModule {
     rdc_done = std::move(p);
   }
   void AttachSnapshot(std::shared_ptr<SnapshotPort> p) { snap = std::move(p); }
+  void AttachRtab(RouterTable* t) { rtab = t; }
   // 第 lane 条完成 lane 的 Stream_table 写口。
   std::shared_ptr<StreamWritePortIf> CompletionPtr(uint64_t lane) const {
     return completion.at(lane);
@@ -123,6 +125,12 @@ class TaskDone : public BachModule {
     uint64_t user_id = 0, pid = 0;
   };
 
+  bool LocalReduce(uint64_t path_id) const {
+    if (!rtab) return true;
+    RouteEntry const& re = rtab->Lookup(0, path_id);
+    return re.operation != Operation::kForward && re.reduce_in_mask != 0;
+  }
+
   void Collect() {
     for (uint64_t u = 0; u < 3; ++u) {
       if (rv_done[u]->Valid()) {
@@ -166,8 +174,8 @@ class TaskDone : public BachModule {
     if (!st.valid) return;
 
     TaskEntry const& t = cfg.Task(e.task_id);
-    if (t.IsReduce()) {
-      // 本地 ACK 只算搬完，Router 的 Reduce Done 才算做完。
+    if (t.IsReduce() && !t.IsDataIn() && LocalReduce(t.path_id)) {
+      // 出核归约等本核 Reduce Done。进核 datain 与纯转发不等。
       if (e.from_router) Complete(lane, e, st, true);
       return;
     }
@@ -233,6 +241,7 @@ class TaskDone : public BachModule {
   }
 
   CfgReg& cfg;
+  RouterTable* rtab = nullptr;
   std::shared_ptr<SnapshotPort> snap;
   std::array<std::shared_ptr<StreamWritePortIf>, kDoneLaneNum> completion;
   std::shared_ptr<ReduceDonePort> rdc_done;

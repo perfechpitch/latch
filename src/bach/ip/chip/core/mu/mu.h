@@ -94,16 +94,24 @@ class Mu {
 
   // topK 里第 i 个专家在本 EP Group 内的序号。topK 直接存组内序号，读出来就是；
   // 没配 topK 的那一档按 topK 里的先后当序号用。
+  // 槽 i 在 Matrix Mem 里的专家序号。共享专家占低地址 0..SharedSlots-1，
+  // 路由专家接在后面，序号是共享槽数加上 topK 里的组内序号。
   uint64_t LocalEpOf(MuInflight const& f, uint64_t i) const {
+    uint64_t ns = f.cfg.SharedSlots();
+    if (i < ns) return i;
     std::vector<TopkEntry> const& t = TopkOf(f);
-    if (i >= t.size()) return i;
-    return t[i].local_ep_index;
+    uint64_t ri = i - ns;
+    if (ri >= t.size()) return ns + ri;
+    return ns + t[ri].local_ep_index;
   }
-  // topK 里第 i 个专家的权重。合并成一份时乘它。
+  // 共享专家没有 W_ep，合并时按 1。路由专家用 topK 里的权重。
   float WeightOf(MuInflight const& f, uint64_t i) const {
+    uint64_t ns = f.cfg.SharedSlots();
+    if (i < ns) return 1.0f;
     std::vector<TopkEntry> const& t = TopkOf(f);
-    if (i >= t.size()) return 1.0f;
-    return t[i].weight;
+    uint64_t ri = i - ns;
+    if (ri >= t.size()) return 1.0f;
+    return t[ri].weight;
   }
   // 这一笔用哪一份 topK：按 stream_id 读 topK_ep_table。DTE 搬运时写进来，
   // MU 计算时与 token / weight 同时读，不再有前置串行读。
@@ -123,6 +131,18 @@ class Mu {
   uint64_t DoneCnt() const { return ctrl->DoneCnt(); }
   uint64_t DoneTask() const { return ctrl->DoneTask(); }
   uint64_t DoneUser() const { return ctrl->DoneUser(); }
+  uint64_t DoneStream() const { return ctrl->DoneStream(); }
+  // 读 / 算 / 写回三段。一段的起点是这一笔的第一个 tile，终点是最后一个 tile。
+  // 三段在时间上重叠，所以各记各的。
+  struct PhasePulse {
+    uint64_t begin_cnt = 0, end_cnt = 0;
+    uint64_t b_user = 0, b_task = 0, b_stream = 0;
+    uint64_t e_user = 0, e_task = 0, e_stream = 0;
+    uint64_t m = 1, k = 0, n = 0, experts = 0, kblock = 1, nblock = 1;
+  };
+  PhasePulse const& LoadPhase() const { return ctrl->LoadPhase(); }
+  PhasePulse const& CompPhase() const { return ctrl->CompPhase(); }
+  PhasePulse const& StorePhase() const { return ctrl->StorePhase(); }
 
   void RunStep() {
     // DTE 搬运时写进来的 topK 这一拍先收进 topK_ep_table，下面才算得到。
@@ -176,6 +196,10 @@ class Mu {
     uint64_t DoneCnt() const { return done_cnt; }
     uint64_t DoneTask() const { return done_task; }
     uint64_t DoneUser() const { return done_user; }
+    uint64_t DoneStream() const { return done_stream; }
+    PhasePulse const& LoadPhase() const { return load_ph; }
+    PhasePulse const& CompPhase() const { return comp_ph; }
+    PhasePulse const& StorePhase() const { return store_ph; }
 
    protected:
     void Step() override {
@@ -239,10 +263,17 @@ class Mu {
       if (!f->agu.CheckStep(s, mu.cfg.cmem_size, mu.cfg.mmem_size)) {
         // 越界或不对齐：这一笔余下的 tile 全部作废，进 Drain 的第一步。已经
         // 发出去的读请求的回复照常收，但不进计算，那是越界任务的数据。
+        // 这里不能把 stage 标成 Finished。Retire 见到 Finished 会直接出队，
+        // dsa_done 就丢了，TS 一直等这一个完成。等 Drain 走完再报。
+        bool load_open = f->issued > 0 && f->issued < f->total;
+        bool comp_open = f->computed > 0 && f->computed < f->total;
+        bool store_open = f->stored > 0 && f->stored < f->OutTotal();
         f->dropped = true;
         f->issued = f->computed = f->total;
         f->stored = f->OutTotal();
-        f->stage = MuStage::kFinished;
+        if (load_open) NoteEnd(load_ph, *f);
+        if (comp_open) NoteEnd(comp_ph, *f);
+        if (store_open) NoteEnd(store_ph, *f);
         drain = MuDrain::kBlock;
         return;
       }
@@ -252,11 +283,13 @@ class Mu {
       bool has_scale = f->agu.ScaleBytes() != 0;
       mu.token_ldq->Push(
           {f->agu.TokenAddr(s), f->agu.TokenBytes(), f->seq, has_scale});
-      mu.weight_ldq->Push({f->agu.WeightAddr(s, mu.LocalEpOf(*f, s.e_idx)),
-                           f->agu.WeightBytes(), f->seq,
-                           f->agu.WeightScaleBytes() != 0});
+      mu.weight_ldq->Push(
+          {f->agu.WeightAddr(s, mu.LocalEpOf(*f, s.e_idx)),
+           f->agu.WeightBytes(), f->seq, f->agu.WeightScaleBytes() != 0});
       f->out_addr.push_back(f->agu.OutAddr(s));
       ++f->issued;
+      if (f->issued == 1) NoteBegin(load_ph, *f);
+      if (f->issued == f->total) NoteEnd(load_ph, *f);
       f->stage = MuStage::kLoading;
     }
 
@@ -302,12 +335,14 @@ class Mu {
       // tile 的循环顺序由内往外是 K、专家、N，所以同一列的几段与这一列的几个
       // 专家都连着算。算到最后才产出这一列的结果。
       uint64_t kb = f->Kblock();
-      uint64_t ne = f->cfg.Experts();
+      uint64_t ne = f->cfg.ExpertSlots();
       uint64_t ki = f->computed % kb;
       uint64_t ei = (f->computed / kb) % ne;
       mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
                     ki + 1 == kb, ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
       ++f->computed;
+      if (f->computed == 1) NoteBegin(comp_ph, *f);
+      if (f->computed == f->total) NoteEnd(comp_ph, *f);
       f->stage = MuStage::kComputing;
     }
 
@@ -318,6 +353,8 @@ class Mu {
       MatrixExe::Result r = mu.exe->TakeResult();
       mu.stq->Push(r.addr, r.out, r.cfg.out_bf16);
       ++f->stored;
+      if (f->stored == 1) NoteBegin(store_ph, *f);
+      if (f->stored == f->OutTotal()) NoteEnd(store_ph, *f);
       f->stage = MuStage::kStoring;
     }
 
@@ -336,6 +373,11 @@ class Mu {
         mu.iq->RetireFront();
         return;
       }
+      // 越界任务要等 Drain 四步走完再报完成，免得下游读到还没排空的旧结果。
+      if (f->dropped && drain != MuDrain::kNone) {
+        mu.done->Idle();
+        return;
+      }
       if (stq_idle < 2) {
         mu.done->Idle();
         return;
@@ -345,6 +387,7 @@ class Mu {
       // 只有 task_last 那一笔，其余任务完成只推进 issue_q，不通知 TS。
       done_task = f->cfg.task_id;
       done_user = f->cfg.user_id;
+      done_stream = f->cfg.stream_id;
       ++done_cnt;
       if (f->cfg.task_last) {
         mu.done->Drive(f->cfg.stream_id, f->cfg.task_id);
@@ -360,7 +403,29 @@ class Mu {
     uint64_t drain_cnt = 0;
     uint64_t stq_idle = 0;
     // 宣告完成的笔数与身份，供 Core 层发波形。
-    uint64_t done_cnt = 0, done_task = 0, done_user = 0;
+    static void NoteBegin(PhasePulse& p, MuInflight const& f) {
+      ++p.begin_cnt;
+      p.b_user = f.cfg.user_id;
+      p.b_task = f.cfg.task_id;
+      p.b_stream = f.cfg.stream_id;
+      uint64_t kb = f.Kblock();
+      uint64_t nb = f.cfg.nblock == 0 ? 1 : f.cfg.nblock;
+      p.m = 1;
+      p.k = kb * f.cfg.PrimK();
+      p.n = nb * f.cfg.PrimN();
+      p.experts = f.cfg.ExpertSlots();
+      p.kblock = kb;
+      p.nblock = nb;
+    }
+    static void NoteEnd(PhasePulse& p, MuInflight const& f) {
+      ++p.end_cnt;
+      p.e_user = f.cfg.user_id;
+      p.e_task = f.cfg.task_id;
+      p.e_stream = f.cfg.stream_id;
+    }
+
+    uint64_t done_cnt = 0, done_task = 0, done_user = 0, done_stream = 0;
+    PhasePulse load_ph, comp_ph, store_ph;
   };
 
   ClockPtr clk;

@@ -161,6 +161,47 @@ class Custom0Loop : public Custom0Inst {
 // RV core 的功能模型系统：在标准 RV32IMC 之上接入 custom-0。dsa_base 是本核
 // 绑定的 DSA 的 IO 窗口基址（DTE / MU / VU 各不同），自定义指令的地址都是
 // 窗口内偏移，Decode 时由这里补全成绝对地址再交给指令体。
+inline bool IsIdentityCsr(uint32_t csr) {
+  return csr == kCsrNumStreamId || csr == kCsrNumTaskId ||
+         csr == kCsrNumUserId || csr == kCsrNumPathId || csr == kCsrNumVcId;
+}
+inline uint64_t IdentityCsrOffset(uint32_t csr) {
+  switch (csr) {
+    case kCsrNumStreamId: return kCsrStreamId;
+    case kCsrNumTaskId: return kCsrTaskId;
+    case kCsrNumUserId: return kCsrUserId;
+    case kCsrNumPathId: return kCsrPathId;
+    default: return kCsrVcId;
+  }
+}
+
+class Custom0IdentityCsr : public Custom0Inst {
+ public:
+  explicit Custom0IdentityCsr(uint32_t w) : Custom0Inst("csr_id", w, 0) {}
+  void RunOnInstance(Instance* instance) override {
+    auto* inst = static_cast<rv32::InstanceRv32*>(instance);
+    uint32_t csr = (word >> 20) & 0xFFFu;
+    uint32_t funct3 = (word >> 12) & 0x7u;
+    uint64_t at = kTaskCtrlBase + IdentityCsrOffset(csr);
+    uint32_t old = instance->GetSystem()->LoadMem<uint32_t>(at);
+    bool use_imm = (funct3 & 0x4u) != 0;
+    uint32_t src = use_imm ? f.rs1 : inst->LocalSr(f.rs1);
+    bool do_write = true;
+    uint32_t next = src;
+    switch (funct3 & 0x3u) {
+      case 1: next = src; break;
+      case 2: next = old | src; do_write = f.rs1 != 0; break;
+      case 3: next = old & ~src; do_write = f.rs1 != 0; break;
+      default: do_write = false; break;
+    }
+    bool read_only = csr == kCsrNumStreamId || csr == kCsrNumTaskId;
+    if (do_write && !read_only) {
+      instance->GetSystem()->StoreMem<uint32_t>(at, next);
+    }
+    if (f.rd != 0) inst->SetLocalSr(f.rd, old);
+  }
+};
+
 class SystemRv32Bach : public rv32::SystemRv32 {
  public:
   SystemRv32Bach(std::shared_ptr<ISA> isa, uint64_t pc, uint32_t thread,
@@ -170,6 +211,13 @@ class SystemRv32Bach : public rv32::SystemRv32 {
   std::shared_ptr<Instruction> Decode(
       std::shared_ptr<InstBinary> instPkg) const override {
     uint32_t w = uint32_t(instPkg->GetBinary64());
+    if ((w & 0x7Fu) == 0x73u) {
+      uint32_t funct3 = (w >> 12) & 0x7u;
+      uint32_t csr = (w >> 20) & 0xFFFu;
+      if (funct3 != 0 && funct3 != 4 && IsIdentityCsr(csr)) {
+        return std::make_shared<Custom0IdentityCsr>(w);
+      }
+    }
     if ((w & 0x7Fu) == 0x0Bu) {
       uint32_t funct3 = (w >> 12) & 0x7u;
       bool imm = (w >> 31) & 1u;

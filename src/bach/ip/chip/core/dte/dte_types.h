@@ -131,6 +131,8 @@ struct Descriptor {
   // （MAS 旧命名 task_last）：标记一个 task 拆成几笔搬运时的最后一笔，只有带这个
   // 标记的那一笔完成后才通知 TS；不通知 TS 的任务把这一位清 0。
   bool ack_ts_en = true;
+  // CFG_TRANS_MODE[7]：源端为 Router 时丢弃包头，不落 header 上下文。
+  bool hw_header_drop = false;
   // reduce 包的任务边界：发方的 task_id，ReduceModule 靠它分开同一个用户前后
   // 两笔 reduce 任务。
   uint64_t reduce_seq = 0;

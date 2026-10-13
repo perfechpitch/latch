@@ -298,6 +298,8 @@ class RvExec : public BachModule {
     task_ctrl->SetReadFn([this](uint64_t at) { return CsrOf(at); });
     share_mem = std::make_shared<MmioSink>(kShareMemBase, kShareMemSize);
     core_mem = std::make_shared<MmioSink>(kCoreMemBase, kCoreMemSize);
+    share_mem_doc = std::make_shared<MmioSink>(kDocShareMemBase, kShareMemSize);
+    core_mem_doc = std::make_shared<MmioSink>(kDocCoreMemBase, kRouterIoOffset);
     local = std::make_shared<systeml::MemoryBase>();
     dtcm = std::make_shared<systeml::MemoryBase>();
 
@@ -308,10 +310,14 @@ class RvExec : public BachModule {
     router->AddPort(dsa_io, DsaIoBase(), DsaIoSize(), 1, 0, "dsa");
     router->AddPort(task_ctrl, kTaskCtrlBase, kTaskCtrlSize, 1, 0, "taskctrl");
     router->AddPort(share_mem, kShareMemBase, kShareMemSize, 1, 0, "smem");
-    // Core Mem 只有 DTE core 看得见。
+    router->AddPort(share_mem_doc, kDocShareMemBase, kShareMemSize, 1, 0,
+                    "smem_doc");
+    // Core Mem 的核内窗口只有 DTE core 有；文档绝对地址的别名三个核都开。
     if (unit == RvUnit::kDte) {
       router->AddPort(core_mem, kCoreMemBase, kCoreMemSize, 1, 0, "cmem");
     }
+    router->AddPort(core_mem_doc, kDocCoreMemBase, kRouterIoOffset, 1, 0,
+                    "cmem_doc");
 
     engine = std::make_unique<rv32::Engine>(/*maxCycles=*/~0ull);
     engine->Add(sys.get(), 0);
@@ -459,6 +465,8 @@ class RvExec : public BachModule {
     if ((RvIssueResOf(inst) & kResMem) == 0) return false;
     uint64_t a = MemAddr(inst);
     return InRange(a, kShareMemBase, kShareMemSize) ||
+           InRange(a, kDocShareMemBase, kShareMemSize) ||
+           InRange(a, kDocCoreMemBase, kRouterIoOffset) ||
            (unit == RvUnit::kDte && InRange(a, kCoreMemBase, kCoreMemSize));
   }
   // 这一条发 DSA 请求：DSA 读写指令，或访存落在本核 DSA 的 IO 窗口。
@@ -487,6 +495,16 @@ class RvExec : public BachModule {
       MmioSink::Req r = share_mem->Front();
       share_mem->Pop();
       SendLsq(LsqTarget::kShareMem, r, u, r.addr - share_mem->Base());
+    }
+    while (!share_mem_doc->Empty()) {
+      MmioSink::Req r = share_mem_doc->Front();
+      share_mem_doc->Pop();
+      SendLsq(LsqTarget::kShareMem, r, u, r.addr - share_mem_doc->Base());
+    }
+    while (!core_mem_doc->Empty()) {
+      MmioSink::Req r = core_mem_doc->Front();
+      core_mem_doc->Pop();
+      SendLsq(LsqTarget::kCoreMem, r, u, r.addr - core_mem_doc->Base());
     }
     while (!core_mem->Empty()) {
       MmioSink::Req r = core_mem->Front();
@@ -531,6 +549,7 @@ class RvExec : public BachModule {
     if (at == kCsrTaskId) return cur.task_id;
     if (at == kCsrUserId) return cur.user_id;
     if (at == kCsrPathId) return cur.path_id;
+    if (at == kCsrVcId) return cur.vcid;
     return 0;
   }
 
@@ -552,6 +571,10 @@ class RvExec : public BachModule {
     if (at == kCsrPathId) {
       // PID 更新任务：软件把新 PID 写进来，随 task_done 回 TS。
       cur.path_id = r.data;
+      return;
+    }
+    if (at == kCsrVcId) {
+      cur.vcid = r.data & 0x3u;
       return;
     }
     if (at == kRegTaskDone) {
@@ -588,6 +611,7 @@ class RvExec : public BachModule {
   std::unique_ptr<rv32::Engine> engine;
   std::shared_ptr<systeml::MemoryBase> local, dtcm;
   std::shared_ptr<MmioSink> dsa_io, task_ctrl, share_mem, core_mem;
+  std::shared_ptr<MmioSink> share_mem_doc, core_mem_doc;
 
   // gpr 就绪表：32 位，复位全 1。
   std::array<bool, 32> ready{};

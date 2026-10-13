@@ -70,6 +70,7 @@ class TsCreditMonitor : public BachModule {
   // 自启动 core 上 Router 收下退休请求后原地重新激活的笔数，Core 层拿它并进
   // ts_create。
   uint64_t Reactivated() const { return reactivate_cnt; }
+  uint64_t ReactivatedStream() const { return reactivate_stream; }
   uint64_t RmemAdmitted() const { return rmem_admitted.Get(); }
 
   bool Quiescent() const override { return !asking && !retiring; }
@@ -105,6 +106,7 @@ class TsCreditMonitor : public BachModule {
         w->entry = SelfStartEntry(cfg.Task(0));
         w->reactivate = true;
         w->stream_num = cfg.StreamNum();
+        reactivate_stream = retire_slot;
         ++reactivate_cnt;
       } else {
         w->clear_valid = true;
@@ -213,6 +215,8 @@ class TsCreditMonitor : public BachModule {
       StreamEntry const& e = s->entry[i];
       if (!e.valid || e.task_fsm != TaskFsm::kWait) continue;
       if (e.task_type != TaskType::kReduce || e.rmem_busy) continue;
+      // 进核的 reduce datain 等包头唤醒，不占本级 Rmem。
+      if (cfg.Task(e.task_id).IsDataIn()) continue;
       auto w = std::make_shared<StreamWrite>();
       w->valid = true;
       w->stream_id = i;
@@ -266,7 +270,7 @@ class TsCreditMonitor : public BachModule {
   uint64_t retire_slot = 0, just_retired = 0;
   uint64_t wake_pending = 0, retire_pending = 0, rmem_pending = 0;
   // 重新激活的笔数，供 Core 层发波形。
-  uint64_t reactivate_cnt = 0;
+  uint64_t reactivate_cnt = 0, reactivate_stream = 0;
 
   Logic64 woken, retired, rmem_admitted;
 };

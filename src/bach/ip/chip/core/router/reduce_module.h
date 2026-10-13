@@ -25,11 +25,14 @@
 // 降级为直接存储或转发。
 //
 // 上下文保护：当前任务的全部输入处理完、结果全部发出之前，同一 User 的下一笔
-// 任务不得进来覆盖（F-030）。
+// 任务不得进来覆盖（F-030）。各核的 task id 各自编号，包头里的 reduce_seq 不
+// 参与配对：同一 user、同一 path 上还没到的那一路就是这一笔的输入。这一路已经
+// 收过、或者 path 不同，才是下一笔，留在队头等到这一笔做完。
 //
-// 收不下的 flit 留在本路的输入缓冲里，按缓冲余量对 Xbar 反压。收不下有三种：
-// 上下文正被同一 User 的另一笔任务占着；这一 User 正锁在另一路的包上；新用户
-// 进来时 16 个分区都占着。
+// 收不下的 flit 留在本路的输入缓冲里，按缓冲余量对 Xbar 反压。收不下有两种：
+// 这一 User 正锁在另一路的包上；新用户进来时 16 个分区都占着。
+// 已经进到输入缓冲的下一笔（另一条 path，或这一路已经收过）留在该路队头，
+// 不写进当前分区。Xbar 上还没准入的下一笔由 Xbar 自己挪出 VC，不进这里。
 //
 // 分区：16 个用户各一个 kReduceCtxBytes 的分区，按 FP32 驻留数据量算（F-044）。
 // 用户第一笔任务真正进来时分配，后面的任务接着用，收到这个用户的 User Retire 才
@@ -47,6 +50,7 @@
 #include <algorithm>
 #include <array>
 #include <deque>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -66,6 +70,8 @@ namespace bach {
 enum ReduceDtype : uint64_t {
   kReduceBf16 = 0,
   kReduceFp32 = 1,
+  // bit8 置位时 bit0..2 按 mid/left/right 标哪一路是 FP32，其余是 BF16。
+  kReduceDtypePerLane = 1u << 8,
 };
 
 // 用户分区数（F-044）。
@@ -145,7 +151,7 @@ class ReduceModule : public BachModule {
   void RetireUser(uint64_t user) {
     auto it = ctx.find(user);
     if (it == ctx.end()) return;
-    if (it->second.busy || it->second.reserved) {
+    if (it->second.busy || it->second.reserved || UserParked(user)) {
       it->second.retired = true;
       return;
     }
@@ -153,15 +159,54 @@ class ReduceModule : public BachModule {
   }
   // 这个用户占着一个本地分区。
   bool HoldsUser(uint64_t user) const { return ctx.count(user) != 0; }
+  void SetHeadNotify(std::function<void(uint64_t, uint64_t)> fn) {
+    head_notify = std::move(fn);
+  }
   uint64_t ContextUsed() const { return ctx.size(); }
 
+  // 这一包是不是当前分区还在等的那一笔。新用户不算：从队头后面放新用户进来
+  // 会把还没轮到的任务整段放行。
+  bool WaitingInput(Message const& m) const {
+    auto it = ctx.find(m.user_id);
+    if (it == ctx.end()) return false;
+    auto const& c = it->second;
+    if (!c.busy && !c.reserved) return false;
+    // 各核 task id 不同，reduce_seq 对不上也还是这一笔要等的输入。
+    return c.path_id == m.path_id;
+  }
   bool CanAcceptHead(Message const& m) const {
-    uint64_t bytes = ElemsOf(m.size, rtab.Lookup(copy, m.path_id).reduce_data_type) * 4;
+    uint64_t spec = rtab.Lookup(copy, m.path_id).reduce_data_type;
+    uint64_t bytes = AccElems(m.size, spec, m.payload_aux) * 4;
     LOGCHECK(bytes <= kReduceCtxBytes, "ReduceModule: 超过 32 KiB。");
     auto it = ctx.find(m.user_id);
-    if (it == ctx.end()) return ctx.size() < kReduceCtxNum;
+    if (it == ctx.end()) {
+      bool ok = ctx.size() < kReduceCtxNum;
+      if (!ok) {
+        deny_why = 1;
+        deny_user = m.user_id;
+        deny_path = m.path_id;
+      }
+      return ok;
+    }
     auto const& c = it->second;
-    if (c.busy || c.reserved) return c.reduce_seq == m.reduce_seq && c.path_id == m.path_id;
+    // 下一笔是另一条 path。同一 path 上别的核 task id 不同，reduce_seq 不作为
+    // 拒绝条件：这一笔还缺的那一路要能进来。
+    if (c.busy || c.reserved) {
+      bool ok = c.path_id == m.path_id;
+      if (!ok) {
+        deny_why = 2;
+        deny_user = m.user_id;
+        deny_path = m.path_id;
+        deny_held = c.path_id;
+      }
+      return ok;
+    }
+    if (c.retired) {
+      deny_why = 3;
+      deny_user = m.user_id;
+      deny_path = m.path_id;
+      deny_held = c.path_id;
+    }
     return !c.retired;
   }
   void ReserveHead(Message const& m) {
@@ -175,26 +220,49 @@ class ReduceModule : public BachModule {
 
   // 正在做的任务有几笔：从首份输入进来到结果尾 flit 交付。
   uint64_t OutQueued() const { return out_q.size(); }
+  bool OutFront(uint64_t& user, uint64_t& sent, uint64_t& size) const {
+    if (out_q.empty() || !out_q.front().msg) return false;
+    user = out_q.front().user_id;
+    sent = out_q.front().sent;
+    size = out_q.front().msg->size;
+    return true;
+  }
   uint64_t Accepted() const { return accepted.Get(); }
   uint64_t Emitted() const { return emitted.Get(); }
   uint64_t Stalled() const { return stalled.Get(); }
 
   struct TaskState {
     uint64_t user_id, path_id, reduce_seq, expect_mask, in_done_mask;
+    bool busy = false, reserved = false;
+  };
+  struct ParkState {
+    uint64_t user_id, path_id, reduce_seq, flits;
   };
   struct State {
     std::vector<TaskState> tasks;
+    std::vector<ParkState> parked;
     std::array<FlitView, 3> input_heads{};
     std::array<uint64_t, 3> input_depth{};
+    int deny_why = 0;
+    uint64_t deny_user = 0, deny_path = 0, deny_held = 0;
   };
   // 停钟并 JoinAll 后查看未完成任务与输入队头；运行中的其他协程不能读这些容器。
   State Inspect() const {
     State s;
+    s.deny_why = deny_why;
+    s.deny_user = deny_user;
+    s.deny_path = deny_path;
+    s.deny_held = deny_held;
     for (auto const& item : ctx) {
       Ctx const& c = item.second;
-      if (c.busy) {
-        s.tasks.push_back({item.first, c.path_id, c.reduce_seq,
-                           c.expect_mask, c.in_done_mask});
+      if (!c.busy && !c.reserved) continue;
+      s.tasks.push_back({item.first, c.path_id, c.reduce_seq, c.expect_mask,
+                         c.in_done_mask, c.busy, c.reserved});
+    }
+    for (auto const& item : park) {
+      for (auto const& pkt : item.second) {
+        s.parked.push_back(
+            {item.first, pkt.path, pkt.seq, pkt.flits.size()});
       }
     }
     for (uint64_t r = 0; r < 3; ++r) {
@@ -208,7 +276,7 @@ class ReduceModule : public BachModule {
     for (auto const& b : in_buf) {
       if (!b.empty()) return false;
     }
-    return out_q.empty();
+    return out_q.empty() && park.empty();
   }
 
  protected:
@@ -220,6 +288,7 @@ class ReduceModule : public BachModule {
       TakeIn(r);
       AcceptFrom(r);
     }
+    PromoteParked();
 
     // Xbar 读上一拍的电平：拉高之后路上最多还有两个 flit，一个上一拍已经发出，
     // 一个照着这一拍的电平发，留得出两格才拉高。
@@ -257,6 +326,7 @@ class ReduceModule : public BachModule {
     std::vector<float> acc;          // FP32 中间累加结果
     std::vector<bool> seen;          // 各元素是不是已经写进过第一份
     std::vector<uint8_t> sw_head;    // 首份输入的软件辅助信息，输出时照抄
+    uint64_t aux = kReduceSwHeaderBytes;
     uint64_t in_dtype = kReduceBf16, out_dtype = kReduceBf16;
     bool retired = false;            // 收到 Retire，这笔任务交付完就放分区
     uint64_t locked_from = 3;        // 锁定到尾 flit 的那一路，3 = 没锁
@@ -303,22 +373,34 @@ class ReduceModule : public BachModule {
     }
     Ctx& c = it->second;
 
+    // 另一条 path，或这一路已经收过一份，是下一笔。同一 path 上 reduce_seq
+    // 不同的另一路是这一笔还缺的输入，写进当前分区。
+    bool lane_done = f.head && ((c.in_done_mask >> r) & 1ull) != 0;
+    bool foreign = (c.busy || c.reserved) &&
+                   (f.msg->path_id != c.path_id || lane_done);
+    if (foreign) {
+      // 留在本路队头。收进 park 会把这一路的反压放掉，后面的包整段涌进来。
+      ++stalled_pending;
+      return;
+    }
+
     // 进入后锁定当前包直至尾 flit：三路输入不能在包中间换。
     if (c.locked_from != 3 && c.locked_from != r) {
       ++stalled_pending;
       return;
     }
-
-    // 上下文保护：当前任务的结果全部发出之前，同一 User 的下一笔任务不得进来。
-    if ((c.busy || c.reserved) && c.reduce_seq != f.msg->reduce_seq) {
-      ++stalled_pending;
-      return;
-    }
     in_buf[r].pop_front();
+    Apply(c, user, r, f);
+  }
 
-    // 按 flit 累加：整包的字节都挂在同一个 Message 上，发送方边读边填，这一 flit
-    // 到的时候只有它覆盖的那一段是真的。所以每个 flit 只动它带来的那一段元素，
-    // 一个元素只算一遍。
+  // 一拍 flit 写进这个用户的当前分区。调用时这一笔已经确定属于当前任务。
+  void Apply(Ctx& c, uint64_t user, uint64_t r, FlitView const& f) {
+    RouteEntry const& e = rtab.Lookup(copy, f.msg->path_id);
+    // 包不进 DTE 时，跳过同 path 的 P2P reissue。进核的包仍由 CoreStation 的
+    // 正常 trigger 派搬入，这里再发一笔会把还没到的包头提前弹掉。
+    if (f.head && head_notify && !e.EntersCore(f.msg->path_core_mask)) {
+      head_notify(user, f.msg->path_id);
+    }
     if (f.head) {
       if (!c.busy) {
         // 首份输入开始这笔任务，把 expect_mask 一并记下，本任务做完前不再重查。
@@ -331,14 +413,14 @@ class ReduceModule : public BachModule {
         c.got = {};
         c.in_dtype = e.reduce_data_type;
         c.out_dtype = e.reduce_outdata_type;
-        uint64_t n = ElemsOf(f.msg->size, c.in_dtype);
+        c.aux = f.msg->payload_aux;
+        uint64_t n = ElemsOf(f.msg->size, LaneDtype(c.in_dtype, r), c.aux);
         c.acc.assign(n, 0.0f);
         c.seen.assign(n, false);
         CheckCtxFits(c);
         c.sw_head.assign(f.msg->payload.begin(),
                          f.msg->payload.begin() +
-                             std::min<size_t>(kReduceSwHeaderBytes,
-                                              f.msg->payload.size()));
+                             std::min<size_t>(c.aux, f.msg->payload.size()));
         c.first_msg = f.msg;
         out_q.push_back({user, c.reduce_seq, nullptr, 0});
       }
@@ -348,7 +430,7 @@ class ReduceModule : public BachModule {
     uint64_t lo = c.got[r];
     uint64_t hi = f.tail ? f.msg->size
                          : std::min<uint64_t>(lo + kFlitBytes, f.msg->size);
-    AccumRange(c, f.msg->payload, lo, hi);
+    AccumRange(c, f.msg->payload, lo, hi, LaneDtype(c.in_dtype, r));
     c.got[r] = hi;
     c.locked_from = f.tail ? 3 : r;
     ++accepted_pending;
@@ -359,20 +441,21 @@ class ReduceModule : public BachModule {
   // 的那一路不再限制。有一路一个元素都还没进来就是 0。
   uint64_t ReadyBytes(Ctx const& c, uint64_t out_size) const {
     if (c.in_done_mask == c.expect_mask) return out_size;
-    uint64_t in_n = ElemBytes(c.in_dtype), out_n = ElemBytes(c.out_dtype);
+    uint64_t out_n = ElemBytes(c.out_dtype);
     uint64_t elems = ~0ull;
     for (uint64_t r = 0; r < 3; ++r) {
       if (((c.expect_mask >> r) & 1u) == 0) continue;
       if ((c.in_done_mask >> r) & 1u) continue;
-      if (c.got[r] < kReduceSwHeaderBytes + in_n) return 0;
-      elems = std::min(elems, (c.got[r] - kReduceSwHeaderBytes) / in_n);
+      uint64_t in_n = ElemBytes(LaneDtype(c.in_dtype, r));
+      if (c.got[r] < c.aux + in_n) return 0;
+      elems = std::min(elems, (c.got[r] - c.aux) / in_n);
     }
-    return std::min(out_size, kReduceSwHeaderBytes + elems * out_n);
+    return std::min(out_size, c.aux + elems * out_n);
   }
 
   // 结果包的长度：软件辅助信息加上按输出精度排的累加结果。
   static uint64_t OutSizeOf(Ctx const& c) {
-    return kReduceSwHeaderBytes + c.acc.size() * ElemBytes(c.out_dtype);
+    return c.aux + c.acc.size() * ElemBytes(c.out_dtype);
   }
 
   // 一个包的 FP32 累加结果要装得进这个用户的分区。
@@ -385,6 +468,26 @@ class ReduceModule : public BachModule {
   // 输入的一个元素占几个字节。
   static uint64_t ElemBytes(uint64_t dtype) {
     return dtype == kReduceFp32 ? 4 : 2;
+  }
+  static uint64_t LaneDtype(uint64_t spec, uint64_t lane) {
+    if ((spec & kReduceDtypePerLane) == 0) {
+      return spec == kReduceFp32 ? kReduceFp32 : kReduceBf16;
+    }
+    return ((spec >> lane) & 1u) ? kReduceFp32 : kReduceBf16;
+  }
+  static uint64_t AccElems(uint64_t bytes, uint64_t spec, uint64_t aux) {
+    uint64_t elem = 4;
+    if ((spec & kReduceDtypePerLane) == 0) {
+      elem = ElemBytes(spec);
+    } else {
+      bool bf16 = false;
+      for (uint64_t r = 0; r < 3; ++r) {
+        if (((spec >> r) & 1u) == 0) bf16 = true;
+      }
+      elem = bf16 ? 2 : 4;
+    }
+    if (bytes <= aux) return 0;
+    return (bytes - aux) / elem;
   }
 
   // 把输入的一个元素解成 FP32：BF16 扩展，FP32 直接进。
@@ -400,29 +503,26 @@ class ReduceModule : public BachModule {
   }
 
   // 一份分量有几个元素：软件辅助信息之后的数据段按输入精度算。
-  static uint64_t ElemsOf(uint64_t bytes, uint64_t dtype) {
-    if (bytes <= kReduceSwHeaderBytes) return 0;
-    return (bytes - kReduceSwHeaderBytes) / ElemBytes(dtype);
+  static uint64_t ElemsOf(uint64_t bytes, uint64_t dtype, uint64_t aux) {
+    if (bytes <= aux) return 0;
+    return (bytes - aux) / ElemBytes(dtype);
   }
 
-  // 一个 flit 带来的字节段 [lo, hi) 里的元素累加进分区：一个元素归结束在这一段
-  // 里的那个 flit。第一份写入，后面的读出当前值、加、写回，中间累加固定 FP32。
-  // 软件辅助信息那 16 B 跳过。
   static void AccumRange(Ctx& c, std::vector<uint8_t> const& in, uint64_t lo,
-                         uint64_t hi) {
-    if (hi <= kReduceSwHeaderBytes) return;
-    uint64_t n = ElemBytes(c.in_dtype);
-    uint64_t from = lo <= kReduceSwHeaderBytes ? 0 : (lo - kReduceSwHeaderBytes) / n;
-    uint64_t to = (hi - kReduceSwHeaderBytes) / n;
+                         uint64_t hi, uint64_t dtype) {
+    if (hi <= c.aux) return;
+    uint64_t n = ElemBytes(dtype);
+    uint64_t from = lo <= c.aux ? 0 : (lo - c.aux) / n;
+    uint64_t to = (hi - c.aux) / n;
     for (uint64_t k = from; k < to; ++k) {
-      uint64_t at = kReduceSwHeaderBytes + k * n;
+      uint64_t at = c.aux + k * n;
       if (at + n > in.size()) break;
       if (k >= c.acc.size()) {
         c.acc.resize(k + 1, 0.0f);
         c.seen.resize(k + 1, false);
         CheckCtxFits(c);
       }
-      float v = ElemOf(in, at, c.in_dtype);
+      float v = ElemOf(in, at, dtype);
       c.acc[k] = c.seen[k] ? numeric::ClampNanInf(c.acc[k] + v) : v;
       c.seen[k] = true;
     }
@@ -431,14 +531,14 @@ class ReduceModule : public BachModule {
   // 结果包的字节段 [lo, hi) 按 reduce_outdata_type 从分区里转出来写进去，软件
   // 辅助信息照抄首份输入的那 16 B。发哪个 flit 之前写哪一段。
   static void PackRange(Ctx const& c, Message& m, uint64_t lo, uint64_t hi) {
-    for (uint64_t i = lo; i < hi && i < kReduceSwHeaderBytes; ++i) {
+    for (uint64_t i = lo; i < hi && i < c.aux; ++i) {
       m.payload[i] = i < c.sw_head.size() ? c.sw_head[i] : 0;
     }
-    if (hi <= kReduceSwHeaderBytes) return;
+    if (hi <= c.aux) return;
     uint64_t n = ElemBytes(c.out_dtype);
-    uint64_t from = lo <= kReduceSwHeaderBytes ? 0 : (lo - kReduceSwHeaderBytes) / n;
+    uint64_t from = lo <= c.aux ? 0 : (lo - c.aux) / n;
     for (uint64_t k = from; k < c.acc.size(); ++k) {
-      uint64_t at = kReduceSwHeaderBytes + k * n;
+      uint64_t at = c.aux + k * n;
       if (at >= hi) break;
       if (c.out_dtype == kReduceFp32) {
         uint32_t v = numeric::BitsOf(c.acc[k]);
@@ -524,8 +624,46 @@ class ReduceModule : public BachModule {
     c.in_done_mask = 0;
     c.got = {};
     c.locked_from = 3;
-    if (c.retired) ctx.erase(user);
     ++emitted_pending;
+  }
+
+  // 当前这笔交付完，把这个用户最早收下的下一笔放进分区。一次只放一笔：
+  // 这一笔自己还缺输入时，后面的继续停着。退休且再也没有下一笔，才放分区。
+  void PromoteParked() {
+    for (auto it = ctx.begin(); it != ctx.end();) {
+      uint64_t user = it->first;
+      Ctx& c = it->second;
+      if (!c.busy && !c.reserved) {
+        auto pit = park.find(user);
+        if (pit != park.end() && !pit->second.empty()) {
+          ParkedPkt pkt = std::move(pit->second.front());
+          pit->second.pop_front();
+          if (pit->second.empty()) park.erase(pit);
+          for (Held& h : pkt.flits) Apply(c, user, h.lane, h.flit);
+        }
+      }
+      if (!c.busy && !c.reserved && c.retired && !UserParked(user)) {
+        it = ctx.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  void Park(uint64_t user, uint64_t lane, FlitView const& f) {
+    auto& q = park[user];
+    for (auto& pkt : q) {
+      if (pkt.path == f.msg->path_id && pkt.seq == f.msg->reduce_seq) {
+        pkt.flits.push_back({lane, f});
+        return;
+      }
+    }
+    q.push_back(ParkedPkt{f.msg->path_id, f.msg->reduce_seq, {{lane, f}}});
+  }
+
+  bool UserParked(uint64_t user) const {
+    auto it = park.find(user);
+    return it != park.end() && !it->second.empty();
   }
 
   // 队头还没开始发时，挑最早一笔首 flit 已经算好的任务挪到队头。
@@ -566,7 +704,21 @@ class ReduceModule : public BachModule {
 
   // Step 独占。
   std::array<std::deque<FlitView>, 3> in_buf;
+  std::function<void(uint64_t, uint64_t)> head_notify;
+  mutable int deny_why = 0;
+  mutable uint64_t deny_user = 0, deny_path = 0, deny_held = 0;
+  struct Held {
+    uint64_t lane = 0;
+    FlitView flit;
+  };
+  // 同一用户按到达顺序停下的下一笔。当前这笔交付完再放进分区，一次一笔。
+  struct ParkedPkt {
+    uint64_t path = 0;
+    uint64_t seq = 0;
+    std::deque<Held> flits;
+  };
   std::map<uint64_t, Ctx> ctx;
+  std::map<uint64_t, std::deque<ParkedPkt>> park;
   std::deque<OutItem> out_q;
   uint64_t req_seq = 0;
   uint64_t accepted_pending = 0, emitted_pending = 0, stalled_pending = 0;

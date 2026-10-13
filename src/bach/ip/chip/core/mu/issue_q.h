@@ -52,7 +52,7 @@ struct MuInflight {
 
   explicit MuInflight(MuTaskCfg const& task)
       : cfg(task), agu(task),
-        total(task.kblock * task.Experts() * task.nblock) {
+        total(task.kblock * task.ExpertSlots() * task.nblock) {
     if (total == 0) total = 1;
   }
   uint64_t Kblock() const { return cfg.kblock == 0 ? 1 : cfg.kblock; }
@@ -60,7 +60,7 @@ struct MuInflight {
   // 各出一份时每个专家写一次。
   uint64_t OutTotal() const {
     uint64_t n = cfg.nblock;
-    if (!cfg.ep_reduce) n *= cfg.Experts();
+    if (!cfg.ep_reduce) n *= cfg.ExpertSlots();
     return n == 0 ? 1 : n;
   }
   bool Done() const { return stored >= OutTotal(); }
@@ -81,6 +81,7 @@ class MuIssueQ : public BachModule {
     ++issue_pending;
     start_task = cfg.task_id;
     start_user = cfg.user_id;
+    start_stream = cfg.stream_id;
   }
 
   // 取第一笔还停在某个阶段的任务。顺序执行：只看队头那几笔。
@@ -132,6 +133,7 @@ class MuIssueQ : public BachModule {
   // 要用：这一层自己的信号在 chip 级被 TraceOffScope 关掉了。
   uint64_t StartTask() const { return start_task; }
   uint64_t StartUser() const { return start_user; }
+  uint64_t StartStream() const { return start_stream; }
 
   bool Quiescent() const override { return q.empty(); }
 
@@ -147,7 +149,7 @@ class MuIssueQ : public BachModule {
   uint64_t next_seq = 0, issue_pending = 0;
 
   // 刚进队列那一笔的身份，供 Core 层发波形。
-  uint64_t start_task = 0, start_user = 0;
+  uint64_t start_task = 0, start_user = 0, start_stream = 0;
 
   Logic64 depth, issued;
 };

@@ -78,6 +78,10 @@ class XbarReqPort : public Logic {
   void DriveRoom(uint64_t vc_mask) { room = vc_mask; }
   // 往第 v 个 VC 上交一笔收不收得下。
   bool RoomFor(uint64_t v) const { return ((room.Get() >> v) & 1u) != 0; }
+  // 深度还没到顶。队头被归约挡住时，另一包能进归约的 flit 走这一档。
+  bool SlackFor(uint64_t v) const {
+    return ((room.Get() >> (v + kVcNum)) & 1u) != 0;
+  }
 };
 
 struct XbarReqView {
@@ -264,21 +268,23 @@ inline CoreDataView ReadCoreData(CoreDataPort const& p) {
 // 请求发出后保持到 TS 拉 ready；丢一笔 trigger 就等于丢一个 token。
 class TriggerPort : public Logic {
  public:
-  Logic64 valid, user_id, path_id, reissue;
+  Logic64 valid, user_id, path_id, reissue, skip_only;
   Logic64 ready;
   // 一笔请求保持到看见 ready，TS 那一侧会连着几拍看到同一笔，按序号认它。
   Logic64 seq;
 
   explicit TriggerPort(ClockPtr c)
-      : valid(c), user_id(c), path_id(c), reissue(c), ready(c), seq(c) {
-    Fields(valid, user_id, path_id, reissue, ready, seq);
+      : valid(c), user_id(c), path_id(c), reissue(c), skip_only(c), ready(c),
+        seq(c) {
+    Fields(valid, user_id, path_id, reissue, skip_only, ready, seq);
   }
 
-  void Drive(uint64_t user, uint64_t path, bool re) {
+  void Drive(uint64_t user, uint64_t path, bool re, bool only_skip = false) {
     valid = 1;
     user_id = user;
     path_id = path;
     reissue = re ? 1 : 0;
+    skip_only = only_skip ? 1 : 0;
     seq = ++issue_seq;
   }
   void Idle() {
@@ -286,6 +292,7 @@ class TriggerPort : public Logic {
     user_id = 0;
     path_id = 0;
     reissue = 0;
+    skip_only = 0;
   }
   void DriveReady(bool ok) { ready = ok ? 1 : 0; }
   bool Ready() const { return ready.Get() != 0; }

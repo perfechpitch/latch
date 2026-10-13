@@ -183,6 +183,7 @@ class VuPipeCtrl : public BachModule {
   uint64_t TaskDispatched() const { return task_dispatch_cnt; }
   uint64_t TaskDispatchTask() const { return task_task; }
   uint64_t TaskDispatchUser() const { return task_user; }
+  uint64_t TaskDispatchStream() const { return task_stream; }
   bool UnitsReady() const { return !in->Valid() || in->Ready(); }
   // Profile 按成因分开记：Fence 串行化、CM_FENCE 等前序 CM 访问、Scoreboard 数据
   // 依赖、执行分组结构冒险。四项相加即“有空位却没派发”的分解。
@@ -311,6 +312,7 @@ class VuPipeCtrl : public BachModule {
       ++task_dispatch_cnt;
       task_task = inst->task_id;
       task_user = inst->user_id;
+      task_stream = inst->stream_id;
     }
 
     if (!Legal(*inst, cfg)) {
@@ -853,7 +855,7 @@ class VuPipeCtrl : public BachModule {
   uint64_t last_seq = 0;
   uint64_t stall_cnt = 0, dispatch_cnt = 0;
   // 发行进流水的那些里，属于某个 task 第一条的笔数与身份，波形用。
-  uint64_t task_dispatch_cnt = 0, task_task = 0, task_user = 0;
+  uint64_t task_dispatch_cnt = 0, task_task = 0, task_user = 0, task_stream = 0;
   uint64_t fence_stall = 0, cmfence_stall = 0, dep_stall = 0, eu_stall = 0;
   std::array<uint64_t, 2> vrf_rd_busy{}, vrf_wt_busy{};
   uint64_t mrf_wt_busy = 0;

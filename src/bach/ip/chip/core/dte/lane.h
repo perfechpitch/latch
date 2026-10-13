@@ -30,6 +30,7 @@
 // 端点（Cmem/Mmem/scale 旁带/topK_table/header_table）在 Fire / 解析时已由 agcu
 // 译码并展开成每段的 src_addr / dst_addr，这一层直接用，不再自己叠 stream 偏移。
 
+#include <array>
 #include <deque>
 #include <memory>
 #include <set>
@@ -121,6 +122,16 @@ class Lane : public BachModule {
            !ctx[kWr].busy && drain_q[kRd].empty() && drain_q[kWr].empty();
   }
 
+  // 读写两半各自的起止。一拍一侧最多起一笔、完一笔（完的是上一笔，起的是下一笔），
+  // 所以两套身份分开留。bytes 是这一笔要搬的 payload 字节数。
+  struct HalfPulse {
+    uint64_t begin_cnt = 0, end_cnt = 0;
+    uint64_t b_user = 0, b_task = 0, b_stream = 0, b_bytes = 0;
+    uint64_t e_user = 0, e_task = 0, e_stream = 0;
+  };
+  HalfPulse const& RdPulse() const { return pulse[kRd]; }
+  HalfPulse const& WrPulse() const { return pulse[kWr]; }
+
  protected:
   void Step() override {
     cmem_used = false;
@@ -149,13 +160,24 @@ class Lane : public BachModule {
  private:
   bool Outbound() const { return idx != kInCh; }
 
-  // 读这一侧的源端存储：route 决定。CmToRouter 读 Core Mem，其余读 Matrix Mem。
-  // scale 旁带随它的数据落在同一块存储。
+  // 读这一侧的源端存储：段端点决定。Cmem 读 Core Mem，Mmem 读 Matrix Mem。
+  // 同一个任务的两段可以落在两块存储上。scale 旁带不带存储 tag，随 route：
+  // CmToRouter 读 Core Mem，其余读 Matrix Mem。
   bool FromCm(Route r) const { return r == Route::kCmToRouter; }
-  // 写这一侧的目的端存储：route 决定。RouterToCm、MmToCm 写 Core Mem，
-  // RouterToMm 写 Matrix Mem。scale 旁带随它的数据落在同一块存储。
+  bool ReadFromCm(Descriptor const& d, Segment const& s) const {
+    if (s.src_kind == SegEndpoint::kCmem) return true;
+    if (s.src_kind == SegEndpoint::kMmem) return false;
+    return FromCm(d.route);
+  }
+  // 写这一侧的目的端存储同样按段端点。RouterToCm、MmToCm 只是 scale 与未打
+  // tag 的地址的退路；RouterToMm 上的 Cmem 段仍写 Core Mem。
   bool ToCm(Route r) const {
     return r == Route::kRouterToCm || r == Route::kMmToCm;
+  }
+  bool WriteToCm(Descriptor const& d, Segment const& s) const {
+    if (s.dst_kind == SegEndpoint::kCmem) return true;
+    if (s.dst_kind == SegEndpoint::kMmem) return false;
+    return ToCm(d.route);
   }
 
   // 这一笔在本通道的 buffer 里用哪个号认。进核那一路的号由 Lane 在 TakeAdmit 时按
@@ -198,7 +220,12 @@ class Lane : public BachModule {
       h.hardware_used = 1;
       h.gpu_id = m->gpu_id;
       h.token_id = m->token_id;
-      cmem_sync->Poke(d.seg[0].dst_addr, HeaderToBytes(h));
+      // 文档包头 Byte8-9 是 user_id。B core 的 check flag 从 CoreMem 这块的
+      // +8 取它，再决定把哪一名用户发到链上。hardware_used 没有读者。
+      ByteBlock raw = HeaderToBytes(h);
+      raw[8] = uint8_t(m->user_id & 0xFFu);
+      raw[9] = uint8_t((m->user_id >> 8) & 0xFFu);
+      cmem_sync->Poke(d.seg[0].dst_addr, raw);
     }
   }
 
@@ -282,10 +309,12 @@ class Lane : public BachModule {
       if (h == kRd) {
         if (c.outstanding != 0) continue;
         rd_done->Drive(c.desc.commit_seq, kRd, true);
+        NoteEnd(kRd, c.desc);
         rd_reported = true;
       } else {
         if (!buffer.TaskDrained(idx, TagOf(c.desc))) continue;
         wr_done->Drive(c.desc.commit_seq, kWr, true);
+        NoteEnd(kWr, c.desc);
         wr_reported = true;
       }
       drain_q[h].pop_front();
@@ -312,6 +341,9 @@ class Lane : public BachModule {
       ctx[h].sent_first = false;
       ctx[h].topk_pending = false;
       ctx[h].hdr_stored = false;
+      ctx[h].topk_acc.clear();
+      ctx[h].rd_mem.clear();
+      NoteBegin(h, d);
       q[h].Pop();
     }
   }
@@ -328,6 +360,7 @@ class Lane : public BachModule {
         c.drained = true;
         if (!rd_reported) {
           rd_done->Drive(c.desc.commit_seq, kRd, true);
+          NoteEnd(kRd, c.desc);
           rd_reported = true;
         } else {
           drain_q[kRd].push_back(c);
@@ -367,7 +400,8 @@ class Lane : public BachModule {
     bool slot = flying < kRdOutstanding;
     if (!room || !slot) return;
     Segment const& s = c.desc.seg[c.seg];
-    MemPort& port = FromCm(c.desc.route) ? *cmem : *mmem;
+    bool from_cm = ReadFromCm(c.desc, s);
+    MemPort& port = from_cm ? *cmem : *mmem;
     if (!port.Ready()) return;
     if (s.src_kind == SegEndpoint::kScale) {
       // scale 段：len 是 scale 字节数，地址给的是对应数据地址。
@@ -381,35 +415,60 @@ class Lane : public BachModule {
       c.cur_addr += n;
       c.remain -= n;
     }
-    (FromCm(c.desc.route) ? cmem_used : mmem_used) = true;
+    (from_cm ? cmem_used : mmem_used) = true;
+    c.rd_mem.push_back(from_cm ? 1 : 0);
     ++c.outstanding;
   }
 
-  // 响应按发出的顺序回来：先给还在等收敛的那一笔，它收满了再给当前这一笔。
+  // 这一侧还欠几笔没收回来的读：已在 hold 里的不算。
+  uint64_t RdOwed(bool from_cm) const {
+    uint64_t n = 0;
+    auto count = [&](ActiveCtx const& c) {
+      for (uint8_t m : c.rd_mem) {
+        if ((m != 0) == from_cm) ++n;
+      }
+    };
+    for (ActiveCtx const& c : drain_q[kRd]) count(c);
+    if (ctx[kRd].busy) count(ctx[kRd]);
+    uint64_t held = from_cm ? cmem_hold.size() : mmem_hold.size();
+    return n > held ? n - held : 0;
+  }
+
+  // 两块存储延迟不同，响应只保持一拍。先按到达收进各自的队列，再按发出顺序
+  // 配回：先配还在等收敛的那些，再配当前这一笔。
   void CollectResponses() {
     if (!Outbound()) return;
-    ActiveCtx* p = nullptr;
-    if (!drain_q[kRd].empty() && drain_q[kRd].front().outstanding != 0) {
-      p = &drain_q[kRd].front();
-    } else if (ctx[kRd].busy) {
-      p = &ctx[kRd];
+    if (cmem->RspValid() && RdOwed(true) != 0) {
+      cmem_hold.push_back(cmem->RspData());
     }
-    if (p == nullptr) return;
-    ActiveCtx& c = *p;
-    bool from_cm = FromCm(c.desc.route);
-    MemPort& port = from_cm ? *cmem : *mmem;
-    if (!port.RspValid()) return;
-    LOGCHECK(c.outstanding > 0, "Lane: 收到没发过的读响应。");
-    --c.outstanding;
-    // 这一笔的所有段都读完、没有在途请求了，才是任务边界（包的最后一拍）。
-    bool last = c.remain == 0 && !RdRemain(c.desc, c.seg + 1) &&
-                c.outstanding == 0;
-    LOGCHECK(buffer.HasRoom(idx), "Lane: 读回来的数据没地方放，发请求那一步的"
-                                  "Buffer credit 记错了。");
-    ByteBlockPtr blk = port.RspData();
-    FillOut(c, blk);
-    uint64_t n = blk ? blk->size() : kFlitBytes;
-    buffer.Push(idx, {TagOf(c.desc), n, last, blk, c.desc.msg});
+    if (mmem->RspValid() && RdOwed(false) != 0) {
+      mmem_hold.push_back(mmem->RspData());
+    }
+    auto take = [&](ActiveCtx& c) -> bool {
+      while (c.outstanding != 0) {
+        LOGCHECK(!c.rd_mem.empty(), "Lane: 读响应比发出的请求多。");
+        bool from_cm = c.rd_mem.front() != 0;
+        auto& hold = from_cm ? cmem_hold : mmem_hold;
+        if (hold.empty()) return false;
+        c.rd_mem.pop_front();
+        --c.outstanding;
+        // 这一笔的所有段都读完、没有在途请求了，才是任务边界（包的最后一拍）。
+        bool last = c.remain == 0 && !RdRemain(c.desc, c.seg + 1) &&
+                    c.outstanding == 0;
+        LOGCHECK(buffer.HasRoom(idx), "Lane: 读回来的数据没地方放，发请求那一步的"
+                                      "Buffer credit 记错了。");
+        ByteBlockPtr blk = hold.front();
+        hold.pop_front();
+        FillOut(c, blk);
+        uint64_t n = blk ? blk->size() : kFlitBytes;
+        buffer.Push(idx, {TagOf(c.desc), n, last, blk, c.desc.msg});
+      }
+      return true;
+    };
+    for (ActiveCtx& c : drain_q[kRd]) {
+      if (!take(c)) return;
+    }
+    if (ctx[kRd].busy) take(ctx[kRd]);
   }
 
   void StepWr() {
@@ -445,7 +504,7 @@ class Lane : public BachModule {
     // 进核任务收下第一拍就落包头上下文（出核不落：包头出核时从落库处读回）。
     // 计算 core 落 Hmem、B/R core 落 Core Mem，看段 0 端点。
     if (!Outbound() && !c.hdr_stored) {
-      StoreHeader(c.desc, b.msg);
+      if (!c.desc.hw_header_drop) StoreHeader(c.desc, b.msg);
       c.hdr_stored = true;
     }
 
@@ -468,9 +527,7 @@ class Lane : public BachModule {
     }
 
     // 进核写存储，或 MM → CM 那一档写 Core Mem。逐段拆分写入：payload 字节按段
-    // 长顺序分到各个目的段。
-    bool to_cm = ToCm(c.desc.route);
-    MemPort& port = to_cm ? *cmem : *mmem;
+    // 长顺序分到各个目的段。落哪块存储看这一段的端点，不看 route。
     ByteBlockPtr data = b.data ? b.data : std::make_shared<ByteBlock>(b.bytes, 0);
     uint64_t n = b.bytes;
     uint64_t pos = c.off + c.part;           // 这一拍从整包的第几个字节起
@@ -486,17 +543,34 @@ class Lane : public BachModule {
       ++seg;
     }
     Segment const& s = c.desc.seg[seg];
+    bool to_cm = WriteToCm(c.desc, s);
+    MemPort& port = to_cm ? *cmem : *mmem;
     uint64_t take = n - c.part;
     uint64_t seg_left = s.len - (pos - seg_off);
     if (take > seg_left) take = seg_left;    // 一拍跨进下一段
     bool whole = c.part == 0 && take == n;
     if (s.dst_kind == SegEndpoint::kTopk) {
-      // topK 段：不落存储，随包的 topk 字段走，经专用数据线写进 MU 的 topK_ep_table。
-      // 写进哪一项由 topK 段的端内偏移给：计算 core 是 stream_id，B core 是 user_id。
-      std::vector<uint8_t> topk = b.msg ? b.msg->topk : std::vector<uint8_t>();
-      if (mu_topk) {
+      // topK 段：不落存储，经专用数据线写进 MU 的 topK_ep_table。写进哪一项由
+      // topK 段的端内偏移给：计算 core 是 stream_id，B core 是 user_id。
+      // latch 自己的 kernel 把 topK 挂在包的 topk 字段上。pcode 按《DTE DSA》把
+      // topK 当普通数据段放在 payload 里，topk 字段是空的，就从流里按段长攒齐。
+      bool inband = !(b.msg && !b.msg->topk.empty());
+      if (inband) {
+        ByteBlockPtr piece = whole ? data : SliceBlock(data, c.part, take);
+        if (piece) {
+          c.topk_acc.insert(c.topk_acc.end(), piece->begin(), piece->end());
+        }
+        if (pos - seg_off + take >= s.len) {
+          if (mu_topk) {
+            mu_topk->Drive(c.desc.TopkIndex(),
+                           std::make_shared<ByteBlock>(std::move(c.topk_acc)));
+            topk_driven = true;
+          }
+          c.topk_acc.clear();
+        }
+      } else if (mu_topk) {
         mu_topk->Drive(c.desc.TopkIndex(),
-                       std::make_shared<ByteBlock>(std::move(topk)));
+                       std::make_shared<ByteBlock>(b.msg->topk));
         topk_driven = true;
       }
     } else {
@@ -538,6 +612,8 @@ class Lane : public BachModule {
   std::array<TaskQueue, kHalfNum> q;
   std::array<ActiveCtx, kHalfNum> ctx;
   std::array<std::deque<ActiveCtx>, kHalfNum> drain_q;
+  // 出核读：Core Mem 与 Matrix Mem 的响应各自排队，配的时候按发出顺序取。
+  std::deque<ByteBlockPtr> cmem_hold, mmem_hold;
   bool rd_reported = false, wr_reported = false;
   std::set<uint64_t> inbound_done;
   // 进核任务按到达顺序编的帧号，与 Header Parser 给每帧编的号对齐。
@@ -545,6 +621,23 @@ class Lane : public BachModule {
   uint64_t last_payload_seq = 0, last_admit_seq = 0;
   bool cmem_used = false, mmem_used = false, router_used = false;
   bool topk_driven = false;
+  std::array<HalfPulse, kHalfNum> pulse{};
+
+  void NoteBegin(uint64_t h, Descriptor const& d) {
+    HalfPulse& p = pulse[h];
+    p.b_user = d.user_id;
+    p.b_task = d.task_id;
+    p.b_stream = d.stream_id;
+    p.b_bytes = d.PayloadBytes();
+    ++p.begin_cnt;
+  }
+  void NoteEnd(uint64_t h, Descriptor const& d) {
+    HalfPulse& p = pulse[h];
+    p.e_user = d.user_id;
+    p.e_task = d.task_id;
+    p.e_stream = d.stream_id;
+    ++p.end_cnt;
+  }
 };
 
 }  // namespace bach

@@ -82,7 +82,10 @@ class HeaderParser : public BachModule {
     // Buffer 满时通过 TREADY 向 Router 反压，本拍不收。这一步要排在
     // “记下已见过这一笔”之前，否则这一笔会被当成收过了，上游换下一笔，
     // 数据就丢了。下游收不下由 payload 口的 ready 反映。
-    if (in_frame && !payload->Ready()) {
+    // 头尾同拍的包到达时还不在帧内，也要看这一拍：它整包都要进 inbound
+    // buffer，buffer 没有空位就停在 Router 口上等写侧弹出。
+    bool to_buf = d.bytes != 0 || d.last;
+    if (to_buf && !payload->Ready()) {
       from_router->DriveReady(false);
       return;
     }

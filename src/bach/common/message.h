@@ -11,8 +11,9 @@
 // vc 每一跳都被改写（下一跳的 VC 编码在包头 loopback[3:2] 里，本跳 Router 读表后
 // 改写它），所以它是 Message 的可变字段，不是 flit 上的只读副本。
 //
-// Router 不感知 payload 内容，只有 reduce 包例外：软件辅助信息固定 16 B，做加法
-// 时跳过这一段（kReduceSwHeaderBytes）。
+// Router 不感知 payload 内容，只有 reduce 包例外：软件辅助信息在 payload 前面，
+// 做加法时跳过。BACHIR 10 的 MoE kernel 固定 16 B；BACHIR 11 的 pcode 数据段是
+// 纯张量，这段为 0。装载时按版本改 DtePayloadAuxBytes()。
 
 #include <cstdint>
 #include <memory>
@@ -40,6 +41,13 @@ enum class OpType : uint32_t {
 
 // reduce 包最前面这一段是软件辅助信息，Router 加法时跳过。
 constexpr uint64_t kReduceSwHeaderBytes = 16;
+
+// 出核包 payload 前缀长度。默认 16，与现有 MoE bundle 一致；LoadBundle 见到
+// BACHIR 11 时改成 0。
+inline uint64_t& DtePayloadAuxBytes() {
+  static uint64_t bytes = kReduceSwHeaderBytes;
+  return bytes;
+}
 
 // 最短包长：只含包头与路由信息的空包。
 constexpr uint64_t kMinPacketBytes = 16;
@@ -79,6 +87,8 @@ struct Message {
   // payload 是 MXFP8 数据后面接它的 scale（每 32 B 一个 E8M0）。发方 DTE 的任务
   // 置了 scale_valid 时打上，收方据此把包尾那一段写进存储的 scale 旁带。
   uint64_t scale_valid = 0;
+  // payload 前多少字节是软件辅助信息。出核时抄 DtePayloadAuxBytes()。
+  uint64_t payload_aux = kReduceSwHeaderBytes;
 
   // MoE 进核包自带的 topK 表（256 B）。topk_valid 置位时收方 DTE 不落 Core Mem，
   // 而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。与数据/scale 同一条

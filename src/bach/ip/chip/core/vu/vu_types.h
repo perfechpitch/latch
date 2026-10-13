@@ -27,6 +27,16 @@
 namespace latch {
 namespace bach {
 
+// 文档绝对地址 0x4840_0000 起是 Core Mem。软件按文档写 ld/st，存储按片内偏移用。
+constexpr uint64_t kVuDocCmemBase = 0x48400000;
+constexpr uint64_t kVuDocCmemBytes = 1024 * 1024;
+inline uint64_t VuStripCmem(uint64_t a) {
+  if (a >= kVuDocCmemBase && a < kVuDocCmemBase + kVuDocCmemBytes) {
+    return a - kVuDocCmemBase;
+  }
+  return a;
+}
+
 // ── 六个 Block 的基址 ──
 constexpr uint64_t kVuDynamicBase = 0x0000;
 constexpr uint64_t kVuStaticBase = 0x1000;
@@ -689,10 +699,12 @@ struct VuMacroInst {
     return (mask & kVuMaskTypeVl) ? dyn.type_vl : dup.type_vl;
   }
   uint64_t LdAddr() const {
-    return (mask & kVuMaskLdAddr) ? dyn.ld_addr : dup.ld_addr;
+    uint64_t a = (mask & kVuMaskLdAddr) ? dyn.ld_addr : dup.ld_addr;
+    return VuStripCmem(a);
   }
   uint64_t StAddr() const {
-    return (mask & kVuMaskStAddr) ? dyn.st_addr : dup.st_addr;
+    uint64_t a = (mask & kVuMaskStAddr) ? dyn.st_addr : dup.st_addr;
+    return VuStripCmem(a);
   }
   uint64_t VrfRd(uint64_t port) const {
     return (mask & kVuMaskVrfRd) ? dyn.VrfRd(port) : dup.VrfRd(port);

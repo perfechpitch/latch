@@ -35,7 +35,9 @@ enum CoreMemPort : uint64_t {
   kCmemReissue = 6,
   kCmemRvCore = 7,
   kCmemCfg = 8,
-  kCmemPortNum = 9,
+  kCmemRvMu = 9,
+  kCmemRvVu = 10,
+  kCmemPortNum = 11,
 };
 
 constexpr uint64_t kCoreMemBytes = 1024 * 1024 + 32 * 1024;
@@ -51,6 +53,8 @@ inline std::vector<MemMaster> CoreMemMasters() {
       {"reissue", 2, 15, 15},   // 后三档平级，先到先得
       {"rv_core", 2, 15, 15},
       {"cfg", 2, 15, 15},
+      {"rv_mu", 2, 15, 15},
+      {"rv_vu", 2, 15, 15},
   };
 }
 
