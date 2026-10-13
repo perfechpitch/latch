@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Tracetto</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=task-chain-1">
 </head>
 <body>
 <header>
@@ -26,6 +26,12 @@
   </div>
 </main>
 
+<section id="task-panel" hidden aria-label="对应 pcode 任务链">
+  <div class="task-heading"><h2 id="task-title">对应 pcode 任务链</h2>
+    <button id="task-close" type="button">收起任务链</button></div>
+  <div class="task-layout"><div id="task-current"></div><div id="task-chain"></div></div>
+</section>
+
 <section id="bottom">
   <div id="props">点一个段看它的来龙去脉</div>
   <div id="legend"></div>
@@ -33,6 +39,6 @@
 
 <div id="tip" hidden></div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=task-chain-1"></script>
 </body>
 </html>

@@ -30,13 +30,18 @@ const S = {
   entries: [], expanded: new Set(), collapsedChips: new Set(),
   view: { t0: 0, t1: 1 }, cache: new Map(), sel: null, hover: null,
   timer: null, inflight: null, loading: false, first: true,
+  taskMapping: false, taskCache: new Map(), taskRequests: new Map(), laneOwners: new Map(),
+  taskSelection: 0,
 };
 
 // ── 波形上印的字 ──────────────────────────────────────────────────────
 // `User_id 77 MU 5 12拍`：单元从通道来（row_parts 里每条通道带自己的单元名），
 // 不从行名里猜。认不出配对的段画淡一点、字写 `?`，颜色仍是本行的颜色。
-function labelOf(unit, seg) {
+function labelOf(unit, seg, owner) {
   if (seg.user < 0 || seg.task < 0) return "?";
+  const info = owner && S.taskCache.get(`${owner.chip}.${owner.core}`);
+  const task = info && taskFor(info, unit, seg.task);
+  if (task) return `${task.fn} · user ${seg.user} · ${seg.t1 - seg.t0}拍`;
   return `User_id ${seg.user} ${unit} ${seg.task} ${seg.t1 - seg.t0}拍`;
 }
 function colorOf(part) { return PALETTE[part.color % PALETTE.length]; }
@@ -50,6 +55,8 @@ async function loadInit() {
   S.row_parts = j.row_parts; S.lanes_per_core = j.lanes_per_core;
   S.chips = j.chips; S.lane_n = j.lane_n; S.missing = j.missing;
   S.cache.clear(); S.sel = null; S.hover = null;
+  S.taskMapping = !!j.task_mapping; S.taskCache.clear(); S.taskRequests.clear();
+  S.taskSelection++; $("task-panel").hidden = true;
   if (S.first) {                       // 第一次进来：看全；之后重载保留当前视窗
     S.first = false;
     S.view = { t0: 0, t1: S.t_end };
@@ -73,6 +80,7 @@ async function loadInit() {
 // ── 树（扁平条目 + 只渲染看得见的那一段）────────────────────────────
 function buildEntries() {
   S.entries = [];
+  S.laneOwners.clear();
   for (const [chip, cores] of S.chips) {
     S.entries.push({ k: "chip", chip, cores });
     if (S.collapsedChips.has(chip)) continue;
@@ -85,6 +93,7 @@ function buildEntries() {
         const parts = S.row_parts[row].map((p) => ({
           ...p, lane: lane_base + p.lane, n: S.lane_n[lane_base + p.lane] || 0,
         }));
+        for (const part of parts) S.laneOwners.set(part.lane, {chip, core});
         S.entries.push({ k: "row", chip, core, row, parts,
                          n: parts.reduce((a, p) => a + p.n, 0) });
       }
@@ -94,11 +103,17 @@ function buildEntries() {
   $("side-inner").style.height = (S.entries.length * ROW_H) + "px";
 }
 
+let treeWindow = null;
 function renderTree() {
   const top = Math.max(0, scroll.scrollTop - ROW_H);
   const h = scroll.clientHeight;
   const a = Math.max(0, Math.floor(top / ROW_H) - 2);
   const b = Math.min(S.entries.length, Math.ceil((top + h) / ROW_H) + 2);
+  const selected = S.sel ? S.sel.lane : null;
+  // 滚动与画布共用一帧更新目录；时间轴缩放、取数完成等不改变目录时不重建 DOM。
+  if (treeWindow && treeWindow.entries === S.entries && treeWindow.a === a
+      && treeWindow.b === b && treeWindow.selected === selected) return;
+  treeWindow = { entries: S.entries, a, b, selected };
   const box = $("side-inner");
   box.textContent = "";
   for (let i = a; i < b; i++) {
@@ -112,7 +127,7 @@ function renderTree() {
         + ` <span class="n">${e.cores.filter((c) => c[1]).length} 个 core</span>`;
       d.onclick = () => {
         if (open) S.collapsedChips.add(e.chip); else S.collapsedChips.delete(e.chip);
-        buildEntries(); renderTree(); scheduleDraw();
+        buildEntries(); renderTree(); scheduleDraw(); scheduleFetch();
       };
     } else if (e.k === "core") {
       d.innerHTML = `<span class="caret">${e.role ? (S.expanded.has(e.lane_base) ? "▾" : "▸") : " "}</span>`
@@ -120,12 +135,12 @@ function renderTree() {
       if (e.role) d.onclick = () => {
         if (S.expanded.has(e.lane_base)) S.expanded.delete(e.lane_base);
         else S.expanded.add(e.lane_base);
-        buildEntries(); renderTree(); scheduleDraw();
+        buildEntries(); renderTree(); scheduleDraw(); scheduleFetch();
       };
     } else {
       d.innerHTML = `${S.rows[e.row]} <span class="n">${e.n}</span>`;
       if (S.sel && e.parts.some((p) => p.lane === S.sel.lane)) d.classList.add("on");
-      d.onclick = () => { S.sel = null; draw(); };
+      d.onclick = () => { S.sel = null; scheduleDraw(); };
     }
     box.appendChild(d);
   }
@@ -144,7 +159,7 @@ function setView(t0, t1) {
   if (t0 < -span * 0.02) { t1 += -span * 0.02 - t0; t0 = -span * 0.02; }
   S.view = { t0, t1 };
 }
-function fitAll() { setView(0, S.t_end); scheduleDraw(); }
+function fitAll() { setView(0, S.t_end); scheduleDraw(); scheduleFetch(); }
 function zoomAt(cx, factor) {
   const t = x2t(cx);
   setView(t - (t - S.view.t0) * factor, t + (S.view.t1 - t) * factor);
@@ -255,6 +270,13 @@ function parseFrame(buf) {
 }
 async function ensureData() {
   const lanes = visibleLanes();
+  if (S.taskMapping) {
+    const owners = new Map(lanes.map(id => {
+      const owner = S.laneOwners.get(id);
+      return [`${owner.chip}.${owner.core}`, owner];
+    }));
+    for (const owner of owners.values()) getCoreTasks(owner.chip, owner.core);
+  }
   const have = new Set();
   for (const id of lanes) if (covered(id, fetchWin())) have.add(id);
   const need = lanes.filter((id) => !have.has(id));
@@ -272,9 +294,12 @@ async function ensureData() {
       await loadInit(); scheduleDraw(); return;
     }
     if (!r.ok) throw new Error("/api/window " + r.status);
-    parseFrame(await r.arrayBuffer());
+    const buf = await r.arrayBuffer();
+    // 新窗口中没有返回的行也应更新为空，不能沿用上一个窗口的空行覆盖范围。
+    for (const id of need) S.cache.delete(id);
+    parseFrame(buf);
     // 这条窗口的空白行也要记下来，不然每次移动都会重新请求它们
-    for (const id of need) if (!S.cache.has(id)) S.cache.set(id, { kind: "exact", segs: [], covers: [w.t0, w.t1] });
+    for (const id of need) if (!S.cache.has(id)) S.cache.set(id, { kind: "exact", segs: [], win: [w.t0, w.t1] });
   } catch (e) {
     if (e.name !== "AbortError") { $("sub").textContent = "取数失败：" + e.message; }
   } finally {
@@ -291,7 +316,7 @@ function scheduleFetch() {
 let raf = 0;
 function scheduleDraw() {
   if (raf) return;
-  raf = requestAnimationFrame(() => { raf = 0; draw(); });
+  raf = requestAnimationFrame(() => { raf = 0; renderTree(); draw(); });
 }
 const _tw = new Map();
 function textW(s) {
@@ -383,14 +408,19 @@ function drawLane(y, e) {
         ctx.globalAlpha = s.user < 0 ? 0.45 : 1;
         ctx.fillRect(xa, y + 3, w, ROW_H - 6);
         ctx.globalAlpha = 1;
-        if (S.sel && S.sel.lane === part.lane && S.sel.seg === s) {
+        if (selectedTask(e, part, s)) {
           ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 2;
           ctx.strokeRect(xa - 1, y + 2, w + 2, ROW_H - 4);
         }
-        const full = labelOf(part.unit, s);
-        if (w >= textW(full)) {
+        const full = labelOf(part.unit, s, e);
+        const info = S.taskCache.get(`${e.chip}.${e.core}`);
+        const task = info && taskFor(info, part.unit, s.task);
+        const short = task ? task.fn : `task ${s.task}`;
+        const id = task && task.datain ? "DATAIN" : `t${task ? task.pcode_task_id : s.task}`;
+        const caption = [full, short, id].find(text => w >= textW(text));
+        if (caption) {
           ctx.fillStyle = "rgba(255,255,255,.92)";
-          ctx.fillText(full, xa + 4, y + ROW_H / 2 + 3.5);
+          ctx.fillText(caption, xa + 4, y + ROW_H / 2 + 3.5);
         }
       }
     } else if (ent.kind === "coarse") {
@@ -425,18 +455,152 @@ function pick(px, py) {
       else if (segs[m].t0 > t) hi = m - 1;
       else { hit = segs[m]; break; }
     }
+    // 放远时两拍任务也画成一像素：按实际画出的标记命中，避免看得到却点不中。
+    if (!hit) {
+      let distance = Infinity;
+      for (const index of [lo - 1, lo]) {
+        const seg = segs[index];
+        if (!seg) continue;
+        const a = t2x(seg.t0), b = Math.max(a + 1, t2x(seg.t1));
+        const d = Math.abs(px - (a + b) / 2);
+        if (px >= a - 1 && px <= b + 1 && d < distance) { hit = seg; distance = d; }
+      }
+    }
     if (hit) return { lane: part.lane, row: e.row, chip: e.chip, core: e.core,
                       unit: part.unit, seg: hit };
   }
   return null;
 }
-function showProps(p) {
-  if (!p) { $("props").textContent = "点一个段看它的来龙去脉"; return; }
+function taskFor(info, unit, id) {
+  const normalized = unit.split("-").at(-1);
+  return (info.tasks || []).find(t => t.unit === normalized && t.native_task_id === id);
+}
+function unitOfRow(name) {
+  const parts = S.row_parts[S.rows.indexOf(name)];
+  return parts && parts[0] ? parts[0].unit.split("-").at(-1) : null;
+}
+function selectedTask(owner, part, seg) {
+  if (!S.sel) return false;
+  const selected = S.laneOwners.get(S.sel.lane);
+  const selectedRow = S.rows[S.sel.row];
+  return selected && selected.chip === owner.chip && selected.core === owner.core
+    && unitOfRow(selectedRow) === part.unit.split("-").at(-1)
+    && S.sel.seg.user === seg.user && S.sel.seg.task === seg.task;
+}
+function getCoreTasks(chip, core) {
+  const key = `${chip}.${core}`;
+  if (S.taskCache.has(key)) return Promise.resolve(S.taskCache.get(key));
+  if (S.taskRequests.has(key)) return S.taskRequests.get(key);
+  const build = S.build;
+  let request;
+  request = (async () => {
+    try {
+      const response = await fetch(`/api/tasks?chip=${chip}&core=${core}`, {cache: "no-store"});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const info = await response.json();
+      if (S.build === build) { S.taskCache.set(key, info); scheduleDraw(); }
+      return info;
+    } catch (error) {
+      return {available: false, reason: "任务链读取失败：" + error.message};
+    } finally {
+      if (S.taskRequests.get(key) === request) S.taskRequests.delete(key);
+    }
+  })();
+  S.taskRequests.set(key, request);
+  return request;
+}
+function taskUserTimes(task, row, user) {
+  const list = task.timings[row] || [];
+  return list.filter(s => user === null || s[2] === user || task.op === "check_flag");
+}
+function renderTaskChain(info, selected, p) {
+  const root = $("task-current"), chain = $("task-chain");
+  root.textContent = ""; chain.textContent = "";
+  $("task-title").textContent = `chip${p.chip} · 物理 core${p.core}`
+    + (info.logical == null ? "" : ` · 逻辑 l${info.logical}`) + ` · h${info.harvest} · pcode 任务链`;
+  const add = (text) => { const d = document.createElement("div"); d.textContent = text; root.appendChild(d); };
+  add(selected.fn);
+  add(`模拟器 task ${selected.native_task_id} ↔ pcode task ${selected.pcode_task_id}`
+    + (selected.datain ? "（DATAIN 独立搬入）" : ""));
+  add(`算子 ${selected.op} · ${selected.unit} · pcode L${selected.pcode_line}`);
+  add(`${selected.data_flow} · Path ${selected.path_id ?? 0}`);
+  add(p.seg ? `当前 ${S.rows[p.row]}：${p.seg.t0}–${p.seg.t1} 拍，共 ${p.seg.t1 - p.seg.t0} 拍`
+    : "本次时序中没有此任务的执行片段");
+  const details = document.createElement("details"), summary = document.createElement("summary");
+  summary.textContent = `查看 pcode 调用 L${selected.pcode_line}`;
+  const pre = document.createElement("pre"); pre.textContent = selected.pcode_call;
+  details.appendChild(summary); details.appendChild(pre); root.appendChild(details);
+  if (info.report_url && /^https?:\/\//.test(info.report_url)) {
+    const link = document.createElement("a");
+    link.href = info.report_url.split("#")[0] + `#chip=${p.chip}&core=${p.core}`
+      + `&harvest=${info.harvest}&task=${selected.pcode_task_id}`;
+    link.target = "_self"; link.textContent = "在三视图中查看此任务 ↗";
+    root.appendChild(link);
+  }
+  const user = selected.op === "check_flag" ? null : (p.seg ? p.seg.user : p.user);
+  for (const task of info.tasks) {
+    const times = taskUserTimes(task, `${task.unit}-Core`, user);
+    const button = document.createElement("button"); button.type = "button";
+    button.className = "task-step" + (task === selected ? " selected" : "")
+      + (!times.length ? " pending" : "");
+    button.setAttribute("aria-pressed", task === selected ? "true" : "false");
+    for (const text of [task.datain ? `DATAIN · ${task.unit}` : `t${task.pcode_task_id} · ${task.unit}`, task.fn]) {
+      const label = document.createElement("span"); label.textContent = text; button.appendChild(label);
+    }
+    const status = document.createElement("span"); status.className = "status";
+    status.textContent = times.length ? `${task.op === "check_flag" ? "控制轮询" : "已执行"} ${times.length} 次`
+      : ([1, 3].includes(task.task_type) ? "本次未执行 · 条件转发" : "本用户未执行");
+    button.appendChild(status);
+    button.onclick = () => {
+      const candidates = [S.rows[p.row], `${task.unit}-DSA`, `${task.unit}-Core`];
+      const rowName = candidates.find(name => unitOfRow(name) === task.unit
+        && taskUserTimes(task, name, user).length);
+      if (!rowName) {
+        S.sel = null; renderTaskChain(info, task, {...p,seg:null,user}); scheduleDraw(); return;
+      }
+      const row = S.rows.indexOf(rowName), entry = S.entries.find(e => e.k === "row"
+        && e.chip === p.chip && e.core === p.core && e.row === row);
+      if (!entry) return;
+      const segment = taskUserTimes(task, rowName, user)[0];
+      const seg = {t0:segment[0],t1:segment[1],user:segment[2],task:segment[3]};
+      S.sel = {lane:entry.parts[0].lane,row,seg};
+      if (seg.t0 < S.view.t0 || seg.t1 > S.view.t1) {
+        const width = Math.max(S.view.t1 - S.view.t0, seg.t1 - seg.t0 + 16);
+        const center = (seg.t0 + seg.t1) / 2; setView(center - width / 2, center + width / 2);
+      }
+      showProps({...p,lane:S.sel.lane,row,unit:entry.parts[0].unit,seg});
+      scheduleDraw(); scheduleFetch();
+    };
+    chain.appendChild(button);
+  }
+  resize(); scheduleDraw(); scheduleFetch();
+}
+async function showProps(p) {
+  const selection = ++S.taskSelection;
+  if (!p) {
+    $("props").textContent = "点一个段看它的来龙去脉"; $("task-panel").hidden = true;
+    resize(); scheduleDraw(); return;
+  }
   const s = p.seg;
   const what = s.user < 0 ? "<b>?</b>（没配对上下发）"
     : `User_id <b>${s.user}</b> · ${p.unit} · task <b>${s.task}</b>`;
   $("props").innerHTML = `chip${p.chip} · core${p.core} · ${S.rows[p.row]}　${what}　`
     + `起 ${s.t0} 止 ${s.t1}　共 <b>${s.t1 - s.t0}</b> 拍`;
+  $("task-panel").hidden = false; $("task-title").textContent = "对应 pcode 任务链";
+  $("task-current").textContent = "读取任务链…"; $("task-chain").textContent = "";
+  resize(); scheduleDraw(); scheduleFetch();
+  const info = await getCoreTasks(p.chip, p.core);
+  if (selection !== S.taskSelection) return;
+  const task = taskFor(info, p.unit, s.task);
+  if (!info.available || !task) {
+    $("task-current").textContent = info.reason || "此段没有匹配到 pcode 任务"; return;
+  }
+  renderTaskChain(info, task, p);
+}
+$("task-close").onclick = () => { S.taskSelection++; $("task-panel").hidden = true;
+  resize(); scheduleDraw(); scheduleFetch(); };
+if (typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => { resize(); scheduleDraw(); scheduleFetch(); }).observe(scroll);
 }
 cv.addEventListener("pointerdown", (ev) => {
   const r = cv.getBoundingClientRect();
@@ -462,7 +626,7 @@ cv.addEventListener("mousemove", (ev) => {
   if (!p) { if (!tip.hidden) tip.hidden = true; return; }
   const s = p.seg;
   tip.hidden = false;
-  tip.textContent = `${labelOf(p.unit, s)}　第 ${s.t0} ～ ${s.t1} 拍`;
+  tip.textContent = `${labelOf(p.unit, s, p)}　第 ${s.t0} ～ ${s.t1} 拍 · 点击查看 pcode 任务链`;
   tip.style.left = Math.min(window.innerWidth - 240, ev.clientX + 14) + "px";
   tip.style.top = (ev.clientY + 16) + "px";
 });
@@ -474,7 +638,7 @@ cv.addEventListener("wheel", (ev) => {
   scheduleFetch();
 }, { passive: false });
 scroll.addEventListener("scroll", () => { scheduleDraw(); scheduleFetch(); });
-window.addEventListener("resize", () => { resize(); scheduleDraw(); });
+window.addEventListener("resize", () => { resize(); renderTree(); scheduleDraw(); scheduleFetch(); });
 window.addEventListener("keydown", (ev) => {
   const k = ev.key.toLowerCase();
   if (k === "f") fitAll();

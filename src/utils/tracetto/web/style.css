@@ -25,7 +25,8 @@ header button:hover{border-color:var(--accent);color:var(--accent)}
 #banner{padding:7px 14px;background:var(--warn);color:#fff;font-size:12.5px}
 #banner.bad{background:var(--bad)}
 main{flex:1;min-height:0;display:flex}
-#scroll{flex:1;overflow-y:auto;overflow-x:hidden;position:relative;display:flex}
+#scroll{flex:1;overflow-y:auto;overflow-x:hidden;position:relative;display:flex;
+        overflow-anchor:none} /* 虚拟目录替换条目时，不让浏览器自行改变滚动位置。 */
 #side{width:264px;flex:0 0 264px;border-right:1px solid var(--line);background:var(--panel);
       position:relative}
 #right{flex:1;position:relative;min-width:0;background:var(--bg)}
@@ -55,3 +56,24 @@ main{flex:1;min-height:0;display:flex}
 #tip{position:fixed;z-index:9;pointer-events:none;background:var(--panel);color:var(--ink);
      border:1px solid var(--line);border-radius:6px;padding:5px 9px;font-family:var(--mono);
      font-size:11.5px;box-shadow:0 4px 14px rgba(0,0,0,.18);white-space:nowrap}
+
+#task-panel{border-top:1px solid var(--line);background:var(--panel);padding:10px 14px;
+            max-height:42vh;overflow:auto;flex-shrink:0}
+#task-panel[hidden]{display:none}
+.task-heading{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.task-heading h2{margin:0;font-size:13px;flex:1}
+.task-heading button{cursor:pointer}
+.task-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,2fr);gap:16px}
+#task-current{font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+#task-current pre{white-space:pre-wrap;font:11px/1.5 var(--mono);max-height:180px;overflow:auto}
+#task-current a{color:var(--accent)}
+#task-chain{display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start}
+.task-step{display:flex;flex-direction:column;align-items:flex-start;gap:3px;
+           padding:6px 9px;border:1px solid var(--line);border-radius:5px;
+           background:var(--box);color:var(--ink);font:11px var(--mono);cursor:pointer}
+.task-step.selected{border:2px solid var(--accent);padding:5px 8px;background:var(--panel)}
+.task-step.pending{border-style:dashed;color:var(--dim)}
+.task-step .status{font:10px var(--sans)}
+#bottom{flex-wrap:wrap}
+#props{white-space:normal}
+@media(max-width:700px){.task-layout{grid-template-columns:1fr}}

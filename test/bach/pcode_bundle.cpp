@@ -119,8 +119,19 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
     uint64_t n = std::stoull(threads); ASSERT_GT(n,0u); ASSERT_LE(n,16u);
     RT::Reset(n, (600 + n - 1) / n);
   } else EnsureSlots(kChipNum * (kMaxCorePerChip + 1));
+  uint64_t trace_chips = 0;
+  if (auto count = std::getenv("PCODE_TRACE_CHIPS")) trace_chips = std::stoull(count);
+  ASSERT_LE(trace_chips, kChipNum);
+  auto trace_prefix = std::getenv("PCODE_TRACE_PREFIX");
+  if (trace_prefix) TraceInto(trace_prefix);
+  // Finalize after the subsequently constructed modules flush their signals,
+  // while the runtime module table is still available to name the waveform.
+  struct TraceFinalizer {
+    bool enabled;
+    ~TraceFinalizer() { if (enabled) TraceDone(); }
+  } trace_finalizer{trace_chips > 0 || trace_prefix != nullptr};
   auto clk = MakeClock(0, 1);
-  auto owned = MakeLpuChips(clk, 0);
+  auto owned = MakeLpuChips(clk, trace_chips);
   std::vector<Chip*> all;
   for (auto& c : owned) all.push_back(c.get());
   LoadBundle(all, root, "pcode_ep6_tp8");

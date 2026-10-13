@@ -72,6 +72,27 @@ class TraceServer(ThreadingHTTPServer):
         self.manifest = manifest
         self.dir = index.index_dir(self.prefix)
         self.build = index.build_id(manifest["source"])
+        self.tasks = None
+        self.task_reason = "这份波形尚未关联 pcode 任务链"
+        task_file = self.trace.with_suffix(".tasks.json")
+        if task_file.exists():
+            try:
+                tasks = json.loads(task_file.read_text(encoding="utf-8"))
+                if tasks.get("format") == 1 and index.identity_matches(self.trace, tasks.get("source", {})):
+                    self.tasks = tasks
+                else:
+                    self.task_reason = "任务链映射已过期，请为这份波形重新生成"
+            except (OSError, ValueError):
+                self.task_reason = "任务链映射文件读取失败"
+        # 通道号只对有数据的 core 连续编号，索引文件号却包含只转发的 core。
+        # 必须按 manifest 的 lane_base 映射，不能直接用 lane / 通道步长作文件号。
+        self.lane_cores = {}
+        ci = 0
+        for _chip, cores in manifest["chips"]:
+            for _core, _role, lane_base in cores:
+                if lane_base >= 0:
+                    self.lane_cores[lane_base // manifest["lanes_per_core"]] = ci
+                ci += 1
         for cf in self._cores.values():
             cf.close()
         self._cores.clear()
@@ -128,6 +149,10 @@ class Handler(SimpleHTTPRequestHandler):
                                    head_only=not want_body, cache="no-cache")
         if parts.path.startswith("/static/"):
             rest = parts.path[len("/static"):]
+            if rest in ("/app.js", "/style.css"):
+                kind = "text/javascript" if rest.endswith(".js") else "text/css"
+                return self._send_file(WEB_DIR / rest[1:], kind + "; charset=utf-8",
+                                       head_only=not want_body, cache="no-cache")
             if rest.endswith("/"):
                 return self.send_error(404, "not found")     # 不列目录
             self.path = rest
@@ -140,6 +165,19 @@ class Handler(SimpleHTTPRequestHandler):
             return self._init(head_only)
         if route == "/api/window":
             return self._window(query, head_only)
+        if route == "/api/tasks":
+            try:
+                chip, core = int(self._one(query, "chip") or ""), int(self._one(query, "core") or "")
+            except ValueError:
+                return self.send_error(400, "chip and core must be integers")
+            srv = self.server
+            if srv.tasks is None:
+                return self._send_json({"available": False, "reason": srv.task_reason}, head_only)
+            info = srv.tasks["cores"].get(f"{chip}.{core}")
+            if info is None:
+                return self.send_error(404, "core absent from task mapping")
+            return self._send_json({"available": True, "build": srv.build,
+                                    "report_url": srv.tasks.get("report_url", ""), **info}, head_only)
         if route == "/api/status":
             srv = self.server
             return self._send_json({"build": srv.build, "building": srv.building,
@@ -166,6 +204,7 @@ class Handler(SimpleHTTPRequestHandler):
             "missing": m["missing"],
             "chips": m["chips"],
             "lane_n": m["lane_n"],
+            "task_mapping": srv.tasks is not None,
         }
         body = json.dumps(payload, separators=(",", ":"),
                           ensure_ascii=False).encode("utf-8")
@@ -201,8 +240,9 @@ class Handler(SimpleHTTPRequestHandler):
             for lane_id in lanes:
                 # 通道号是“core 序号 × 一个 core 几条通道 + 通道号”，步长与
                 # 显示成几行无关（TS 拆成三行之后仍然是一行对一条通道）。
-                ci, row = divmod(lane_id, srv.manifest["lanes_per_core"])
-                if ci >= len(srv.manifest["core_size"]):
+                ordinal, row = divmod(lane_id, srv.manifest["lanes_per_core"])
+                ci = srv.lane_cores.get(ordinal)
+                if ci is None:
                     continue
                 # 不派角色的 core 没有索引文件（manifest 里 core_size 记 0），它本来
                 # 就没有行：跳过。不能落到下面那个 FileNotFoundError 上 —— 那是留给

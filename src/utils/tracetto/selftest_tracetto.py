@@ -768,6 +768,103 @@ def check_cmake_path():
                 "CMakeLists 没指着 selftest")
 
 
+def check_http_forwarding_cores():
+    """只转发的 core 穿插在两个计算 core 前面，通道号仍必须读取正确文件。"""
+    with tempfile.TemporaryDirectory() as d:
+        prefix = str(Path(d) / "forwarding")
+        modules = [(1, 0, "chip0"), (10, 1, "core0"), (2, 1, "core1"),
+                   (11, 1, "core2"), (12, 1, "core3"),
+                   (50, 10, "router_packets"), (51, 11, "router_packets")]
+        modules += [m for m in MODULES if m[0] >= 100]
+        modules += [(mid + 1000, 12, name) for mid, _parent, name in MODULES if mid >= 100]
+        signals = dict(SIGNALS)
+        signals.update({50: [(0, 0), (200, 1)], 51: [(0, 0), (200, 1)]})
+        # 第二个计算 core 整体晚 100 拍，用字节比对检测串行读错 core。
+        signals.update({sid + 1000: [(t + 100, v) for t, v in events]
+                        for sid, events in SIGNALS.items()})
+        trace = Path(prefix + ".trace")
+        write_trace(trace, modules, signals)
+        manifest, _ = idxbuild.ensure(trace, workers=1, quiet=True)
+        srv = server.TraceServer(("127.0.0.1", 0), server.Handler, trace, manifest, 1)
+        th = threading.Thread(target=srv.serve_forever, daemon=True)
+        th.start()
+        try:
+            expect(manifest["chips"][0][1],
+                   [[0, 0, -1], [1, 1, 0], [2, 0, -1], [3, 1, 10]],
+                   "只转发 core 不占用通道编号")
+            expect(srv.lane_cores, {0: 1, 1: 3}, "紧凑通道编号映射物理文件编号")
+            url = (f"http://127.0.0.1:{srv.server_address[1]}"
+                   "/api/window?lanes=0-19&t0=0&t1=200&px=1200")
+            with urllib.request.urlopen(url, timeout=10) as response:
+                raw = response.read()
+            n = struct.unpack_from("<I", raw, 4)[0]
+            head = json.loads(raw[8:8 + n])
+            expect(sorted(e["lane"] for e in head["lanes"]), list(range(20)),
+                   "只转发 core 后的全部计算通道都返回")
+            for e in head["lanes"]:
+                ordinal, row = divmod(e["lane"], 10)
+                cf = index.CoreFile(index.index_dir(prefix) / index.CORES_DIR
+                                    / f"{[1, 3][ordinal]:05d}.bin")
+                try:
+                    window = cf.window(row, 0, 200, 1200)
+                    expected = cf.read(window["off"], window["end"])
+                finally:
+                    cf.close()
+                expect(raw[8 + n + e["off"]:8 + n + e["off"] + e["len"]], expected,
+                       f"通道 {e['lane']} 的窗口来自正确物理 core")
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            th.join(timeout=2)
+
+
+def check_http_task_mapping(prefix):
+    trace = Path(prefix + ".trace")
+    manifest, _ = idxbuild.ensure(trace, workers=1, quiet=True)
+    info = {"chip": 0, "core": 0, "harvest": 0, "logical": 8,
+            "tasks": [{"fn": "pcie_sw_data_in", "unit": "DTE",
+                       "native_task_id": 63, "pcode_task_id": -1}]}
+    mapping = {"format": 1, "source": index.source_identity(trace),
+               "report_url": "http://127.0.0.1:8901/report.html", "cores": {"0.0": info}}
+    file = trace.with_suffix(".tasks.json")
+    file.write_text(json.dumps(mapping))
+    srv = server.TraceServer(("127.0.0.1", 0), server.Handler, trace, manifest, 1)
+    th = threading.Thread(target=srv.serve_forever, daemon=True)
+    th.start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def get(path):
+        with urllib.request.urlopen(base + path, timeout=10) as response:
+            return json.load(response)
+
+    try:
+        expect(get("/api/init")["task_mapping"], True, "init 表明关联了任务链")
+        actual = get("/api/tasks?chip=0&core=0")
+        expect(actual["tasks"], info["tasks"], "DATAIN 的两种编号完整保留")
+        expect(actual["harvest"], 0, "API 使用实际 harvest")
+        for query, code in (("chip=x&core=0", 400), ("chip=99&core=0", 404)):
+            try:
+                get("/api/tasks?" + query)
+                FAILS.append(f"task mapping {query} should return {code}")
+            except urllib.error.HTTPError as error:
+                expect(error.code, code, "任务链请求参数检查")
+        mapping["source"]["size"] += 1
+        file.write_text(json.dumps(mapping))
+        with srv.lock:
+            srv.set_manifest(manifest)
+        expect(get("/api/tasks?chip=0&core=0")["available"], False,
+               "禁止把旧波形任务链套到新波形")
+        expect_true("过期" in get("/api/tasks?chip=0&core=0")["reason"], "说明映射过期原因")
+        file.unlink()
+        with srv.lock:
+            srv.set_manifest(manifest)
+        expect(get("/api/init")["task_mapping"], False, "普通波形可不带 pcode 映射")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        th.join(timeout=2)
+
+
 def main():
     with_trace(check_tree)
     with_trace(check_bits)
@@ -778,6 +875,8 @@ def main():
     with_trace(check_reuse)
     with_trace(check_parallel_determinism)
     with_trace(check_http)
+    check_http_forwarding_cores()
+    with_trace(check_http_task_mapping)
     with_trace(check_labels)
     check_chain()
     check_step_chain()

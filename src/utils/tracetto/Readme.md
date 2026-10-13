@@ -48,6 +48,25 @@ DTE / MU 没有这一层，它们的 DSA 行仍从各自「过门槛」那一拍
 
 只有 Router 在用的 core（坏 core 与 TS 没配过任务的好 core，没有 `ts_inflight`）没有数据，树上标“只有 Router”，点不开。
 
+## 对应 pcode 任务链
+
+可以为 pcode 导出的波形生成任务映射，点击时序块后显示实际物理 core 对应的整条任务链、
+高亮任务、算子、pcode 调用位置与时间。DATAIN 同时显示模拟器编号 63 和原 pcode 编号；
+条件转发分支会标明本次是否执行。Core、DSA 和 TS 中属于同一任务的块会一起高亮。
+
+```sh
+python src/utils/tracetto/pcode_tasks.py path/to/case.trace \
+  --html path/to/pcode_report.html --bundle path/to/pcode_ep6_tp8 \
+  --report-url http://127.0.0.1:8901/pcode_report.html
+```
+
+生成 `case.tasks.json`，启动 Tracetto 时自动读取。映射从导出 bundle 的坏核掩码选取 harvest，
+处理自启动核的任务重新编号，并检查记录中的 bundle 校验值和每条原生任务链。
+与当前波形身份不符的映射会被拒绝，未关联的普通波形仍可照常查看。
+三视图报告支持 `#chip=0&core=1&harvest=0&task=2` 链接，定位对应物理核和任务卡片。
+
+前端回归：`node src/utils/tracetto/selftest_frontend.cjs`（无需额外 npm 依赖）。
+
 ## 索引
 
 一份波形一份索引，落在波形旁边：`<波形名>.tracetto-index/`（`.gitignore` 里已经忽略）。
