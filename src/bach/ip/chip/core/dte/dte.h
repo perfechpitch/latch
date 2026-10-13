@@ -160,6 +160,7 @@ private:
       commit->AddLanePort(l->AdmitPtr());
     comp->AttachAdmit(commit->RsPortPtr());
     comp->AttachCanceled(commit->CancelPtr());
+    reg->BindError([this] { return comp->Error() != 0; });
     // The source does not freeze control offsets. These are model parameters.
     reg->BindControl(
         [this](uint64_t at) -> uint64_t {

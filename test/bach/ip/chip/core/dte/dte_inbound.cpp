@@ -50,6 +50,7 @@ public:
     uint64_t bytes = 0;
     bool last = false;
     MessagePtr msg;
+    bool head = true;
   };
 
   ParserHarness(ClockPtr c, HeaderParser &target)
@@ -112,7 +113,7 @@ private:
       }
     }
     Beat const &b = beats[cursor];
-    in.Drive(b.bytes, b.last, cursor == 0, 0, b.msg);
+    in.Drive(b.bytes, b.last, b.head, 0, b.msg);
     driving = true;
   }
 
@@ -129,7 +130,7 @@ std::vector<ParserHarness::Beat> Frame(uint64_t at, MessagePtr const &m) {
   uint64_t left = m->size;
   for (uint64_t i = 0; i < n; ++i) {
     uint64_t take = left > kFlitBytes ? kFlitBytes : left;
-    out.push_back({at + i, take, i + 1 == n, m});
+    out.push_back({at + i, take, i + 1 == n, m, i == 0});
     left -= take;
   }
   return out;
@@ -194,7 +195,7 @@ TEST(BachHeaderParser, PayloadIsForwardedBeatByBeat) {
 }
 
 // 靠上一帧的 TLAST 判断下一拍是新 Header：两帧首尾相接，各存一次包头。
-TEST(BachHeaderParser, TlastMarksTheFrameBoundary) {
+TEST(BachHeaderParser, HeadAndTailMarkTheFrameBoundary) {
   uint64_t parsed = 0;
   std::vector<uint64_t> frames;
   {
@@ -310,4 +311,44 @@ TEST(BachHeaderParser, FramesGetDistinctFrameNumbers) {
   EXPECT_EQ(first_frames[0], 1u);
   EXPECT_EQ(first_frames[1], 2u);
   EXPECT_EQ(first_frames[2], 3u);
+}
+
+
+TEST(BachHeaderParser, MissingHeadIsPacketError) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  HeaderParser hp(clock, "hp", 0, false);
+  ParserHarness driver(clock, hp);
+  auto msg = MakeMsg(41, 7, 256, 0, 0);
+  driver.beats = {{2, 256, true, msg, false}};
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(driver.errors, 1u);
+  RT::Reset();
+}
+TEST(BachHeaderParser, SecondHeadBeforeTailIsPacketError) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  HeaderParser hp(clock, "hp", 0, false);
+  ParserHarness driver(clock, hp);
+  auto msg = MakeMsg(41, 7, 512, 0, 0);
+  driver.beats = {{2, 256, false, msg, true}, {3, 256, true, msg, true}};
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_GE(driver.errors, 1u);
+  RT::Reset();
+}
+
+TEST(BachHeaderParser, PayloadLengthReachedWithoutTailIsPacketError) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  HeaderParser hp(clock, "hp", 0, false);
+  ParserHarness driver(clock, hp);
+  auto msg = MakeMsg(41, 7, 256, 0, 0);
+  driver.beats = {{2, 256, false, msg, true}};
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(driver.errors, 1u);
+  EXPECT_FALSE(hp.Quiescent());
+  RT::Reset();
 }

@@ -425,10 +425,36 @@ TEST(BachCompletionRs, YoungerErrorWaitsForHeadAndFirstErrorIsRetained) {
   EXPECT_EQ(rs.ErrorEntry(), 1u);
   EXPECT_EQ(rs.Interrupt(), 1u);
   EXPECT_EQ(driver.reports.size(), 1u);
-  EXPECT_TRUE(rs.Quiescent());
+  EXPECT_FALSE(rs.Quiescent());
   rs.SetInterruptMask(1);
   EXPECT_EQ(rs.Interrupt(), 0u);
   rs.ClearError(1);
   EXPECT_EQ(rs.Error(), 0u);
+  RT::Reset();
+}
+
+
+TEST(BachCompletionRs, ErrorHeadKeepsEntryAndStopsYoungerAck) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  CompletionRs rs(clock, "rs", 0, false);
+  CompHarness driver(clock, rs);
+  auto bad = Task(1, 1, 2);
+  bad->error = 3;
+  auto younger = Task(2, 2, 3);
+  younger->entry_id = 1;
+  younger->wr_sharemem_flag = true;
+  younger->smem_addr = 8;
+  driver.admits = {{2, bad}, {3, younger}};
+  driver.halves = {{5, 2, true, true}, {6, 2, false, true}};
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(rs.Error(), 3u);
+  EXPECT_NE(rs.EntryState(1), 0u);
+  EXPECT_NE(rs.EntryState(2), 0u);
+  EXPECT_FALSE(rs.Quiescent());
+  EXPECT_TRUE(driver.reports.empty());
+  EXPECT_TRUE(driver.smem.empty());
+  EXPECT_EQ(rs.NoAckCnt(), 0u);
   RT::Reset();
 }

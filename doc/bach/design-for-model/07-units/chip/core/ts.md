@@ -1515,7 +1515,7 @@ Map提供有效等待SID、Current TID、新方向与Head。Credit Ctrl登记后
 
 软件将需要业务资源的方向写入TS RouterTable。Core连接按真实release归还TS已取得的方向许可，Data NOC转发方向由独立RouterTable配置。Reduce使用Core与DTE双ACK，RMEM返回独立处理。
 
-APB访问检查地址、完整字写入和提交完整性；配置错误阻止普通模式及SELF_START启动。原文尚未统一的寄存边界、权重触发时点和检查清单保存在TBD。
+APB访问检查地址、完整字写入和提交完整性；配置错误阻止普通模式及SELF_START启动。ATTR写入分别过滤send、recv和type的保留编码，保留对应旧字段，其余合法字段照常更新；boot辅助接口使用相同规则。原文尚未统一的寄存边界、权重触发时点和检查清单保存在TBD。
 
 ## 9　取舍
 

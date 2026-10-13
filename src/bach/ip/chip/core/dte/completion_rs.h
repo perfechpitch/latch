@@ -184,7 +184,7 @@ private:
     auto it = rs.find(p.commit_seq.Get());
     if (it == rs.end())
       return;
-    if (p.error.Get())
+    if (p.error.Get() && !it->second.desc.error)
       it->second.desc.error = p.error.Get();
     bool drained = p.drained.Get() != 0;
     if (which == kRd) {
@@ -216,19 +216,33 @@ private:
     auto it = rs.find(seq);
     LOGCHECK(it != rs.end(), "CompletionRs: SM响应命中已释放Entry。");
     it->second.smem_complete = true;
-    if (smem_wr->WriteRspValid() ? smem_wr->WriteRspError()
-                                 : smem_wr->RspError())
+    if (!it->second.desc.error &&
+        (smem_wr->WriteRspValid() ? smem_wr->WriteRspError()
+                                  : smem_wr->RspError()))
       it->second.desc.error = 7;
   }
 
   void Report() {
     smem_used = false;
+    if (first_error || rs.empty())
+      return;
+    auto head = rs.begin();
+    Entry const &head_entry = head->second;
+    if (head_entry.joined && head_entry.desc.error) {
+      first_error = head_entry.desc.error;
+      first_entry = head_entry.desc.entry_id;
+      if (!interrupt_mask)
+        exception->Drive(head_entry.desc);
+      error_ids = head_entry.desc.stream_id | (head_entry.desc.task_id << 4) |
+                  (head_entry.desc.user_id << 10) | (head_entry.desc.path_id << 26);
+      return;
+    }
     // SM Ptr按接纳序扫描，允许旧写等待响应时继续发年轻的SM写。
     for (auto &kv : rs) {
       Entry &e = kv.second;
-      if (!e.joined)
+      if (!e.joined || e.desc.error)
         break;
-      if (!e.desc.wr_sharemem_flag || e.desc.error) {
+      if (!e.desc.wr_sharemem_flag) {
         e.smem_complete = true;
         continue;
       }
@@ -246,20 +260,9 @@ private:
       smem_used = true;
       break;
     }
-    if (rs.empty())
-      return;
-    auto head = rs.begin();
     Entry const &e = head->second;
     if (!e.joined || !e.smem_complete)
       return;
-    if (e.desc.error && !first_error) {
-      first_error = e.desc.error;
-      first_entry = e.desc.entry_id;
-      if (!interrupt_mask)
-        exception->Drive(e.desc);
-      error_ids = e.desc.stream_id | (e.desc.task_id << 4) |
-                  (e.desc.user_id << 10) | (e.desc.path_id << 26);
-    }
     if (e.desc.ack_ts_en && !e.desc.error) {
       to_ts->Drive(e.desc.stream_id, e.desc.task_id, e.desc.user_id);
       done_task = e.desc.task_id;

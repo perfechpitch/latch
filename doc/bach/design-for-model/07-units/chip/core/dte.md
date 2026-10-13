@@ -1430,6 +1430,10 @@ MM地址只要求8B合法，6592B槽合法但多数槽跨256B边界增加请求�
 
 `lane.h`按段译码端点，CM/MM在256B边界执行双128B事务，保留跨拍余量；M Top的MM与topK请求共用仲裁，topK每256B分两笔128B。HeaderTable采用16组、每组32项，包头按32B硬件位序读写。Regfile、控制网络、kernel和生成产物使用同一建模基线。
 
+ERROR保留异常队头及原描述符，停止SM与退休推进，继续收集已Fire响应。Regfile在ERROR中保持ready并丢弃Trigger、清dirty。HeaderParser按显式head/tail和有效长度检查Packet边界。HeaderTable每拍最多一读、一写；各Channel的Buffer每拍最多写入一份响应或RX数据，尚未写入的响应仍占原预留槽及Outstanding。OutCh3出Router经过额外一拍输出级，反压时保持flit，尾拍交付后才转Hold。
+
+波形的data/scale位置仍按Route推断，尚未按每段端点记录；Route与段端点不同或多段使用不同存储时，位置参数不能准确表示实际访问。模型观测沿用下发和ACK报告两个计数，新增PMU统计不纳入当前建模范围。
+
 控制、异常及观测的模型地址、ERROR和Flush恢复边界保存在TBD。复位及残包终止的硬件协议仍需统一；运行模型使用已确认的位序、STOP反压、多搬运任务最后一条ACK及E2许可提交。
 
 

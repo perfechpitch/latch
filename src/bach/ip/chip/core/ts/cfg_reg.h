@@ -70,7 +70,7 @@ public:
   void WriteTask(uint64_t idx, TaskEntry e) {
     LOGCHECK(idx < kTaskChainNum, "CfgReg: task_chain 下标越界。");
     e.valid = true;
-    chain[idx] = e;
+    chain[idx] = PreserveReserved(e, chain[idx]);
     task_written = true;
     pc_written[idx] = attr_written[idx] = true;
   }
@@ -126,6 +126,7 @@ public:
           t.task_pc = value;
           pc_written[tid] = true;
         } else {
+          TaskEntry previous = t;
           t.send_unit = SendUnit(value & 3);
           t.recv_unit = RecvUnit((value >> 2) & 3);
           t.wait_wake = ((value >> 4) & 1) != 0;
@@ -135,6 +136,7 @@ public:
           t.path_id = (value >> 15) & 255;
           t.end = ((value >> 23) & 1) != 0;
           t.valid = true;
+          t = PreserveReserved(t, previous);
           attr_written[tid] = true;
         }
         task_written = true;
@@ -254,6 +256,15 @@ protected:
   }
 
 private:
+  static TaskEntry PreserveReserved(TaskEntry next, TaskEntry const &previous) {
+    if (uint64_t(next.send_unit) > 2)
+      next.send_unit = previous.send_unit;
+    if (uint64_t(next.recv_unit) > 2)
+      next.recv_unit = previous.recv_unit;
+    if (uint64_t(next.task_type) > 5)
+      next.task_type = previous.task_type;
+    return next;
+  }
   void DeriveMasks() {
     data_in_mask = through_end_mask = 0;
     for (uint64_t i = 0; i < kTaskChainNum; ++i) {

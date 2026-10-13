@@ -257,7 +257,7 @@ TEST(BachTsCfg, FlowControlWindowIsPerPath) {
   RT::Reset();
 }
 
-TEST(BachTsCfg, ApbRejectsPartialWritesIllegalEncodingAndHalfWrittenTasks) {
+TEST(BachTsCfg, ApbChecksWritesAndPreservesReservedSendingUnit) {
   auto clock = MakeClock(0, kPeriod);
   CfgReg cfg(clock, "cfg", 0, false);
   EXPECT_TRUE(cfg.Access(1, true, 0).error);
@@ -266,7 +266,9 @@ TEST(BachTsCfg, ApbRejectsPartialWritesIllegalEncodingAndHalfWrittenTasks) {
   EXPECT_FALSE(cfg.Access(0, true, 0x100).error);
   cfg.Access(0x20c, true, 1);
   EXPECT_FALSE(cfg.InitFinished());
-  cfg.Access(4, true, (1u << 23) | 3u); // illegal sending unit
+  cfg.Access(4, true, (1u << 23) | 3u);
+  EXPECT_EQ(cfg.Task(0).send_unit, SendUnit::kDte);
+  cfg.Access(0x208, true, 0);
   cfg.Access(0x20c, true, 1);
   EXPECT_FALSE(cfg.InitFinished());
   cfg.Access(4, true, 1u << 23);
@@ -307,5 +309,41 @@ TEST(BachTsCfg, ApbPortSamplesAccessPhaseAndReturnsSlaveError) {
   EXPECT_EQ(driver.pc, 0x1234u);
   EXPECT_EQ(driver.error, 1u);
   EXPECT_FALSE(cfg.Task(0).valid);
+  RT::Reset();
+}
+
+
+TEST(BachTsCfg, ReservedAttrEncodingsKeepPreviousFields) {
+  auto clock = MakeClock(0, kPeriod);
+  CfgReg cfg(clock, "cfg", 0, false);
+  cfg.WriteTask(0, Last());
+  auto before = cfg.Access(4, false).data;
+  auto reserved = (before & ~uint32_t(0xef)) | 3u | (3u << 2) | (6u << 5);
+  EXPECT_FALSE(cfg.Access(4, true, reserved).error);
+  EXPECT_EQ(cfg.Task(0).send_unit, SendUnit::kDte);
+  EXPECT_EQ(cfg.Task(0).recv_unit, RecvUnit::kDsa);
+  EXPECT_EQ(cfg.Task(0).task_type, TaskType::kNormal);
+  cfg.SetInitFinish();
+  EXPECT_TRUE(cfg.InitFinished());
+  RT::Reset();
+}
+
+TEST(BachTsCfg, BootHelperPreservesReservedFieldsAndUpdatesValidFields) {
+  auto clock = MakeClock(0, kPeriod);
+  CfgReg cfg(clock, "cfg", 0, false);
+  auto previous = Last();
+  cfg.WriteTask(0, previous);
+  auto next = previous;
+  next.send_unit = SendUnit(3);
+  next.recv_unit = RecvUnit(3);
+  next.task_type = TaskType(7);
+  next.path_id = 17;
+  cfg.WriteTask(0, next);
+  EXPECT_EQ(cfg.Task(0).send_unit, previous.send_unit);
+  EXPECT_EQ(cfg.Task(0).recv_unit, previous.recv_unit);
+  EXPECT_EQ(cfg.Task(0).task_type, previous.task_type);
+  EXPECT_EQ(cfg.Task(0).path_id, 17u);
+  cfg.SetInitFinish();
+  EXPECT_TRUE(cfg.InitFinished());
   RT::Reset();
 }

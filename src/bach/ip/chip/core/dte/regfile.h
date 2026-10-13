@@ -210,6 +210,7 @@ public:
     control_read = std::move(read);
     control_write = std::move(write);
   }
+  void BindError(std::function<bool()> read) { error_state = std::move(read); }
   void ConfigWrite(uint64_t at, uint64_t data) { WriteReg(at, data); }
   uint64_t ConfigRead(uint64_t at) const { return ReadReg(at); }
   // ── 观测 ──
@@ -236,7 +237,7 @@ protected:
     if (!rdata_used)
       rdata->Idle();
 
-    cfg->DriveReady(out->Credits() > submitted.size());
+    cfg->DriveReady(InError() || out->Credits() > submitted.size());
     triggers = trig_cnt;
     writes = write_cnt;
     TracePerCycle("submitted", submitted.size());
@@ -254,6 +255,7 @@ protected:
   }
 
 private:
+  bool InError() const { return error_state && error_state(); }
   void Drain() {
     uint64_t ack = out->AcceptedSeq();
     while (!submitted.empty() && submitted.front() <= ack)
@@ -264,7 +266,7 @@ private:
   void TakeCfg() {
     if (!cfg->Valid() || cfg->Seq() == last_seq)
       return;
-    if (out->Credits() <= submitted.size())
+    if (!InError() && out->Credits() <= submitted.size())
       return;
     last_seq = cfg->Seq();
     uint64_t at = cfg->req_addr.Get();
@@ -355,6 +357,11 @@ private:
 
   // 写 CFG_TRIGGER 那一拍：合并配置 → 采样 STUPV → 组装 4 段位 Descriptor。
   void Fire(uint64_t trigger) {
+    if (InError()) {
+      dirty = 0;
+      cfg_write_cnt = 0;
+      return;
+    }
     bool temp_valid = (trigger & kDteTempValid) != 0;
     uint64_t temp_idx = (trigger >> kDteTempIndexShift) & kDteTempIndexMask;
 
@@ -428,6 +435,7 @@ private:
 
   std::function<uint64_t(uint64_t)> control_read;
   std::function<void(uint64_t, uint64_t)> control_write;
+  std::function<bool()> error_state;
   Agcu agcu;
   std::shared_ptr<DsaCfgPort> cfg;
   std::shared_ptr<DescPort> out;

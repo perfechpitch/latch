@@ -79,7 +79,7 @@ public:
   }
   bool Quiescent() const override {
     return q[0].Empty() && q[1].Empty() && !active[0] && !active[1] &&
-           !hold[0] && !hold[1] && !deferred;
+           !hold[0] && !hold[1] && !deferred && responses.empty() && !tx_stage;
   }
 
 protected:
@@ -114,6 +114,7 @@ protected:
     wr_done->Idle();
     Collect();
     Report();
+    ForwardTxStage();
     TakeAdmit();
     Activate();
     TakePayload();
@@ -179,6 +180,16 @@ private:
   };
   struct Flight {
     uint64_t seq = 0, slot = 0, skip = 0, bytes = 0, offset = 0;
+  };
+  struct BufferedResponse {
+    Flight flight;
+    ByteBlock bytes;
+    uint64_t error = 0;
+  };
+  struct TxStage {
+    uint64_t at = 0, bytes = 0, seq = 0;
+    bool last = false, head = false;
+    MessagePtr msg;
   };
   bool Outbound() const { return idx != kInCh; }
   static bool FromCm(Route r) { return r == Route::kCmToRouter; }
@@ -368,11 +379,14 @@ private:
   void TakePayload() {
     if (Outbound())
       return;
+    bool buffer_written = false;
     if (deferred && buffer.HasRoom(idx)) {
       buffer.Push(idx, *deferred);
       deferred.reset();
+      buffer_written = true;
     }
     if (payload->Valid() && payload->Seq() != last_payload && !deferred &&
+        !buffer_written &&
         buffer.Credit(idx) >= 2) {
       // The header may precede the task by one beat. Payload acceptance waits
       // for the matching RD context; it never depends on descriptor dispatch.
@@ -403,13 +417,13 @@ private:
           buffer.Push(idx, {frame, 32, last && n == 0,
                             std::make_shared<ByteBlock>(HeaderOfMessage(*m)), m,
                             true});
-        else if (!n)
-          buffer.Push(idx, {frame, 0, last, nullptr, m});
+        else
+          buffer.Push(idx, {frame, n, last, Slice(m, off, n), m});
         if (hmem) {
           auto const &s = active[0]->desc.seg[0];
           hmem->SaveIdentity(s.dst_kind, s.dst_addr, *m);
         }
-        if (n)
+        if (n && !active[0]->desc.hw_header_op)
           deferred = BufBeat{frame, n, last, Slice(m, off, n), m};
       } else
         buffer.Push(idx, {frame, n, last, Slice(m, off, n), m});
@@ -435,21 +449,20 @@ private:
         reads[ep].pop_front();
         auto c = Owner(0, f.seq);
         LOGCHECK(c && c->outstanding, "Lane: read response without owner");
-        --c->outstanding;
         if (c->desc.commit_seq != rd_seen_commit) {
           rd_seen_commit = c->desc.commit_seq;
           rresp_ev = true;
           rresp_task = c->desc.task_id & 0xFFu;
           rresp_user = c->desc.user_id & 0xFFFFu;
         }
-        if (p.RspError())
+        if (p.RspError() && !c->desc.error)
           c->desc.error = 7;
         ByteBlock bytes(f.bytes, 0);
         auto got = p.RspData();
         if (got)
           for (uint64_t k = 0; k < f.bytes && f.skip + k < got->size(); ++k)
             bytes[k] = (*got)[f.skip + k];
-        buffer.Complete(idx, f.slot, bytes, f.offset, p.RspError() ? 7 : 0);
+        responses.push_back({f, std::move(bytes), p.RspError() ? 7u : 0u});
       }
       // Dedicated memory backends report writes through rsp_valid. XBar
       // separates read data and write completion on its aggregate lane ports.
@@ -462,9 +475,22 @@ private:
         writes[ep].pop_front();
         LOGCHECK(c && c->outstanding, "Lane: write response without owner");
         --c->outstanding;
-        if (p.WriteRspValid() ? p.WriteRspError() : p.RspError())
+        if (!c->desc.error &&
+            (p.WriteRspValid() ? p.WriteRspError() : p.RspError()))
           c->desc.error = 7;
       }
+    }
+    // Returned data waits in its reserved context until the single Buffer
+    // write port accepts it. Outstanding includes these waiting responses.
+    if (!responses.empty()) {
+      auto &response = responses.front();
+      auto owner = Owner(kRd, response.flight.seq);
+      LOGCHECK(owner && owner->outstanding,
+               "Lane: buffered read response without owner");
+      buffer.Complete(idx, response.flight.slot, response.bytes,
+                      response.flight.offset, response.error);
+      --owner->outstanding;
+      responses.pop_front();
     }
   }
   void Report() {
@@ -719,37 +745,62 @@ private:
       c.tail = b.last;
       buffer.Pop(idx);
     }
-    if ((c.residue.size() < 256 && !c.tail) || !to_router->Ready())
+    bool staged = idx == kInnerLane;
+    if ((c.residue.size() < 256 && !c.tail) ||
+        (staged ? tx_stage.has_value() : !to_router->Ready()))
       return;
     uint64_t n = std::min<uint64_t>(256, c.residue.size());
     bool last = c.tail && c.residue.size() <= 256;
     if (last && hold[1])
       return;
-    to_router->Drive(n, last, c.first, c.desc.vc, c.desc.msg);
-    router_used = true;
+    if (staged)
+      tx_stage = TxStage{CycleNow() + 1, n, c.desc.commit_seq, last, c.first,
+                         c.desc.msg};
+    else {
+      to_router->Drive(n, last, c.first, c.desc.vc, c.desc.msg);
+      router_used = true;
+    }
     c.first = false;
     for (uint64_t k = 0; k < n; ++k)
       c.residue.pop_front();
-    if (last) {
-      if (c.desc.msg && c.desc.msg->topk_valid &&
-          c.desc.msg->payload.size() >= 256)
-        c.desc.msg->topk.assign(c.desc.msg->payload.end() - 256,
-                                c.desc.msg->payload.end());
-      c.tail = true;
-      c.issued = true;
-      Finish(1);
-    }
+    if (last && !staged)
+      FinishNetwork(c);
+  }
+  void ForwardTxStage() {
+    if (!tx_stage || tx_stage->at > CycleNow() || !to_router->Ready())
+      return;
+    LOGCHECK(active[kWr] && active[kWr]->desc.commit_seq == tx_stage->seq,
+             "Lane: staged Router flit lost its context");
+    auto &context = *active[kWr];
+    to_router->Drive(tx_stage->bytes, tx_stage->last, tx_stage->head,
+                     context.desc.vc, tx_stage->msg);
+    router_used = true;
+    bool last = tx_stage->last;
+    tx_stage.reset();
+    if (last)
+      FinishNetwork(context);
+  }
+  void FinishNetwork(Context &c) {
+    if (c.desc.msg && c.desc.msg->topk_valid &&
+        c.desc.msg->payload.size() >= 256)
+      c.desc.msg->topk.assign(c.desc.msg->payload.end() - 256,
+                              c.desc.msg->payload.end());
+    c.tail = true;
+    c.issued = true;
+    Finish(kWr);
   }
   uint64_t idx;
   DteBuffer &buffer;
   std::array<std::shared_ptr<MemPort>, 4> mem;
   std::array<bool, 4> used{};
   std::array<std::deque<Flight>, 4> reads;
+  std::deque<BufferedResponse> responses;
   std::array<std::deque<uint64_t>, 4> writes;
   std::array<TaskQueue, 2> q{{TaskQueue(1), TaskQueue(4)}};
   std::array<std::optional<Context>, 2> active, hold;
   std::set<uint64_t> inbound_done, rd_complete;
   std::optional<BufBeat> deferred;
+  std::optional<TxStage> tx_stage;
   std::shared_ptr<CoreDataPort> to_router;
   std::shared_ptr<PayloadPort> payload;
   std::shared_ptr<AdmitPort> admit;

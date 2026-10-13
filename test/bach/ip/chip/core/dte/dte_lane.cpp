@@ -104,13 +104,16 @@ public:
   uint64_t mem_latency = 2;
   // Router 那一路收不收。
   bool router_ready = true;
+  uint64_t router_ready_from = 0;
 
   struct MemOp {
     uint64_t at = 0, addr = 0;
     bool write = false, to_cmem = true;
   };
   std::vector<MemOp> ops;
-  uint64_t router_beats = 0;
+  uint64_t router_beats = 0, first_router_at = 0;
+  std::vector<uint64_t> router_times;
+  std::vector<bool> router_heads, router_tails;
   uint64_t peak_outstanding = 0;
   uint64_t next_job = 0;
 
@@ -120,9 +123,16 @@ protected:
     // 末级先做：先看上一拍摆出来的请求。
     Serve(ln.Cmem(), true, now);
     Serve(ln.Mmem(), false, now);
-    if (ln.ToRouter().Valid())
+    auto output = ReadCoreData(ln.ToRouter());
+    if (output.valid && output.seq != last_router_seq) {
+      last_router_seq = output.seq;
+      if (!first_router_at) first_router_at = now;
       ++router_beats;
-    ln.ToRouter().DriveReady(router_ready);
+      router_times.push_back(now);
+      router_heads.push_back(output.hdr);
+      router_tails.push_back(output.last);
+    }
+    ln.ToRouter().DriveReady(router_ready && now >= router_ready_from);
 
     // 扮演 Commit：到点的任务按序送进来，通道报满就等着，有空位了再送。
     bool drove = false;
@@ -172,6 +182,7 @@ private:
   std::vector<Pend> pend;
   std::array<uint64_t, 2> last_seq{};
   uint64_t admit_seq = 0;
+  uint64_t last_router_seq = 0;
 };
 
 } // namespace
@@ -663,4 +674,116 @@ TEST(BachAgcu, WindowBoundsAlignmentAndArithmeticAreCheckedBeforeFire) {
   Agcu shifted(windows);
   EXPECT_EQ(shifted.Endpoint(0x50000000), SegEndpoint::kMmem);
   EXPECT_EQ(shifted.Endpoint(0x10000000), SegEndpoint::kInvalid);
+}
+
+
+class MultiEndpointResponseHarness : public BachModule {
+public:
+  MultiEndpointResponseHarness(ClockPtr clock, Lane &lane, DteBuffer &buffer)
+      : BachModule(clock, "driver"), target(lane), buf(buffer) {}
+  uint64_t max_completed_slots = 0;
+  uint64_t completed_slots = 0, output_bytes = 0;
+  MessagePtr result;
+protected:
+  void Step() override {
+    target.Cmem().DriveSlave(true, CycleNow() == 14,
+        std::make_shared<ByteBlock>(256, 0x11));
+    target.Mmem().DriveSlave(true, CycleNow() == 14,
+        std::make_shared<ByteBlock>(256, 0x22));
+    auto output = ReadCoreData(target.ToRouter());
+    if (output.valid && output.seq != last_output) {
+      last_output = output.seq;
+      output_bytes += output.bytes;
+      result = output.msg;
+    }
+    target.ToRouter().DriveReady(CycleNow() >= 20);
+    if (CycleNow() == 2) {
+      auto d = Task(1, Route::kCmToRouter, 0, 256, 0x2000, 0);
+      d->seg[2].valid = true;
+      d->seg[2].len = 256;
+      d->seg[2].src_kind = SegEndpoint::kMmem;
+      d->seg[2].src_addr = 0x2000;
+      d->msg->size = 512;
+      d->msg->payload.resize(512);
+      target.AdmitPtr()->Drive(d, 1);
+    } else target.AdmitPtr()->Idle();
+    auto before = buf.Reserved(kOutCh0);
+    target.RunStep();
+    auto after = buf.Reserved(kOutCh0);
+    if (before > after) {
+      max_completed_slots = std::max(max_completed_slots, before - after);
+      completed_slots += before - after;
+    }
+  }
+private:
+  Lane &target;
+  DteBuffer &buf;
+  uint64_t last_output = 0;
+};
+TEST(BachDteLane, SingleWriteBufferSerializesDifferentEndpointResponses) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  DteBuffer buffer(clock, "buf", kDteBufFlits, 1, 0, false);
+  Lane lane(clock, "lane", kOutCh0, buffer, 0, false);
+  MultiEndpointResponseHarness driver(clock, lane, buffer);
+  clock->Continue(50);
+  RT::JoinAll();
+  EXPECT_EQ(driver.max_completed_slots, 1u);
+  EXPECT_EQ(driver.completed_slots, 2u);
+  EXPECT_EQ(driver.output_bytes, 512u);
+  ASSERT_TRUE(driver.result);
+  ByteBlock expected(256, 0x11);
+  expected.insert(expected.end(), 256, 0x22);
+  EXPECT_EQ(driver.result->payload, expected);
+  EXPECT_TRUE(lane.Quiescent());
+  RT::Reset();
+}
+
+TEST(BachDteLane, ChannelThreeOutputStageHoldsFlitsWithoutDuplicatingThem) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  DteBuffer buffer(clock, "buf", kDteBufFlits, 1, 0, false);
+  Lane lane(clock, "lane3", kInnerLane, buffer, 0, false);
+  LaneHarness driver(clock, lane);
+  driver.router_ready_from = 15;
+  auto task = Task(1, Route::kCmToRouter, 0, 1024, 0x2000, 0);
+  task->vc = 3;
+  driver.jobs = {{2, task}};
+  clock->Continue(60);
+  RT::JoinAll();
+  ASSERT_EQ(driver.router_beats, 4u);
+  EXPECT_GE(driver.first_router_at, 15u);
+  EXPECT_TRUE(driver.router_heads.front());
+  EXPECT_TRUE(driver.router_tails.back());
+  for (uint64_t k = 1; k < driver.router_times.size(); ++k) {
+    EXPECT_EQ(driver.router_times[k], driver.router_times[k - 1] + 1);
+    EXPECT_FALSE(driver.router_heads[k]);
+    EXPECT_FALSE(driver.router_tails[k - 1]);
+  }
+  EXPECT_TRUE(lane.Quiescent());
+  RT::Reset();
+}
+TEST(BachDteLane, ChannelThreeNetworkPathAddsOneCycle) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  DteBuffer buffer(clock, "buf", 4 * kDteBufFlits, 4, 0, false);
+  Lane first(clock, "lane0", kOutCh0, buffer, 0, false);
+  Lane fourth(clock, "lane3", kOutCh0 + 3, buffer, 0, false);
+  LaneHarness first_driver(clock, first);
+  LaneHarness fourth_driver(clock, fourth);
+  auto a = Task(1, Route::kCmToRouter, 0, 256, 0x2000, 0);
+  auto b = Task(2, Route::kCmToRouter, 0, 256, 0x2000, 0);
+  for (auto d : {a, b}) {
+    d->seg[0].valid = true;
+    d->seg[0].src_kind = SegEndpoint::kHeader;
+    d->seg[0].src_addr = 0;
+  }
+  b->vc = 3;
+  first_driver.jobs = {{2, a}};
+  fourth_driver.jobs = {{2, b}};
+  clock->Continue(40);
+  RT::JoinAll();
+  ASSERT_GT(first_driver.first_router_at, 0u);
+  EXPECT_EQ(fourth_driver.first_router_at, first_driver.first_router_at + 1);
+  RT::Reset();
 }

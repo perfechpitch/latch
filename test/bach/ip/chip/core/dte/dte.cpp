@@ -536,7 +536,7 @@ TEST(BachDte, InvalidConfigurationReportsErrorWithoutMemoryAccess) {
   EXPECT_EQ(memory.writes, 0u);
   EXPECT_EQ(ts.dones, 0u);
   EXPECT_EQ(dte.Completion().Error(), kDteAlignmentError);
-  EXPECT_EQ(dte.Committer().Occupied(), 0u);
+  EXPECT_EQ(dte.Committer().Occupied(), 1u);
   RT::Reset();
 }
 
@@ -817,4 +817,46 @@ TEST(BachDte, TriggerRunsOncePerWrite) {
   }
   RT::Reset();
   EXPECT_EQ(trigs, 1u);
+}
+
+TEST(BachDte, ErrorAcceptsRegisterAccessAndDiscardsTriggerWhenQueueIsFull) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  Agcu agcu;
+  DteRegfile reg(clock, "reg", agcu, 0, false);
+  reg.BindError([] { return true; });
+  struct Driver : BachModule {
+    DteRegfile &reg;
+    bool created_descriptor = false, ready_in_error = false;
+    uint64_t returned = 0;
+    Driver(ClockPtr c, DteRegfile &target)
+        : BachModule(c, "driver"), reg(target) {}
+    void Step() override {
+      auto now = CycleNow();
+      auto output = reg.OutPtr();
+      created_descriptor |= output->Valid();
+      output->DriveCredits(0);
+      if (now == 3)
+        reg.Cfg().Drive(kDteRegAddr0Src, 0x1234, 1);
+      else if (now == 5)
+        reg.Cfg().DriveRead(kDteRegAddr0Src, 2);
+      else if (now == 8 || now == 10)
+        reg.Cfg().Drive(kDteRegTrigger, 0, now);
+      else
+        reg.Cfg().Idle();
+      if (now == 12)
+        ready_in_error = reg.Cfg().Ready();
+      auto response = reg.RdataPtr();
+      if (response->valid.Get())
+        returned = response->rdata.Get();
+      reg.RunStep();
+    }
+  } driver(clock, reg);
+  clock->Continue(20);
+  RT::JoinAll();
+  EXPECT_TRUE(driver.ready_in_error);
+  EXPECT_FALSE(driver.created_descriptor);
+  EXPECT_EQ(driver.returned, 0x1234u);
+  EXPECT_EQ(reg.Triggers(), 0u);
+  RT::Reset();
 }

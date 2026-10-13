@@ -271,7 +271,7 @@ protected:
     }
     std::set<uint64_t> responded;
     for (uint64_t rw = 0; rw < 2; ++rw) {
-      uint64_t budget = rw ? 2 : 4;
+      uint64_t budget = 1;
       while (budget--) {
         bool granted = false;
         for (uint64_t age = 0; age < 5; ++age) {

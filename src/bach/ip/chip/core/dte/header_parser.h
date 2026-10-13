@@ -52,14 +52,17 @@ protected:
           count = 0;
           offset = 0;
           expected = next.msg ? next.msg->TotalBytes() : 0;
-          error = (!next.msg || expected > kMaxTaskBytes ||
+          error = (!next.hdr || !next.msg || expected > kMaxTaskBytes ||
                    next.msg->path_id > 255 || next.msg->user_id > 65535)
                       ? 8
                       : 0;
+        } else if (next.hdr) {
+          error = 8;
         }
         count += next.bytes;
         if (next.bytes > 256 || count > expected ||
-            (next.last && count != expected))
+            (next.last && count != expected) ||
+            (!next.last && count == expected))
           error = 8;
         auto message = next.msg ? next.msg : std::make_shared<Message>();
         payload->Drive(frames, next.bytes, offset, next.last, message, error);

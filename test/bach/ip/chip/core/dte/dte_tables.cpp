@@ -324,3 +324,70 @@ TEST(BachDteXbar, PairedReadyAndSeparatedResponsesRemainOneTransaction) {
   EXPECT_TRUE(xbar.Quiescent());
   RT::Reset();
 }
+
+
+class HeaderBudgetHarness : public BachModule {
+public:
+  HeaderBudgetHarness(ClockPtr clock, Hmem &table, bool writing)
+      : BachModule(clock, "driver"), target(table), writes(writing) {}
+  uint64_t peak_responses = 0, total_responses = 0;
+  bool read_data_correct = true;
+protected:
+  void Step() override {
+    uint64_t returned = 0;
+    for (uint64_t lane = 0; lane < 5; ++lane) {
+      auto port = target.LanePort(lane);
+      if (port->RspValid()) {
+        ++returned;
+        if (!writes) {
+          auto data = port->RspData();
+          read_data_correct &= data && data->size() == 32 &&
+                               (*data)[26] == 0x20 + lane;
+        }
+      }
+      if (CycleNow() == 2 &&
+          (writes ? (lane == 0 || lane == 4) : lane != 0)) {
+        if (writes)
+          port->Write(lane, std::make_shared<ByteBlock>(32, uint8_t(0x40 + lane)));
+        else
+          port->Read(lane, 32);
+      } else port->IdleReq();
+    }
+    peak_responses = std::max(peak_responses, returned);
+    total_responses += returned;
+    target.RunStep();
+  }
+private:
+  Hmem &target;
+  bool writes;
+};
+TEST(BachDteHmem, HeaderFourToOneReadPortHasOneGrantPerCycle) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  Hmem table(clock, "header", 0, false);
+  for (uint64_t lane = 1; lane < 5; ++lane) {
+    ByteBlock bytes(32, 0);
+    bytes[26] = uint8_t(0x20 + lane);
+    table.WriteIndexed(lane, bytes);
+  }
+  HeaderBudgetHarness driver(clock, table, false);
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(driver.peak_responses, 1u);
+  EXPECT_EQ(driver.total_responses, 4u);
+  EXPECT_TRUE(driver.read_data_correct);
+  RT::Reset();
+}
+TEST(BachDteHmem, HeaderTwoToOneWritePortHasOneGrantPerCycle) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  Hmem table(clock, "header", 0, false);
+  HeaderBudgetHarness driver(clock, table, true);
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(driver.peak_responses, 1u);
+  EXPECT_EQ(driver.total_responses, 2u);
+  EXPECT_EQ(table.Indexed(0).hardware_used, 0x40u);
+  EXPECT_EQ(table.Indexed(4).hardware_used, 0x44u);
+  RT::Reset();
+}
