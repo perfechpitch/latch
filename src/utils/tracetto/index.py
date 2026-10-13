@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import spans as S
 
-INDEX_FORMAT = 16  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
+INDEX_FORMAT = 17  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
                    #    带上行名（TS-DTE / CORE-DTE …）。5：段间隔改 zigzag，
                    #    重叠的段能原样解回来。6：VU 那条 DSA 拆成两行（VU-DSA-ISQ
                    #    在前），十条通道 —— 每条 core 的头里 lane_off 从 9 个变 10 个。
@@ -59,6 +59,8 @@ INDEX_FORMAT = 16  # 2：七行显示 + 九条通道；3：段上印的单元名
                    #    16：把 DTE-DSA 与 MU-DSA-ISQ 两行加回来，行数回到十三行。
                    #    复用判据只看波形身份，改展示不会自动重建；格式号不对时打开
                    #    索引会要求重建。
+                   #    17：TS-MU / TS-VU 的起点往前一拍，落在表收下后继的那一拍
+                   #    （ts_install 仍是看见 accepted 的那一拍）。段的内容变了。
 INDEX_SUFFIX = ".tracetto-index"
 MANIFEST_NAME = "manifest.json"
 CORES_DIR = "cores"

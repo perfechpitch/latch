@@ -11,9 +11,10 @@
 的那一路填占位（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。
 
 TS 那一族（TS-DTE-DATAIN / TS-DTE / TS-MU / TS-VU）量的都是**「这一步在 TS 里等了多久」**：
-起点是它进入 TS、可以被下发那一刻，终点是这一路的 RV core 接下它（`rv_start`）。
-DTE 那一路有两类任务（主线 + Router 触发的搬入），所以拆成两行 —— 主线那刻是「装进
-stream」，搬入那刻是「被下发」，见 `dte_spans()`。
+终点都是这一路的 RV core 接下它（`rv_start`）。DTE 的起点是 `ts_install` 那一拍
+（计数器看见 accepted）；TS-MU / TS-VU 再往前一拍，落在表收下后继的那一拍，见
+`step_chain()`。DTE 那一路有两类任务（主线 + Router 触发的搬入），所以拆成两行 ——
+主线那刻是「装进 stream」，搬入那刻是「被下发」，见 `dte_spans()`。
 
 起点那一侧是**单调计数器 + 标量身份**（不是位掩码），终点那一侧是位掩码 + 按位打包，
 形状完全不同，所以配对一律按 (user, task)。
@@ -430,11 +431,14 @@ def user_spans(starts: List[dict], dones: List[dict],
 
 def step_chain(load: List[dict], issue: List[dict],
                rv_starts: List[dict], t_end: int) -> List[List[int]]:
-    """TS-MU / TS-VU 那一行：一步从「TaskCtrl 把它装进 stream」到「这一路的 RV core
-    接下它」。
+    """TS-MU / TS-VU 那一行：一步从「表收下后继」到「这一路的 RV core 接下它」。
 
-    量的是这一步在 TS 里等的时间 —— 等 credit、等发射通路空出来、等前一笔从 RV core
-    那边腾出槽位。不含 RV core 与 DSA 的任何时间。
+    量的是这一步在 TS 里等的时间 —— 等快照翻过来、等 credit、等发射通路空出来、等前
+    一笔从 RV core 那边腾出槽位。不含 RV core 与 DSA 的任何时间。
+
+    `ts_install` 在 TaskCtrl 看见 accepted 的那一拍才加一，表是上一拍收下的。认领仍
+    用计数器那一拍（它不晚于下发），画出来的起点减 1。减在这里，不改传给 `dte_spans`
+    的那份 `load`，TS-DTE 仍从计数器那一拍起算。
 
     三条流的形状各不相同：`load` 是装进 stream（整核一份的单调计数器），`issue` 是
     下发到本单元（`ts_unit` 的这一位），`rv_starts` 是本单元 RV core 接下。
@@ -456,7 +460,9 @@ def step_chain(load: List[dict], issue: List[dict],
     for e in issue:
         q = queues.get((e["user"], e["task"]))
         if q and q[0] <= e["t"]:
-            started.append({"t": q.pop(0), "user": e["user"],
+            # 计数器比表收下晚一拍。0 不再往前：波形开头没有更早的一拍。
+            t0 = q.pop(0)
+            started.append({"t": t0 - 1 if t0 else 0, "user": e["user"],
                             "task": e["task"]})
     return user_spans(started, rv_starts, t_end)
 
@@ -630,9 +636,9 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
             dsa_dones = sorted(dsa_dones + na, key=lambda e: e["t"])
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
-        # TS 那几行都是「这一步在 TS 里等了多久」：起点是它进入 TS、可以被下发那一刻，
-        # 终点是这一路的 RV core 接下它。终点都一样（rv_start）；起点按主线 / Router
-        # 触发的搬入分：MU / VU 只有主线，DTE 两样都有，所以 DTE 拆成两行。
+        # TS 那几行都是「这一步在 TS 里等了多久」，终点都是 rv_start。DTE 的起点是
+        # ts_install 那一拍，并按主线 / Router 触发的搬入拆成两行。MU / VU 只有主线，
+        # 起点在 step_chain 里再往前一拍，落在表收下后继的那一拍。
         if u == 0:
             dte_main, dte_datain = dte_spans(load, issue, rv_starts, t_end)
             chain_rows.append(dte_main)

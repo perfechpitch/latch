@@ -430,8 +430,8 @@ def check_step_chain():
     issue = [{"t": 40, "task": 5, "user": 77}, {"t": 50, "task": 6, "user": 77}]
     rv = [{"t": 41, "task": 5, "user": 77}]
     expect(S.step_chain(load, issue, rv, 80),
-           [[38, 41, 77, 5], [48, 80, 77, 6]],
-           "配上的按身份对上；认领了却没等到 RV 的延到波形末")
+           [[37, 41, 77, 5], [47, 80, 77, 6]],
+           "配上的按身份对上，起点比 ts_install 早一拍；没等到 RV 的延到波形末")
     got = S.step_chain(load, issue, rv, 80)
     expect_true(not any(s[0] == 12 for s in got),
                 "没被本单元下发认领的装进 stream 不画在这一行")
@@ -579,9 +579,10 @@ def check_rows(prefix):
     # DTE 拆两行：装进 stream@8 早于下发@10 → 主线；装进 stream@72 晚于下发@70（搬入
     # 任务那一路）→ 搬入那一行，起点退回下发那一刻。两条都接到 DTE_Core 的段首上。
     expect(rows[0], [[8, 11, 77, 3]], "TS · DTE（装进 stream → rv_start）")
-    # MU 这一行的起点是装进 stream（38），终点是这一路的 rv_start（41）；另外两笔
-    # 装进来的（8 的 DTE 那笔、72 的 task 7）都没下发给 MU，不画在这一行上。
-    expect(rows[1], [[38, 41, 77, 5]], "TS · MU（装进 stream → rv_start）")
+    # MU 这一行的起点比 ts_install（38）早一拍，落在表收下的 37；终点是这一路的
+    # rv_start（41）。另外两笔装进来的（8 的 DTE 那笔、72 的 task 7）都没下发给 MU，
+    # 不画在这一行上。
+    expect(rows[1], [[37, 41, 77, 5]], "TS · MU（表收下 → rv_start）")
     # VU 这一路没有下发，装进 stream 的那条流被筛空；rv_start 那笔身份是占位、又没
     # 有装进来那一拍，只记一拍。
     expect(rows[2], [[60, 61, -1, -1]], "TS · VU（没装进来那一拍的只记一拍）")
