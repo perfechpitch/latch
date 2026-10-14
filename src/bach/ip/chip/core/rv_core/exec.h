@@ -244,6 +244,8 @@ class RvExec : public BachModule {
   // 三个 RV core 都进 wait 后 core 把 ready 拉高，SCP 据此开放业务接收。
   bool AtWait() const { return !running; }
   uint64_t Insts() const { return inst_cnt; }
+  // 最近一笔 task 从接下到交还执行过的指令数（含 task_done 那一条）。
+  uint64_t DoneInsts() const { return done_insts; }
   // 与前一条同拍发出的指令数。
   uint64_t DualIssued() const { return dual_cnt; }
   uint64_t Waits() const { return wait_cnt; }
@@ -369,6 +371,8 @@ class RvExec : public BachModule {
     sys->SetPC(cur.task_pc, 0);
     sys->SetHaltState(false, 0);
     running = true;
+    // 记下这笔 task 起跑前的累计指令数，交还时相减就是这笔跑的条数。
+    task_inst_start = inst_cnt;
   }
 
   void RunOne() {
@@ -563,6 +567,8 @@ class RvExec : public BachModule {
       }
       sys->SetHaltState(true, 0);
       running = false;
+      // 这一笔跑的指令数（含 task_done 自己）。Core 层发波形时读它。
+      done_insts = inst_cnt - task_inst_start;
     }
   }
 
@@ -596,6 +602,7 @@ class RvExec : public BachModule {
   uint64_t last_start_seq = 0, last_dsa_wb = 0, last_lsq_wb = 0;
   uint64_t dsa_seq = 0, lsq_seq = 0, finish_seq = 0;
   uint64_t inst_cnt = 0, wait_cnt = 0, dual_cnt = 0;
+  uint64_t task_inst_start = 0, done_insts = 0;
 
   Logic64 insts, waits, pc_sig;
 };

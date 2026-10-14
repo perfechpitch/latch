@@ -133,6 +133,11 @@ CALC_DIM_SIGS = (SIG_CALC_START_EXPERT, SIG_CALC_START_K, SIG_CALC_START_N,
 # Perfetto 的 MU-Core args 靠它带上「这笔任务配置了多少个寄存器」。
 SIG_DISP_CFG_COUNT = "dsa_dispatch_cfg_count"
 
+# 每单元最近一笔 task 执行过的标量指令数（rv_done 那一拍锁存，标量，三单元各一条）。
+# Perfetto 的 X-Core args 靠它带上「这笔任务跑了多少条指令」。三单元 = DTE/MU/VU，与
+# rv_done 掩码的 bit 序一致。
+RV_INST_SIGS = ("rv_insts_dte", "rv_insts_mu", "rv_insts_vu")
+
 # ── DTE 十条轨道的信号（挂在 chip<i>.core<j>.dte.<regfile|lane<k>> 下，不在 core
 #    级的 RE_CORE 里，所以由 dte_signal_paths 单独扫）──
 # 写 trigger 那一拍带身份，标量 dsa_trigger_cfg_count 在同一拍锁存「这笔任务配置过
@@ -217,11 +222,12 @@ REDUCE_SIDES = ("mid", "left", "right", "out")
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
              DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE +
-             CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,))
+             CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,) + RV_INST_SIGS)
 # 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那些也在
 # 这里 —— TS-MU / TS-VU 与 MU-DSA-CALC 现在要读它们，老波形缺了那些行就是空的。
 NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS +
-            CALC_EDGE + NOACK_EDGE + CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,))
+            CALC_EDGE + NOACK_EDGE + CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,) +
+            RV_INST_SIGS)
 
 # 索引里一个 core 的十三条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
@@ -839,6 +845,32 @@ def dte_cfg_count(reader: TraceReader, sigs: Dict) -> Dict[Tuple[int, int], int]
                         *reader.events(trig_user_sid), 0)          # dsa_trigger 单 bit
     for e in trig:
         out[(e["user"], e["task"])] = val_at(cts, cvs, e["t"])
+    return out
+
+
+def rv_inst_count(reader: TraceReader,
+                  sigs: Dict[str, int]) -> Dict[Tuple[int, int, int], int]:
+    """每个 RV core 一笔 task 执行过的标量指令数，键是 (unit, user, task)，unit 与
+    rv_done 掩码的 bit 序一致（0 = DTE、1 = MU、2 = VU）。rv_done 那一拍带身份，标量
+    `rv_insts_<unit>` 在同一拍锁存（见 core.h 的 EmitRv）。键按 (unit, user, task) 而不是
+    时间 —— Perfetto 里它挂到 X-Core 那一行（rv_start → rv_done），那一段的起点不是
+    rv_done 拍，只能靠 unit/user/task 对上。老波形缺这几条时返回空 dict。
+    """
+    out: Dict[Tuple[int, int, int], int] = {}
+    done_sid = sigs.get(SIG_RV_DONE)
+    done_task_sid = sigs.get(SIG_RV_DONE_TASK)
+    done_user_sid = sigs.get(SIG_RV_DONE_USER)
+    if None in (done_sid, done_task_sid, done_user_sid):
+        return out
+    for u, name in enumerate(RV_INST_SIGS):
+        sid = sigs.get(name)
+        if sid is None:
+            continue
+        cts, cvs = reader.events(sid)
+        dones = issue_events(*reader.events(done_sid), *reader.events(done_task_sid),
+                             *reader.events(done_user_sid), u)
+        for e in dones:
+            out[(u, e["user"], e["task"])] = val_at(cts, cvs, e["t"])
     return out
 
 

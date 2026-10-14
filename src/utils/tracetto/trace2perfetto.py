@@ -33,8 +33,10 @@ chrome://tracing。
 
 精简（都是实测省下来的）：
   · 字段只留 name/ph/ts/dur/pid/tid 六样，外加 args 里 user/task 两个键值（段名里
-    已有，这里作为结构化字段，点选 slice 时在详情面板看）；MU-Core 那段多一个
-    cfg_count（这一笔任务配置了多少个寄存器），MU-DSA-CALC 那段多 expert_num / M /
+    已有，这里作为结构化字段，点选 slice 时在详情面板看）；X-Core 那三段（DTE-Core /
+    MU-Core / VU-Core）多一个 insts（这一笔任务在这颗 RV core 上跑了几条标量指令），
+    MU-Core 那段多一个 cfg_count（这一笔任务配置了多少个寄存器），MU-DSA-CALC 那段
+    多 expert_num / M /
     K / N / block_k / block_n / prim_k / prim_N / a_dtype / b_dtype / out_dtype
     十一个键值（GEMM 规模：全尺寸、K/N 分块、原语尺寸、三处数据类型），DTE 那十
     条轨道多 head/data/scale/topk 各多少字节，以及各份内容从哪读（rd 轨道，`*_rd`）
@@ -98,6 +100,10 @@ ROUTER_SLOT_UNITS = ("RTR-MID", "RTR-LEFT", "RTR-RIGHT", "RTR-CORE")
 REDUCE_SIDES = ("mid", "left", "right", "out")
 # 段上印的单元名，与 REDUCE_SIDES 一一对应。四个名字两两不同。
 REDUCE_SLOT_UNITS = ("RTR-RED-MID", "RTR-RED-LEFT", "RTR-RED-RIGHT", "RTR-RED-OUT")
+
+# X-Core 三行的行名 → RV core 单元位序（与 rv_done 掩码 bit 一致：0 = DTE、1 = MU、
+# 2 = VU）。每段的 args 里按它取这笔 task 跑过的标量指令数（`insts`）。
+CORE_ROW_UNIT = {"DTE-Core": 0, "MU-Core": 1, "VU-Core": 2}
 
 # 时间：1 拍 = 1 ns。Perfetto 的 ts / dur 单位固定是微秒，1 ns = 0.001 µs，所以把
 # 拍号乘这个系数折成微秒，Perfetto 里读到的才是纳秒。
@@ -270,6 +276,8 @@ def build(prefix: str) -> dict:
             # MU-Core 那一段的配置寄存器数：按 (user, task) 对上发行拍，键是身份。
             mucfg = S.mu_cfg_count(r, core_sig[key])
             dtecfg = dte_cfg_by_core.get(key, {})
+            # X-Core 那三行每段跑过的标量指令数：按 (unit, user, task) 对上 rv_done 拍。
+            rvinst = S.rv_inst_count(r, core_sig[key])
             for row, (_name, parts) in enumerate(S.ROWS):
                 tid = row + 1
                 row_events: List[dict] = []
@@ -286,6 +294,10 @@ def build(prefix: str) -> dict:
                             c = dtecfg.get((user, task))
                             if c is not None:
                                 args["cfg_count"] = c
+                        if _name in CORE_ROW_UNIT:
+                            c = rvinst.get((CORE_ROW_UNIT[_name], user, task))
+                            if c is not None:
+                                args["insts"] = c
                         if _name == "MU-DSA-CALC" and t0 in dims:
                             d = dims[t0]
                             args.update({

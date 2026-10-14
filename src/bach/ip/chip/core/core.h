@@ -528,6 +528,11 @@ public:
     TracePerCycle("rv_done", done_mask);
     TracePerCycle("rv_done_task", done_task);
     TracePerCycle("rv_done_user", done_user);
+    // 每单元最近一笔 task 执行过的标量指令数（rv_done 那一拍锁存，标量，三单元各
+    // 一条）。Perfetto 的 X-Core 段 args 靠它带上「这笔任务跑了多少条指令」。
+    TracePerCycle("rv_insts_dte", rv[0]->Exec().DoneInsts());
+    TracePerCycle("rv_insts_mu", rv[1]->Exec().DoneInsts());
+    TracePerCycle("rv_insts_vu", rv[2]->Exec().DoneInsts());
   }
 
   bool Quiescent() const override {
