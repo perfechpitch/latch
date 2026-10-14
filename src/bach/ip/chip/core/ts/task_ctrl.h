@@ -56,10 +56,12 @@ public:
   uint64_t NextUser() const { return next_user; }
   bool NextUserValid() const { return next_user_vld; }
 
-  // 已被 StreamTable 收下的后继身份，避免下一批候选覆盖完成事件。
-  uint64_t AcceptedTask() const { return accepted_task; }
-  uint64_t AcceptedUser() const { return accepted_user; }
-  bool AcceptedUserValid() const { return accepted_user_vld; }
+  // 已被 StreamTable 收下的后继身份，按 DTE / MU / VU 各留一套，避免下一批
+  // 候选覆盖完成事件。同一拍三路各收一笔都留下；同一路同一拍两笔只留后写的。
+  uint64_t AcceptedMask() const { return accepted_mask; }
+  uint64_t AcceptedTask(uint64_t unit) const { return accepted_task[unit]; }
+  uint64_t AcceptedUser(uint64_t unit) const { return accepted_user[unit]; }
+  bool AcceptedUserValid(uint64_t unit) const { return accepted_user_vld[unit]; }
 
   bool Quiescent() const override {
     if (pending)
@@ -76,18 +78,23 @@ protected:
       if (!install->Accepted())
         return;
       // accepted 表示批请求已处理，部分后继可能被同拍完成或退休取消。
-      // 与表同拍发布的快照核对，身份只取实际安装的后继。
+      // 与表同拍发布的快照核对，身份只取实际安装的后继，并按 task_unit 分槽。
+      accepted_mask = 0;
       auto accepted_view = snap->Get();
       auto request = install->Req();
       if (install->AcceptedCount() && accepted_view && request) {
         for (auto const &w : request->updates) {
           auto const &e = accepted_view->entry[w->stream_id];
-          if (e.valid && e.allocation == w->allocation &&
-              e.task_id == w->entry.task_id) {
-            accepted_task = e.task_id;
-            accepted_user = e.user_id;
-            accepted_user_vld = e.user_id_vld;
-          }
+          if (!e.valid || e.allocation != w->allocation ||
+              e.task_id != w->entry.task_id)
+            continue;
+          uint64_t unit = uint64_t(e.task_unit);
+          if (unit > 2)
+            continue;
+          accepted_task[unit] = e.task_id;
+          accepted_user[unit] = e.user_id;
+          accepted_user_vld[unit] = e.user_id_vld;
+          accepted_mask |= 1ull << unit;
         }
       }
       install_pending += install->AcceptedCount();
@@ -186,8 +193,11 @@ private:
   uint64_t next_task = 0, next_user = 0;
   bool next_user_vld = false;
 
-  uint64_t accepted_task = 0, accepted_user = 0;
-  bool accepted_user_vld = false;
+  // 本拍实际收下的那几路。没置位的槽里可能还留着上一笔，读身份先看掩码。
+  uint64_t accepted_mask = 0;
+  uint64_t accepted_task[3] = {};
+  uint64_t accepted_user[3] = {};
+  bool accepted_user_vld[3] = {};
 
   Logic64 installed, skipped;
 };

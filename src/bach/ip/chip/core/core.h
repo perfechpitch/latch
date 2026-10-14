@@ -303,8 +303,13 @@ public:
   // 起来，差值就是这一步在 TS 里等的时间：等 credit、等发射通路空出来、等前一笔
   // 从 RV core 那边腾出槽位。不含 RV core 与 DSA 的任何时间。
   //
-  // 身份与 ts_task / ts_user 同宽：task 8 bit、user 16 bit，本拍没有就填
-  // 0xFF / 0xFFFF。自启动 core 建表时还没有用户身份，user 也填 0xFFFF。
+  // 建表身份是标量：task 8 bit、user 16 bit，本拍没有就填 0xFF / 0xFFFF。
+  // 自启动 core 建表时还没有用户身份，user 也填 0xFFFF。
+  //
+  // 装后继的身份按路打包，与 ts_task / ts_user 同宽：
+  //   ts_install_task  dte | mu << 8 | vu << 16，没装的那一路填 0xFF
+  //   ts_install_user  dte | mu << 16 | vu << 32，没装的那一路填 0xFFFF
+  // 同一拍三路各收一笔都留得下。同一路同一拍收进两笔时，这一路只有一个槽。
   //
   // DataIn 任务（Bypass 档从 DataIn_task_table 直接下发的那一路）既没有建表也没
   // 有装后继，它在 ts_unit 上出现时配不上这两个信号。
@@ -328,13 +333,22 @@ public:
     bool next = install != ts_install_seq;
     ts_install_seq = install;
     TracePerCycle("ts_install", install);
-    // 身份取实际安装的后继；下一批候选和批内被取消的后继不覆盖完成事件。
-    TracePerCycle("ts_install_task",
-                  next ? (ts->Ctrl().AcceptedTask() & 0xFFu) : 0xFFu);
-    TracePerCycle("ts_install_user",
-                  (next && ts->Ctrl().AcceptedUserValid())
-                      ? (ts->Ctrl().AcceptedUser() & 0xFFFFu)
-                      : 0xFFFFu);
+    // 身份按 DTE / MU / VU 各留一套。计数器仍是整核一条，一拍可以加多笔。
+    // 下一批候选和批内被取消的后继不进这些槽。
+    uint64_t mask = next ? ts->Ctrl().AcceptedMask() : 0;
+    uint64_t pack = 0, users = 0;
+    for (uint64_t u = 0; u < 3; ++u) {
+      uint64_t id = 0xFFu, user = 0xFFFFu;
+      if ((mask >> u) & 1) {
+        id = ts->Ctrl().AcceptedTask(u) & 0xFFu;
+        if (ts->Ctrl().AcceptedUserValid(u))
+          user = ts->Ctrl().AcceptedUser(u) & 0xFFFFu;
+      }
+      pack |= id << (8 * u);
+      users |= user << (16 * u);
+    }
+    TracePerCycle("ts_install_task", pack);
+    TracePerCycle("ts_install_user", users);
   }
 
   // 三个 DSA 各自对一笔 task 的执行时间，两个端点各发三个信号。

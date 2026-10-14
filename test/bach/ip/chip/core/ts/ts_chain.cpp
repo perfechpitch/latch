@@ -378,9 +378,44 @@ TEST(BachTaskCtrl, AcceptedIdentityExcludesCanceledSuccessorsInTheBatch) {
     EXPECT_EQ(installed, 1u);
     EXPECT_EQ(b.ctrl->NextTask(), 2u);
     EXPECT_EQ(b.ctrl->NextUser(), 101u);
-    EXPECT_EQ(b.ctrl->AcceptedTask(), 1u);
-    EXPECT_EQ(b.ctrl->AcceptedUser(), 100u);
-    EXPECT_TRUE(b.ctrl->AcceptedUserValid());
+    EXPECT_EQ(b.ctrl->AcceptedMask(), 1u);
+    EXPECT_EQ(b.ctrl->AcceptedTask(0), 1u);
+    EXPECT_EQ(b.ctrl->AcceptedUser(0), 100u);
+    EXPECT_TRUE(b.ctrl->AcceptedUserValid(0));
+  }
+  RT::Reset();
+}
+
+// 同一拍两路后继都收下时，MU 与 VU 各留自己的身份。
+TEST(BachTaskCtrl, AcceptedIdentityIsPerUnit) {
+  EnsureSlots();
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.cfg->WriteTask(0, Step(0x100));
+    TaskEntry mu = Step(0x200);
+    mu.send_unit = SendUnit::kMu;
+    b.cfg->WriteTask(1, mu);
+    TaskEntry vu = Step(0x300);
+    vu.send_unit = SendUnit::kVu;
+    vu.end = true;
+    b.cfg->WriteTask(2, vu);
+    b.cfg->SetInitFinish();
+
+    ChainBench h(clk, *b.cfg, *b.table, *b.ctrl);
+    auto create = std::make_shared<StreamWrite>();
+    create->valid = true;
+    create->updates = {Sitting(0, 0, 1), Sitting(1, 1, 3)};
+    h.jobs = {{2, kWrCreate, create}};
+    clk->Continue(20 * kPeriod);
+    RT::JoinAll();
+    EXPECT_EQ(b.ctrl->AcceptedMask(), 6u);
+    EXPECT_EQ(b.ctrl->AcceptedTask(1), 1u);
+    EXPECT_EQ(b.ctrl->AcceptedUser(1), 100u);
+    EXPECT_TRUE(b.ctrl->AcceptedUserValid(1));
+    EXPECT_EQ(b.ctrl->AcceptedTask(2), 2u);
+    EXPECT_EQ(b.ctrl->AcceptedUser(2), 101u);
+    EXPECT_TRUE(b.ctrl->AcceptedUserValid(2));
   }
   RT::Reset();
 }

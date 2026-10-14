@@ -255,8 +255,10 @@ RouterTable 是静态配置，不记。
 | - | - |
 | `ts_create`、`ts_install` | 笔数，只加不清零 |
 | `ts_unit`、`rv_start`、`rv_done`、`dsa_start`、`dsa_done` | 位掩码，bit0 DTE、bit1 MU、bit2 VU。0 表示本拍没有 |
-| `ts_create_task`、`ts_install_task` | task 号 8 bit，本拍没有就填 `0xFF`。自启动 core 原地重新激活的那一步是 task 0 |
-| `ts_create_user`、`ts_install_user` | user_id 16 bit，本拍没有就填 `0xFFFF`。自启动 core 建表时还没有用户身份，也填 `0xFFFF` |
+| `ts_create_task` | task 号 8 bit，本拍没有就填 `0xFF`。自启动 core 原地重新激活的那一步是 task 0 |
+| `ts_create_user` | user_id 16 bit，本拍没有就填 `0xFFFF`。自启动 core 建表时还没有用户身份，也填 `0xFFFF` |
+| `ts_install_task` | 三路的 task 号各占 8 bit：`dte │ mu << 8 │ vu << 16`。那一路本拍没装就填 `0xFF` |
+| `ts_install_user` | 三路的 user_id 各占 16 bit：`dte │ mu << 16 │ vu << 32`。那一路本拍没装就填 `0xFFFF` |
 | `ts_task` 与 `rv_*`、`dsa_*` 的 `_task` | 三路的 task 号各占 8 bit：`dte │ mu << 8 │ vu << 16`。那一路本拍没有就填 `0xFF` |
 | `ts_user` 与 `rv_*`、`dsa_*` 的 `_user` | 三路的 user_id 各占 16 bit：`dte │ mu << 16 │ vu << 32`。那一路本拍没有就填 `0xFFFF` |
 

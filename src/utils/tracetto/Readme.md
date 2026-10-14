@@ -121,7 +121,8 @@ moe_lpu.tracetto-index/
   DTE 那一行有个缺口：Router 入站那一路按约定不算一笔 DTE task，它有完成没有起手，
   只记那一拍。
 - **TS 那几行的配对**：起点那条流是 `ts_create`（第一个 task 走建表）与 `ts_install`
-  （装后继）两条**单调计数器**合起来的 —— 它是**整核一份、不分路**的，所以要先按身份跟
+  （装后继）两条**单调计数器**合起来的。计数器仍是整核一条；建表身份是标量，装后继
+  按 DTE / MU / VU 打包，画段时按路拆开。拆开之后仍要按身份跟
   **本单元的下发**（`ts_unit` 这一位）一一对上。对不上的是别的单元的活，丢掉（实测 MU
   上整核装进 82231 笔、本单元只下发 25224 笔，不筛的话多出来的会每笔从装进来那拍画到
   波形末）。对上之后再与 `rv_start` 配。TS-DTE 的段 = `[ts_install 那一拍, 这一路 RV core 接下
@@ -137,15 +138,16 @@ moe_lpu.tracetto-index/
   MU / VU 的仲裁器（`mu_vu_arb.h`）**没有 DataIn 通路** —— 它的候选只从 stream_table
   的快照取（`if (!e.valid || e.task_fsm != kReady || e.task_unit != unit) continue;`），
   DataIn 那条路严格只喂 DTE。所以它们不拆行；那两行里「没装进来那一拍」的单拍段
-  **不是 DataIn，而是 `ts_install` 的身份流有洞**（见下一条）。
-- **`ts_install` 的笔数与身份必须一起定格**。`Installed()` 数的是「这一拍表收下了一笔
-  装后继」，而 `TaskCtrl::Step()` 里收下之后**同一拍**又 `Generate()` 出一个新候选，
+  **不是 DataIn**。同一路同一拍收进两笔时，这一路的身份槽只留后写的那一笔，另一笔
+  对不上（见下一条）。
+- **`ts_install` 的笔数与身份必须一起定格**。`Installed()` 数的是「这一拍表收下了几笔
+  装后继」，而 `TaskCtrl::Step()` 里收下之后**同一拍**又挑出下一批候选，
   `next_task` / `next_user` 当场就被换成下一笔了。早先 `EmitStep()` 拿 `NextTask()` 配
   `Installed()`，于是**计数涨的那一拍报出来的是下一笔的身份**，被收下那一笔的身份
-  从头到尾没进过波形。后果：少数任务被误判成「没装进 stream」—— 实测 `moe_lpu_tokens`
-  上 VU 62 笔、MU 1510 笔（MU / VU 全是这个洞，不存在别的通路），DTE 上则与真正的
-  DataIn 叠在一起。现在身份改取 `AcceptedTask()`（在 `install->Accepted()` 那一支里先
-  截下来），两边就对齐了。
+  从头到尾没进过波形。现在身份在 `install->Accepted()` 那一支里按 `task_unit` 截进
+  `AcceptedTask(unit)`，DTE / MU / VU 各一套，再按 `ts_task` / `ts_user` 的位宽打进
+  `ts_install_task` / `ts_install_user`。同一拍三路各收一笔都留得下。同一路同一拍
+  两笔仍共用一个槽，后写的留下。
 - **位掩码事件是「一拍一笔」的脉冲，连着两拍有事件时并成一段，要逐拍展开**。各家
   `EmitXxx()` 每拍从 0 重算掩码、只在笔数变的那一拍置位；一条命令在端口上被持有期间
   不会被重新驱动（`mu_vu_arb.h` 的 `Select()` 里 `if (held) return;`），所以那一位只在
@@ -168,7 +170,7 @@ moe_lpu.tracetto-index/
 | 组 | 信号 |
 | - | - |
 | TS 下发 | `ts_unit` / `ts_task` / `ts_user` |
-| 装进 stream | `ts_create` / `ts_create_task` / `ts_create_user`（建表）、`ts_install` / `ts_install_task` / `ts_install_user`（装后继）—— 两条都是单调计数器，身份是标量 |
+| 装进 stream | `ts_create` / `ts_create_task` / `ts_create_user`（建表，身份是标量）、`ts_install` / `ts_install_task` / `ts_install_user`（装后继；计数器整核一条，身份按 DTE / MU / VU 打包） |
 | RV core | `rv_start` / `rv_start_task` / `rv_start_user`、`rv_done` / `rv_done_task` / `rv_done_user` |
 | DSA | `dsa_start` / `dsa_start_task` / `dsa_start_user`、`dsa_done` / `dsa_done_task` / `dsa_done_user` |
 | DTE 那个不报的完成 | `dsa_done_noack` / `dsa_done_noack_task` / `dsa_done_noack_user` —— 只有 DTE 抬 bit0 |
@@ -196,7 +198,8 @@ RV core 是执行器接下队头那笔），终点是各家把完成报回去那
 链一那 1279 段原来最长 17335 拍、并上之后 192 拍）。
 
 「装进 stream」那六条不是边沿：它们是**只加不清零的计数器**，判据是“这一拍的值比上一拍
-大”，身份在涨的那一拍单独取（标量，不是按位打包）。`TS-MU` / `TS-VU` 的起点从这里取。
+大”。建表身份在涨的那一拍取标量，一次涨多笔也只出一笔。装后继的身份按路打包，涨的那一拍
+按 DTE / MU / VU 拆开，task 不是 `0xFF` 的一路各出一笔。`TS-MU` / `TS-VU` 的起点从这里取。
 
 最后那一对（`dsa_task_trigger` / `dsa_task_dispatch`）量的是**一笔任务在单元里的两端**，
 MU 抬 bit1、VU 抬 bit2，DTE 恒 0：

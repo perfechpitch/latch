@@ -16,8 +16,9 @@ TS 那一族（TS-DTE-DATAIN / TS-DTE / TS-MU / TS-VU）量的都是**「这一�
 `step_chain()`。DTE 那一路有两类任务（主线 + Router 触发的搬入），所以拆成两行 ——
 主线那刻是「装进 stream」，搬入那刻是「被下发」，见 `dte_spans()`。
 
-起点那一侧是**单调计数器 + 标量身份**（不是位掩码），终点那一侧是位掩码 + 按位打包，
-形状完全不同，所以配对一律按 (user, task)。
+起点那一侧是**单调计数器**。建表身份是标量；装后继的身份按 DTE / MU / VU 打包，
+与下发的 `ts_task` / `ts_user` 同宽。终点那一侧是位掩码 + 按位打包。配对一律按
+(user, task)。
 """
 
 from __future__ import annotations
@@ -37,8 +38,9 @@ SIG_TS_DONE = "ts_done"
 SIG_TS_INFLIGHT = "ts_inflight"
 # TaskCtrl 把一步装进 stream。两条来源：第一个 task 走 create（建表），其余走
 # install（装后继）—— core.h 的 EmitStep() 说这是“同一件事的两种来源”。都是**单调
-# 计数器**（只加不清零，涨了的那一拍就是装进去一笔），一拍最多一笔；身份是标量而不是
-# 位掩码：task 8 bit、user 16 bit，本拍没有就填 0xFF / 0xFFFF。TS-MU / TS-VU 的起点。
+# 计数器**（只加不清零）。建表身份是标量。装后继的身份按路打包：task 各 8 bit、
+# user 各 16 bit，没装的那一路填 0xFF / 0xFFFF。同一拍三路各一笔都留得下；同一路
+# 同一拍两笔仍只有一个槽。TS-MU / TS-VU 的起点。
 SIG_TS_CREATE = "ts_create"
 SIG_TS_CREATE_TASK = "ts_create_task"
 SIG_TS_CREATE_USER = "ts_create_user"
@@ -334,14 +336,10 @@ def issue_events(unit_ts: list, unit_vs: list, task_ts: list, task_vs: list,
 
 def step_events(counter_ts: list, counter_vs: list, task_ts: list,
                 task_vs: list, user_ts: list, user_vs: list) -> List[dict]:
-    """单调计数器 → 「装进去一笔」的事件，带上那一笔的身份。
+    """建表计数器 → 「装进去一笔」的事件，带上那一笔的标量身份。
 
-    `issue_events` 的孪生兄弟，形状不一样：那几条是位掩码 + 按位打包的 task / user，
-    这几条是**只加不清零的笔数**，身份是标量。所以判据是“这一拍的值比上一拍大”，
-    而不是某一位 0→1。一拍最多装一笔，不用管一次涨多笔。
-
-    身份在计数器涨的那一拍取 —— `ts_create_task` / `ts_install_task` 那几条只在涨的
-    那一拍带真值，其余拍是 0xFF / 0xFFFF 的占位。
+    判据是“这一拍的值比上一拍大”。计数器一次涨多笔也只出一笔：身份是标量，涨的
+    那一拍只有一个 task、一个 user。自启动一次建 16 个表项就是这样。
     """
     out: List[dict] = []
     prev = 0
@@ -352,6 +350,34 @@ def step_events(counter_ts: list, counter_vs: list, task_ts: list,
                 "task": val_at(task_ts, task_vs, t) & 0xFF,
                 "user": val_at(user_ts, user_vs, t) & 0xFFFF,
             })
+        prev = v
+    return out
+
+
+def install_events(counter_ts: list, counter_vs: list, task_ts: list,
+                   task_vs: list, user_ts: list, user_vs: list) -> List[dict]:
+    """装后继计数器 → 按路拆开的事件。
+
+    计数器仍是整核一条，一拍可以加 2 或 3。身份与 `ts_task` / `ts_user` 同宽：
+    task 各 8 bit、user 各 16 bit，没装的那一路是 0xFF / 0xFFFF。计数器涨的那一拍
+    按路拆开，task 不是 0xFF 的一路各出一个事件。同一路同一拍两笔在波形上已经并成
+    一个槽，这里拆不开。
+    """
+    out: List[dict] = []
+    prev = 0
+    for t, v in zip(counter_ts, counter_vs):
+        if v > prev:
+            task = val_at(task_ts, task_vs, t)
+            user = val_at(user_ts, user_vs, t)
+            for bit in range(3):
+                tk = (task >> (8 * bit)) & 0xFF
+                if tk == 0xFF:
+                    continue
+                out.append({
+                    "t": t,
+                    "task": tk,
+                    "user": (user >> (16 * bit)) & 0xFFFF,
+                })
         prev = v
     return out
 
@@ -603,8 +629,8 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     load = sorted(
         step_events(*ev(SIG_TS_CREATE), *ev(SIG_TS_CREATE_TASK),
                     *ev(SIG_TS_CREATE_USER)) +
-        step_events(*ev(SIG_TS_INSTALL), *ev(SIG_TS_INSTALL_TASK),
-                    *ev(SIG_TS_INSTALL_USER)),
+        install_events(*ev(SIG_TS_INSTALL), *ev(SIG_TS_INSTALL_TASK),
+                       *ev(SIG_TS_INSTALL_USER)),
         key=lambda e: e["t"])
 
     def ends_of(group: Tuple[str, ...], bit: int) -> Tuple[List[dict], List[dict]]:

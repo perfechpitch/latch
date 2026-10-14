@@ -137,14 +137,14 @@ TASK_DISP_EV = [(22, 2, 3, 77), (46, 1, 5, 77)]
 CALC_START_EV = [(52, 1, 5, 77)]
 CALC_DONE_EV = [(64, 1, 5, 77)]
 
-# TaskCtrl 把一步装进 stream：两条**单调计数器**、身份是标量（不是位掩码），所以不走
-# lanes_to_signals，手工编。三笔，正好把 DTE 那两行的分流踩出来：
+# TaskCtrl 把一步装进 stream。建表身份是标量。装后继按路打包，与下发同宽，所以
+# install 走 lanes_to_signals。三笔，正好把 DTE 那两行的分流踩出来：
 #    8 装的是 DTE 第一笔（走 create）→ 早于下发@10 → 归 TS-DTE
 #   38 装的是 MU 那笔（走 install）  → 早于下发@40 → 归 TS-MU
 #   72 装的是 DTE 第二笔（走 install）→ **晚于**下发@70，即搬入任务那一路 → 归 TS-DTE-DATAIN
 # 「装进来了、这一路一直没接」那一条分支在 check_step_chain 里单独查。
 STEP_CREATE_EV = [(8, 3, 77)]                     # (t, task, user)
-STEP_INSTALL_EV = [(38, 5, 77), (72, 7, 77)]
+STEP_INSTALL_EV = [(38, 1, 5, 77), (72, 0, 7, 77)]  # (t, unit, task, user)
 
 MODULES = [
     (1, 0, "chip0"),
@@ -180,10 +180,10 @@ for _t, _task, _user in STEP_CREATE_EV:
     SIGNALS.setdefault(123, []).append((_t, 1))       # 计数器的值就是笔数
     SIGNALS.setdefault(124, []).append((_t, _task))
     SIGNALS.setdefault(125, []).append((_t, _user))
-for _i, (_t, _task, _user) in enumerate(STEP_INSTALL_EV, start=1):
-    SIGNALS.setdefault(126, []).append((_t, _i))
-    SIGNALS.setdefault(127, []).append((_t, _task))
-    SIGNALS.setdefault(128, []).append((_t, _user))
+_, _install_task, _install_user = lanes_to_signals(STEP_INSTALL_EV)
+SIGNALS[126] = [(t, i) for i, (t, *_) in enumerate(STEP_INSTALL_EV, start=1)]
+SIGNALS[127] = _install_task
+SIGNALS[128] = _install_user
 for _base, _ev, _done in ((105, RV_EV, RV_DONE_EV), (111, DSA_EV, DSA_DONE_EV),
                           (117, TASK_TRIG_EV, TASK_DISP_EV),
                           (129, CALC_START_EV, CALC_DONE_EV)):
@@ -243,8 +243,8 @@ def synth_scaled(path, cores, rounds):
         t = 10
         for i in range(rounds):
             for u in range(3):
-                # 身份按单元错开（task 加上 u * 8）：TaskCtrl 那两条计数器是整核一份
-                # 的，三路共用同一个身份的话，装进 stream 的那条流就分不出是哪一路。
+                # 身份按单元错开（task 加上 u * 8）。装后继已按路打包，错开仍留着：
+                # 三路若共用同一个 task，对不上时不好从段上看出是哪一路。
                 tk, usr = (i % 7) + u * 8, i % 5 + 1
                 unit += [(t, 1 << u), (t + 1, 0)]
                 task.append((t, tk << (8 * u)))
@@ -265,7 +265,7 @@ def synth_scaled(path, cores, rounds):
                 # 只取 1/8 是有意的：check_window / check_scale 要求 lane 0 的段数
                 # 压过 256（`2 * px` 那个阈值）才走粗层，挪太多了就掉回 exact。
                 late = u == 0 and i % 8 == 7
-                loads.append((t + 1 if late else t - 1, tk, usr))
+                loads.append((t + 1 if late else t - 1, tk, usr, u))
                 # 收下与真正发行那两拍：MU / VU 各一（DTE 没有这一层）。收下在 RV
                 # 起点后一拍、发行在 DSA 起点后一拍，把它夹在 dsa_start 两侧。
                 if u in (1, 2):
@@ -279,15 +279,18 @@ def synth_scaled(path, cores, rounds):
             done.append((t, i + 1))
             fly += [(t, 1), (t + 1, 0)]
             t += 2
-        # TaskCtrl 装进 stream：第一笔走 create（建表），其余走 install（装后继）。
-        # 两条都是单调计数器（值就是笔数）、身份是标量，所以不走 lanes_to_signals。
+        # TaskCtrl 装进 stream：第一笔走 create（建表，身份是标量），其余走 install
+        # （装后继，身份按路打包）。
         signals[sig["ts_create"]] = [(loads[0][0], 1)]
         signals[sig["ts_create_task"]] = [(loads[0][0], loads[0][1])]
         signals[sig["ts_create_user"]] = [(loads[0][0], loads[0][2])]
         rest = loads[1:]
-        signals[sig["ts_install"]] = [(lt, n) for n, (lt, _, _) in enumerate(rest, 1)]
-        signals[sig["ts_install_task"]] = [(lt, tk) for lt, tk, _ in rest]
-        signals[sig["ts_install_user"]] = [(lt, usr) for lt, _, usr in rest]
+        signals[sig["ts_install"]] = [
+            (lt, n) for n, (lt, *_) in enumerate(rest, 1)]
+        _, install_task, install_user = lanes_to_signals(
+            [(lt, unit, tk, usr) for lt, tk, usr, unit in rest])
+        signals[sig["ts_install_task"]] = install_task
+        signals[sig["ts_install_user"]] = install_user
         signals[sig["ts_unit"]] = unit
         signals[sig["ts_task"]] = task
         signals[sig["ts_user"]] = user
@@ -420,6 +423,19 @@ def check_user_spans():
         [[10, 40, 23, 4], [20, 50, 24, 4]])
     expect(index.decode_segments(payload, 0, 2),
            [[10, 40, 23, 4], [20, 50, 24, 4]], "重叠的段能原样解回来")
+
+
+def check_install_events():
+    """同一拍两路装后继：计数器加 2，身份按路拆成两笔。建表仍是标量。"""
+    task = 2 | (0xFF << 8) | (4 << 16)
+    user = 11 | (0xFFFF << 16) | (8 << 32)
+    expect(S.install_events([10], [2], [10], [task], [10], [user]),
+           [{"t": 10, "task": 2, "user": 11},
+            {"t": 10, "task": 4, "user": 8}],
+           "同一拍 DTE 与 VU 各留一笔")
+    expect(S.step_events([5], [16], [5], [0], [5], [0xFFFF]),
+           [{"t": 5, "task": 0, "user": 0xFFFF}],
+           "建表一次涨 16 笔仍只出一笔标量身份")
 
 
 def check_step_chain():
@@ -964,6 +980,7 @@ def main():
     check_dte_spans()
     check_router_ingress()
     check_reduce_flits()
+    check_install_events()
     check_step_chain()
     check_user_spans()
     check_window()
