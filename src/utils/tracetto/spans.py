@@ -6,9 +6,11 @@
 
 这一层是**参考实现**：索引里存的就是它算出来的段，自检拿它对拍。
 
-单元侧的段不读模型里的电平忙位，读的是边沿信号：起点是各家“过门槛”那一拍，终点是
-各家把完成报回去那一拍。一条边沿事件带 8 bit 的 task 与 16 bit 的 user，本拍没有事件
-的那一路填占位（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。
+单元侧的段不读模型里的电平忙位，读的是边沿信号。MU / VU 的起点仍是各家“过门槛”
+那一拍；DTE-DSA 的起点是写 `CFG_TRIGGER` 的下一拍（Descriptor 进中央 TaskQueue），
+不是 `dsa_start`（Commit 把任务 dispatch 到 lane 的那一拍）。终点是各家把完成报回去
+那一拍。一条边沿事件带 8 bit 的 task 与 16 bit 的 user，本拍没有事件的那一路填占位
+（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。DTE 的 trigger 身份是标量。
 
 TS 那一族（TS-DTE-DATAIN / TS-DTE / TS-MU / TS-VU）量的都是**「这一步在 TS 里等了多久」**：
 终点都是这一路的 RV core 接下它（`rv_start`）。DTE 的起点是 `ts_install` 那一拍
@@ -477,7 +479,9 @@ def step_chain(load: List[dict], issue: List[dict],
     配好的起点再与 `rv_start` 配 —— 这两条都是本单元的，实测 MU 上 25224 对 25170，
     近乎一一对应。两种配不上都不丢：
       - 装进来了、下发了、这一路还没接下 → 延到波形末（那笔确实还在等）
-      - RV 起了、压根没有装进来那一拍 → 只记一拍（DataIn 任务既没建表也没装后继）
+      - RV 起了、压根没有装进来那一拍 → 记 `[rv_start - 1, rv_start)`。自启动核的
+        Task 0 建表 user 是 0xFFFF、`rv_start` 上是 0，对不上，就是这一支。
+        `rv_start` 为 0 时不再往前。
     """
     queues: Dict[Tuple[int, int], List[int]] = {}
     for e in load:
@@ -490,7 +494,31 @@ def step_chain(load: List[dict], issue: List[dict],
             t0 = q.pop(0)
             started.append({"t": t0 - 1 if t0 else 0, "user": e["user"],
                             "task": e["task"]})
-    return user_spans(started, rv_starts, t_end)
+    # 与 user_spans 同一套次序：同一拍先完成（这里是 rv_start）再起手。对上的交给
+    # user_spans；对不上的不进那里，否则会被画成 [rv_start, rv_start+1)。
+    ev = [(e["t"], 1, e) for e in started] + [(e["t"], 0, e) for e in rv_starts]
+    ev.sort(key=lambda x: (x[0], x[1]))
+    pending: Dict[Tuple[int, int], List[int]] = {}
+    paired: List[dict] = []
+    lone: List[dict] = []
+    for _t, kind, e in ev:
+        key = (e["user"], e["task"])
+        if kind == 1:
+            pending.setdefault(key, []).append(e["t"])
+            continue
+        q = pending.get(key)
+        if q:
+            q.pop(0)
+            paired.append(e)
+        else:
+            lone.append(e)
+    out = user_spans(started, paired, t_end)
+    for e in lone:
+        t = e["t"]
+        t0 = t - 1 if t else 0
+        out.append([t0, t if t else 1, _user_tag(e["user"]), _task_tag(e["task"])])
+    out.sort(key=lambda s: (s[0], s[1]))
+    return out
 
 
 def dte_spans(load: List[dict], issue: List[dict], rv_starts: List[dict],
@@ -608,13 +636,25 @@ def trace_t_end(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> int
 
 
 def core_spans(reader: TraceReader, sigs: Dict[str, int],
-               t_end: int) -> Dict[str, List[List[List[int]]]]:
+               t_end: int, dte_reg: Dict[str, int] = None
+               ) -> Dict[str, List[List[List[int]]]]:
     """一个 core 的十三条行。键是 `core` / `dsa` / `chain` / `datain` / `vuisq` /
     `muisq` / `calc`，各三个单元一个 list（`vuisq` 只有 VU 那条、`muisq` 与 `calc`
-    只有 MU 那条、`datain` 只有 DTE 那条有数据，其余恒空）。"""
+    只有 MU 那条、`datain` 只有 DTE 那条有数据，其余恒空）。
+
+    `dte_reg` 是 `dte_signal_paths()` 里这个 core 的 `regfile` 信号表。DTE-DSA 的
+    起点从这里取 `dsa_trigger` 的下一拍；缺这张表时那一行没有起点。"""
+
+    reg = dte_reg or {}
 
     def ev(name: str) -> Tuple[list, list]:
         sid = sigs.get(name)
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    def ev_reg(name: str) -> Tuple[list, list]:
+        sid = reg.get(name)
         if sid is None:
             return [], []
         return reader.events(sid)
@@ -656,10 +696,20 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         # DTE 那一路的 DSA 有**两个**终点：`dsa_done`（报给 TS 的）与 `dsa_done_noack`
         # （完成了但不报的，链一/自启动 Bypass 走这条）。两者互斥，所以按时间并成一条
         # 完成流就完事 —— 不并的话那 1279 笔只能延到波形末。
+        # 起点不用 dsa_start。那条是 Commit dispatch：同一拍两条 lane 各发一笔时
+        # admit 计数加 2，身份槽只留后写的那一笔。写 CFG_TRIGGER 一拍一笔，下一拍
+        # Commit 才把 Descriptor 收进中央 TaskQueue（Commit 比寄存器先跑）。段从
+        # 这一拍起，通道忙着排队的时间算在段里。身份取 trigger 那一拍的标量。
         if u == 0:
             na = issue_events(*ev(SIG_DSA_NOACK), *ev(SIG_DSA_NOACK_TASK),
                               *ev(SIG_DSA_NOACK_USER), 0)
             dsa_dones = sorted(dsa_dones + na, key=lambda e: e["t"])
+            dsa_starts = []
+            for e in issue_events(*ev_reg(SIG_DTE_TRIGGER),
+                                  *ev_reg(SIG_DTE_TRIGGER_TASK),
+                                  *ev_reg(SIG_DTE_TRIGGER_USER), 0):
+                dsa_starts.append({"t": e["t"] + 1, "task": e["task"],
+                                   "user": e["user"]})
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
         # TS 那几行都是「这一步在 TS 里等了多久」，终点都是 rv_start。DTE 的起点是
@@ -676,7 +726,8 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
         # 执行通路」，被切掉的那一截（单元把这一笔收下 → 发行）归 `muisq` / `vuisq`
         # 那一行。发行那对边沿既是新行的终点，也是 DSA 行的新起点，两行首尾相接。
         # MU 收下的是写 trigger 被 regfile 锁成的那一笔，VU 是 config_register 收到
-        # 的那条宏指令；DTE（u == 0）没有这一层，仍从过门槛那一拍起算。
+        # 的那条宏指令。DTE（u == 0）没有这一层：它的段已经从写 CFG_TRIGGER 的
+        # 下一拍起算，不是从 dsa_start 起算。
         if u == 0:
             dsa_rows.append(dsa)
             vuisq_rows.append([])

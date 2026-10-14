@@ -31,8 +31,8 @@ STALE_SECONDS = 3600
 
 def _write_one(reader: TraceReader, job) -> Tuple[int, List[int]]:
     """解一个 core 的十三条行，写成 `cores/<idx>.bin`。"""
-    _prefix, core_idx, sigs, t_end, cores_dir, lane_base = job
-    rows = S.lanes_of(S.core_spans(reader, sigs, t_end))
+    _prefix, core_idx, sigs, dte_reg, t_end, cores_dir, lane_base = job
+    rows = S.lanes_of(S.core_spans(reader, sigs, t_end, dte_reg))
     (Path(cores_dir) / f"{core_idx:05d}.bin").write_bytes(
         index.encode_core(core_idx, rows, lane_base, t_end))
     # 一个 core 的信号不会出现在别的 core 上，解完就把缓存放了：内存不随波形长大。
@@ -59,6 +59,7 @@ def plan(trace: Path) -> Dict:
     prefix = str(trace.with_suffix(""))
     with TraceReader(prefix) as r:
         chips, core_sig = S.core_paths(r)
+        dte_sig = S.dte_signal_paths(r)
         t_end = S.trace_t_end(r, core_sig)
         missing = S.missing_signals(r, core_sig)
         weights = {}
@@ -74,8 +75,8 @@ def plan(trace: Path) -> Dict:
         for core in sorted(chips[chip]):
             ordered.append((chip, f"{chip}.{core}"))
     return {
-        "prefix": prefix, "chips": chips, "core_sig": core_sig, "t_end": t_end,
-        "missing": missing, "ordered": ordered, "weights": weights,
+        "prefix": prefix, "chips": chips, "core_sig": core_sig, "dte_sig": dte_sig,
+        "t_end": t_end, "missing": missing, "ordered": ordered, "weights": weights,
     }
 
 
@@ -156,7 +157,8 @@ def build(trace: Path, workers: Optional[int] = None, progress: bool = True,
                 continue                      # 只转发的 core：只有树上一个名字，没有数据
             lane_base_of[ci] = data_ordinal * S.LANES_PER_CORE
             data_ordinal += 1
-            jobs.append((plan_info["prefix"], ci, sigs, plan_info["t_end"],
+            reg = (plan_info.get("dte_sig") or {}).get(key, {}).get("regfile")
+            jobs.append((plan_info["prefix"], ci, sigs, reg, plan_info["t_end"],
                          str(cores_dir), lane_base_of[ci]))
         jobs.sort(key=lambda j: -plan_info["weights"].get(ordered[j[1]][1], 0))
 

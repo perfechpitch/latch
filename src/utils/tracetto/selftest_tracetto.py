@@ -168,6 +168,11 @@ MODULES = [
     (134, 2, "dsa_calc_done_user"),
     (135, 2, "dsa_done_noack"), (136, 2, "dsa_done_noack_task"),
     (137, 2, "dsa_done_noack_user"),
+    # DTE-DSA 的起点读 regfile 上的 dsa_trigger，不读 core 级的 dsa_start。
+    (3, 2, "dte"),
+    (4, 3, "regfile"),
+    (138, 4, "dsa_trigger"), (139, 4, "dsa_trigger_task"),
+    (140, 4, "dsa_trigger_user"),
 ]
 SIGNALS = {
     100: [(10, 1), (40, 2), (70, 1)],             # DTE 两发，MU 一发
@@ -196,6 +201,13 @@ for _base, _ev, _done in ((105, RV_EV, RV_DONE_EV), (111, DSA_EV, DSA_DONE_EV),
 _m, _t, _u = lanes_to_signals(DSA_NOACK_EV)
 SIGNALS[135], SIGNALS[136], SIGNALS[137] = _m, _t, _u
 
+# 写 CFG_TRIGGER 的那一拍。DTE-DSA 从下一拍起算，所以比 dsa_start（14 / 52）早，
+# 段首落在 13 / 51，用来确认起点不再是 Commit dispatch。
+DTE_TRIG_EV = [(12, 3, 77), (50, 7, 77)]          # (t, task, user)
+SIGNALS[138] = [(t, 1) for t, *_rest in DTE_TRIG_EV]
+SIGNALS[139] = [(t, task) for t, task, _user in DTE_TRIG_EV]
+SIGNALS[140] = [(t, user) for t, _task, user in DTE_TRIG_EV]
+
 
 def with_trace(fn):
     """把合成波形写到临时文件，把前缀交给 fn。"""
@@ -214,7 +226,15 @@ def synth_scaled(path, cores, rounds):
         mid += 2
         modules.append((chip_id, 0, f"chip{c}"))
         modules.append((core_id, chip_id, "core0"))
+        dte_mod, reg_mod = mid, mid + 1
+        mid += 2
+        modules.append((dte_mod, core_id, "dte"))
+        modules.append((reg_mod, dte_mod, "regfile"))
         sig = {}
+        for name in ("dsa_trigger", "dsa_trigger_task", "dsa_trigger_user"):
+            sig[name] = mid
+            modules.append((mid, reg_mod, name))
+            mid += 1
         for name in ("ts_unit", "ts_task", "ts_user", "ts_done", "ts_inflight",
                      "rv_start", "rv_start_task", "rv_start_user",
                      "rv_done", "rv_done_task", "rv_done_user",
@@ -240,6 +260,7 @@ def synth_scaled(path, cores, rounds):
         trig_ev, disp_ev, loads = [], [], []
         calc_start_ev, calc_done_ev = [], []
         noack_ev = []
+        dte_trig = []
         t = 10
         for i in range(rounds):
             for u in range(3):
@@ -252,6 +273,10 @@ def synth_scaled(path, cores, rounds):
                 rv_ev.append((t, u, tk, usr))
                 rv_done_ev.append((t + 5, u, tk, usr))
                 dsa_ev.append((t + 2, u, tk, usr))
+                # DTE-DSA 从写 trigger 的下一拍起算。trigger 放在 t+1，段首仍是
+                # t+2，和这条放大波形原来的 dsa_start 对齐，段长不变。
+                if u == 0:
+                    dte_trig.append((t + 1, tk, usr))
                 # DTE 每 4 轮把终点的**另一条流**踩一脚：这一轮不报 TS，走
                 # `dsa_done_noack`（链一/自启动 Bypass 那一路）。段数不变，只是换一条
                 # 完成流收尾。
@@ -307,6 +332,9 @@ def synth_scaled(path, cores, rounds):
             signals[sig[base]] = m
             signals[sig[base + "_task"]] = pt
             signals[sig[base + "_user"]] = pu
+        signals[sig["dsa_trigger"]] = [(tt, 1) for tt, *_rest in dte_trig]
+        signals[sig["dsa_trigger_task"]] = [(tt, tk) for tt, tk, _usr in dte_trig]
+        signals[sig["dsa_trigger_user"]] = [(tt, usr) for tt, _tk, usr in dte_trig]
     write_trace(path, modules, signals)
 
 
@@ -317,7 +345,7 @@ def check_tree(prefix):
     try:
         paths = r.tree_paths()
         expect(paths[100], "chip0.core0.ts_unit", "层次名")
-        expect(r.signals(), list(range(100, 138)), "信号号列表")
+        expect(r.signals(), list(range(100, 141)), "信号号列表")
         ts, vs = r.events(100)
         expect(list(zip(ts, vs)), [(10, 1), (40, 2), (70, 1)], "ts_unit 的事件")
         expect(len(r.segments(100)), 1, "一个信号的段数（非零一直连着）")
@@ -455,11 +483,14 @@ def check_step_chain():
     expect(S.step_chain([{"t": 52, "task": 6, "user": 77}],
                         [{"t": 50, "task": 6, "user": 77}], [], 80), [],
            "装进来晚于下发的不认领")
-    # RV 起了却没有装进来那一拍 —— MU / VU 上就是搬入任务提前下发那一路（Router 触发
-    # 只落在 DTE，所以 MU / VU 没有 DataIn 行可归），只记一拍。
+    # RV 起了却没有装进来那一拍 —— 自启动核 Task 0 建表 user 是 0xFFFF、这边是 0，
+    # 对不上。单拍段落在 [rv_start-1, rv_start)。
     expect(S.step_chain([], [{"t": 60, "task": 1, "user": 9}],
                         [{"t": 60, "task": 1, "user": 9}], 80),
-           [[60, 61, 9, 1]], "没有装进 stream 那一拍的只记一拍")
+           [[59, 60, 9, 1]], "没有装进 stream 那一拍的记在 rv_start 前一拍")
+    expect(S.step_chain([], [{"t": 0, "task": 1, "user": 9}],
+                        [{"t": 0, "task": 1, "user": 9}], 80),
+           [[0, 1, 9, 1]], "rv_start 在第 0 拍时不再往前")
 
 
 def check_dte_spans():
@@ -589,7 +620,8 @@ def check_rows(prefix):
     """十三条通道（`lanes_of` 按**通道号**给，不是显示行号 —— 显示行序见 `spans.ROWS`）。"""
     plan = idxbuild.plan(Path(prefix + ".trace"))
     with TraceReader(prefix) as r:
-        nodes = S.core_spans(r, plan["core_sig"]["0.0"], plan["t_end"])
+        reg = plan["dte_sig"].get("0.0", {}).get("regfile")
+        nodes = S.core_spans(r, plan["core_sig"]["0.0"], plan["t_end"], reg)
     rows = S.lanes_of(nodes)
     expect(plan["t_end"], 80, "波形末尾（只按要读的信号算）")
     # DTE 拆两行：装进 stream@8 早于下发@10 → 主线；装进 stream@72 晚于下发@70（搬入
@@ -600,15 +632,16 @@ def check_rows(prefix):
     # 不画在这一行上。
     expect(rows[1], [[37, 41, 77, 5]], "TS · MU（表收下 → rv_start）")
     # VU 这一路没有下发，装进 stream 的那条流被筛空；rv_start 那笔身份是占位、又没
-    # 有装进来那一拍，只记一拍。
-    expect(rows[2], [[60, 61, -1, -1]], "TS · VU（没装进来那一拍的只记一拍）")
+    # 有装进来那一拍，记在 rv_start 的前一拍。
+    expect(rows[2], [[59, 60, -1, -1]], "TS · VU（没装进来那一拍，落在 rv_start 前）")
     expect(rows[3], [[11, 20, 77, 3], [71, 76, 77, 7]], "DTE_Core（两笔）")
     expect(rows[4], [[60, 70, -1, -1]], "VU_Core（身份是占位）")
     expect(rows[5], [[41, 50, 77, 5]], "MU_Core")
-    # DTE_DSA 的终点有两个：`dsa_done` 与 `dsa_done_noack`。52 起手那一笔只有后者，
+    # DTE_DSA 的起点是写 trigger 的下一拍（12→13、50→51），不是 dsa_start（14 / 52）。
+    # 终点有两个：`dsa_done` 与 `dsa_done_noack`。51 起手那一笔只有后者，
     # 所以这一段收在 60 而不是延到波形末的 80 —— 这条断言就是这一行存在的理由。
-    expect(rows[6], [[14, 30, 77, 3], [52, 60, 77, 7]],
-           "DTE_DSA（两条完成流合一）")
+    expect(rows[6], [[13, 30, 77, 3], [51, 60, 77, 7]],
+           "DTE_DSA（trigger 后一拍起，两条完成流合一）")
     # VU 那一路：起点从「ISQ 收下」换成了「真正发行」（22），VU 没有 dsa_done，
     # 这一段延到波形末；被切掉的前半截归 VU_DSA_ISQ（16..22）。两行首尾相接。
     expect(rows[7], [[22, 80, 77, 3]], "VU_DSA（从真正发行起算）")
@@ -636,7 +669,8 @@ def check_rows(prefix):
 
 def _rows_for(plan, key):
     with TraceReader(plan["prefix"]) as r:
-        return S.lanes_of(S.core_spans(r, plan["core_sig"][key], plan["t_end"]))
+        reg = plan["dte_sig"].get(key, {}).get("regfile")
+        return S.lanes_of(S.core_spans(r, plan["core_sig"][key], plan["t_end"], reg))
 
 
 def check_index_roundtrip(prefix):

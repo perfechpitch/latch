@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import spans as S
 
-INDEX_FORMAT = 18  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
+INDEX_FORMAT = 20  # 2：七行显示 + 九条通道；3：段上印的单元名；4：TS 拆成三行（九行）
                    #    带上行名（TS-DTE / CORE-DTE …）。5：段间隔改 zigzag，
                    #    重叠的段能原样解回来。6：VU 那条 DSA 拆成两行（VU-DSA-ISQ
                    #    在前），十条通道 —— 每条 core 的头里 lane_off 从 9 个变 10 个。
@@ -63,6 +63,10 @@ INDEX_FORMAT = 18  # 2：七行显示 + 九条通道；3：段上印的单元名
                    #    （ts_install 仍是看见 accepted 的那一拍）。段的内容变了。
                    #    18：装后继的身份按 DTE / MU / VU 打包。同一拍两路一起收下时
                    #    两笔都留得下。段的内容变了。
+                   #    19：TS-MU / TS-VU 上对不上装表身份的 rv_start，单拍段从
+                   #    [rv_start, rv_start+1) 改成 [rv_start-1, rv_start)。段的内容变了。
+                   #    20：DTE-DSA 的起点从 dsa_start（Commit dispatch）改成写
+                   #    CFG_TRIGGER 的下一拍。段的内容变了。
 INDEX_SUFFIX = ".tracetto-index"
 MANIFEST_NAME = "manifest.json"
 CORES_DIR = "cores"

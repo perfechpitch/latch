@@ -118,8 +118,12 @@ moe_lpu.tracetto-index/
   一个核上几个用户叠在一起时各画一段，不并成最早那笔的长段。同一拍上完成与起手撞在
   一起时先算完成。段与段之间没有东西就是空档（画面上不画），**不是**“上一个值保持”。
 - **段的标签**：直接来自起手那条边沿（不是贴下发事件）。身份是占位就写 `-1`，画面上是 `?`。
-  DTE 那一行有个缺口：Router 入站那一路按约定不算一笔 DTE task，它有完成没有起手，
-  只记那一拍。
+  DTE-DSA 的起点是写 `CFG_TRIGGER` 的下一拍（`chip<i>.core<j>.dte.regfile` 上的
+  `dsa_trigger`），身份取那一拍的标量 `dsa_trigger_task` / `dsa_trigger_user`。
+  这一拍 Descriptor 进中央 TaskQueue；`dsa_start` 仍是 Commit 把它 dispatch 到
+  lane 的那一拍，通道忙时比起点更晚，不再当作段首。同一拍两条 lane 一起下发时
+  `dsa_start` 只留后写的身份，trigger 一拍一笔，两笔都有起点。Router 入站那一路
+  按约定不算一笔 DTE task，它没有这次 trigger，有完成没有起手，只记那一拍。
 - **TS 那几行的配对**：起点那条流是 `ts_create`（第一个 task 走建表）与 `ts_install`
   （装后继）两条**单调计数器**合起来的。计数器仍是整核一条；建表身份是标量，装后继
   按 DTE / MU / VU 打包，画段时按路拆开。拆开之后仍要按身份跟
@@ -128,7 +132,7 @@ moe_lpu.tracetto-index/
   波形末）。对上之后再与 `rv_start` 配。TS-DTE 的段 = `[ts_install 那一拍, 这一路 RV core 接下
   那一刻)`。TS-MU / TS-VU 的起点再往前一拍：计数器在看见 accepted 时才加一，表是上一拍
   收下的，画出来用那一拍。装进来了、下发了、这一路还没接下的延到波形末；`rv_start`
-  起了却没有装进来那一拍的只记一拍。
+  起了却没有装进来那一拍的，记 `[rv_start - 1, rv_start)`。
 - **DTE 那一路的起点按「装进 stream 早不早于下发」分成两行**。搬入任务（chain 里的
   `wait_wake` 项）是 Router 的数据一到就下发，与主线走到哪无关，所以它在**下发那一刻**
   认领不到自己那一笔 —— 这些归 `TS-DTE-DATAIN`，起点退回**下发**那一刻；认领得到的
@@ -180,9 +184,10 @@ moe_lpu.tracetto-index/
 | DTE 写 trigger 那拍的配置寄存器数 | `dsa_trigger_cfg_count`（标量，只有 DTE 有）—— 一笔任务配置过多少个配置寄存器（写 Config 区 `0x004`~`0x04C` 每写一次记一笔，`CFG_TRIGGER` 是提交位不算、Template 区 `0x1000+` 也不计）。`trace2perfetto.py` 把它写进 `DTE-Core` 段的 args（`cfg_count`） |
 | DTE 十条轨道（只有 `trace2perfetto.py` 读） | 挂在 `chip<i>.core<j>.dte.<regfile|lane<k>>` 下：每条 lane 的 `rd_start`→`rd_done`、`wr_start`→`wr_done`（各带 `_task` / `_user`）量读/写两半；起点那一拍另带四份内容（head/data/scale/topk）的字节数 `rd_start_head` / `rd_start_data` / `rd_start_scale` / `rd_start_topk`（写侧 `wr_start_*`）与各份内容从哪里读/写到哪的位置编码 `rd_start_head_loc`~`rd_start_topk_loc`（写侧 `wr_start_*_loc`；0 = none，1 = Hmem，2 = Core Mem，3 = Matrix Mem，4 = Router，5 = MU/topK_ep_table）|
 
-边沿的起点是各家“过门槛”那一拍（DTE 过 Commit 准入、MU 进 issue_q、VU 被 ISQ 收下；
-RV core 是执行器接下队头那笔），终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。
-边沿自带身份，段的标签直接取自边沿。
+MU / VU 的起点是各家“过门槛”那一拍（MU 进 issue_q、VU 被 ISQ 收下）。DTE-DSA 的起点
+是写 `CFG_TRIGGER` 的下一拍，不是 Commit 准入（`dsa_start`）。RV core 的起点是执行器
+接下队头那笔。终点是各家把完成报回去那一拍（VU 每条宏指令退休报一次）。边沿自带身份，
+段的标签直接取自起点那一拍。
 
 **DTE 那一路的终点有两个**，因为它的完成分两种去向：`ack_ts_en` 置了的报回 TS（`dsa_done`），
 没置的（自启动 core 的链一 Bypass DataIn、身份是保留号 63，以及别的不上报的搬入）不报 TS。

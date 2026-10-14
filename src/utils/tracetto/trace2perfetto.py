@@ -262,7 +262,8 @@ def build(prefix: str) -> dict:
         spans_cnt = 0
         for ordinal, (_chip, _core, key) in enumerate(ordered):
             pid = ordinal + 1
-            lanes = S.lanes_of(S.core_spans(r, core_sig[key], t_end))
+            reg = dte_sigs.get(key, {}).get("regfile")
+            lanes = S.lanes_of(S.core_spans(r, core_sig[key], t_end, reg))
             # MU-DSA-CALC 那一段的 GEMM 尺寸：按 calc_start 那拍取，键是起点时间。
             # 只有 MU 有，M 恒为 1（见 spans.calc_dims）。老波形缺这几条时是空 dict。
             dims = S.calc_dims(r, core_sig[key])
