@@ -1,15 +1,8 @@
 # DTE 数据搬运引擎
 
-**模式**：design（陈述当前设计，动机与取舍收在各节的“取舍”段落里）
+模式：design。层次：Core 内数据搬运。本文供搬运、软件和性能建模人员确定任务如何配置、搬运、完成和有序退休。
 
-给要实现或建模 DTE 的人：DTE 解决什么问题、靠什么解决、每条机制归在哪一处。
-
-* DTE 在 core 内的位置、它和三级存储的关系：《执行单元与存储》
-* 逐级拍数、接口位宽、机制覆盖表：[DTE 建模单元](07-units/chip/core/dte.md)
-
-《Bach 硬件设计建模参考》DTE 专题，全套目录见 [README](README.md)。
-
-***
+设计依据为原始库中的 [DTE DSA详细设计文档](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)，同步基准 revision 24200。本文描述当前采用的详设基线；寄存器、lane、接口和验证细节在 [DTE 单元设计](07-units/chip/core/dte.md)。现有模型差异与原文未统一项分别登记，不用旧代码定义硬件行为。
 
 ## DTE 解决的问题
 
@@ -23,7 +16,7 @@ core 里 MU 算矩阵、VU 算向量。数据怎么进来、怎么出去、怎�
 
 难点在两端的节奏对不上：
 
-* **Router 一侧**：流式到达，按 AXI-Stream 的帧边界走，什么时候来由上游决定
+* **Router 一侧**：流式到达，RX按valid/ready及head/tail接收；TX按每VC credit及head/tail发送，什么时候来由上游决定
 * **存储一侧**：要过 DMA_XBAR 抢 bank，Core Mem 有 8 个 bank、Matrix Mem 有 64 个，命中冲突就得排队
 * 把两端硬绑在一起，慢的一端会把快的一端拖住
 
@@ -31,7 +24,7 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 
 * 读一半、写一半，各自排队各自推进
 * 中间用 buffer 顶住速度差
-* 完成时按 `task_id` 合回一次 `task_done` 报给 TS
+* 完成以全局entry_id保持归属，WR完成回写后由SM/Ack按序退休
 
 后面两节分别是这个“劈开”和这个“合上”。
 
@@ -46,169 +39,262 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 | MM → CM | `out_ch[3]` | 固定复用 VC3 那个出核通道，出口切到 `DMA WR1`，硬件 route mask 只允许 CoreMem |
 | ~~CM → MM~~ | — | **本版本不支持**，XBar 不提供出核通道 write ctrl 到 Matrix Memory 的连接 |
 
-数据布局：**仅支持连续一维搬运**，当前不支持 stride。
+每段执行连续一维搬运；CFG_STRIDEi描述不同SID的基址间距，不是段内多维步长。
 
 模块组成与对外通道如下，布局与通道名照 MAS 的 Block Diagram 与 External Connections。
 
 ```svg
-<svg viewBox="0 0 1240 830" width="1240" height="830" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DTE 的模块组成与对外通道">
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0.00 0.00 861.00 1160.00" role="img" aria-label="DTE 的模块组成与对外通道">
 <title>DTE 的模块组成与对外通道</title>
-<rect width="1240" height="830" fill="#ffffff"/>
-<defs><marker id="kka" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="kkas" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="kkai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="kkais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="kkab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="kkabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="kkar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="kkars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="kkac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="kkacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="kkap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="kkaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
-<text x="30" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="start">DTE 的模块组成与对外通道</text>
-<text x="30" y="44" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">布局与通道名照 MAS 的 Block Diagram：左列是任务入口（config reg / LUT / MUX / taskQ），中间上下两条 Channel（inbound_ch/ch0、outbound_ch/ch1），右侧 DMA XBar 接 MatrixMem / CoreMem；</text>
-<text x="30" y="58" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每条 Channel 都是 taskq → agcu → ctrl 的读写两行，中间一个 buffer；Hmem 收进核包头、出核时被读；对外通道名照 External Connections 图</text>
-<rect x="40" y="140" width="120" height="46" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
-<text x="48" y="155" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#16181d" font-weight="700" text-anchor="start">DTE RVCore</text>
-<text x="48" y="169" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">用 dsawi 写四个寄存器</text>
-<text x="48" y="181" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">core_cmd / status</text>
-<rect x="40" y="246" width="120" height="46" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
-<text x="48" y="261" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" font-weight="700" text-anchor="start">TS</text>
-<text x="48" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">trigger：TID · SID · UID</text>
-<text x="48" y="287" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">收 done</text>
-<rect x="40" y="352" width="120" height="46" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
-<text x="48" y="367" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" font-weight="700" text-anchor="start">ctrl_NOC</text>
-<text x="48" y="381" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">SCP 经 ctrl_ch 配</text>
-<text x="48" y="393" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">LUT 与静态寄存器</text>
-<rect x="40" y="458" width="120" height="46" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
-<text x="48" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" font-weight="700" text-anchor="start">Debug</text>
-<text x="48" y="487" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">debug_ch</text>
-<rect x="190" y="96" width="830" height="650" rx="12" fill="#eef4ff" stroke="#2563eb" stroke-width="1.6"/>
-<text x="204" y="116" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#2563eb" font-weight="700" text-anchor="start">DTE</text>
-<rect x="215" y="140" width="90" height="46" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="223" y="155" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">config reg</text>
-<text x="223" y="169" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">ADDR · TD · PACK</text>
-<text x="223" y="181" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Trigger 启动</text>
-<rect x="215" y="246" width="90" height="46" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="223" y="261" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Fast LUT 待评估</text>
-<text x="223" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">{valid, length,</text>
-<text x="223" y="287" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">ctrl_flags} 64 项</text>
-<path d="M330 150 L352 162 L352 282 L330 294 Z" fill="#ffffff" stroke="#3f4451" stroke-width="1.2"/>
-<text transform="translate(342 222) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" text-anchor="middle">MUX</text>
-<rect x="380" y="192" width="80" height="62" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="388" y="207" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">taskQ</text>
-<text x="388" y="221" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">TaskQueue 16 项</text>
-<text x="388" y="233" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">Commit：读写两侧</text>
-<text x="388" y="245" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">同时拿到项才成立</text>
-<rect x="215" y="458" width="90" height="46" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="223" y="473" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Debug ctrl</text>
-<text x="223" y="487" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">调试通路</text>
-<path d="M160 163 L214.3 163" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M160 269 L214.3 269" stroke="#2563eb" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<path d="M160 375 L200 375 L200 300 L215 300" stroke="#6b7280" stroke-width="1.2" fill="none" marker-end="url(#kka)" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M200 300 L200 190 L215 190" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kka)"/>
-<path d="M160 481 L214.3 481" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kka)"/>
-<path d="M305 163 L330 163" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M305 269 L330 269" stroke="#16181d" stroke-width="1.4" fill="none" marker-end="url(#kkai)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M352 222 L379.3 222" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M305 481 L420 481 L420 254.7" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kka)"/>
-<rect x="470" y="140" width="440" height="200" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="690" y="156" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="700" text-anchor="middle">inbound_ch / ch0　Router → MM / CM</text>
-<rect x="485" y="170" width="80" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="525.0" y="190.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_taskq</text>
-<rect x="600" y="170" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="645.0" y="190.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">rd_ch0_agcu</text>
-<rect x="720" y="170" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="765.0" y="190.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_rd_ctrl</text>
-<rect x="720" y="226" width="90" height="28" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="765.0" y="244.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">inbound buffer</text>
-<rect x="485" y="280" width="80" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
-<text x="525.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_wr_taskq</text>
-<rect x="600" y="280" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
-<text x="645.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">wr_ch0_agcu</text>
-<rect x="720" y="280" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
-<text x="765.0" y="300.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch0_wr_ctrl</text>
-<path d="M565 186 L599.3 186" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M690 186 L719.3 186" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M525 202 L525 279.3" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M565 296 L599.3 296" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M690 296 L719.3 296" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M765 202 L765 225.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<path d="M765 254 L765 279.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<rect x="470" y="380" width="440" height="200" rx="8" fill="#ffffff" stroke="#0d9488" stroke-width="1.2"/>
-<text x="690" y="396" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#0d9488" font-weight="700" text-anchor="middle">outbound_ch / ch1　MM / CM → Router，MM → CM</text>
-<rect x="485" y="410" width="80" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="525.0" y="430.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_taskq</text>
-<rect x="600" y="410" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="645.0" y="430.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">rd_ch1_agcu</text>
-<rect x="720" y="410" width="90" height="32" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.3"/>
-<text x="765.0" y="430.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_rd_ctrl</text>
-<rect x="720" y="466" width="90" height="28" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="765.0" y="484.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">outbound buffer</text>
-<rect x="485" y="520" width="80" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
-<text x="525.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_wr_taskq</text>
-<rect x="600" y="520" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
-<text x="645.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">wr_ch1_agcu</text>
-<rect x="720" y="520" width="90" height="32" rx="5" fill="#f3e8ff" stroke="#a21caf" stroke-width="1.3"/>
-<text x="765.0" y="540.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">ch1_wr_ctrl</text>
-<path d="M565 426 L599.3 426" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M690 426 L719.3 426" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M525 442 L525 519.3" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M565 536 L599.3 536" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M690 536 L719.3 536" stroke="#16181d" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M765 442 L765 465.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<path d="M765 494 L765 519.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<text x="690" y="348" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">RD 可领先 WR，领先量由 buffer credit 约束；buffer 满经 TREADY 向 Router 反压</text>
-<text x="690" y="588" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">出口由 Route 固化：Router TX 或 CoreMem（WR_CH1 只允许 CoreMem，所以不支持 CM → MM）</text>
-<path d="M460 222 L470 222 L470 186 L484.3 186" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<path d="M470 222 L470 426 L484.3 426" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkai)"/>
-<rect x="800" y="108" width="180" height="24" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="890.0" y="124.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="middle">Hmem 288 B</text>
-<text x="890" y="142" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="middle">16 项 × {core_mask 2 B, sw_header 16 B}</text>
-<path d="M780 170 L780 150 L820 150 L820 132.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
-<text x="826" y="154" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="start">2 B / 16 B 包头写入</text>
-<path d="M990 132 L1000 132 L1000 576 L775 576 L775 552.7" stroke="#dc2626" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
-<text transform="translate(1009 360) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#dc2626" text-anchor="middle">出核时读包头（sw / hw 包头）</text>
-<rect x="1030" y="200" width="44" height="380" rx="6" fill="#eceef1" stroke="#3f4451" stroke-width="1.3"/>
-<text transform="translate(1052 390) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#16181d" text-anchor="middle">DMA XBar</text>
-<path d="M810 296 L1029.3 296" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<text x="920" y="290" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2xbar_ch0_wr　256 B</text>
-<path d="M1030 426 L810.7 426" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<text x="920" y="420" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">xbar2dsa_ch　256 B</text>
-<path d="M840 526 L862 536 L862 556 L840 566 Z" fill="#ffffff" stroke="#3f4451" stroke-width="1.2"/>
-<path d="M810 536 L840 536" stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#kkab)" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M862 546 L900 546 L900 536 L1029.3 536" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<text x="965" y="530" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2xbar_ch1_wr　CoreMem Only</text>
-<path d="M900 546 L900 700 L1120 700 L1120 606.7" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<text x="1010" y="694" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">dsa2router_ch　256 B</text>
-<rect x="1110" y="108" width="110" height="40" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
-<text x="1118" y="123" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#0d9488" font-weight="700" text-anchor="start">MU</text>
-<text x="1118" y="137" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">topK_ep_table</text>
-<text x="1118" y="149" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">128 B / 256 B</text>
-<path d="M810 178 L1090 178 L1090 138 L1109.3 138" stroke="#0d9488" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkac)"/>
-<text x="950" y="174" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#0d9488" font-weight="400" text-anchor="middle">topK 复制给 MU　128 B / 256 B</text>
-<rect x="1110" y="170" width="110" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="1118" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router RX</text>
-<text x="1118" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">router2dsa_ch</text>
-<text x="1118" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">read_ch0 · 256 B</text>
-<path d="M1110 196 L810.7 196" stroke="#2563eb" stroke-width="2.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkab)"/>
-<text x="960" y="210" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#2563eb" font-weight="400" text-anchor="middle">AXI-Stream：首拍 Header，Header Parser 在 ch0_rd_ctrl 解析</text>
-<rect x="1110" y="276" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
-<text x="1118" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#d97706" font-weight="700" text-anchor="start">MatrixMem</text>
-<text x="1118" y="305" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">to_mm_ch 进核</text>
-<text x="1118" y="317" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">mm_out_ch</text>
-<path d="M1074.7 296 L1109.3 296" stroke="#d97706" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kkars)" marker-end="url(#kkar)"/>
-<rect x="1110" y="406" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
-<text x="1118" y="421" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#d97706" font-weight="700" text-anchor="start">CoreMem</text>
-<text x="1118" y="435" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">to_cm_ch 进核 / 出核</text>
-<text x="1118" y="447" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">cm_out_ch</text>
-<path d="M1074.7 426 L1109.3 426" stroke="#d97706" stroke-width="1.8" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kkars)" marker-end="url(#kkar)"/>
-<rect x="1110" y="566" width="110" height="40" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="1118" y="581" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router TX</text>
-<text x="1118" y="595" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">write_ch1 · 256 B</text>
-<text x="1118" y="607" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">AXI-Stream Valid/Ready</text>
-<rect x="485" y="620" width="325" height="40" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
-<text x="493" y="635" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#2563eb" font-weight="700" text-anchor="start">Completion</text>
-<text x="493" y="649" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">RD 与 WR 两侧按 task_id Join，buffer 排空后才生成一次 task_done；同一任务只报一次</text>
-<path d="M765 552 L765 619.3" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
-<path d="M830 312 L830 366 L680 366 L680 410" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M680 442 L680 520" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M680 552 L680 619.3" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kkar)"/>
-<path d="M485 640 L175 640 L175 292" stroke="#d97706" stroke-width="1.6" fill="none" marker-end="url(#kkar)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="330" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">done → TS（dte2ts_done_ch）</text>
-<rect x="30" y="770" width="1180" height="40" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
-<text x="46" y="787" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">外部通道名照 External Connections：ctrl_ch（SCP）、debug_ch、core_cmd / status（DTE Core）、trigger_dsa 与 router2dsa_ch / dsa2router_ch（Router）、dsa2xbar_ch0_wr / ch1_wr 与 xbar2dsa_ch（DMA_XBAR）、done（TS）。</text>
-<text x="46" y="803" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">MAS 图里 inbound_ch 的写控制标成 ch1_wr_ctrl，按上下文应为 ch0_wr_ctrl，本图按后者；参数：中央 TaskQueue 深度 16、每通道 WR Lane TaskQ 深度 4、中间 buffer 约 8 KB、Cmem 口 256 B + 8 B scale、Router 口 256 B。</text>
+<g id="diagram82ed021f8526-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 1141.52)">
+<title>G</title>
+<polygon fill="white" stroke="none" points="-18,18 -18,-1141.52 843.25,-1141.52 843.25,18 -18,18" />
+<text xml:space="preserve" text-anchor="middle" x="412.62" y="-1104.32" font-family="Noto Sans CJK SC" font-size="16.00">DTE 的模块组成与对外通道</text>
+<text xml:space="preserve" text-anchor="middle" x="412.62" y="-1080.32" font-family="Noto Sans CJK SC" font-size="16.00">RVCore IF与Config产生FullTaskDesc；Router、CM/MM、M Top、HeaderTable、ShareMem分别遵循各自接口。</text>
+
+<g id="diagram82ed021f8526-node1" class="node">
+<title>nrv</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M180.5,-1067.52C180.5,-1067.52 47.21,-1067.52 47.21,-1067.52 41.21,-1067.52 35.21,-1061.52 35.21,-1055.52 35.21,-1055.52 35.21,-1008.24 35.21,-1008.24 35.21,-1002.24 41.21,-996.24 47.21,-996.24 47.21,-996.24 180.5,-996.24 180.5,-996.24 186.5,-996.24 192.5,-1002.24 192.5,-1008.24 192.5,-1008.24 192.5,-1055.52 192.5,-1055.52 192.5,-1061.52 186.5,-1067.52 180.5,-1067.52" />
+<text xml:space="preserve" text-anchor="middle" x="113.86" y="-1047.48" font-family="Noto Sans CJK SC" font-size="12.00">RVCore IF / AddrDecode</text>
+<text xml:space="preserve" text-anchor="middle" x="113.86" y="-1029.48" font-family="Noto Sans CJK SC" font-size="12.00">请求与STUPV保持</text>
+<text xml:space="preserve" text-anchor="middle" x="113.86" y="-1011.48" font-family="Noto Sans CJK SC" font-size="12.00">读Fire采样，下一拍返回</text>
+</g>
+
+<g id="diagram82ed021f8526-node2" class="node">
+<title>ncfg</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M400.25,-933.24C400.25,-933.24 283.46,-933.24 283.46,-933.24 277.46,-933.24 271.46,-927.24 271.46,-921.24 271.46,-921.24 271.46,-873.96 271.46,-873.96 271.46,-867.96 277.46,-861.96 283.46,-861.96 283.46,-861.96 400.25,-861.96 400.25,-861.96 406.25,-861.96 412.25,-867.96 412.25,-873.96 412.25,-873.96 412.25,-921.24 412.25,-921.24 412.25,-927.24 406.25,-933.24 400.25,-933.24" />
+<text xml:space="preserve" text-anchor="middle" x="341.86" y="-913.2" font-family="Noto Sans CJK SC" font-size="12.00">Config / Status</text>
+<text xml:space="preserve" text-anchor="middle" x="341.86" y="-895.2" font-family="Noto Sans CJK SC" font-size="12.00">19字段、dirty、8模板</text>
+<text xml:space="preserve" text-anchor="middle" x="341.86" y="-877.2" font-family="Noto Sans CJK SC" font-size="12.00">RUN / STOP / ERROR</text>
+</g>
+
+<g id="diagram82ed021f8526-edge1" class="edge">
+<title>nrv-&gt;ncfg</title>
+<path fill="none" stroke="#475569" d="M174.36,-995.78C205.01,-977.99 242.34,-956.33 273.98,-937.98" />
+<polygon fill="#475569" stroke="#475569" points="274.99,-940.43 280.16,-934.4 272.36,-935.89 274.99,-940.43" />
+<text xml:space="preserve" text-anchor="middle" x="259.82" y="-962.74" font-family="Noto Sans CJK SC" font-size="10.00">Config请求</text>
+</g>
+
+<g id="diagram82ed021f8526-node9" class="node">
+<title>nht</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M171.13,-71.28C171.13,-71.28 56.59,-71.28 56.59,-71.28 50.59,-71.28 44.59,-65.28 44.59,-59.28 44.59,-59.28 44.59,-12 44.59,-12 44.59,-6 50.59,0 56.59,0 56.59,0 171.13,0 171.13,0 177.13,0 183.13,-6 183.13,-12 183.13,-12 183.13,-59.28 183.13,-59.28 183.13,-65.28 177.13,-71.28 171.13,-71.28" />
+<text xml:space="preserve" text-anchor="middle" x="113.86" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">HeaderTable</text>
+<text xml:space="preserve" text-anchor="middle" x="113.86" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">16组×32项，共800B</text>
+<text xml:space="preserve" text-anchor="middle" x="113.86" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">软件口与通道口仲裁</text>
+</g>
+
+<g id="diagram82ed021f8526-edge15" class="edge">
+<title>nrv-&gt;nht</title>
+<path fill="none" stroke="#475569" d="M108.28,-995.78C102.06,-956.59 92.86,-898.6 92.86,-898.6 92.86,-898.6 92.86,-898.6 92.86,-168.92 92.86,-168.92 100.81,-118.8 106.93,-80.26" />
+<polygon fill="#475569" stroke="#475569" points="109.46,-81.05 108.05,-73.24 104.28,-80.23 109.46,-81.05" />
+<text xml:space="preserve" text-anchor="middle" x="112.36" y="-531.76" font-family="Noto Sans CJK SC" font-size="10.00">软件读写</text>
+</g>
+
+<g id="diagram82ed021f8526-node3" class="node">
+<title>nq</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M543.88,-798.96C543.88,-798.96 421.84,-798.96 421.84,-798.96 415.84,-798.96 409.84,-792.96 409.84,-786.96 409.84,-786.96 409.84,-739.68 409.84,-739.68 409.84,-733.68 415.84,-727.68 421.84,-727.68 421.84,-727.68 543.88,-727.68 543.88,-727.68 549.88,-727.68 555.88,-733.68 555.88,-739.68 555.88,-739.68 555.88,-786.96 555.88,-786.96 555.88,-792.96 549.88,-798.96 543.88,-798.96" />
+<text xml:space="preserve" text-anchor="middle" x="482.86" y="-778.92" font-family="Noto Sans CJK SC" font-size="12.00">Glb Cfg TaskQ</text>
+<text xml:space="preserve" text-anchor="middle" x="482.86" y="-760.92" font-family="Noto Sans CJK SC" font-size="12.00">16项FullTaskDesc</text>
+<text xml:space="preserve" text-anchor="middle" x="482.86" y="-742.92" font-family="Noto Sans CJK SC" font-size="12.00">Tail / Ch0..4 / SM / Ack</text>
+</g>
+
+<g id="diagram82ed021f8526-edge2" class="edge">
+<title>ncfg-&gt;nq</title>
+<path fill="none" stroke="#475569" d="M379.27,-861.5C397.74,-844.17 420.13,-823.16 439.37,-805.12" />
+<polygon fill="#475569" stroke="#475569" points="440.98,-807.21 444.65,-800.16 437.39,-803.38 440.98,-807.21" />
+<text xml:space="preserve" text-anchor="middle" x="452.21" y="-828.46" font-family="Noto Sans CJK SC" font-size="10.00">Trigger快照入队</text>
+</g>
+
+<g id="diagram82ed021f8526-node4" class="node">
+<title>nrd</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M341.13,-664.68C341.13,-664.68 208.59,-664.68 208.59,-664.68 202.59,-664.68 196.59,-658.68 196.59,-652.68 196.59,-652.68 196.59,-605.4 196.59,-605.4 196.59,-599.4 202.59,-593.4 208.59,-593.4 208.59,-593.4 341.13,-593.4 341.13,-593.4 347.13,-593.4 353.13,-599.4 353.13,-605.4 353.13,-605.4 353.13,-652.68 353.13,-652.68 353.13,-658.68 347.13,-664.68 341.13,-664.68" />
+<text xml:space="preserve" text-anchor="middle" x="274.86" y="-644.64" font-family="Noto Sans CJK SC" font-size="12.00">RD AGCU / Ctrl ×5</text>
+<text xml:space="preserve" text-anchor="middle" x="274.86" y="-626.64" font-family="Noto Sans CJK SC" font-size="12.00">驻留深1；Active/retiring</text>
+<text xml:space="preserve" text-anchor="middle" x="274.86" y="-608.64" font-family="Noto Sans CJK SC" font-size="12.00">算址、预留、RX/读响应</text>
+</g>
+
+<g id="diagram82ed021f8526-edge3" class="edge">
+<title>nq-&gt;nrd</title>
+<path fill="none" stroke="#475569" d="M409.66,-733.17C372.71,-718.45 335.61,-703.68 335.61,-703.68 335.61,-703.68 323.02,-688.42 309.3,-671.8" />
+<polygon fill="#475569" stroke="#475569" points="311.57,-670.42 304.77,-666.3 307.52,-673.76 311.57,-670.42" />
+<text xml:space="preserve" text-anchor="middle" x="351.73" y="-694.18" font-family="Noto Sans CJK SC" font-size="10.00">RD驻留</text>
+</g>
+
+<g id="diagram82ed021f8526-node5" class="node">
+<title>nwrq</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M608,-569.4C608,-569.4 489.71,-569.4 489.71,-569.4 483.71,-569.4 477.71,-563.4 477.71,-557.4 477.71,-557.4 477.71,-510.12 477.71,-510.12 477.71,-504.12 483.71,-498.12 489.71,-498.12 489.71,-498.12 608,-498.12 608,-498.12 614,-498.12 620,-504.12 620,-510.12 620,-510.12 620,-557.4 620,-557.4 620,-563.4 614,-569.4 608,-569.4" />
+<text xml:space="preserve" text-anchor="middle" x="548.86" y="-549.36" font-family="Noto Sans CJK SC" font-size="12.00">WR TaskQ / AGCU ×5</text>
+<text xml:space="preserve" text-anchor="middle" x="548.86" y="-531.36" font-family="Noto Sans CJK SC" font-size="12.00">深4；按Channel保序</text>
+<text xml:space="preserve" text-anchor="middle" x="548.86" y="-513.36" font-family="Noto Sans CJK SC" font-size="12.00">目的地址与段context</text>
+</g>
+
+<g id="diagram82ed021f8526-edge4" class="edge">
+<title>nq-&gt;nwrq</title>
+<path fill="none" stroke="#475569" d="M446.32,-727.19C433.33,-714.7 421.86,-703.68 421.86,-703.68 421.86,-703.68 421.86,-688.68 421.86,-688.68 421.86,-688.68 423.86,-593.4 423.86,-593.4 423.86,-593.4 444.57,-583.68 469.14,-572.16" />
+<polygon fill="#475569" stroke="#475569" points="470.19,-574.57 475.86,-569 467.96,-569.81 470.19,-574.57" />
+<text xml:space="preserve" text-anchor="middle" x="448.86" y="-694.18" font-family="Noto Sans CJK SC" font-size="10.00">同拍WR入队</text>
+</g>
+
+<g id="diagram82ed021f8526-node11" class="node">
+<title>nsm</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M527.13,-664.68C527.13,-664.68 448.59,-664.68 448.59,-664.68 442.59,-664.68 436.59,-658.68 436.59,-652.68 436.59,-652.68 436.59,-605.4 436.59,-605.4 436.59,-599.4 442.59,-593.4 448.59,-593.4 448.59,-593.4 527.13,-593.4 527.13,-593.4 533.13,-593.4 539.13,-599.4 539.13,-605.4 539.13,-605.4 539.13,-652.68 539.13,-652.68 539.13,-658.68 533.13,-664.68 527.13,-664.68" />
+<text xml:space="preserve" text-anchor="middle" x="487.86" y="-644.64" font-family="Noto Sans CJK SC" font-size="12.00">ShareMem</text>
+<text xml:space="preserve" text-anchor="middle" x="487.86" y="-626.64" font-family="Noto Sans CJK SC" font-size="12.00">4B可选控制写</text>
+<text xml:space="preserve" text-anchor="middle" x="487.86" y="-608.64" font-family="Noto Sans CJK SC" font-size="12.00">等待真实bresp</text>
+</g>
+
+<g id="diagram82ed021f8526-edge19" class="edge">
+<title>nq-&gt;nsm</title>
+<path fill="none" stroke="#475569" d="M482.41,-727.19C482.25,-714.7 482.11,-703.68 482.11,-703.68 482.11,-703.68 482.11,-688.68 482.11,-688.68 482.11,-688.68 482.72,-682.48 483.54,-674.11" />
+<polygon fill="#475569" stroke="#475569" points="486.15,-674.39 484.26,-666.67 480.92,-673.88 486.15,-674.39" />
+<text xml:space="preserve" text-anchor="middle" x="501.98" y="-694.18" font-family="Noto Sans CJK SC" font-size="10.00">SM Ptr写</text>
+</g>
+
+<g id="diagram82ed021f8526-node12" class="node">
+<title>nts</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M683.38,-664.68C683.38,-664.68 576.34,-664.68 576.34,-664.68 570.34,-664.68 564.34,-658.68 564.34,-652.68 564.34,-652.68 564.34,-605.4 564.34,-605.4 564.34,-599.4 570.34,-593.4 576.34,-593.4 576.34,-593.4 683.38,-593.4 683.38,-593.4 689.38,-593.4 695.38,-599.4 695.38,-605.4 695.38,-605.4 695.38,-652.68 695.38,-652.68 695.38,-658.68 689.38,-664.68 683.38,-664.68" />
+<text xml:space="preserve" text-anchor="middle" x="629.86" y="-644.64" font-family="Noto Sans CJK SC" font-size="12.00">TS done</text>
+<text xml:space="preserve" text-anchor="middle" x="629.86" y="-626.64" font-family="Noto Sans CJK SC" font-size="12.00">UID16 / SID4 / TID6</text>
+<text xml:space="preserve" text-anchor="middle" x="629.86" y="-608.64" font-family="Noto Sans CJK SC" font-size="12.00">Ack按序valid-only</text>
+</g>
+
+<g id="diagram82ed021f8526-edge21" class="edge">
+<title>nq-&gt;nts</title>
+<path fill="none" stroke="#475569" d="M526.59,-727.19C542.13,-714.7 555.86,-703.68 555.86,-703.68 555.86,-703.68 571.46,-688.15 588.34,-671.35" />
+<polygon fill="#475569" stroke="#475569" points="590.05,-673.35 593.52,-666.2 586.35,-669.63 590.05,-673.35" />
+<text xml:space="preserve" text-anchor="middle" x="595.89" y="-694.18" font-family="Noto Sans CJK SC" font-size="10.00">Ack Ptr退休</text>
+</g>
+
+<g id="diagram82ed021f8526-node6" class="node">
+<title>nbuf</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M513.63,-474.12C513.63,-474.12 396.09,-474.12 396.09,-474.12 390.09,-474.12 384.09,-468.12 384.09,-462.12 384.09,-462.12 384.09,-414.84 384.09,-414.84 384.09,-408.84 390.09,-402.84 396.09,-402.84 396.09,-402.84 513.63,-402.84 513.63,-402.84 519.63,-402.84 525.63,-408.84 525.63,-414.84 525.63,-414.84 525.63,-462.12 525.63,-462.12 525.63,-468.12 519.63,-474.12 513.63,-474.12" />
+<text xml:space="preserve" text-anchor="middle" x="454.86" y="-454.08" font-family="Noto Sans CJK SC" font-size="12.00">Buffer ×5</text>
+<text xml:space="preserve" text-anchor="middle" x="454.86" y="-436.08" font-family="Noto Sans CJK SC" font-size="12.00">每Channel32×256B</text>
+<text xml:space="preserve" text-anchor="middle" x="454.86" y="-418.08" font-family="Noto Sans CJK SC" font-size="12.00">free / reserved / valid</text>
+</g>
+
+<g id="diagram82ed021f8526-edge5" class="edge">
+<title>nrd-&gt;nbuf</title>
+<path fill="none" stroke="#475569" d="M303.87,-593.22C335.93,-554.74 383.11,-498.12 383.11,-498.12 383.11,-498.12 392.89,-490.13 405.23,-480.04" />
+<polygon fill="#475569" stroke="#475569" points="406.56,-482.34 410.71,-475.56 403.24,-478.28 406.56,-482.34" />
+<text xml:space="preserve" text-anchor="middle" x="423.98" y="-531.76" font-family="Noto Sans CJK SC" font-size="10.00">数据/响应填预留槽</text>
+</g>
+
+<g id="diagram82ed021f8526-node7" class="node">
+<title>nwr</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M520.38,-339.84C520.38,-339.84 389.34,-339.84 389.34,-339.84 383.34,-339.84 377.34,-333.84 377.34,-327.84 377.34,-327.84 377.34,-280.56 377.34,-280.56 377.34,-274.56 383.34,-268.56 389.34,-268.56 389.34,-268.56 520.38,-268.56 520.38,-268.56 526.38,-268.56 532.38,-274.56 532.38,-280.56 532.38,-280.56 532.38,-327.84 532.38,-327.84 532.38,-333.84 526.38,-339.84 520.38,-339.84" />
+<text xml:space="preserve" text-anchor="middle" x="454.86" y="-319.8" font-family="Noto Sans CJK SC" font-size="12.00">WR Ctrl ×5</text>
+<text xml:space="preserve" text-anchor="middle" x="454.86" y="-301.8" font-family="Noto Sans CJK SC" font-size="12.00">Active与上一任务Hold</text>
+<text xml:space="preserve" text-anchor="middle" x="454.86" y="-283.8" font-family="Noto Sans CJK SC" font-size="12.00">写响应与RD drain_done</text>
+</g>
+
+<g id="diagram82ed021f8526-edge8" class="edge">
+<title>nrd-&gt;nwr</title>
+<path fill="none" stroke="#475569" d="M275.82,-593.35C277.57,-530.18 281.11,-402.84 281.11,-402.84 281.11,-402.84 336.66,-371.62 384.94,-344.49" />
+<polygon fill="#475569" stroke="#475569" points="386.05,-346.88 391.3,-340.92 383.48,-342.3 386.05,-346.88" />
+<text xml:space="preserve" text-anchor="middle" x="326.48" y="-436.48" font-family="Noto Sans CJK SC" font-size="10.00">同Entry drain_done</text>
+</g>
+
+<g id="diagram82ed021f8526-node8" class="node">
+<title>nmem</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M264.25,-205.56C264.25,-205.56 153.46,-205.56 153.46,-205.56 147.46,-205.56 141.46,-199.56 141.46,-193.56 141.46,-193.56 141.46,-146.28 141.46,-146.28 141.46,-140.28 147.46,-134.28 153.46,-134.28 153.46,-134.28 264.25,-134.28 264.25,-134.28 270.25,-134.28 276.25,-140.28 276.25,-146.28 276.25,-146.28 276.25,-193.56 276.25,-193.56 276.25,-199.56 270.25,-205.56 264.25,-205.56" />
+<text xml:space="preserve" text-anchor="middle" x="208.86" y="-185.52" font-family="Noto Sans CJK SC" font-size="12.00">端口仲裁与适配</text>
+<text xml:space="preserve" text-anchor="middle" x="208.86" y="-167.52" font-family="Noto Sans CJK SC" font-size="12.00">CM/MM双128B</text>
+<text xml:space="preserve" text-anchor="middle" x="208.86" y="-149.52" font-family="Noto Sans CJK SC" font-size="12.00">M Top MM/topK共享</text>
+</g>
+
+<g id="diagram82ed021f8526-edge10" class="edge">
+<title>nrd-&gt;nmem</title>
+<path fill="none" stroke="#475569" d="M221.54,-592.91C202.59,-580.42 185.86,-569.4 185.86,-569.4 185.86,-569.4 148.61,-378.84 148.61,-378.84 148.61,-378.84 148.61,-363.84 148.61,-363.84 148.61,-363.84 189.86,-229.56 189.86,-229.56 189.86,-229.56 191.95,-223.1 194.75,-214.46" />
+<polygon fill="#475569" stroke="#475569" points="197.19,-215.43 197.01,-207.49 192.2,-213.81 197.19,-215.43" />
+<text xml:space="preserve" text-anchor="middle" x="163.23" y="-369.34" font-family="Noto Sans CJK SC" font-size="10.00">读请求</text>
+</g>
+
+<g id="diagram82ed021f8526-edge6" class="edge">
+<title>nwrq-&gt;nwr</title>
+<path fill="none" stroke="#475569" d="M545.91,-497.94C542.65,-459.46 537.86,-402.84 537.86,-402.84 537.86,-402.84 509.86,-363.84 509.86,-363.84 509.86,-363.84 502.9,-356.42 493.93,-346.86" />
+<polygon fill="#475569" stroke="#475569" points="495.88,-345.11 488.84,-341.43 492.05,-348.7 495.88,-345.11" />
+<text xml:space="preserve" text-anchor="middle" x="570.45" y="-436.48" font-family="Noto Sans CJK SC" font-size="10.00">目的context</text>
+</g>
+
+<g id="diagram82ed021f8526-edge7" class="edge">
+<title>nbuf-&gt;nwr</title>
+<path fill="none" stroke="#475569" d="M454.86,-402.38C454.86,-385.95 454.86,-366.23 454.86,-348.85" />
+<polygon fill="#475569" stroke="#475569" points="457.48,-349.02 454.86,-341.52 452.23,-349.02 457.48,-349.02" />
+<text xml:space="preserve" text-anchor="middle" x="479.23" y="-369.34" font-family="Noto Sans CJK SC" font-size="10.00">按段序消费</text>
+</g>
+
+<g id="diagram82ed021f8526-edge9" class="edge">
+<title>nwr-&gt;nq</title>
+<path fill="none" stroke="#475569" d="M532.75,-321.69C614.68,-339.03 731.86,-363.84 731.86,-363.84 731.86,-363.84 731.86,-378.84 731.86,-378.84 731.86,-378.84 707.86,-664.68 707.86,-664.68 707.86,-664.68 627.86,-703.68 627.86,-703.68 627.86,-703.68 597.27,-716.05 564.2,-729.43" />
+<polygon fill="#475569" stroke="#475569" points="563.58,-726.84 557.61,-732.09 565.55,-731.71 563.58,-726.84" />
+<text xml:space="preserve" text-anchor="middle" x="755.91" y="-531.76" font-family="Noto Sans CJK SC" font-size="10.00">lane_finish ×5</text>
+</g>
+
+<g id="diagram82ed021f8526-edge12" class="edge">
+<title>nwr-&gt;nmem</title>
+<path fill="none" stroke="#475569" d="M377.09,-270.45C345.19,-257.02 315.61,-244.56 315.61,-244.56 315.61,-244.56 292.1,-228.34 267.14,-211.13" />
+<polygon fill="#475569" stroke="#475569" points="268.64,-208.97 260.98,-206.87 265.66,-213.29 268.64,-208.97" />
+<text xml:space="preserve" text-anchor="middle" x="330.23" y="-235.06" font-family="Noto Sans CJK SC" font-size="10.00">写请求</text>
+</g>
+
+<g id="diagram82ed021f8526-node10" class="node">
+<title>nrouter</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M593.75,-205.56C593.75,-205.56 479.96,-205.56 479.96,-205.56 473.96,-205.56 467.96,-199.56 467.96,-193.56 467.96,-193.56 467.96,-146.28 467.96,-146.28 467.96,-140.28 473.96,-134.28 479.96,-134.28 479.96,-134.28 593.75,-134.28 593.75,-134.28 599.75,-134.28 605.75,-140.28 605.75,-146.28 605.75,-146.28 605.75,-193.56 605.75,-193.56 605.75,-199.56 599.75,-205.56 593.75,-205.56" />
+<text xml:space="preserve" text-anchor="middle" x="536.86" y="-185.52" font-family="Noto Sans CJK SC" font-size="12.00">Router RX / TX</text>
+<text xml:space="preserve" text-anchor="middle" x="536.86" y="-167.52" font-family="Noto Sans CJK SC" font-size="12.00">RX valid/ready</text>
+<text xml:space="preserve" text-anchor="middle" x="536.86" y="-149.52" font-family="Noto Sans CJK SC" font-size="12.00">TX每VC信用、flit交织</text>
+</g>
+
+<g id="diagram82ed021f8526-edge17" class="edge">
+<title>nwr-&gt;nrouter</title>
+<path fill="none" stroke="#475569" d="M486.61,-268.07C497.89,-255.58 507.86,-244.56 507.86,-244.56 507.86,-244.56 513.55,-230.1 519.89,-214" />
+<polygon fill="#475569" stroke="#475569" points="522.18,-215.36 522.48,-207.42 517.29,-213.44 522.18,-215.36" />
+<text xml:space="preserve" text-anchor="middle" x="536.65" y="-235.06" font-family="Noto Sans CJK SC" font-size="10.00">实际TX flit</text>
+</g>
+
+<g id="diagram82ed021f8526-edge11" class="edge">
+<title>nmem-&gt;nrd</title>
+<path fill="none" stroke="#475569" d="M213.9,-205.84C225.76,-288.01 255.43,-493.48 268.5,-584.02" />
+<polygon fill="#475569" stroke="#475569" points="265.9,-584.38 269.57,-591.43 271.1,-583.63 265.9,-584.38" />
+<text xml:space="preserve" text-anchor="middle" x="253.44" y="-369.34" font-family="Noto Sans CJK SC" font-size="10.00">读响应</text>
+</g>
+
+<g id="diagram82ed021f8526-edge13" class="edge">
+<title>nmem-&gt;nwr</title>
+<path fill="none" stroke="#475569" d="M276.64,-199.72C311.54,-214.55 346.86,-229.56 346.86,-229.56 346.86,-229.56 370.85,-245.92 396.21,-263.21" />
+<polygon fill="#475569" stroke="#475569" points="394.46,-265.2 402.14,-267.25 397.42,-260.86 394.46,-265.2" />
+<text xml:space="preserve" text-anchor="middle" x="382.14" y="-235.06" font-family="Noto Sans CJK SC" font-size="10.00">写响应</text>
+</g>
+
+<g id="diagram82ed021f8526-edge14" class="edge">
+<title>nmem-&gt;nht</title>
+<path fill="none" stroke="#475569" d="M183.65,-133.82C171.42,-116.79 156.64,-96.21 143.84,-78.39" />
+<polygon fill="#475569" stroke="#475569" points="146.24,-77.24 139.74,-72.68 141.98,-80.3 146.24,-77.24" />
+<text xml:space="preserve" text-anchor="middle" x="183.71" y="-100.78" font-family="Noto Sans CJK SC" font-size="10.00">通道读写</text>
+</g>
+
+<g id="diagram82ed021f8526-edge16" class="edge">
+<title>nrouter-&gt;nrd</title>
+<path fill="none" stroke="#475569" d="M554.23,-206.05C560.4,-218.54 565.86,-229.56 565.86,-229.56 565.86,-229.56 632.86,-498.12 632.86,-498.12 632.86,-498.12 632.86,-569.4 632.86,-569.4 632.86,-569.4 423.86,-593.4 423.86,-593.4 423.86,-593.4 394.39,-600.25 361.66,-607.86" />
+<polygon fill="#475569" stroke="#475569" points="361.47,-605.21 354.76,-609.46 362.66,-610.32 361.47,-605.21" />
+<text xml:space="preserve" text-anchor="middle" x="634.32" y="-369.34" font-family="Noto Sans CJK SC" font-size="10.00">RX头/payload</text>
+</g>
+
+<g id="diagram82ed021f8526-edge18" class="edge">
+<title>nrouter-&gt;nwr</title>
+<path fill="none" stroke="#475569" d="M484.89,-206.05C466.42,-218.54 450.11,-229.56 450.11,-229.56 450.11,-229.56 450.11,-244.56 450.11,-244.56 450.11,-244.56 450.61,-250.76 451.29,-259.13" />
+<polygon fill="#475569" stroke="#475569" points="448.67,-259.3 451.89,-266.56 453.9,-258.88 448.67,-259.3" />
+<text xml:space="preserve" text-anchor="middle" x="475.98" y="-235.06" font-family="Noto Sans CJK SC" font-size="10.00">每VC credit</text>
+</g>
+
+<g id="diagram82ed021f8526-edge20" class="edge">
+<title>nsm-&gt;nq</title>
+<path fill="none" stroke="#475569" d="M509.42,-665.17C517.09,-677.66 523.86,-688.68 523.86,-688.68 523.86,-688.68 523.86,-703.68 523.86,-703.68 523.86,-703.68 518.96,-710.68 512.56,-719.84" />
+<polygon fill="#475569" stroke="#475569" points="510.43,-718.3 508.28,-725.95 514.73,-721.31 510.43,-718.3" />
+<text xml:space="preserve" text-anchor="middle" x="536.61" y="-694.18" font-family="Noto Sans CJK SC" font-size="10.00">bresp</text>
+</g>
+</g>
 </svg>
 ```
 
@@ -217,261 +303,188 @@ DTE 的做法是**把一个搬运任务从中间劈开**：
 ## 拆开与合上
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 790" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="一个搬运任务在 DTE 里被拆成读写两半又合回一次完成">
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0.00 0.00 1295.00 181.00" role="img" aria-label="一个搬运任务怎么被拆开又合上">
 <title>一个搬运任务怎么被拆开又合上</title>
-<defs>
-<marker id="ad" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
-<marker id="ac" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#d97706"/></marker>
-<marker id="at" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0d9488"/></marker>
-</defs>
-<rect width="1340" height="790" fill="#ffffff"/>
-<text x="24" y="30" font-size="15" fill="#111827" font-weight="600">一个搬运任务怎么被拆开又合上</text>
-<text x="24" y="50" font-size="10.5" fill="#475569">读一半、写一半各自排队推进，中间 buffer 顶住两端速度差，完成时按 task_id 合回一次 task_done</text>
-<text x="24" y="66" font-size="10.5" fill="#475569">图里画的是一个通道；进核通道 1 条，出核通道 4 条与 4 个 VC 一一对应，各有一套 RD_CH1 / WR_CH1</text>
-<rect x="210" y="96" width="730" height="60" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="221" y="118" font-size="12" fill="#111827" font-weight="600">Commit：配对接纳，不产生半任务</text>
-<text x="221" y="134" font-size="9.5" fill="#475569">一个高层任务必须同时拿到通道读侧的 TaskQueue 项、写侧的 TaskQueue 项和 Completion RS 项；任一侧没有空间就整体保持（半任务防护）。地址展开在 Regfile Fire 时已算好</text>
-<rect x="30" y="200" width="160" height="110" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
-<text x="41" y="220" font-size="12" fill="#111827" font-weight="600">Router RX</text>
-<text x="41" y="236" font-size="9.5" fill="#475569">AXI-Stream</text>
-<text x="41" y="249" font-size="9.5" fill="#475569">一帧一任务</text>
-<text x="41" y="262" font-size="9.5" fill="#475569">首拍固定 Header</text>
-<rect x="210" y="200" width="170" height="110" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="221" y="220" font-size="12" fill="#111827" font-weight="600">RD_CH0 ×1</text>
-<text x="221" y="236" font-size="9.5" fill="#475569">收 Payload 写 buffer</text>
-<text x="221" y="249" font-size="9.5" fill="#475569">带 task_id、有效字节</text>
-<text x="221" y="262" font-size="9.5" fill="#475569">与任务边界</text>
-<text x="221" y="275" font-size="9.5" fill="#475569">buffer 满则 TREADY 反压</text>
-<rect x="400" y="200" width="140" height="110" rx="4" fill="#eef2f6" stroke="#374151" stroke-width="1.25"/>
-<text x="411" y="220" font-size="12" fill="#111827" font-weight="600">inbound buffer</text>
-<text x="411" y="236" font-size="9.5" fill="#475569">与 outbound</text>
-<text x="411" y="249" font-size="9.5" fill="#475569">合计约 8 KB</text>
-<text x="411" y="262" font-size="9.5" fill="#475569">256B × 20～30 T</text>
-<text x="411" y="275" font-size="9.5" fill="#475569">掩盖 32 T 延迟</text>
-<rect x="560" y="200" width="170" height="110" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="571" y="220" font-size="12" fill="#111827" font-weight="600">WR_CH0 ×1</text>
-<text x="571" y="236" font-size="9.5" fill="#475569">按任务边界取数</text>
-<text x="571" y="249" font-size="9.5" fill="#475569">经 DMA_XBAR</text>
-<text x="571" y="262" font-size="9.5" fill="#475569">写 MM / CM</text>
-<rect x="750" y="200" width="170" height="110" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
-<text x="761" y="220" font-size="12" fill="#111827" font-weight="600">Matrix Mem / Core Mem</text>
-<text x="761" y="236" font-size="9.5" fill="#475569">inbound 的落点</text>
-<rect x="30" y="350" width="160" height="110" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
-<text x="41" y="370" font-size="12" fill="#111827" font-weight="600">Matrix Mem / Core Mem</text>
-<text x="41" y="386" font-size="9.5" fill="#475569">outbound 的源</text>
-<rect x="210" y="350" width="170" height="110" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="221" y="370" font-size="12" fill="#111827" font-weight="600">RD_CH1 ×4</text>
-<text x="221" y="386" font-size="9.5" fill="#475569">AGCU 生成源端读地址</text>
-<text x="221" y="399" font-size="9.5" fill="#475569">经 DMA_XBAR 读</text>
-<text x="221" y="412" font-size="9.5" fill="#475569">数据连同 task_id</text>
-<text x="221" y="425" font-size="9.5" fill="#475569">与边界元数据入 buffer</text>
-<rect x="400" y="350" width="140" height="110" rx="4" fill="#eef2f6" stroke="#374151" stroke-width="1.25"/>
-<text x="411" y="370" font-size="12" fill="#111827" font-weight="600">outbound buffer</text>
-<text x="411" y="386" font-size="9.5" fill="#475569">read-ahead 的</text>
-<text x="411" y="399" font-size="9.5" fill="#475569">领先量由它的</text>
-<text x="411" y="412" font-size="9.5" fill="#475569">credit 约束</text>
-<rect x="560" y="350" width="170" height="110" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="571" y="370" font-size="12" fill="#111827" font-weight="600">WR_CH1 ×4</text>
-<text x="571" y="386" font-size="9.5" fill="#475569">按固化的 Route 选出口</text>
-<text x="571" y="399" font-size="9.5" fill="#475569">Router TX 或</text>
-<text x="571" y="412" font-size="9.5" fill="#475569">CoreMem Egress</text>
-<rect x="750" y="350" width="170" height="110" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
-<text x="761" y="370" font-size="12" fill="#111827" font-weight="600">Router TX / Core Mem</text>
-<text x="761" y="386" font-size="9.5" fill="#475569">MM → CM 时出口</text>
-<text x="761" y="399" font-size="9.5" fill="#475569">切到 DMA WR1</text>
-<rect x="210" y="510" width="730" height="60" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="221" y="532" font-size="12" fill="#111827" font-weight="600">Completion RS：按 task_id Join</text>
-<text x="221" y="548" font-size="9.5" fill="#475569">同一 task_id 的 RD 与 WR 两侧条件都满足才产生 task_done。同一拍多个 Join 命中时全部写入 Done Pending，不允许覆盖或丢失</text>
-<rect x="980" y="510" width="170" height="60" rx="4" fill="#f8fafc" stroke="#374151" stroke-width="1.25"/>
-<text x="991" y="532" font-size="12" fill="#111827" font-weight="600">Done Pending</text>
-<text x="991" y="548" font-size="9.5" fill="#475569">串行化后报 TS</text>
-<path d="M192 255 L209.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M382 255 L399.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M542 255 L559.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M732 255 L749.5 255" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M192 405 L209.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M382 405 L399.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M542 405 L559.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<path d="M732 405 L749.5 405" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<rect x="36.32000000000001" y="181.5" width="147.35999999999999" height="15.5" fill="#ffffff" opacity="0.95"/>
-<text x="110" y="192" font-size="9.5" fill="#2563eb" text-anchor="middle">inbound：Router → MM / CM</text>
-<rect x="18.650000000000006" y="331.5" width="182.7" height="15.5" fill="#ffffff" opacity="0.95"/>
-<text x="110" y="342" font-size="9.5" fill="#2563eb" text-anchor="middle">outbound：MM / CM → Router / CM</text>
-<path d="M295 158 L295 199.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<path d="M645 158 L645 199.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<path d="M390 158 L390 395 L380.5 395" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<path d="M740 158 L740 395 L730.5 395" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<rect x="368.98" y="166" width="218.04" height="15" fill="#ffffff" opacity="0.95"/>
-<text x="478" y="176" font-size="9" fill="#d97706" text-anchor="middle">每个通道每侧各自的 TaskQueue 与 Active Context</text>
-<path d="M922 255 L960 255 L960 524 L941 524" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
-<path d="M922 405 L930 405 L930 509.5" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
-<rect x="965" y="320" width="61.8" height="15" fill="#ffffff" opacity="0.95"/>
-<text x="968" y="330" font-size="9" fill="#0d9488" text-anchor="start">RD / WR 两侧</text>
-<rect x="965" y="334" width="61.8" height="15" fill="#ffffff" opacity="0.95"/>
-<text x="968" y="344" font-size="9" fill="#0d9488" text-anchor="start">各自 drained</text>
-<path d="M942 540 L979.5 540" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
-<path d="M1065 572 L1065 606" fill="none" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
-<rect x="979.54" y="613.5" width="170.92" height="15.5" fill="#ffffff" opacity="0.95"/>
-<text x="1065" y="624" font-size="9.5" fill="#0d9488" text-anchor="middle">task_done → TS（exactly-once）</text>
-<text x="24" y="690" font-size="12" fill="#111827" font-weight="600">完成的六个层级</text>
-<rect x="160" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
-<text x="247" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">queued</text>
-<text x="247" y="705" font-size="9" fill="#475569" text-anchor="middle">进 TaskQueue</text>
-<path d="M337 694 L354.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
-<rect x="355" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
-<text x="442" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">active</text>
-<text x="442" y="705" font-size="9" fill="#475569" text-anchor="middle">装载为 Active Context</text>
-<path d="M532 694 L549.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
-<rect x="550" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
-<text x="637" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">issue_done</text>
-<text x="637" y="705" font-size="9" fill="#475569" text-anchor="middle">最后一个请求已 Fire</text>
-<path d="M727 694 L744.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
-<rect x="745" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
-<text x="832" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">drained</text>
-<text x="832" y="705" font-size="9" fill="#475569" text-anchor="middle">响应与 Buffer 收敛</text>
-<path d="M922 694 L939.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
-<rect x="940" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
-<text x="1027" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">join_done</text>
-<text x="1027" y="705" font-size="9" fill="#475569" text-anchor="middle">RD 与 WR 都满足</text>
-<path d="M1117 694 L1134.5 694" fill="none" stroke="#d97706" stroke-width="1.4" marker-end="url(#ac)"/>
-<rect x="1135" y="672" width="175" height="44" rx="5" fill="#fdf5e8" stroke="#c2823a" stroke-width="1.1"/>
-<text x="1222" y="688" font-size="10.5" fill="#111827" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">task_done</text>
-<text x="1222" y="705" font-size="9" fill="#475569" text-anchor="middle">与 TS 握手成功</text>
-<text x="160" y="736" font-size="9.5" fill="#475569">前三层是通道单侧子上下文的粒度，后三层是高层任务的粒度。issue_done 一到，该侧就能去装下一个任务，剩下的排空由 Completion RS 按 task_id 跟踪</text>
-<text x="24" y="762" font-size="10.5" fill="#475569">连线：</text>
-<path d="M70 758 L104 758" stroke="#2563eb" stroke-width="1.6" marker-end="url(#ad)"/>
-<text x="112" y="762" font-size="10.5" fill="#475569">数据通路</text>
-<path d="M220 758 L254 758" stroke="#d97706" stroke-width="1.6" marker-end="url(#ac)"/>
-<text x="262" y="762" font-size="10.5" fill="#475569">任务分配</text>
-<path d="M370 758 L404 758" stroke="#0d9488" stroke-width="1.6" marker-end="url(#at)"/>
-<text x="412" y="762" font-size="10.5" fill="#475569">完成事件</text>
-<text x="540" y="762" font-size="10.5" fill="#475569">CM → MM 本版本不支持：XBar 不提供 WR_CH1 到 Matrix Memory 的连接</text>
+<g id="diagram8f7c411cea9a-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 163.28)">
+<title>G</title>
+<polygon fill="white" stroke="none" points="-18,18 -18,-163.28 1276.95,-163.28 1276.95,18 -18,18" />
+<text xml:space="preserve" text-anchor="middle" x="629.47" y="-126.08" font-family="Noto Sans CJK SC" font-size="16.00">一个搬运任务怎么被拆开又合上</text>
+<text xml:space="preserve" text-anchor="middle" x="629.47" y="-102.08" font-family="Noto Sans CJK SC" font-size="16.00">归属键是全局entry_id；WR收齐本任务RD与写侧完成条件后回写，全局SM/Ack按序退休。</text>
+
+<g id="diagram8f7c411cea9a-node1" class="node">
+<title>n0</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M189.54,-89.28C189.54,-89.28 12,-89.28 12,-89.28 6,-89.28 0,-83.28 0,-77.28 0,-77.28 0,-12 0,-12 0,-6 6,0 12,0 12,0 189.54,0 189.54,0 195.54,0 201.54,-6 201.54,-12 201.54,-12 201.54,-77.28 201.54,-77.28 201.54,-83.28 195.54,-89.28 189.54,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="100.77" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">M2 · 全局Q / dispatch</text>
+<text xml:space="preserve" text-anchor="middle" x="100.77" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">16 Entry从接纳持有到退休</text>
+<text xml:space="preserve" text-anchor="middle" x="100.77" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">Ch Ptr同时交付RD驻留与WR Q</text>
+<text xml:space="preserve" text-anchor="middle" x="100.77" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">同Channel保序，跨Channel独立</text>
+</g>
+
+<g id="diagram8f7c411cea9a-node2" class="node">
+<title>n1</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M453.33,-89.28C453.33,-89.28 281.04,-89.28 281.04,-89.28 275.04,-89.28 269.04,-83.28 269.04,-77.28 269.04,-77.28 269.04,-12 269.04,-12 269.04,-6 275.04,0 281.04,0 281.04,0 453.33,0 453.33,0 459.33,0 465.33,-6 465.33,-12 465.33,-12 465.33,-77.28 465.33,-77.28 465.33,-83.28 459.33,-89.28 453.33,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="367.18" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">M4 · 读请求 / 响应</text>
+<text xml:space="preserve" text-anchor="middle" x="367.18" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">请求Fire前预留Buffer槽</text>
+<text xml:space="preserve" text-anchor="middle" x="367.18" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">CM/MM双128B，topK两笔128B</text>
+<text xml:space="preserve" text-anchor="middle" x="367.18" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">响应按端点FIFO恢复原预留项</text>
+</g>
+
+<g id="diagram8f7c411cea9a-edge1" class="edge">
+<title>n0-&gt;n1</title>
+<path fill="none" stroke="#475569" d="M201.73,-44.64C220.76,-44.64 240.73,-44.64 259.94,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="259.69,-47.27 267.19,-44.64 259.69,-42.02 259.69,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="235.29" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+
+<g id="diagram8f7c411cea9a-node3" class="node">
+<title>n2</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M698.37,-89.28C698.37,-89.28 544.83,-89.28 544.83,-89.28 538.83,-89.28 532.83,-83.28 532.83,-77.28 532.83,-77.28 532.83,-12 532.83,-12 532.83,-6 538.83,0 544.83,0 544.83,0 698.37,0 698.37,0 704.37,0 710.37,-6 710.37,-12 710.37,-12 710.37,-77.28 710.37,-77.28 710.37,-83.28 704.37,-89.28 698.37,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="621.6" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">M6 · WR / 数据重对齐</text>
+<text xml:space="preserve" text-anchor="middle" x="621.6" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">内存写等待真实写响应</text>
+<text xml:space="preserve" text-anchor="middle" x="621.6" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">Router TX按VC credit发flit</text>
+<text xml:space="preserve" text-anchor="middle" x="621.6" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">prev/residue跨拍与跨段保留</text>
+</g>
+
+<g id="diagram8f7c411cea9a-edge2" class="edge">
+<title>n1-&gt;n2</title>
+<path fill="none" stroke="#475569" d="M465.78,-44.64C484.7,-44.64 504.53,-44.64 523.44,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="523.33,-47.27 530.83,-44.64 523.33,-42.02 523.33,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="499.08" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+
+<g id="diagram8f7c411cea9a-node4" class="node">
+<title>n3</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M962.91,-89.28C962.91,-89.28 789.87,-89.28 789.87,-89.28 783.87,-89.28 777.87,-83.28 777.87,-77.28 777.87,-77.28 777.87,-12 777.87,-12 777.87,-6 783.87,0 789.87,0 789.87,0 962.91,0 962.91,0 968.91,0 974.91,-6 974.91,-12 974.91,-12 974.91,-77.28 974.91,-77.28 974.91,-83.28 968.91,-89.28 962.91,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="876.39" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">M7 · lane_finish</text>
+<text xml:space="preserve" text-anchor="middle" x="876.39" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">WR等待写响应与RD drain_done</text>
+<text xml:space="preserve" text-anchor="middle" x="876.39" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">同Entry唯一一次finish</text>
+<text xml:space="preserve" text-anchor="middle" x="876.39" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">五路同拍分别更新全局Entry</text>
+</g>
+
+<g id="diagram8f7c411cea9a-edge3" class="edge">
+<title>n2-&gt;n3</title>
+<path fill="none" stroke="#475569" d="M710.66,-44.64C729.44,-44.64 749.47,-44.64 768.86,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="768.7,-47.27 776.2,-44.64 768.7,-42.02 768.7,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="744.12" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+
+<g id="diagram8f7c411cea9a-node5" class="node">
+<title>n4</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M1246.95,-89.28C1246.95,-89.28 1054.41,-89.28 1054.41,-89.28 1048.41,-89.28 1042.41,-83.28 1042.41,-77.28 1042.41,-77.28 1042.41,-12 1042.41,-12 1042.41,-6 1048.41,0 1054.41,0 1054.41,0 1246.95,0 1246.95,0 1252.95,0 1258.95,-6 1258.95,-12 1258.95,-12 1258.95,-77.28 1258.95,-77.28 1258.95,-83.28 1252.95,-89.28 1246.95,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="1150.68" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">M8 · SM / Ack退休</text>
+<text xml:space="preserve" text-anchor="middle" x="1150.68" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">SM Ptr按序可选4B写并等bresp</text>
+<text xml:space="preserve" text-anchor="middle" x="1150.68" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">Ack Ptr按接纳顺序释放Entry</text>
+<text xml:space="preserve" text-anchor="middle" x="1150.68" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">ack_ts_en=1才发valid-only TS ACK</text>
+</g>
+
+<g id="diagram8f7c411cea9a-edge4" class="edge">
+<title>n3-&gt;n4</title>
+<path fill="none" stroke="#475569" d="M975.31,-44.64C994.08,-44.64 1013.91,-44.64 1033.21,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="1033.01,-47.27 1040.51,-44.64 1033.01,-42.02 1033.01,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="1008.66" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+</g>
 </svg>
 ```
 
 ### 五个物理通道
 
-数据面上是五个物理通道：**一个进核通道，加四个出核通道**。
+| Route 逻辑编码 | 方向 | 通道与端点 |
+| - | - | - |
+| 000 | Router→CM | InCh；各段目的端由地址窗口确定 |
+| 001 | Router→MM | InCh；各段目的端由地址窗口确定 |
+| 010 | CM→Router | OutCh0～3，由 VCID 选择 |
+| 011 | MM→Router | OutCh0～3，由 VCID 选择 |
+| 100 | Core 内搬运 | OutCh3；支持 MM→CM 和 CM→HeaderTable |
 
-四个出核通道**与 Router 的四个 VC 一一对应**。这样切是为了不让一个 VC 阻塞卡住整个 DTE：某个 VC 满了只堵住对应的那个通道，别的通道照发。
+Route 确定整体形态和 Channel。每段的 CM、MM、topK 或 HeaderTable 端点仍由该段地址窗口决定。CM→MM 的写路径不在当前 XBar 中，非法配置必须在第一笔外部请求前拦截。
 
-* **通道之间可以乱序执行**，哪个通道的资源先齐哪个先走
-* **通道内顺序执行**，TaskQueue 按序激活
-* **向 TS 反馈完成在同一通道内按下发顺序**，通道之间不互相等
-* 每个通道读写两侧的 TaskQueue **深度 4**（MAS 的 WR Lane TaskQ 深度 4，允许读这一侧先执行 4 个任务）；dispatch 之前另有一个 16 项的中央 TaskQueue
+每 Channel 有独立的 RD 和 WR issue lane，共十条。下发要求本 Channel 的 RD AGCU 驻留空闲、WR TaskQ 有空间，同拍交付两侧，携带同一 entry_id。RD AGCU 深度 1，WR TaskQ 深度 4。不同 Channel 可以乱序下发和物理完成，同一 Channel 保持任务顺序。
 
-`MM → CM` 不另开通道，**固定复用 VC3 那个出核通道**（那一路带宽有余量，VC0 / VC1 用得最多）。代价是这个通道的目的端要能 MUX 到 Core Mem，不像其余三个只去 Router。
+全局 TaskQ 是容量、任务身份、异常现场和退休的所有者。Tail 接纳任务，五个 Ch Ptr 分别扫描和下发，SM Ptr 处理完成后的 ShareMem 写，Ack Ptr 按接纳顺序释放条目。循环序满足 `Ack Ptr ≤ SM Ptr ≤ ChX Ptr ≤ Tail Ptr`。已下发条目不能因为 lane 空闲或物理完成提前复用。
+### VC独立与Core内搬运
+四个OutCh分别绑定VC0～3；某个VC缺credit时不阻塞其他VC，复用点可以按flit交织。一个VC内部Packet不交织。OutCh3另支持MM→CM及CM→HeaderTable，写路径不能到MM；普通TX相对OutCh0～2多一拍。
 
-每个通道内部再拆成读写两半，各自拥有 TaskQueue 和 Active Context，一个高层任务落到一对 RD / WR 子上下文上；两半的状态彼此独立，读这一侧的 Active Context 释放后就能激活下一个任务，不等写那一侧。
-
-两侧的名字沿用原来那套：进核通道的两侧叫 `RD_CH0` 与 `WR_CH0`，出核通道的两侧叫 `RD_CH1` 与 `WR_CH1`。**出核现在有四个通道实例，每个实例各有一套**，下文讲逐拍行为时说的是其中一个实例。
-
-出核前查什么也跟着分了工：下游的 Stream 资源与 Rmem 资源由 TS 在下发前查好，**DTE 这一侧 dispatch 时不查 VC credit**——DTE 到 Router 那一条本地链路的 VC 反压逐拍变化，由 CoreStation 的 `DteReady()` 在 flit 层端到端兜住，dispatch 时再查是冗余。
-
-> **取舍**：通道按 VC 切而不是按读写方向切，是《MU / DTE 需求整理和遗留问题分析》的结论。按方向切挡不住“一个 VC 阻塞导致其他 VC 的包也发不出去”这条死锁路径，因为所有出核任务共用同一条出口。
->
-> 代价是配套一条软件约束：**软件要保证 TS 下发的任务足够小，到 DTE 之后不用 RV core 再拆**。TS 看到的是大任务、DTE 看到的是小任务时，一个大任务拆出的小任务数量不确定，可能填满 TaskQueue，把后面那笔“释放下游资源”的任务堵在外面，形成死锁。
+TS先完成业务方向或RMEM许可；DTE下发只检查本Channel RD驻留与WR队列空间。Router发送时才逐flit消费本地VC credit，这与TS许可是两类资源。
 
 ### Commit：配对接纳，不产生半任务
 
-一个高层任务必须**同时**拿到三样：
+Trigger Fire先接纳完整不可变Entry到全局16项Q。目标Channel的Ch Ptr命中Ready且RD AGCU空闲、WR TaskQ有位时，同拍交付两侧，并使Entry进入RS状态。两个条件只满足一个时不下发，其他Channel可独立扫描。
 
-1. 目标通道读侧的 TaskQueue 项
-2. 同一通道写侧的 TaskQueue 项
-3. Completion RS 项
-
-* 任一侧没有空间，Commit 整体保持，队列里后面别的通道的任务可以先行（不同通道可乱序下发）
-* 这条规则挡住“读已经开始、写还没有落脚点”的半任务
-* 地址展开在 Regfile Fire 时已算好，Commit dispatch 只分配内部序号 `commit_seq`
+Entry自身承担容量、身份和异常现场；dispatch不释放Entry。模型Commit与Completion RS分别保存同一逻辑Q的下发视图和完成视图，不是另加16项独立任务容量。任何响应、Buffer或Hold都要保留entry_id，直到Ack退休才可复用。
 
 ### 中间 Buffer 与 read-ahead
 
-inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算，最大可掩盖 32 T 的延迟。
+每个Channel独立32×256B=8KiB，五Channel合计40KiB。Buffer只存FIFO数据与归属元数据，重对齐使用Buffer外的prev/residue寄存器。
 
-读侧允许领先写侧，领先量由三件事共同约束：
+读Fire前预留槽，响应到达后置valid，写侧消费后归还free。free+reserved+valid始终等于32。读侧领先受Buffer credit、最多32个读Outstanding、WR队列4项以及Active/Hold容量共同限制。
 
-* 中间 Buffer 的可用 Credit
-* 读的 outstanding 限额
-* 可保留的任务边界数
+当前任务的最后请求发出后可进入retiring/Hold，让下一任务激活；上一任务迟到响应不能写入新任务的槽。Hold未排空时，不能再释放另一个任务覆盖它。
 
-也就是说：
+### WR完成回写与全局有序退休
 
-* RD_CH0 可以在 WR_CH0 还没排空任务 N 时就开始接收任务 N+1
-* 出口阻塞只通过 Credit 反压限制领先距离
-* 不要求读写用同一个 Active Context
+各Channel由WR汇合实际写完成与同任务RD drain_done，只生成一次lane_finish。entry_id是内部归属键，SID/TID/UID是TS身份；同TID不同用户或多搬运条目不能只按task_id匹配。
 
-### Completion RS：按 task_id 合上
-
-* 只在同一个 `task_id` 的 RD 与 WR 两侧条件都满足时产生 `task_done`
-* 同一拍多个 Join 命中时**全部写入 Done Pending，不允许覆盖或丢失**，由 Done Pending 负责串行化
-* 向 TS 的报告是 **exactly-once**
+五路WR同拍完成不同Entry时都要保存。年轻Entry先完成只置自身Done，SM/Ack不能越过队头。只有Ack Ptr按接纳顺序退休、且ack_ts_en=1时才产生一拍TS完成；TS端没有Ready。
 
 ### 完成的六个层级
 
-| 状态 | 粒度 | 定义 |
+| 状态 | 粒度 | 释放或可见条件 |
 | - | - | - |
-| `queued` | 通道单侧子上下文 | 已进 TaskQueue，尚未装载为 Active Context |
-| `active` | 通道单侧子上下文 | 由对应 AGCU / Ctrl 执行，各通道彼此独立 |
-| `issue_done` | 通道单侧子上下文 | 该侧最后一个请求已 Fire，**允许该侧提前激活下一任务** |
-| `drained` | 通道单侧 / 任务边界 | 相关响应、Buffer 数据和外部副作用均已收敛 |
-| `join_done` | 高层任务 | 同一 `task_id` 的 RD 与 WR 子上下文均满足完成条件 |
-| `task_done` | 高层任务 | 完成结果进 Done Pending 并与 TS 成功握手 |
+| queued | 全局Entry／WR工作项 | 已接纳、尚未激活 |
+| active | RD／WR上下文 | 正在算址、接收或发送 |
+| issue_done | 单侧上下文 | 最后请求已Fire，可在Hold有空间时换任务 |
+| drained | 响应及Buffer归属 | 本侧所有在途响应和该任务数据均收敛 |
+| lane_finish | WR所拥有的Entry | 写侧完成且对应RD drain_done已到 |
+| retired / task_done | 全局Entry／TS任务 | SM响应完成、Ack按序退休；ACK使能决定是否通知TS |
 
-分这么多层，是因为“请求发完”和“事情办完”不是一回事：
-
-* `issue_done` 只表示所有写请求已经发出，该侧可以去干下一个任务
-* 真正的完成还要等存储的写响应、读响应排空，以及 outstanding 清零
+issue_done不是写响应完成。Router侧最后flit必须在实际TX信用允许的拍发出，不能以排入中间队列代替。多搬运TS任务只由最后一条带ACK的Entry通知完成。
 
 ### 并发约束
 
-| 场景 | 允许 | 约束 |
+| 场景 | 是否允许 | 边界 |
 | - | - | - |
-| 进核通道读侧领先写侧 | 是 | 受 inbound buffer Credit、任务边界容量、Router AXI-Stream 背压约束 |
-| 出核通道读侧领先写侧 | 是 | 受 outbound buffer Credit、读 outstanding、出口背压约束 |
-| 五个通道同时执行 | 是 | 目的资源无冲突时独立推进，共享 DMA_XBAR 端口时按其仲裁规则 |
-| Router→MM 与 MM→CM | 是 | 分别走进核通道与 `out_ch[3]`，端口映射无冲突时可并行 |
-| Router→CM 与 MM→CM | 受限 | **竞争 CoreMem 写路径**，由 CM 写仲裁器选择，未获选的一侧保持 valid 和上下文 |
-| 同一通道内任务乱序 | 否 | TaskQueue 按序激活。read-ahead 允许 RD / WR 任务序号错位，但不改变各 Lane 内顺序 |
-| 多个任务同拍 Join 完成 | 是 | Completion RS 捕获所有命中，Done Pending 负责序列化 |
-
-***
+| RD领先WR | 允许 | credit、Outstanding、WR Q和Hold共同限制 |
+| 五Channel并行 | 允许 | 共用端口按仲裁保持请求归属 |
+| Router→MM与MM→CM | 可重叠 | MM读/写不同口；同bank访问由存储仲裁 |
+| Router→CM与MM→CM | 竞争 | 共用CM写通路，落选者保持valid/地址/mask/数据 |
+| 同Channel任务乱序 | 不允许 | RD与WR可处于不同任务，但各侧激活保序 |
+| 多路同拍finish | 允许 | 分别回写Entry；最终SM/Ack各按序推进 |
+| 四VC TX交织 | 允许 | 每VC包内保序、hflit上下文稳定 |
+| 后继覆盖旧Hold | 不允许 | 上一任务响应与drain先收敛 |
 
 ## 三条数据流
 
 ### Inbound：Router → MM / CM
 
-1. 任务由 DTE RV core 配寄存器 + 写 `CFG_TRIGGER` 起：Regfile 快照 Descriptor（落点由软件配 `CFG_ADDRx_DST`），送进 Commit 的中央 TaskQueue。
-2. Router 以 AXI-Stream 发送 Header，Header Parser 在首拍锁存并检查长度和帧格式，把包头上下文存进 Header Table；它不生成 Descriptor。
-3. Commit 从中央 TaskQueue dispatch：目标通道 RD_CH0 / WR_CH0 的 TaskQueue 项与 Completion RS 项都可用时才原子成功，RD_CH0 建立 Router 接收上下文，WR_CH0 建立 MM / CM 写入上下文。进核任务与到达的数据包按顺序 FIFO 配对。
-4. Payload 由 Header Parser 逐拍转发，RD_CH0 控制写入 inbound buffer，附带 `task_id`、有效字节与任务边界信息；buffer 满时通过 TREADY 向 Router 反压。
-5. WR_CH0 从 inbound buffer 按任务边界取数，经 DMA_XBAR 写入目标 MM / CM。
-6. RD_CH0 的帧接收结束和 WR_CH0 的写请求与响应 Drain 分别进入 Completion RS，
-   二者按 `task_id` Join 后才向 TS 产生一次 `task_done`。
+RV Core 配好各段的目的地址和长度并提交任务。RD 侧驻留任务后接收 Packet。RX 是单通道 valid/ready，首 flit 的 32B hflit 与 256B pflit 并行。保存包头时先停一拍，将包头写入 Buffer，再接收首拍 payload；丢弃包头时直接接收 payload。
+
+WR 侧按四段的目的端拆分数据，以 8B 粒度重对齐并形成字节 mask。包头可以写 HeaderTable、CM 或 MM。topK 与其他数据段使用同一段位机制，经 M Top 写入对应端点。
+
+RX 在首 flit Fire 时校验 pkt_length，并在 tail 时校验 flit 数。无驻留任务、未收到 tail 又出现 head、长度不符均保留任务现场。写侧待全部写响应返回，并取得同任务的 RD drain_done 后才产生 lane_finish。
+1. RV Trigger快照已入全局Q；Channel驻留任务后才允许对应RX Packet进入。
+2. 首拍锁存32B hflit，同时保存首pflit资格；保存头时先把头写Buffer再推进payload。
+3. WR按四段独立地址/长度拆分，CM/MM、topK、HeaderTable由目的地址选择。
+4. 长度校验分别检查首包声明长度、实际tail位置与flit数，不因flit数相同而接受错误字节长。
+5. 全部写响应与RD drain_done到齐后WR回写Entry；SM写完成后按全局顺序退休。
 
 ### Outbound：MM / CM → Router
 
-选定的 Matrix Mem 或 Core Mem 是数据源，Router TX 是最终的流式接收端。
+RD 侧按段顺序从对应端点发读请求，Fire 当拍为响应预留 Buffer 槽。各端点响应恢复 entry_id、段号和槽号，按预留顺序交给 WR。段 0 读回后重写 UID、PID、VCID 与 pkt_length，再保存为本 Packet 的包头。
 
-1. Commit 把 MM / CM → Router 或 MM → CM 的高层任务原子拆成 RD_CH1 与 WR_CH1 两个子上下文。
-2. RD_CH1 的 AGCU 生成源端读地址，Read Ctrl 经 DMA_XBAR 读取 MM / CM，
-   把返回数据连同 `task_id` 和边界元数据写入 outbound buffer。
-3. WR_CH1 按固化的 Route 选择 Router TX 或 CoreMem Egress，从 outbound buffer 按任务边界发出。
-4. Router TX 用 AXI-Stream 的 Valid / Ready / Keep / Last，CoreMem Egress 用 DMA_XBAR 写握手，
-   两种出口的响应与 Drain 条件统一送进 Completion RS。
-5. 同一任务的 RD_CH1 与 WR_CH1 都完成、且 outbound buffer 里该任务的数据已排空后，才生成 `task_done`。
+WR 先装载包头寄存器，该动作不输出 flit。后续每个 flit 同时携带 hflit 和 pflit，head/tail 标识本 VC 的 Packet 边界。段间的 residue 保留未输出字节，直到最后一个 flit Fire 才清空。纯包头任务也发送一个 head/tail 同时有效的 flit。
 
-### Inner：MM → CM
+TX 使用每 VC 的 credit，没有 Ready。四条 OutCh 在复用点按 flit 交织，Packet 的所有权仅限制同一 VC，其他 VC 可以继续发送。最后一个 flit 发出即完成 Router 写侧发送，但 lane_finish 仍需等待对应 RD drain_done。
+读到段0后重写硬件PID、UID、VCID和总包长，保持core_mask及16B sw_aux。每个TX flit携带同一hflit；段1～3在residue中按段序拼接，无效尾字节不得计入Packet长度。
 
-完全走出核通道，且固定占 `out_ch[3]`（`MM → CM` 不出核、不占 VC，出口在目的端 MUX 到 Core Mem）。
+四个OutCh都能保留自己VC的包上下文。仲裁可在合法flit边界切换VC，但同一VC的两Packet不得交织。
 
-1. 任务先锁定 Matrix Mem 为读源、Core Mem 为写目标
-2. Matrix 返回的数据经 DMA_XBAR RD、`ch1_rd_ctrl` 和 outbound buffer 到达 `ch1_wr_ctrl`
-3. 出核通道的出口绑定此时选 DMA WR1 而不是 Router TX
-4. WR1 的硬件 route mask 只允许 CoreMem，因此不会把出核通道的数据写回 Matrix Mem
+### Inner：MM → CM 与 CM → HeaderTable
 
-存储读、Buffer 搬运和 WR1 写可以流水重叠，但每一级仍各自遵守 valid / ready。
+OutCh3 将 Router 发包路径与 Core 内写路径分开选择。Core 内模式对四段源端和目的端分别译码，源地址按软件给出的物理地址，目的地址叠加 SID×stride。MM→CM 搬包头和各使能数据段；CM→HeaderTable 将段 0 写入指定组号与项号。完成等待实际目的端的写响应。
 
-***
+OutCh3 对外发包相对 OutCh0～2 多一拍延迟，软件优先将普通输出放在 VC0～2。该差异不能解释为四个通道共享一个整包发送锁。
+MM→CM和CM→HeaderTable均走OutCh3 Core内写路径；源使用软件物理地址，目的叠SID×stride。源与目的不是固定同一段端点，仍逐段译码。没有Router TX，不消费Router信用；写响应全部返回才能完成。
 
 ## 一个任务搬的是什么
 
@@ -486,175 +499,136 @@ inbound buffer 与 outbound buffer 合计约 8 KB，按 256 B × 20～30 拍算�
 四份各有各的地址，这是下一节地址算法要分五类的根源。拆到哪里去、地址怎么来，一张图看完。
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 790" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="一个 DTE 任务搬的四类内容与它们各自的地址">
-<title>一个任务搬的四类内容与它们各自的地址</title><defs>
-<marker id="d" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
-<marker id="c" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#d97706"/></marker>
-<marker id="g" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6b7280"/></marker>
-</defs>
-<rect width="1360" height="790" fill="#ffffff"/>
-<text x="24" y="28" font-size="14.5" fill="#111827" font-weight="600">一个任务搬的四类内容与它们各自的地址</text>
-<text x="24" y="47" font-size="10" fill="#475569">MSG 包在 Router 线上连成一条，进核后按内容拆成四份分开存。蓝色是硬件自己算出来的偏移，其余由软件配</text>
-<rect x="24" y="62" width="1312" height="108" rx="6" fill="#eef6fb" stroke="#b7d4e6" stroke-width="1.1"/>
-<text x="36" y="80" font-size="10.5" fill="#6b7280" font-weight="600">Router 线上：一个 MSG 包</text>
-<rect x="44" y="92" width="100" height="46" rx="3" fill="#ffffff" stroke="#374151" stroke-width="1.1"/>
-<text x="94.0" y="110" font-size="10" fill="#111827" text-anchor="middle">包头标记</text>
-<text x="94.0" y="126" font-size="8.5" fill="#6b7280" text-anchor="middle">2 B</text>
-<rect x="144" y="92" width="300" height="46" rx="3" fill="#ffffff" stroke="#374151" stroke-width="1.1"/>
-<text x="294.0" y="110" font-size="10" fill="#111827" text-anchor="middle">Router 信息  4 B</text>
-<text x="294.0" y="126" font-size="8.5" fill="#6b7280" text-anchor="middle">path_id 1 B · path_core_mask 2 B · rsv 1 B</text>
-<rect x="444" y="92" width="100" height="46" rx="3" fill="#ffffff" stroke="#374151" stroke-width="1.1"/>
-<text x="494.0" y="110" font-size="10" fill="#111827" text-anchor="middle">包长度</text>
-<text x="494.0" y="126" font-size="8.5" fill="#6b7280" text-anchor="middle">2 B</text>
-<rect x="544" y="92" width="190" height="46" rx="3" fill="#f8fafc" stroke="#374151" stroke-width="1.1"/>
-<text x="639.0" y="110" font-size="10" fill="#111827" text-anchor="middle">软件辅助信息</text>
-<text x="639.0" y="126" font-size="8.5" fill="#6b7280" text-anchor="middle">0～16 B</text>
-<rect x="734" y="92" width="460" height="46" rx="3" fill="#f8fafc" stroke="#374151" stroke-width="1.1"/>
-<text x="964.0" y="110" font-size="10" fill="#111827" text-anchor="middle">业务数据</text>
-<text x="964.0" y="126" font-size="8.5" fill="#6b7280" text-anchor="middle">0～(64 K − 24) B</text>
-<path d="M44 148 L544 148" stroke="#6b7280" stroke-width="1"/>
-<text x="294" y="161" font-size="8.5" fill="#6b7280" text-anchor="middle">前三段合起来是包头，24 B 封顶</text>
-<text x="1140" y="161" font-size="8.5" fill="#6b7280" text-anchor="middle">单个 DTE 任务的搬运量上限 32 KB = 256 B × 128 拍</text>
-<path d="M680 170 L680 195.5" fill="none" stroke="#6b7280" stroke-width="1.8" marker-end="url(#g)"/>
-<rect x="500" y="196" width="360" height="62" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="510" y="215" font-size="11.5" fill="#111827" font-weight="600">DTE：按内容拆成四份</text>
-<text x="510" y="231.0" font-size="9" fill="#475569">每份的目的地址各算各的，规则见下面两栏</text>
-<rect x="248" y="206" width="228" height="42" rx="4" fill="#ffffff" stroke="#c9bade" stroke-width="1.2"/>
-<text x="362" y="223" font-size="10" fill="#111827" text-anchor="middle">TS 给的 stream_id / task_id</text>
-<text x="362" y="238" font-size="8.5" fill="#6b7280" text-anchor="middle">各类地址的 stream 偏移都用它算</text>
-<path d="M476 227 L499.5 227" fill="none" stroke="#2563eb" stroke-width="1.6" marker-end="url(#d)"/>
-<path d="M560 258 L560 279.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#c)"/>
-<path d="M800 258 L800 279.5" fill="none" stroke="#d97706" stroke-width="1.6" marker-end="url(#c)"/>
-<rect x="24" y="280" width="656" height="398" rx="6" fill="#fdf6ec" stroke="#e4c99b" stroke-width="1.1"/>
-<text x="36" y="298" font-size="10.5" fill="#6b7280" font-weight="600">计算 core：包头进 Hmem，data 与 scale 进 Core Mem，topK 进 MU</text>
-<rect x="40" y="306" width="624" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="50" y="325" font-size="11" fill="#111827" font-weight="600">Hmem · 包头表（硬件 + 软件合并）</text>
-<text x="50" y="341.0" font-size="8.8" fill="#475569">16 项 × {core_mask 2 B, sw_header 16 B} = 288 B</text>
-<text x="50" y="353.5" font-size="8.8" fill="#2563eb">→ header_base_addr + stream_id × 18 B</text>
-<text x="50" y="366.0" font-size="8.8" fill="#475569">一个用户一个包头，只用 stream_id 就索引得到，软件只配一个地址</text>
-<rect x="40" y="404" width="624" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="50" y="423" font-size="11" fill="#111827" font-weight="600">去掉了 path_id_table 与 task_len_table</text>
-<text x="50" y="439.0" font-size="8.8" fill="#475569">path_id 随配置写送来，size 由 RV core 配寄存器</text>
-<text x="50" y="451.5" font-size="8.8" fill="#475569">硬件只改 core_mask，RV core 改软件包头</text>
-<text x="50" y="464.0" font-size="8.8" fill="#2563eb">Concat 改 size，MoE Route 改 core_mask，发包几乎都改 path_id</text>
-<rect x="40" y="502" width="624" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="50" y="521" font-size="11" fill="#111827" font-weight="600">Core Mem · data 区与 scale 区</text>
-<text x="50" y="537.0" font-size="8.8" fill="#2563eb">→ data：dst_base_addr + stream_id × stream_stride</text>
-<text x="50" y="549.5" font-size="8.8" fill="#2563eb">→ scale：scale_base_addr + stream_id × scale_stride</text>
-<text x="50" y="562.0" font-size="8.8" fill="#475569">data_len 只算 data；scale 长度硬件按 data_len / 32 算</text>
-<rect x="40" y="600" width="624" height="72" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="50" y="619" font-size="11" fill="#111827" font-weight="600">MU · topK_ep_table（或 Core Mem 独立空间）</text>
-<text x="50" y="635.0" font-size="8.8" fill="#2563eb">→ topk_base_addr + stream_id × 256 B，每 stream 上限 256 B</text>
-<text x="50" y="647.5" font-size="8.8" fill="#475569">长度硬件按 router_ep_count × 6 B 算，每项 {local_ep_index 2 B, weight 4 B}</text>
-<rect x="696" y="280" width="640" height="398" rx="6" fill="#eef8f4" stroke="#a8d8c6" stroke-width="1.1"/>
-<text x="708" y="298" font-size="10.5" fill="#6b7280" font-weight="600">B core / R core：三类连排进 Matrix Mem，包头与 shareMem 单放</text>
-<rect x="712" y="306" width="608" height="100" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="722" y="325" font-size="11" fill="#111827" font-weight="600">Matrix Mem · topK + scale + data 连排</text>
-<text x="722" y="341.0" font-size="8.8" fill="#475569">src_addr / dst_addr 直接当最终地址用，不加 stream 偏移</text>
-<text x="722" y="353.5" font-size="8.8" fill="#475569">data_len 盖住 topK + scale + data 三类的总长</text>
-<text x="722" y="366.0" font-size="8.8" fill="#475569">顺序由 GPU 侧按 pattern 排好，DTE 不重排</text>
-<text x="722" y="378.5" font-size="8.8" fill="#475569">位置由软件算准，配任务时就已经确定</text>
-<rect x="712" y="418" width="608" height="76" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="722" y="437" font-size="11" fill="#111827" font-weight="600">Core Mem · 包头独立空间</text>
-<text x="722" y="453.0" font-size="8.8" fill="#475569">软件包头与硬件包头都存在这里，不进 Hmem；容量软件分配</text>
-<text x="722" y="465.5" font-size="8.8" fill="#475569">出核时同样按 task_id 改写 path_id 与 size</text>
-<rect x="712" y="506" width="608" height="88" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="722" y="525" font-size="11" fill="#111827" font-weight="600">shareMem</text>
-<text x="722" y="541.0" font-size="8.8" fill="#475569">sharemem_waddr 直接给表项地址，不加偏移</text>
-<text x="722" y="553.5" font-size="8.8" fill="#475569">表项内容 sharemem_data：user_id 加 valid / invalid 标志</text>
-<text x="722" y="566.0" font-size="8.8" fill="#475569">token 搬进 Matrix Mem 后置 valid，搬出后置 invalid，软件维护</text>
-<text x="1016" y="628" font-size="9" fill="#6b7280" text-anchor="middle">两边的差别只在存到哪里。包在 Router 线上的格式是同一个，</text>
-<text x="1016" y="646" font-size="9" fill="#6b7280" text-anchor="middle">DTE 按 core 的类型决定拆到哪几处去</text>
-<rect x="24" y="692" width="1312" height="92" rx="6" fill="#f5f1fa" stroke="#c9bade" stroke-width="1.1"/>
-<text x="36" y="710" font-size="10.5" fill="#6b7280" font-weight="600">谁配基址，谁算偏移</text>
-<rect x="40" y="720" width="640" height="58" rx="4" fill="#ffffff" stroke="#374151" stroke-width="1.2"/>
-<text x="50" y="739" font-size="10.5" fill="#111827" font-weight="600">软件配（RV core 写 DSA 寄存器，或 boot 阶段配）</text>
-<text x="50" y="755.0" font-size="8.8" fill="#475569">五类基址、stream_stride、scale_stride、data_len、router_ep_count、</text>
-<text x="50" y="767.5" font-size="8.8" fill="#475569">以及 transfer_mode 与几个开关；同一段代码对所有用户配同一套基址</text>
-<rect x="696" y="720" width="640" height="58" rx="4" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="706" y="739" font-size="10.5" fill="#111827" font-weight="600">硬件算（用 TS 给的 stream_id / task_id）</text>
-<text x="706" y="755.0" font-size="8.8" fill="#475569">四类地址的 stream 偏移（base_addr 只对 Core Mem 有效）、</text>
-<text x="706" y="767.5" font-size="8.8" fill="#475569">scale 长度 data_len / 32、topK 长度 router_ep_count × 6 B</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0.00 0.00 918.00 181.00" role="img" aria-label="一个任务搬的四类内容与各自的地址">
+<title>一个任务搬的四类内容与各自的地址</title>
+<g id="diagram7e133923141a-graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 163.28)">
+<title>G</title>
+<polygon fill="white" stroke="none" points="-18,18 -18,-163.28 899.91,-163.28 899.91,18 -18,18" />
+<text xml:space="preserve" text-anchor="middle" x="440.95" y="-126.08" font-family="Noto Sans CJK SC" font-size="16.00">一个任务搬的四类内容与各自的地址</text>
+<text xml:space="preserve" text-anchor="middle" x="440.95" y="-102.08" font-family="Noto Sans CJK SC" font-size="16.00">数据类型是软件约定；四段均按各自的端点、地址和长度执行，不依方向隐式推算长度。</text>
+
+<g id="diagram7e133923141a-node1" class="node">
+<title>n0</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M152.79,-89.28C152.79,-89.28 12,-89.28 12,-89.28 6,-89.28 0,-83.28 0,-77.28 0,-77.28 0,-12 0,-12 0,-6 6,0 12,0 12,0 152.79,0 152.79,0 158.79,0 164.79,-6 164.79,-12 164.79,-12 164.79,-77.28 164.79,-77.28 164.79,-83.28 158.79,-89.28 152.79,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="82.39" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">段0 · 32B包头</text>
+<text xml:space="preserve" text-anchor="middle" x="82.39" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">HT索引或CM/MM字节地址</text>
+<text xml:space="preserve" text-anchor="middle" x="82.39" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">HT：16组 × 32项</text>
+<text xml:space="preserve" text-anchor="middle" x="82.39" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">共享core_mask与sw_aux</text>
+</g>
+
+<g id="diagram7e133923141a-node2" class="node">
+<title>n1</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M403.83,-89.28C403.83,-89.28 244.29,-89.28 244.29,-89.28 238.29,-89.28 232.29,-83.28 232.29,-77.28 232.29,-77.28 232.29,-12 232.29,-12 232.29,-6 238.29,0 244.29,0 244.29,0 403.83,0 403.83,0 409.83,0 415.83,-6 415.83,-12 415.83,-12 415.83,-77.28 415.83,-77.28 415.83,-83.28 409.83,-89.28 403.83,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="324.06" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">段1 · data</text>
+<text xml:space="preserve" text-anchor="middle" x="324.06" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">CM：基址+SID×stride</text>
+<text xml:space="preserve" text-anchor="middle" x="324.06" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">MM：软件物理地址、stride=0</text>
+<text xml:space="preserve" text-anchor="middle" x="324.06" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">长度由DATA_LEN1配置</text>
+</g>
+
+<g id="diagram7e133923141a-edge1" class="edge">
+<title>n0-&gt;n1</title>
+<path fill="none" stroke="#475569" d="M165.2,-44.64C183.9,-44.64 203.98,-44.64 223.33,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="223.15,-47.27 230.65,-44.64 223.15,-42.02 223.15,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="198.54" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+
+<g id="diagram7e133923141a-node3" class="node">
+<title>n2</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M622.62,-89.28C622.62,-89.28 495.33,-89.28 495.33,-89.28 489.33,-89.28 483.33,-83.28 483.33,-77.28 483.33,-77.28 483.33,-12 483.33,-12 483.33,-6 489.33,0 495.33,0 495.33,0 622.62,0 622.62,0 628.62,0 634.62,-6 634.62,-12 634.62,-12 634.62,-77.28 634.62,-77.28 634.62,-83.28 628.62,-89.28 622.62,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="558.97" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">段2 · scale</text>
+<text xml:space="preserve" text-anchor="middle" x="558.97" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">每32个MXFP8元素1B</text>
+<text xml:space="preserve" text-anchor="middle" x="558.97" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">8B补齐长度由软件配置</text>
+<text xml:space="preserve" text-anchor="middle" x="558.97" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">CM scale或MM软件区域</text>
+</g>
+
+<g id="diagram7e133923141a-edge2" class="edge">
+<title>n1-&gt;n2</title>
+<path fill="none" stroke="#475569" d="M416.11,-44.64C435.28,-44.64 455.41,-44.64 474.29,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="474.14,-47.27 481.64,-44.64 474.14,-42.02 474.14,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="449.58" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+
+<g id="diagram7e133923141a-node4" class="node">
+<title>n3</title>
+<path fill="#f0fdfa" stroke="#0f766e" d="M869.91,-89.28C869.91,-89.28 714.12,-89.28 714.12,-89.28 708.12,-89.28 702.12,-83.28 702.12,-77.28 702.12,-77.28 702.12,-12 702.12,-12 702.12,-6 708.12,0 714.12,0 714.12,0 869.91,0 869.91,0 875.91,0 881.91,-6 881.91,-12 881.91,-12 881.91,-77.28 881.91,-77.28 881.91,-83.28 875.91,-89.28 869.91,-89.28" />
+<text xml:space="preserve" text-anchor="middle" x="792.01" y="-69.24" font-family="Noto Sans CJK SC" font-size="12.00">段3 · topK</text>
+<text xml:space="preserve" text-anchor="middle" x="792.01" y="-51.24" font-family="Noto Sans CJK SC" font-size="12.00">MU topK_table：16 × 256B</text>
+<text xml:space="preserve" text-anchor="middle" x="792.01" y="-33.24" font-family="Noto Sans CJK SC" font-size="12.00">经M Top拆成两笔128B</text>
+<text xml:space="preserve" text-anchor="middle" x="792.01" y="-15.24" font-family="Noto Sans CJK SC" font-size="12.00">B Core也可连续保存到MM</text>
+</g>
+
+<g id="diagram7e133923141a-edge3" class="edge">
+<title>n2-&gt;n3</title>
+<path fill="none" stroke="#475569" d="M634.99,-44.64C653.5,-44.64 673.6,-44.64 693.02,-44.64" />
+<polygon fill="#475569" stroke="#475569" points="692.87,-47.27 700.37,-44.64 692.87,-42.02 692.87,-47.27" />
+<text xml:space="preserve" text-anchor="middle" x="668.37" y="-50.14" font-family="Noto Sans CJK SC" font-size="10.00">推进</text>
+</g>
+</g>
 </svg>
 ```
 
 ### MSG 包在 Router 线上的样子
 
-| 字段 | 长度 |
-| - | - |
-| 包头标记 | 2 B |
-| Router 信息 | 4 B = `path_id` 1 B + `path_core_mask` 2 B + reserved 1 B |
-| 包长度 | 2 B |
-| 软件辅助信息 | 0～16 B |
-| 业务数据 | 0～(64 K − 24) B |
+包头Byte0是最高字节，字段位置与Router一致。
 
-* 前四项合起来是包头，24 B 封顶，业务数据的上限由此得来
-* **单个 DTE 任务的搬运量上限是 32 KB**（256 B × 128 拍），比包上限小，超过的要拆成多个任务包下发
+| 字节／位 | 内容 | 出Core操作 |
+| - | - | - |
+| Byte0，[255:248] | path_id | 改为任务PID |
+| Byte1，Byte4，Byte10～15 | 保留 | HT来源为0，CM/MM来源保持 |
+| Byte2～3，[239:224] | core_mask | 保持所读值 |
+| Byte5，[215:208] | loopback／Hardware Used | 仅[3:2]改为任务VCID |
+| Byte6～7，[207:192] | pkt_length | 改为32+使能数据段总长 |
+| Byte8～9，[191:176] | user_id | 改为任务UID |
+| Byte16～31，[127:0] | sw_aux | 保持所读16B |
+
+CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，不沿用当前48B C++字段序列化。
+Packet总长度为32B硬件头加各使能数据段长度。地址与长度按8B软件约束，16bit总长度最大65535，可编码的8B对齐总长度最大65528。大于32KiB的数据可流式经过Buffer；32KiB是每用户RMEM归约上下文容量，不是通用DTE搬运上限。
+
+归约模型payload另有16B兼容前缀，Router加法跳过它；该前缀与32B头内sw_aux分别计算，硬件是否继续保留前缀尚未统一。
 
 ### 四类内容的长度与去处
 
-| 内容 | 长度 | 计算 core 存哪 | B core / R core 存哪 |
+| 内容 | 配置长度 | 计算Core典型端点 | B/R Core典型端点 |
 | - | - | - | - |
-| 包头（硬件 + 软件） | 每项 18 B = `core_mask` 2 B + 软件包头 16 B | DTE 内 Hmem 一张表，16 项按 `stream_id` 索引，共 288 B | Core Mem 独立空间，容量软件分配 |
-| scale | `data_len / 32`，只有 MXFP8 有 | Core Mem 的 scale 区 | Matrix Mem，与 data 连排 |
-| topK | `router_ep_count × 6 B`，每项 `{local_ep_index 2 B, weight 4 B}`，每 stream 上限 256 B | MU 内 `topK_ep_table`，或 Core Mem 独立空间，由软件配 | Matrix Mem，与 data 连排 |
-| data | `data_len` | Core Mem 按 stream 分片 | Matrix Mem |
+| 段0包头 | 固定32B | HeaderTable，16组、每组32项，共800B | CM按UID保留32B头，软件可留64B间距 |
+| data | 软件配置各段DATA_LEN | CM按SID分区 | MM软件槽 |
+| scale | MXFP8每32元素1B，段长向上补齐8B | CM scale窗口 | B Core与数据连续保存MM；权重scale映射另配 |
+| topK | 软件配置，MU表按256B整数倍 | MU topK_table，16×256B | B Core可作为普通256B段连续保存MM |
 
-几处对得上的地方：
+HeaderTable每组共享core_mask 2B和sw_aux 16B，有32个各1B Hardware Used；不是16个完整头项。段地址为9bit索引，软件回读地址0x3000+group×0x40是另一地址域。
 
-* **一个用户只有一个硬件包头和一个软件包头**，所以两者合并成一张表、只用 `stream_id` 就能索引到，软件也只需要配一个地址。Hmem 的 288 B 就是 `16 × 16 B + 32 B`
-* 走 Hmem 还是走 Core Mem，由 `hw_header_addr` 这个地址本身选：普通计算 core 用 Hmem，B core 与 R core 用 Core Mem（它们的用户数多，Hmem 装不下）
-* **DTE 内不再存 `path_id_table` 与 `task_len_table`**：`path_id` 由 TS 直连送过来，`size` 由 RV core 配寄存器给。前者因为 `task_id` 与 `path_id` 本来就绑定、TS 已经知道，DTE 没必要再存一份；后者因为 `size` 的算法可能复杂，查表值不一定准，配寄存器更灵活
-* 包头的修改分两边：**硬件只改硬件包头**（`core_mask`），**RV core 改软件包头**
-* B core 与 R core 的 scale、topK、data 由 GPU 侧按 pattern 排好序送来，DTE 不重排顺序
-
-`data_len` 这个寄存器在不同方向上盖的范围不一样：
-
-* **Router ↔ Matrix Mem**：topK + scale + data 的总长
-* **Router ↔ Core Mem**：只是 data 的长度，scale 与 topK 的长度另算
-
-原因就在上面那张表：B core / R core 侧三类内容在 Matrix Mem 里连排、一次搬完；计算 core 侧三类内容各去各的地方，长度得分开给。
+四段没有按内容类型隐式生成长度。data、scale与topK落在同一个MM槽时仍可分三段，各自的地址、长度和有效位独立。
 
 ### 三类 core 各自怎么拆、怎么重组
 
-同一个包在线上的格式是一样的，拆到哪里、出核时怎么重组，按 core 的类型分。下表里 `h` 是包头、`k` 是 topK、`t` 是 token、`s` 是 scale。
-
-| core | 方向 | 拆 / 组 |
+| Core / 场景 | 入核配置 | 出核配置 |
 | - | - | - |
-| B core | Router → Matrix Mem | 拆四份：`h → Core Mem`、`k → Core Mem`、`t → Matrix Mem`、`s → Core Mem`。另有一种配法：RV core 把 topK 与 scale 标记成无效，DSA 就把 `k + t + s` 整体当 token 处理，只拆两份 `h → Core Mem`、`t → Matrix Mem` |
-| B core | Matrix Mem → Router | 读的时候改：读到包头时按配置改写 `path_id`，重组成完整的 `h, k, t, s` 搬出 |
-| R core | Router → Matrix Mem | 与 B core 一致。理论上 R core 上不会有 topK 和 scale，真出现了就按有效处理 |
-| R core | Matrix Mem → Router（归约） | 一个用户的两笔各组成 `h, t`、重写 `path_id`，作为同一笔 reduce 任务的两个操作数先后送进本级 Rmem |
-| 计算 core | Router → Core Mem（广播） | 拆四份：`h → Hmem`、`k → topK 区`、`t → Core Mem`、`s → Core Mem` |
-| 计算 core | Core Mem → Router（广播重发） | 重写 `path_id`，组成 `h, k, t, s` |
-| 计算 core | Router → Core Mem（归约） | 拆两份：`h → Hmem`、`t → Core Mem` |
-| 计算 core | Core Mem → Router（归约） | 重写 `path_id`，组成 `h, t` |
-| 计算 core | Concat | 与归约相同，另外要改 `size` |
+| B Core token | 头到CM；6144B data、192B scale、256B topK连续到MM | 从相同三段读出；广播与组间转发各一条Entry |
+| 计算Core广播 | 头到HeaderTable；data到CM；scale到CM scale；topK到MU表 | 软件按需要使能各段，硬件重写路由字段 |
+| 计算Core归约/concat | 头可存配对HT项；BF16数据到CM，不自动产生scale | 读配对头和计算结果，包长由各段总长产生 |
+| R Core | 头到CM；两输入半槽落MM、完成分别写flag | 一TS Task提交两Packet操作数到本级RMEM，仅最后Entry带ACK |
+| 纯包头 | 段0长度32B，seg_valid=000 | 必须消费或发送一个head/tail Packet |
 
-* **scale 只有 MXFP8 才有**，而归约不用 MXFP8，所以归约方向上不会出现 scale
-* B core 与 R core 的包头落 Core Mem、计算 core 的包头落 Hmem，就是前面那张表里“存哪”的分工
-* R core 上 Core Mem 给包头之外剩下的空间约 786 KB（源文档标注这个数要重算）
+B Core逻辑有效载荷6592B，软件槽跨度6656B；跨度不是CFG_STRIDE，MM段仍配stride=0。R Core每半槽0x3080B，兼容归约数据段含16B前缀与12288B BF16数据，剩余槽空间是软件padding。
 
 ### 什么时候存，什么时候丢
 
-* **进核**
-  * 计算 core 只在这个 token 需要分配新 `stream_id` 时才存包头（`hw_header_op = 1`）
-  * 中间环节的 reduce 与 concat 任务直接丢弃（`hw_header_op = 0`）
-  * 广播 token 进核必然带 topK，必须存下来
-* **出核**：硬件包头三个字段都可能要改
-  * `path_id`：几乎每次发包都要改，用 TS 送来的那个（TS 配置时带齐 `user_id` / `stream_id` / `path_id` / `task_id` 四样）
-  * `size`：Concat 这类算完数据量会变的场景要改，由 RV core 配寄存器给
-  * `core_mask`：只在 Bach 自己做 MoE Route、算完才知道发给谁时才改
-  * 软件包头不改；计算结果出核不带 topK
-* 支持纯包头任务（`data_len = 0`），进出 core 都可以
+Router源时hw_header_op=0保存段0，=1丢弃段0；后者仍消费Packet，但不写包头端点。Core源或Core内搬运始终搬32B段0，不能用这个位取消源头读取。
+
+出Core重写path_id、user_id、loopback中的VCID与pkt_length，保持core_mask和sw_aux；CM/MM头中保留字节保持，HT生成头中保留字节为0。修改core_mask或软件辅助信息由软件显式写入所选包头端点，不靠DTE自动MoE路由。
+
+软件为配对DataIn/DataOut选择HT组内项号。后到concat写某项会共享覆盖该组core_mask/sw_aux；不能假定32项各自都有独立软件头。
 
 ### shareMem 写
 
-* 任务数据传输完成后，按 `sharemem_waddr` / `sharemem_data` 写 shareMem，然后通知 TS
-* 只在 B core 与 R core 使用
-* 存 user_id 与 token entry 的 valid 标志，由软件维护：token 搬入 Matrix Mem 后置 valid，搬出后置 invalid。R core 上这块 Share Mem 还放按 `user_id` 寻址的软件映射表，以及按 ready 顺序排 `user_id` 的软件用户 FIFO（头尾指针）
+SM Ptr仅在指向Done时发可选4B控制写，addr/data来自Trigger快照，valid且未ready时保持。Fire后记录对应Entry outstanding，bresp到达置SM Resp Flag；Ack不能提前退休。一个使能Entry恰好写一次，即使ack_ts_en=0也完成SM副作用和有序退休。
 
-***
+TS输出UID16、SID4、TID6和valid1，valid-only无Ready。Ack Ptr对ack_ts_en=1的Entry产生一拍，随后释放；ack_ts_en=0仍按序释放。TS观察顺序为Trigger接纳顺序，与不同Channel的物理完成顺序分开。
+
+SM物理接口对齐128B端口，但控制写有效4B，byte mask低4位为1，其余0；接口数据的有效控制字为低32bit。请求valid/ready，响应valid-only。SM payload物理宽度不等于控制字长度。
+完成flag只在数据真实落地后写入，软件轮询不能把“提交DTE请求”当作ready。B Core完成地址按落点/6656计算，R Core按落点/0x3080计算；表基址、内容、是否写入均在对应Entry快照中保存。
+
+搬入使能flag写，搬出后清标志由相应kernel的软件队列管理；不能笼统规定所有搬出DSA都自动写invalid。
 
 ## 软件怎么配一个任务
 
@@ -662,490 +636,326 @@ DTE 只有一个任务入口：所有任务（进核 + 出核）都由 RV core �
 
 这一节讲 RV core 这一侧：写哪些寄存器、每个参数管什么、地址怎么算出来、五个方向各自怎么配。
 
-### Fast LUT（待评估）：把配置延迟压到 10T 以内
+### Fast LUT与Config Template的取舍
 
-Fast LUT 是否保留待评估：《DTE DSA》v0.3 只留了一节“LUT 评估”，结论未出。模型里所有任务都走上面这条 RV core 配寄存器的路径。本节是候选方案。
+当前详设取消按TID绕过RV的Fast LUT，配置加速采用8套Config Template。模板只保存常量字段；RV每笔覆盖变化字段并最后写Trigger。每套19字段、128B跨度，模板不包含Trigger。
 
-从“TS 把任务下发下来”到“总线上出现第一笔搬运请求”这一段叫 **DTE Setup Time**，目标是压到 10T 以内。
+旧Fast LUT提出的命中4T、未命中Core Latency+4T和Setup<10T是候选方案估算；85T是旧RV配置路径的端到端估算。它们保留为方案评估背景，不能代替当前kernel指令统计和真实访存/信用等待。
 
-按上面这条 RV core 配寄存器的路径走，Setup Time 大约 85T（流水启动 5T + 50 条指令算地址 75T + core 发射 5T），太慢。办法是让常规任务根本不走 RV core 的配置代码：
+### Config字段与Trigger
 
-* 系统里各种操作都是一个 task，且对每个用户都长一样，变的只有用户
-* 所以按 `task_id` 建一张 Fast LUT，表项是 `{valid, length, ctrl_flags}`；再按 `user_id` 建一组 User Base Register，存各用户的基址
-* 任务到来时（`{user_id, task_id}` 二元组）用 `task_id` 查表：**命中**就把表项内容与基址拼成 `{base_addr, length, ctrl_flags}` 的 task descriptor，按任务类型推进对应通道的 TaskQueue，**4T**；**未命中**才转发信息、重设 PC、执行 RV core 的配置程序，**Core Latency + 4T**
+| 信号 | 方向 | 位宽 | 合同 |
+| - | - | - | - |
+| rvcore2dte_rw_req_vld / dte2rvcore_rw_req_rdy | 输入／输出 | 各1 | 每拍最多Fire一笔 |
+| rvcore2dte_rw_type | 输入 | 1 | 0读，1写 |
+| rvcore2dte_rw_addr / wr_data | 输入 | 各32 | 字节地址和写数据 |
+| rvcore2dte_sid / tid / uid / pid / vcid | 输入 | 4/6/16/8/2 | 与请求一起保持，Trigger Fire快照 |
+| dte2rvcore_rd_rsp / rd_data | 输出 | 1/32 | 下一拍返回，无Ready、无ID |
 
-Fast LUT 只加速任务配置，不改路由定义、数据通路和完成条件。
+valid且未ready时全部请求字段保持。Fire后不可撤销；RV kill只影响未接受请求。ready由Status和TaskQ满状态寄存产生，不组合依赖地址、读写、数据或已有未返回读。RUN满队列反压所有访问；ERROR恒ready=1，Trigger不入队而清dirty。STOP队满按用户确认的建模基线反压全部RV访问；原文另一种行为继续登记TBD。
 
-### 四个寄存器与 Trigger
+各目标Fire当拍采样读值到自己的读寄存器，AddrDecode保存目标选择，下一拍直接选择并输出，不额外寄存、不限制在途读。连续读可每拍接收、每拍返回；之后写不改变之前读值。非法地址写无状态变化，读下一拍返回0。
 
-软件用 `dsawi` / `dsaw` 指令写四个寄存器，一条指令写一个，**必须最后写 Trigger**：
+模板t的基址为`0x1000+t×0x80`，内部19字段偏移0x00～0x48，不含Trigger；模板字段顺序与Config字段0x04～0x4C一致。t范围0～7。
 
-```asm
-# 先配 ADDR 和 TD 寄存器（两个都必须配，各写一条）
-dsawi TASK_CFG_ADDR data0
-dsawi TASK_CFG_TD   data1
-# 再写 Trigger，PACK 寄存器随之自动写入
-dsawi TASK_CFG_TRG  data2
-```
+普通写Fire更新对应Config字段并置dirty。模板写只改模板。Trigger Fire时，temp_valid=1则取选定模板并以dirty字段覆盖，temp_valid=0则取Config当前值；与请求SID/TID/UID/PID/VCID共同形成完整快照，同拍写全局Q并清dirty。Config不再保留一份等待Commit的Descriptor。
 
-`TASK_CFG_TD` 位域：
+已接受任务不受后续Config/模板/CSR写入影响。无效段字段可保留旧值，但不参与执行；软件优先将无关字段写0。FastLUT已取消，PID由请求旁带给出，长度由各段DATA_LEN给出。
 
-| 位域 | 名称 | 含义 |
-| - | - | - |
-| 31:30 | `src_sel` | 00=Router，01=MM，10=CM，11=Reserve |
-| 29:28 | `dst_sel` | 同上 |
-| 27:26 | `queue_sel` | b0=ch0，b1=ch1 |
-| 25:19 | `cnt` | 搬运总拍数，**单任务最大 256B × 128 = 32 KB** |
-| 18:11 | `mask` | 256B 一拍，按 32B 粒度 mask，位为 0 表示该 32B 无效 |
-| 10:5 | `path_id` | 当前任务打包需要的 PathID |
-| 4:1 | `task_pack_id` | 一个任务可由多个任务包组成，从 0 计数，**包之间不保证顺序执行** |
-| 0 | `last` | 是否当前 TaskID 的最后一个任务包 |
-
-`TASK_CFG_PACK` 位域：
-
-| 位域 | 名称 | 含义 |
-| - | - | - |
-| 31:16 | `UserID` | 用户 ID |
-| 15:12 | `stream_id` | 等同 SlotID，用户在 core 内的 ID |
-| 11:6 | `task_id` | 最大 64 |
-| 1 | `no_ack` | 标记是否需要返回 Ack |
-| 0 | `last` | 当前 Task 的最后一个宏指令 |
-
-打包信息只有在 `dst_sel` 是 Router 时才有效。
+用户确认模型允许一个TS任务包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q仍对每条搬运独立保存、执行与退休；原文一Task一Packet限制继续登记TBD。
 
 ### 一次配置要写的参数
 
-**三套软件接口并存、尚未对齐**：
+| 范围 | 目标 | 有效资源 |
+| - | - | - |
+| 0x0000～0x03FF | Config | Trigger和19个任务字段 |
+| 0x0400～0x07FF | Status Ctrl | SYS_CTRL、SYS_STATUS、EXCEPT_*；具体地址尚未冻结 |
+| 0x0800～0x0BFF | PMU | 任务、Channel和有效拍计数；位域/地址待冻结 |
+| 0x0C00～0x0FFF | Debug | 尚未冻结 |
+| 0x1000～0x1FFF | Template | 8套×128B，其余保留 |
+| 0x2000～0x2FFF | TaskQ回读 | FullTaskDesc、异常、SM响应和Entry状态；完整字偏移待冻结 |
+| 0x3000～0x3FFF | HeaderTable | 16组×64B占0x3000～0x33FF，其余保留 |
 
-* 上面四个寄存器出自 DTE MAS，是硬件那一侧的接口
-* 软件这一侧另有一组按名字寻址的 DSA 寄存器，出自软件计算流程详细评估，字段与 `TASK_CFG_*` 没有对应关系
-* 《DTE 寄存器配置参数》给的是第三套：一段地址空间加一组**寄存器模板**，字段名与第二套对得上，多了模板与动态的分档
+| 字段 | 地址 | 有效位宽 |
+| - | - | - |
+| CFG_TRIGGER | 0x0000 | [0]temp_valid，[3:1]temp_index；虚拟写事件 |
+| CFG_ADDR0_SRC / DST | 0x0004 / 0x0008 | 各32 |
+| CFG_ADDR1_SRC / DST | 0x000C / 0x0010 | 各32 |
+| CFG_ADDR2_SRC / DST | 0x0014 / 0x0018 | 各32 |
+| CFG_ADDR3_SRC / DST | 0x001C / 0x0020 | 各32 |
+| CFG_STRIDE0～3 | 0x0024、0x0028、0x002C、0x0030 | 各32 |
+| CFG_DATA_LEN0～3 | 0x0034、0x0038、0x003C、0x0040 | 各16，字节单位 |
+| CFG_SM_W_ADDR / DATA | 0x0044 / 0x0048 | 各32 |
+| CFG_TRANS_MODE | 0x004C | 10，模型位序mode[2:0]、保留[3]、seg_valid[6:4]、header[7]、SM[8]、ACK[9] |
 
-下面先讲地址空间与模板，再按第二套逐字段讲，`dsawi` 一条写一个寄存器，分五组。
+任务配置字段复位0。TRANS_MODE的逻辑字段为transfer_mode3、seg_valid3、hw_header_op1、wr_sharemem_flag1、ack_ts_en1及reserved1。段0恒为包头，段1～3独立使能。丢弃包头只对Router源生效，出Core和Core内搬运仍搬32B段0。ack_ts_en只决定退休时是否通知TS。
+### 配置参数的分工
+| 参数组 | 软件配置 | 硬件使用 |
+| - | - | - |
+| 方向与段有效性 | TRANS_MODE及四段使能 | 选择Channel、源/目的端和包头操作 |
+| 数据地址与长度 | 每段SRC、DST、STRIDE、DATA_LEN | 只对有效端算址，逐段连续执行 |
+| 包头与附加内容 | 段0=32；其余段内容由软件约定 | HT/CM/MM/topK逐端口访问，不隐式推算长度 |
+| 完成副作用 | SM地址/数据、SM使能、ACK使能 | 实际完成后按全局次序写SM并退休 |
+| 请求身份 | CSR旁带SID/TID/UID/PID/VCID | Trigger Fire当拍保存，后续CSR变化无影响 |
 
-#### 地址空间与寄存器模板
+模型TRANS_MODE为mode[2:0]、bit3保留、seg_valid[6:4]、header[7]、SM[8]、ACK[9]。这是用户确认的建模基线，原文另一位序仍TBD。旧TASK_CFG_ADDR/TD/PACK/TRG四寄存器和64B模板表不是当前可执行接口，其功能分别由四段字段、STUPV快照与128B模板承担。
 
-`DTE_BASE` 起三段，各 256 B：
+### 原配置字段与现行四段字段的对应
 
-| 地址区间 | 内容 |
-| - | - |
-| `0x000`～`0x0FF` | ctrl / status / profile / debug：全局控制、状态、错误、性能计数、调试选择 |
-| `0x100`～`0x1FF` | issue / task_trigger：运行时动态字段、trigger、override 字段 |
-| `0x200`～`0x2FF` | `template[0..3]`：**3 套有效模板加 1 套 reserved / header-only**，每套 64 B 对齐 |
+这张表保留旧稿各参数解决的问题，供读旧软件资料时转换；旧TASK_CFG_*和64B模板不是当前可执行接口。
 
-模板解决的是配置时延：五种搬运方向里大部分寄存器的值是静态的，提前配进模板，业务流里只写随任务变的那几个。每个字段因此分三档：
-
-| 属性 | 含义 |
-| - | - |
-| 模板 | 只在模板里配，业务流不改 |
-| 模板 / 可覆盖 | 模板里有默认值，任务需要时用 issue 段的 override 字段盖掉 |
-| 动态 | 每个任务都要写 |
-
-一套模板 64 B 的排布（偏移从模板基址起算）：
-
-| 偏移 | 寄存器 | 属性 | 说明 |
-| - | - | - | - |
-| `0x00` | `src_addr` | 模板 / 可覆盖 | 源地址；Router 作为源时可忽略 |
-| `0x04` | `dst_addr` | 模板 / 可覆盖 | 目的地址；Router 作为目的时可忽略 |
-| `0x08` | `stream_stride` | 模板 | stream 间跨度，地址按 `base + streamID × stride + offset` 算 |
-| `0x0C` | `scale_addr` | 模板 | Core Mem 里 scale 的地址，`scale_valid = 1` 时有效 |
-| `0x10` | `topK_table_addr` | 模板 | topK 存储地址；B core / R core 可把 topK 存在 Core Mem |
-| `0x14` | `hw_header_addr` | 模板 | 硬件包头地址，可区分 Hmem 与 Core Mem |
-| `0x18` | `sw_header_addr` | 模板 | 软件包头地址，按 `stream_id` 存，**每项固定 16 B** |
-| `0x1C` | `sharemem_waddr` | 模板 / 可覆盖 | 任务完成写 shareMem 的地址 |
-| `0x20` | `sharemem_wdata` | 模板 / 可覆盖 | 任务完成写 shareMem 的数据 |
-| `0x24` | `data_len` | 动态 / 模板 | 有效传输长度，0 表示纯 header / control 包 |
-| `0x28` | `transfer_mode` / `task_trigger` | 动态 / 模板 | 传输模式、控制信息、包头操作、last 等多字段合一 |
-
-最后那一个寄存器的位域：
-
-| 字段 | 位宽 | 属性 | 含义 |
-| - | - | - | - |
-| `transfer_mode` | 3 | 模板 | 000 Router→CM、001 Router→MM、010 CM→Router、011 MM→Router、100 MM→CM，其余保留 |
-| `router_ep_count` | 8 | 动态 | 本 token 激活的专家数，决定 topK 与 control 信息的搬运量 |
-| `scale_valid` | 1 | 模板 / 动态 | 搬不搬 scale |
-| `topK_valid` | 1 | 模板 / 动态 | 包里带不带 topK，或搬不搬 topK |
-| `hw_header_op` | 1 | 模板 / 动态 | 硬件包头操作：0 保存 / 复用，1 生成 / 修改，具体由 `transfer_mode` 细化 |
-| `wr_sharemem_flag` | 1 | 模板 / 动态 | 任务完成后写不写 shareMem flag |
-| `task_last` | 1 | 动态 | 本任务包是这个 task 的最后一笔，用于通知 TS |
-
-`src_addr` 与 `dst_addr` 都是 32 bit：Core Mem 1 MB 用 20 bit，Matrix Mem 36 MB 用 26 bit，Router 作为一端时不需要地址。`stream_id` 4 bit、`task_id` 6 bit、`user_id` 16 bit 这三个身份字段不由这套寄存器配。RV 执行写 trigger 的 `dsaw` 时从 CSR 抄进这笔请求，DSA 收下时用这一份。
-
-**第一组，模式与开关**，或进同一个寄存器一次写下：
-
-| 参数 | 作用 |
-| - | - |
-| `transfer_mode` | 选五个搬运方向之一。它决定走进核通道还是出核通道、出核走哪个 `out_ch`、出口接 Router TX 还是 DMA WR1 |
-| `scale_valid` | 这个任务带不带 scale。只有 MXFP8 的数据有 |
-| `topK_valid` | 带不带 topK |
-| `hw_header_op` | 1 = 把包头存进 Hmem，0 = 丢弃 |
-| `task_last` | 一个 task 拆成几笔搬运时最后一笔置 1，只有带这个标记的那一笔完成后才通知 TS |
-| `smem_valid` | 完成后要不要写 shareMem |
-| `router_ep_count` | 本 token 激活的专家数。topK 的搬运长度等于它乘 6 B |
-
-**第二组，数据的地址与长度**：
-
-| 参数 | 作用 |
-| - | - |
-| `src_addr` / `dst_addr` | Matrix Mem 一侧的地址，直接当最终地址用，不加偏移 |
-| `src_base_addr` / `dst_base_addr` | Core Mem 一侧的基址，硬件在它上面加 stream 偏移 |
-| `stream_stride` | 每个 stream 在 Core Mem 里占多少字节。MM → CM 方向两端各有一个，写 `src_stream_stride` 与 `dst_stream_stride` |
-| `data_len` | 搬运长度，单位字节。它盖住哪几类内容随方向变 |
-
-**第三组，包头、scale 与 topK 的地址**：
-
-| 参数 | 作用 |
-| - | - |
-| `header_addr` | Matrix Mem 一侧的包头地址。包头长度固定，不用配，也不加偏移 |
-| `header_base_addr` | Core Mem 一侧的包头基址，硬件加 stream 偏移 |
-| `header_src_addr` / `header_dst_base_addr` | MM → CM 方向的包头两端，源侧直给、目的侧给基址 |
-| `scale_base_addr` / `scale_stride` | scale 的基址与每 stream 步长。搬运长度硬件按 `data_len / 32` 算，不用配 |
-| `topk_base_addr` | topK 的基址。步长硬件固定 256 B，搬运长度硬件按 `router_ep_count × 6 B` 算 |
-
-**第四组，shareMem 表项**：
-
-* `sharemem_waddr`：表项地址
-* `sharemem_data`：表项内容，user_id 加 valid / invalid 标志
-
-**第五组，任务身份**：`UserID`、`stream_id`、`task_id`、`no_ack`、`last`。写 Trigger 时由硬件一并写进 `TASK_CFG_PACK`，软件不单独配。
-
-另有一组不随任务变的控制与观测寄存器：
-
-| 寄存器 | 作用 |
-| - | - |
-| `SYS_CTRL` / `DTE_CTRL` | 全局时钟门控、软复位、任务启动触发、单步调试使能；清空缓冲 |
-| `SYS_STATUS` / `DTE_STATUS` | 主状态机反馈（Idle / Running / Error / Stop）与忙状态 |
-| `EXCEPT_STATUS` / `EXCEPT_MASK` | 访存越界、非对齐、ECC 错、搬运异常；中断默认屏蔽，写 0 打开 |
-| `EXCEPT_CFG_ADDR` / `EXCEPT_CFG_TD` / `EXCEPT_CFG_PACK` | 出异常时硬件自动抓下当时的三个任务配置寄存器，只读 |
-| `PMU_CTRL` 与 11 个 `PMU_CNT_*` | 搬运原语数；进核 / 出核各自的执行周期、数据量、XBar 单次传输时间、完成交易数、完成任务数 |
+| 旧资料参数 | 当前表达 | 变化 |
+| - | - | - |
+| TASK_CFG_ADDR及src_addr/dst_addr | 每段CFG_ADDRi_SRC/DST | 四段各自独立有效端 |
+| TASK_CFG_TD.src_sel/dst_sel | Route与地址端点译码 | 端点不再用一个全局二选一字段 |
+| queue_sel | Channel Sel由Route及VCID生成 | InCh、OutCh0～3 |
+| cnt及32KiB上限 | 各段DATA_LEN字节、Packet总长校验 | 通用DTE可流式超过32KiB；RMEM容量另限 |
+| 32B粒度mask | 按地址/长度派生8B keep/mask | 首尾拍和段间重对齐由硬件处理 |
+| TASK_CFG_TD.path_id | Trigger旁带PID8 | 与任务身份一起锁存 |
+| task_pack_id及last | 全局entry_id、Entry生命周期、ack_ts_en | 内部归属不是软件任意重排包号 |
+| PACK.UserID/stream_id/task_id | Trigger UID16/SID4/TID6 | CSR旁带，不单独配置PACK |
+| PACK.no_ack | ack_ts_en=0 | 无ACK仍执行SM及有序退休 |
+| 单一stream_stride | 四个CFG_STRIDEi | Core内源不叠，目的叠 |
+| 专用scale/topK地址 | 通用段SRC/DST、长度、使能 | 内容与端点独立，不隐式推算长度 |
+| hw_header_addr/sw_header_addr | 32B段0及HT组/项 | 16B软件字段与core_mask在HT组内共享 |
+| router_ep_count×6 | 软件生成具体topK段长 | MU表一次逻辑项256B，经M Top两笔 |
+| sharemem_waddr/data | CFG_SM_W_ADDR/DATA、bit8 | 仅在实际完成后按序写入 |
+| 原64B模板11字段 | 128B跨度、19字段 | 8套、不含Trigger、dirty逐字段覆盖 |
+| SYS_CTRL的task_trigger表述 | CFG_TRIGGER负责任务提交，Status负责运行控制 | 不能把resume当作业务Task提交 |
+| 11项旧性能计数 | 当前8项逻辑PMU口径及模型观测 | 有效字节、物理拍、队头等待分别统计 |
 
 ### 地址怎么算
 
-一条式子贯穿所有地址：
+每段配置 SRC、DST、STRIDE、DATA_LEN，长度单位为字节。一般存储端地址为 `CFG_ADDRi + SID × CFG_STRIDEi`；stride=0 为物理地址。Core 内搬运只对目的端叠 stride，源端按软件已算好的地址使用。
 
-```
-PhyAddr = base_addr + stream_id × stride + offset
-```
+段 0 的长度必须为 32。段 1～3 由 seg_valid[i−1] 独立使能，地址和长度均须 8B 对齐；无效段不参与乘加、校验、读写或包长。HeaderTable 段 0 地址是索引，不检查 8B 对齐；CM/MM 包头地址按 8B 对齐。
 
-拆开看就是“基址 + 用户地址 + 段内偏移”。配置寄存器里给的 `src_addr` / `dst_addr` 相当于 `base_addr + offset`，`stream_id × stride` 是硬件自己叠上去的用户地址。由此得到一条规矩：**软件只配基址，偏移由硬件用 `stream_id` 算出来**。
+| 端点窗口 | 默认基址 | 默认大小 | 地址含义 |
+| - | - | - | - |
+| CM | 0x00000000 | 2MB | bit20 选择数据／scale；scale 实际 256×128B |
+| MM | 0x10000000 | 36MB | 字节地址，基址按 64MB 对齐 |
+| topK_table | 0x20000000 | 4KB | 16×256B；按 SID 使用时 stride=256 |
+| HeaderTable 段地址 | 0x30000000 | 512 个索引 | bit[8:5]组号、bit[4:0]项号；一个索引对应一个32B包头 |
 
-* `stream_id` 是 TS 建 stream 表项时定的，随任务一起给到 DTE
-* 软件不需要知道这个 token 落在 Core Mem 的哪一片
-* 同一段代码配同一个基址，不同用户自动落到各自的片上
+窗口基址与大小是实现参数，按全局地址图配置。乘加溢出、地址跨端点、段范围越窗口、topK 起点或长度不满足 256B 对齐，均须在对应外部事务之前被拦截。HeaderTable 的段地址窗口与软件寄存器地址域是两套地址。
+### 地址与长度的算例
+取SID=3，CM数据基址0x2000，stride=0x10000，得到0x32000；MM软件槽基址直接给最终地址、stride=0。段内再按有效字节offset推进，不能在每拍重复加SID偏移。
 
-| 内容 | 地址 | 基址谁配 | 偏移用什么索引 | 步长 |
-| - | - | - | - | - |
-| data，Core Mem 侧 | `base_addr + stream_id × stream_stride` | RV core | `stream_id` | 软件配 |
-| data，Matrix Mem 侧 | `src_addr` / `dst_addr` | RV core | 不加偏移 | — |
-| 包头（硬件 + 软件） | `header_base_addr + stream_id × 18 B` | RV core | `stream_id` | 硬件固定 |
-| scale | `scale_base_addr + stream_id × scale_stride` | RV core | `stream_id` | 软件配 |
-| topK | `topk_base_addr + stream_id × 256 B` | RV core | `stream_id` | 硬件固定 256 B |
-| shareMem 表项 | `sharemem_waddr` | RV core | 不加偏移 | — |
+HeaderTable item=2、stride0=32时索引为3×32+2=98，即组3项2；软件回读同组从0x3000+3×0x40开始。MU topK使用SID×256，SID3对应字节偏移768，两笔128B地址在[0]路连续发出。
 
-**`base_addr` 只对 Core Mem 有效**：
-
-* Matrix Mem 的地址全由软件管。走 Matrix Mem 的任务，硬件丢掉 `stream_id × stride` 这一项，软件自己把 `PhyAddr` 算准，直接当 `src_addr` / `dst_addr` 配进去
-* 理由是 Matrix Mem 放的是模型 weight，以及从 GPU 按 pattern 排好序送来的 token，位置软件本来就知道，DTE 也不重排
-* Core Mem 按 stream 切成 16 片，一片对应一个在飞的用户。谁占哪片由 TS 定，软件配的时候还不知道，所以偏移交给硬件
-
-**包头只有一级索引**：一个用户只有一个硬件包头（`core_mask` 2 B）和一个软件包头（16 B），两者合并成一项 18 B，`stream_id` 一级就索引到了，不再需要 `task_id` 那一级。
-
-**搬运长度有两项不用软件配，硬件自己算**：
-
-* scale：`data_len / 32`，32 个元素共用一个 scale
-* topK：`router_ep_count × 6 B`
+scale是自己的字节地址与长度：6144B MXFP8对应192B scale，192已是8B倍数。若data不是256B倍数，软件按段对齐规则配置scale长度，保留逻辑有效长度用于软件解释。
 
 ### 五个方向的配置例子
 
-五个方向配置项不同，差别集中在四处：
+| 场景 | 段0 | 数据段 | 关键约束 |
+| - | - | - | - |
+| Router→CM | DST=EP_HTAB_BASE+item，stride0=32，len0=32 | DST=EP_CM_BASE+offset，stride为用户跨度，len为8B倍数 | SRC无效，ack_ts_en按是否反馈TS |
+| Router→MM | DST可HT/CM/MM | DST=EP_MM_BASE+软件槽地址，stride=0 | 接收任务先驻留，目标按段地址选择 |
+| CM/MM→Router | SRC为配对HT索引或32B存储包头 | SRC逐段配置，DST无效 | 包长加32B，VCID来自Trigger |
+| MM→CM | SRC物理包头，DST为目标头 | SRC物理MM、DST CM+SID×stride | transfer_mode100；源不叠stride |
+| CM→HeaderTable | SRC为CM32B包头，DST=EP_HTAB_BASE+item+SID×32 | 可为无数据段 | OutCh3 core_mode，不产生Router TX |
+| 纯包头／空接收 | len0=32；空接收hw_header_op=1 | seg_valid=000 | 都需消费一个Packet；空接收不写存储 |
 
-1. 数据地址加不加 stream 偏移
-2. `data_len` 盖不盖 scale 与 topK
-3. scale 与 topK 要不要单独配地址
-4. 要不要写 shareMem
+以下示例使用已确认的模型位序；硬件原文差异仍记录TBD。无关字段写0，模板dirty覆盖按单字段记录；软件调度保证所有Packet长度、项号配对和SM地址有效。
+### 可执行配置顺序示例
+下例使用kernel里的DTE_*地址常量与dsa_write包装；sid/tid/uid/pid/vcid由执行任务CSR提供。
 
-| 方向 | 数据地址 | `data_len` 含义 | scale / topK 单独配 | shareMem | 典型场景 |
+```c
+/* Router -> MM，32B头 + 6144B数据；模型mode=1、seg1=bit4。 */
+dsa_write(DTE_ADDR0_DST, dte_ep(DTE_EP_CMEM, header_addr));
+dsa_write(DTE_DATA_LEN0, 32);
+dsa_write(DTE_STRIDE0, 0);
+dsa_write(DTE_ADDR1_DST, dte_ep(DTE_EP_MMEM, slot_addr));
+dsa_write(DTE_STRIDE1, 0);
+dsa_write(DTE_DATA_LEN1, 6144);
+dsa_write(DTE_TRANS_MODE, 1u | (1u << 4) | DTE_ACK_TS_EN);
+dsa_write(DTE_TRIGGER, 0);
+```
+
+B Core真实token还要使能scale和topK两段，并以flag写代替业务ACK。MM→Router与CM→Router的模式分别为3和2，填SRC而不是把Router目标地址当Memory地址；Core内mode=4填两端并走OutCh3。模板Trigger值为1|(template_index<<1)，仅dirty字段覆盖模板。
+
+### 各方向完整最小配置
+
+以下C示例使用`bach.h`中的模型寄存器地址、端点窗口和已确认TRANS_MODE位序。每次先清19字段，显式配置两段，最后Trigger；真实kernel通常用模板减少常量写。`seg_valid`仅使能段1，数据长度512B，无scale/topK。
+
+```c
+static void example_clear(void) {
+  dsa_write(DTE_ADDR0_SRC, 0u);
+  dsa_write(DTE_ADDR0_DST, 0u);
+  dsa_write(DTE_ADDR1_SRC, 0u);
+  dsa_write(DTE_ADDR1_DST, 0u);
+  dsa_write(DTE_ADDR2_SRC, 0u);
+  dsa_write(DTE_ADDR2_DST, 0u);
+  dsa_write(DTE_ADDR3_SRC, 0u);
+  dsa_write(DTE_ADDR3_DST, 0u);
+  dsa_write(DTE_STRIDE0, 0u);
+  dsa_write(DTE_STRIDE1, 0u);
+  dsa_write(DTE_STRIDE2, 0u);
+  dsa_write(DTE_STRIDE3, 0u);
+  dsa_write(DTE_DATA_LEN0, 32u);
+  dsa_write(DTE_DATA_LEN1, 0u);
+  dsa_write(DTE_DATA_LEN2, 0u);
+  dsa_write(DTE_DATA_LEN3, 0u);
+  dsa_write(DTE_SM_W_ADDR, 0u);
+  dsa_write(DTE_SM_W_DATA, 0u);
+  dsa_write(DTE_TRANS_MODE, 0u);
+}
+
+/* CM和HT段按SID分区；MM示例的固定物理地址只用于单Entry。 */
+static void example_router_to_cm(void) {
+  example_clear();
+  dsa_write(DTE_ADDR0_DST, dte_ep(DTE_EP_HDR, 2u));
+  dsa_write(DTE_STRIDE0, 32u);
+  dsa_write(DTE_ADDR1_DST, 0x2000u);
+  dsa_write(DTE_STRIDE1, 0x10000u);
+  dsa_write(DTE_DATA_LEN1, 512u);
+  dsa_write(DTE_TRANS_MODE, 0x210u);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+
+static void example_router_to_mm(void) {
+  example_clear();
+  dsa_write(DTE_ADDR0_DST, 0x400u);
+  dsa_write(DTE_ADDR1_DST, dte_ep(DTE_EP_MMEM, 0x10000u));
+  dsa_write(DTE_DATA_LEN1, 512u);
+  dsa_write(DTE_TRANS_MODE, 0x211u);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+
+static void example_cm_to_router(void) {
+  example_clear();
+  dsa_write(DTE_ADDR0_SRC, dte_ep(DTE_EP_HDR, 2u));
+  dsa_write(DTE_STRIDE0, 32u);
+  dsa_write(DTE_ADDR1_SRC, 0x2000u);
+  dsa_write(DTE_STRIDE1, 0x10000u);
+  dsa_write(DTE_DATA_LEN1, 512u);
+  dsa_write(DTE_TRANS_MODE, 0x292u);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+
+static void example_mm_to_router(void) {
+  example_clear();
+  dsa_write(DTE_ADDR0_SRC, 0x400u);
+  dsa_write(DTE_ADDR1_SRC, dte_ep(DTE_EP_MMEM, 0x10000u));
+  dsa_write(DTE_DATA_LEN1, 512u);
+  dsa_write(DTE_TRANS_MODE, 0x293u);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+
+static void example_mm_to_cm(void) {
+  example_clear();
+  dsa_write(DTE_ADDR0_SRC, dte_ep(DTE_EP_MMEM, 0x10000u));
+  dsa_write(DTE_ADDR0_DST, dte_ep(DTE_EP_HDR, 2u));
+  dsa_write(DTE_STRIDE0, 32u);
+  dsa_write(DTE_ADDR1_SRC, dte_ep(DTE_EP_MMEM, 0x10100u));
+  dsa_write(DTE_ADDR1_DST, 0x2000u);
+  dsa_write(DTE_STRIDE1, 0x10000u);
+  dsa_write(DTE_DATA_LEN1, 512u);
+  dsa_write(DTE_TRANS_MODE, 0x214u);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+
+/* 同一Core内mode=4还可复制纯32B包头到HeaderTable。 */
+static void example_cm_to_header_table(void) {
+  example_clear();
+  dsa_write(DTE_ADDR0_SRC, 0x400u);
+  dsa_write(DTE_ADDR0_DST, dte_ep(DTE_EP_HDR, 2u));
+  dsa_write(DTE_STRIDE0, 32u);
+  dsa_write(DTE_TRANS_MODE, 0x204u);
+  dsa_write(DTE_TRIGGER, 0u);
+}
+```
+
+| 示例 | mode[2:0] | seg_valid[6:4] | hw_header_op | ACK | 外部路径 |
 | - | - | - | - | - | - |
-| Router → MM | `dst_addr` 直给 | topK + scale + data 总长 | 否 | 写，置 valid | CPU 发来的 token 进 B core；EP 间 token 进 R core |
-| MM → Router | `src_addr` 直给 | topK + scale + data 总长 | 否 | 写，置 invalid | B core 把 token 广播到别的 core |
-| Router → CM | `dst_base_addr` 加偏移 | 只有 data | 是 | 否 | init token 进核；reissue；EPTP-NK 切分时进 concat & reduce core |
-| CM → Router | `src_base_addr` 加偏移 | 只有 data | 是 | 否 | reissue；EPTP-NK 切分时 FC1 / FC3 在 Router 上做 reduce、FC2 搬到 concat core |
-| MM → CM | 源直给，目的加偏移 | 只有 data | 否 | 写，置 invalid | R core 里 EP 间的 reduction |
+| Router→CM | 0 | 001 | 0保存 | 1 | InCh RX及CM/HT写 |
+| Router→MM | 1 | 001 | 0保存 | 1 | InCh RX及MM/CM头写 |
+| CM→Router | 2 | 001 | 1改写 | 1 | OutCh，VCID取CSR旁带 |
+| MM→Router | 3 | 001 | 1改写 | 1 | OutCh，VCID取CSR旁带 |
+| MM→CM | 4 | 001 | 0，Core内不丢头 | 1 | OutCh3内存写 |
+| CM→HeaderTable | 4 | 000 | 0，Core内不丢头 | 1 | OutCh3 HT写 |
 
-**Router → MM**
-
-```c
-void data_in_config() {
-  // 模式与开关：方向 router → matrix mem
-  //   hw_header_op  是否把包头存进 Hmem
-  //   task_last     一个 task 拆成多笔搬运时只有最后一笔置 1，由它给 TS 报 done
-  //   smem_valid    结束后更新 shareMem
-  dsawi transfer_mode | scale_valid | topK_valid | hw_header_op | task_last | smem_valid, X
-
-  // 数据：Matrix Mem 侧地址直给，不加 stream 偏移
-  dsawi dst_addr, X
-  // 长度，单位字节，这个方向上盖住 topK + scale + data
-  dsawi data_len, X
-
-  // 包头：长度固定，地址直给
-  dsawi header_addr, X
-
-  // shareMem：表项记这个 token 在 Matrix Mem 里的信息，置 user_id 与 valid
-  dsawi sharemem_waddr, X
-  dsawi sharemem_data, X
-}
-```
-
-**MM → Router**
-
-```c
-void data_out_config() {
-  // 模式与开关：方向 matrix mem → router
-  dsawi transfer_mode | scale_valid | topK_valid | hw_header_op | task_last | smem_valid, X
-
-  // 数据：Matrix Mem 侧地址直给
-  dsawi src_addr, X
-  // 长度盖住 topK + scale + data
-  dsawi data_len, X
-
-  // 包头：path_id 在 boot 阶段按 task_id 初始化进 DTE，出核时由硬件填进包头
-  dsawi header_addr, X
-
-  // shareMem：token 搬出后把表项置 invalid
-  dsawi sharemem_waddr, X
-  dsawi sharemem_data, X
-}
-```
-
-**Router → CM**
-
-```c
-void data_in_config() {
-  // 模式与开关：方向 router → core mem
-  //   router_ep_count  本 token 激活的专家数，决定 topK 搬多少字节
-  dsawi transfer_mode | scale_valid | topK_valid | hw_header_op | task_last | smem_valid | router_ep_count, X
-
-  // 数据：Core Mem 侧给基址，硬件算 dst_addr = dst_base_addr + stream_id × stream_stride
-  dsawi dst_base_addr, X
-  // 长度只算 data，不含 topK 与 scale
-  dsawi data_len, X
-  dsawi stream_stride, X
-
-  // 包头：dst_addr = header_base_addr + stream_id × 18 B
-  dsawi header_base_addr, X
-
-  // scale：只有 MXFP8 有，存在 Core Mem
-  //   dst_addr = scale_base_addr + stream_id × scale_stride
-  //   搬运长度 = data_len / 32，硬件算
-  dsawi scale_base_addr, X
-  dsawi scale_stride, X
-
-  // topK：dst_addr = topk_base_addr + stream_id × 256B，每个 stream 上限 256B
-  //   搬运长度 = router_ep_count × 6B，每项 {local_ep_index 2B, weight 4B}
-  dsawi topk_base_addr, X
-}
-```
-
-**CM → Router**
-
-```c
-void data_out_config() {
-  // 模式与开关：方向 core mem → router
-  dsawi transfer_mode | scale_valid | topK_valid | hw_header_op | task_last | smem_valid | router_ep_count, X
-
-  // 数据：src_addr = src_base_addr + stream_id × stream_stride
-  dsawi src_base_addr, X
-  // 长度只算 data
-  dsawi data_len, X
-  dsawi stream_stride, X
-
-  // 包头：src_addr = header_base_addr + stream_id × 18 B
-  dsawi header_base_addr, X
-
-  // scale：基址与步长各写一条
-  dsawi scale_base_addr, X1
-  dsawi scale_stride,    X2
-
-  // topK
-  dsawi topk_base_addr, X
-}
-```
-
-**MM → CM**
-
-```c
-void data_inner_config() {
-  // 模式与开关：方向 matrix mem → core mem，不过 Router，走出核通道的内部通路
-  dsawi transfer_mode | scale_valid | topK_valid | hw_header_op | task_last | smem_valid | router_ep_count, X
-
-  // 源：Matrix Mem 侧地址直给
-  dsawi src_addr, X
-  dsawi data_len, X
-
-  // 目的：Core Mem 侧给基址，dst_addr = dst_base_addr + stream_id × stream_stride
-  dsawi dst_base_addr, X
-  dsawi stream_stride, X
-
-  // 包头：R core 的包头存在 Core Mem，这一笔顺带把它搬进 Hmem
-  //   源侧地址直给，目的侧 dst_addr = header_dst_base_addr + stream_id × 18 B
-  dsawi header_src_addr, X
-  dsawi header_dst_base_addr, X
-
-  // shareMem：token 从 Matrix Mem 搬走后置 invalid
-  dsawi sharemem_waddr, X
-  dsawi sharemem_data, X
-}
-```
+启用SM写时再填`DTE_SM_W_ADDR/DATA`并置bit8；多搬运的前条目清bit9。示例中的固定MM地址用于单Entry，真实软件按UID或接收序号求不同槽位。例子中HT item2必须与数据的配对任务一致，MM源头必须已保存32B合法头。Router出站目的由Packet PID/路由表决定，不能用无效DST字段创造Memory写。
 
 ### TS 直接启动
 
-**MAS 已删掉这一条**（原第 2 条，标 P1 优先级）。下面记的是它被删之前的内容，建模不按它做。
+TS只向DTE RV Core下发task PC和身份，RV执行配置指令后Trigger才建立搬运Entry。当前没有另一个TS→DTE Descriptor入口；所有普通、Special、权重和Core内搬运都走同一RVCore IF快照合同。
 
-它它绕过 RV core，由 TS 直接触发 DTE DSA，DSA 用 `stream_id` / `task_id` 索引内部的静态参数查找表取参数。
-
-初始化要走完七步：
-
-1. SCP 复位 DTE
-2. 配全局静态寄存器
-3. 配 Fast LUT（待评估）与 User Base Register
-4. 配 stream 相关表
-5. 配 header 与 topK 参数
-6. 使能 TS 直接触发模式
-7. DTE 返回 `init_done`，TS 才允许直接启动
-
-触发时：
-
-1. 检查 `stream_id` / `task_id` 合法性
-2. 按 `task_id` 查 task_mode_table，按 `stream_id` 查 stream 相关表
-3. 取得 length 与 path_id 等动态字段
-4. 算出源与目的地址，生成内部搬运描述符
-5. 选进核 / 出核通道启动
-
-启动方式只有“DTE core 配置任务给 DSA”这一种。
+多条搬运可属于同一TS Task，但条目各占全局Q容量、各自具有段位和真实完成；只有最后带ack_ts_en的条目回TS。
 
 ### 双 Bank 与优先级
 
-Commit 提供两个配置 Bank，**Bank0 优先于 Bank1**：
+CM/MM逻辑256B请求由两个连续128B地址组成，两路ready都满足才Fire。每路响应分别握手，先到半拍暂存，等另一半后拼成一个Buffer拍；无tag响应按端点接纳顺序归属。
 
-* 都空闲时：Router 的配置进 Bank0，RV core 的配置进 Bank1
-* 只剩一个 Bank 而两者竞争时：**优先配置 Router 信息**
-
-***
+MM遇到MU同bank访问时遵循M Top/存储仲裁与反压，DTE保持请求；不同端口的迟到响应不得串给下一Entry。topK与MM共用M Top端口，sel区分，topK仅[0]路连续两笔128B。MM mask写需计入RMW路径，不将256B写mask当作两块独立随意写入。
 
 ## 与 Router 的边界
 
 ### 入站帧格式
 
-* **一帧一任务**：同一个 AXI-Stream Frame 只属于一个 Router→MM 或 Router→CM 任务，不允许任务间交织
-* **首拍固定为 Header**：DTE 靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖 Start-of-Frame 信号；
-  建议 Header 限定在一个 256 B beat 内
-* TLAST 标识最后一个 Payload beat；
-  `byte_count` 为 0 时可由 Header beat 同时携带 TLAST
-* TKEEP 按字节粒度生效，每个 Payload Fire 累计 TKEEP 有效字节，TLAST 时与 `byte_count` 比较
-* **非法 Header 进入 Drop Frame 流程**：不发存储器请求，只消费到 TLAST 以恢复帧边界。进核任务与数据包按到达顺序配对，丢掉的那一帧对应的进核任务怎么结束未定，模型遇到非法 Header 直接断言
+RV Core 配好各段的目的地址和长度并提交任务。RD 侧驻留任务后接收 Packet。RX 是单通道 valid/ready，首 flit 的 32B hflit 与 256B pflit 并行。保存包头时先停一拍，将包头写入 Buffer，再接收首拍 payload；丢弃包头时直接接收 payload。
 
-Header 里与进核搬运有关的字段，以及 Header Parser 对它们的检查：
+WR 侧按四段的目的端拆分数据，以 8B 粒度重对齐并形成字节 mask。包头可以写 HeaderTable、CM 或 MM。topK 与其他数据段使用同一段位机制，经 M Top 写入对应端点。
 
-| 逻辑字段 | 用途 | 检查 |
-| - | - | - |
-| `dst_addr` | 发方算好的落点，收方的 datain 任务从 Router I/O reg 读出来配进 `CFG_ADDRx_DST` | — |
-| `byte_count` | Payload 总有效字节数 | 不超过单任务上限 32 KB，与后续 Payload 的 TKEEP 累计值及 TLAST 位置一致 |
-| `task_id` / `stream_id` | 发方带的身份，软件可从 Router I/O reg 读；进核任务的身份由 RV core 随配置写送来 | — |
+RX 在首 flit Fire 时校验 pkt_length，并在 tail 时校验 flit 数。无驻留任务、未收到 tail 又出现 head、长度不符均保留任务现场。写侧待全部写响应返回，并取得同任务的 RD drain_done 后才产生 lane_finish。
+RX不在DTE内重新构造48B C++头；32B hflit与payload分别按硬件边界传递。head/tail属于Packet，不由长度计数生成一个新的包间边界。长度计数用于校验，与tail缺失或提前到达的检查共同工作。
 
 ### core 侧承担的桥接职责
 
-Router 与 core 之间**不做独立的桥接模块**，按耦合关系把逻辑拆到 core 与 Router 两侧分布实现。落到 DTE 这一侧的是：
+模型CoreStation连接Router与DTE，承担接口适配与Packet上下文，不扩大DTE容量。RX按native ready接入，TX按每VC native信用真正发出；排入内部CoreData队列不代表尾flit已交付。
 
-* **进来的方向**：Router 与 core 之间只用单个 VC 调度，多 VC 到单 VC 的映射由 Router 侧硬件固化完成
-  * DTE 侧感知单 VC buffer 的缓存状态并据此启动搬运
-  * 解析包信息，搬完按 flit 释放 VC credit
-* **出去的方向**：DTE 侧按 VC0～3 多线程调度维护多个 VC buffer
-  * 用它吸收整包流量，完成 core 与 Router 之间的协议转换
-  * 出去这一侧 dispatch 时不查 VC credit，发往本 core ReduceModule 的 Reduce 包也一样：本地 DTE↔Router 的 VC 反压由 CoreStation 的 DteReady 在 flit 层兜住；本级 Rmem 资源由 TS 在下发前申请
-  * 两类业务层 credit（下游的 coremem credit 与 reduce credit）都分方向，方向由 routing table 定，但这两类由 TS 在下发前查，不在 DTE 这一级
-* **credit 回程**：解析本级 Router 各方向传进来的 core credit release，按其中的 action 信息决定是否同步更新 core 内的 stream 表状态
-  * DTE 里存的这份叫 `stream_cache`，是 Router 那张 stream 表的**只读副本**，3 方向各 16 项 `{valid, user_id}`
-  * 它只跟随、不分配：真正建表项只有 Router 能做。它的用处是包要重发时本地先记账，以及判断某个包该不该重注入
-
-***
+诊断上下文可保留GPU/token、reduce_seq和远端落点，便于数值回归；这些字段不扩展32B硬件包头或800B HT容量。LogicalPayload移除scale补齐等线上padding供主机比较，wire字节数仍单独校验。
 
 ## 参数
 
-| 项目 | 数量 / 容量 | 说明 |
-| - | - | - |
-| 物理通道 | 5 | 进核 `in_ch` 1 条 + 出核 `out_ch[0..3]` 4 条，与 4 个 VC 一一对应 |
-| TaskQueue | 16 | 中央一个，保存已快照、尚未 dispatch 的任务，不同通道的任务可乱序下发 |
-| WR Lane TaskQ | 4 | 每通道每侧各一个，允许读这一侧先执行 4 个任务 |
-| 中间 Buffer | 约 8 KB | inbound + outbound，约 256B × (20～30) T，最大可掩盖 32 T 延迟 |
-| 与 Cmem 接口宽度 | 256 B/T | 双向；DTE MAS 与 Cmem MAS 口径一致 |
-| 与 router 接口宽度 | 256 B | Data（看不到 scale），双向 |
-| Hmem | 288 B | 16 项 × {`core_mask` 2 B, 软件包头 16 B}，按 `stream_id` 索引；B core / R core 改存 Core Mem |
-| `stream_cache` | 3 × 16 项 | × {`valid`, `user_id`}，Router 那张 stream 表的只读副本 |
-| Fast LUT | 64 项（待评估） | × {`valid`, `length`, `ctrl_flags`}，按 `task_id` 索引 |
-| DTE Setup Time | < 10T（随 Fast LUT 待评估） | Fast LUT 命中 4T，未命中 Core Latency + 4T；模型不走 Fast LUT，按 85T |
-| 单任务最大搬运量 | 32 KB | 256 B × 128 拍 |
+| 资源／统计 | 基线 |
+| - | - |
+| 全局Q | 16项，直到Ack退休 |
+| Channel／issue lane | 5／10 |
+| RD AGCU／WR Q | 每Channel1项／4项 |
+| Active/retiring或Hold | 每lane最多当前和上一任务 |
+| Buffer | 每Channel32×256B=8KB，共40KB |
+| RD Outstanding | 深32，与预留槽容量一致 |
+| HeaderTable／模板 | 800B／8×128B |
+| 包长 | 32B头+数据总和≤65535；8B对齐最大65528 |
+| OutCh3发包 | 相对Out0～2多1拍 |
+| PMU逻辑计数 | 总任务、InCh及Out0～3任务、读有效拍、写有效拍，共8项 |
+
+SM控制字按4B统计，物理总线128B不能计成每Task搬128B有效数据。topK每256B耗两笔[0]路事务；MM mask写包含RMW成本。配置到下发、issue到drain、Done到SM/Ack分别统计，队头等待不能算作lane执行时间。
+### 模型延迟与硬件容量分别标注
+CM/MM接口双向256B，MM模型读8T、写9T，Ctrl_noc读写时延与DTE端口分开统计；存储Owner最终延迟和cache边界仍TBD。端口延迟不可用Setup85T替代。
+
+硬件Status/Debug/PMU字段未冻结与模型可观察地址不是同一件事。模型实现首错、STOP/RUN、step/cancel/Flush及观测计数，软件必须使用标明为模型的地址。
 
 ### 性能剖析口径
 
-```
-setup_cycles  = first_issue_fire - task_accept_fire
-issue_cycles  = issue_done       - first_issue_fire
-drain_cycles  = task_done        - issue_done
-report_cycles = done_fire        - task_done
-total_latency = setup + issue + drain + report
-active_cycles = cycles(any_data_fire)
-stall_cycles  = cycles(valid && !ready)
+```text
+setup_cycles = first_external_fire - trigger_fire
+issue_cycles = last_request_fire - first_external_fire
+drain_cycles = wr_finish - last_request_fire
+sm_wait_cycles = sm_response - sm_fire
+retire_wait_cycles = ack_retire - wr_finish
+active_cycles = count(any_data_fire)
+stall_cycles = count(valid && !ready)
 ```
 
-***
+读/写响应排空、SM等待、全局队头等待分别记录。Packet的有效载荷、线上padding、32B头以及topK物理两笔请求各按自己的口径计数。total_latency=ack_retire-trigger_fire；retire_wait包含SM等待，不把sm_wait再重复相加。
 
 ## 取舍
 
 ### 出口串行导致的死锁，两个方案怎么合成一个
+按存储方向共用一条出口时，一个VC阻塞可把后面的其他VC任务一并挡住。按VC复制四条OutCh并按flit仲裁，保留同VC Packet所有权，使其他VC继续推进；代价是每Channel独立Buffer和上下文。
 
-死锁的形状是这样的：两条流在某个位置串成一条，再分回两条。串起来那一段被一条流堵住，另一条流也过不去。而堵住的那条流的特性是**申请资源**，被堵住的那条流的特性是**释放资源**，于是谁也动不了。加了 VC 之后 Router 之间是多路并行的，core 的出口（DataOut DTE）如果还是串行的，就正好是那个串起来的位置。
+### 配对下发与全局退休
+RD先开始而WR无落脚点会占满Buffer。Ch Ptr必须同拍接纳两侧；dispatch后Entry继续保留，年轻先完成不能使身份提前复用。代价是队头SM或异常可阻塞退休，但数据通道仍可在容量内独立推进。
 
-源文档里比过两个方案：
+多Entry提交必须有数量和依赖边界；当前R Core只提交两条。软件不能以无限拆分填满16项Q，使释放某VC资源所需的后续任务无法进入。按VC分通道解决出口阻塞，不取消全局容量约束。
 
-| | 方案一：每 VC 一个整包 Buffer | 方案二：DTE 开多个通道对应 VC |
-| - | - | - |
-| Buffer | 每 VC 一个，至少装得下一整包 | 每 VC 一条通道，各带 Buffer |
-| 谁查资源 | TS。TS 要知道 VC 通道、包大小、路由方向、各方向的资源需求 | DTE。通信的信息和操作都转移到 DTE，TS 不感知通信行为 |
-| PendingQ 查什么 | Buffer 容量与包大小、下游 stream 资源、下游 reduce 资源，齐了反向通知 TS 可以下发 | 乱序发射，谁等的资源先齐谁先走 |
-| 对软件的要求 | TS 里一个任务的数据量必须小于 Buffer 容量 | 不限制任务大小，但会拆包的任务要在 PendingQ 里单独占一项，拆包规范得和软件对齐 |
+### Active、Hold与读写领先
+请求发完允许切下一任务，上一任务迟到响应由Hold和entry_id归属保存。Buffer外prev/residue提供8B重对齐，避免多读口RAM；代价是需要额外保持跨拍及跨段字节。
 
-最终落地的是两者的合成：
+### 四段通用配置与模板
+按内容硬化scale/topK长度可减少字段，却限制端点和格式变化。四段独立地址/长度保留灵活性，8套模板减少常量重复配置；软件仍负责字段一致、包长与项号配对。
 
-* **通道结构取方案二**：DTE 开 4 个出核通道对应 4 个 VC，某个 VC 阻塞只堵对应那条通道
-* **资源检查取方案一**：TS 查 RouterTable 与 stream 资源，有资源才下发；DTE dispatch 时连 VC credit 也不查，本地 DTE↔Router 的 VC 反压由 CoreStation 的 DteReady 在 flit 层兜住
-* **软件约束也取方案一**：TS 里的任务要足够小，下发到 DTE 后不用 RV core 再拆
-
-这么合是因为两个方案各自的短板正好互补。方案二把资源检查全放进 DTE，DTE 就要在 PendingQ 里做拆包，拆出来的小任务数量不确定，会把 TaskQueue 填满、堵住后面那笔释放资源的任务，死锁只是换了个位置。方案一用“任务足够小”这条软件约束避开了拆包，但它的出口仍是按 Buffer 而不是按通道切的，DTE 侧没有乱序执行能力。取通道结构加软件约束，两头都避掉了。
-
-* **为什么一个任务要拆成读写两半**
-  * 搬运的两端节奏不同：Router 侧什么时候来数据由上游决定，存储侧要抢 bank
-  * 绑成一体，任一端卡住另一端就空转
-  * 拆开之后两端各自按自己的节奏排队，中间 buffer 吸收速度差
-  * 代价是要额外维护配对关系和 Join 逻辑
-* **为什么 Commit 必须两侧同时拿到资源**
-  * 只拿到读侧就开始收数据，数据进了 buffer 却没有写侧上下文可以落地
-  * buffer 会被一个无法推进的任务占住
-  * 两侧同时拿到才接纳，把这种半途卡死挡在入口
-* **为什么通道按 VC 切、出核四份进核一份**
-  * 早期方案按存储资源切：Matrix Mem、Core Mem、Router 各看作一个读写 Resource，理想情况 3 条通路，定性上会带来性能提升
-  * 代价是 XBar 面积近似 *N_in × N_out × W*，偏大；带宽从来不是约束（需求 190～320 GB/s，而 Matrix Mem 8192 GB/s、Core Mem 512 GB/s、Router 双向各 256 GB/s），所以按物理相邻关系并成进核、出核两条
-  * 但两条挡不住死锁：出核任务共用一条出口，某个 VC 的 credit 耗尽会把排在后面、走别的 VC 的任务一起堵死
-  * 现在把出核那条按 VC 复制成四份，一份对一个 VC，通道之间可以乱序推进，一个 VC 阻塞只影响自己那条；进核方向没有这个问题，仍是一条
-  * `MM → CM` 不占 VC，固定复用 `out_ch[3]`，在目的端 MUX 到 Core Mem
-* **为什么 `issue_done` 就允许该侧走下一个任务**
-  * 一侧占的资源是 Active Context，不是在途事务
-  * 最后一个请求发出后这一侧本身已经空出来，剩下的响应排空由 Completion RS 按 `task_id` 跟踪
-  * 若等到全部 drain 才放行，外部响应延迟会直接算进通道的占用时间
-
-***
-
-配图：[DTE DSA 12 张](<Bach/04_四、MAS（Micro Architecture SPEC）/08_DTE DSA>)：顶层框图、内部结构、包头存储与访存、TS 快速启动流程、Inbound/Outbound/Inner Flow、Concurrency、Commit、通路方案评估
-
-内嵌表格：[DTE DSA 4 子表](_sheets/_Dx7Ns6)（Reduction only 场景下各通路（R→M 搬入 / C→R 搬出 / M→C 线上归约）的带宽占比、DTE 参数含义、寄存器偏移与位宽）
-
-来源：`04_四、MAS/08_DTE DSA.md`、`Bach软件文档库/04_总体设计/05_软件计算流程详细评估.md`（DTE 章）
+### 软件槽对齐
+MM地址只要求8B合法，6592B槽合法但多数槽跨256B边界增加请求。6656B软件槽把起点对齐到物理拍，逻辑有效载荷仍6592B；额外64B占用与访存请求减少一起纳入容量/性能评估。

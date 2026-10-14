@@ -6,9 +6,9 @@
 
 #include <memory>
 
-#include "base/logic.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
+#include "base/logic.h"
 
 namespace latch {
 namespace bach {
@@ -18,14 +18,16 @@ namespace bach {
 // 同一笔请求会连着两拍出现在端口上（请求方要等 accepted 打一拍才撤 valid），
 // 所以带序号，接收方按序号认，不执行两遍。这一条在 Router 与 TS 上各踩过一次。
 class DescPort : public Logic {
- public:
+public:
   Logic64 valid;
   LogicPtr<Descriptor> desc;
-  Logic64 accepted;
+  Logic64 accepted, accepted_seq, credits;
   Logic64 seq;
 
-  explicit DescPort(ClockPtr c) : valid(c), desc(c), accepted(c), seq(c) {
-    Fields(valid, desc, accepted, seq);
+  explicit DescPort(ClockPtr c)
+      : valid(c), desc(c), accepted(c), accepted_seq(c), credits(c), seq(c) {
+    Fields(valid, desc, accepted, accepted_seq, credits, seq);
+    credits = kCentralTaskQDepth;
   }
 
   void Drive(std::shared_ptr<Descriptor> d) {
@@ -45,14 +47,20 @@ class DescPort : public Logic {
     valid = 0;
     desc = std::shared_ptr<Descriptor>();
   }
-  void DriveAccepted(bool ok) { accepted = ok ? 1 : 0; }
+  void DriveAccepted(bool ok) {
+    accepted = ok ? 1 : 0;
+    accepted_seq = ok ? seq.Get() : 0;
+  }
+  void DriveCredits(uint64_t n) { credits = n; }
+  uint64_t Credits() const { return credits.Get(); }
+  uint64_t AcceptedSeq() const { return accepted_seq.Get(); }
 
   bool Valid() const { return valid.Get() != 0; }
   bool Accepted() const { return accepted.Get() != 0; }
   uint64_t Seq() const { return seq.Get(); }
   std::shared_ptr<Descriptor> Desc() const { return desc.Get(); }
 
- private:
+private:
   uint64_t issue_seq = 0;
 };
 
@@ -61,21 +69,23 @@ class DescPort : public Logic {
 // 不能让 Parser 直接往 Lane 的 buffer 里塞：那是两个模块的协程同时改同一个
 // 容器，单线程下看着能跑，多线程下就是段错误。一切跨模块的搬运都走端口。
 class PayloadPort : public Logic {
- public:
+public:
   // frame 是 Header Parser 给这一帧编的号，进核那一路按它认“这几拍属于哪一
   // 帧”。off 是这一拍的数据在整包 payload 里的起点：一包拆成几拍进来，写存储
   // 时要按这个起点切出本拍那一段。
-  Logic64 valid, frame, bytes, off, last, ready, seq;
+  Logic64 valid, frame, bytes, off, last, ready, seq, accepted_seq, error;
   LogicPtr<Message> msg;
 
   explicit PayloadPort(ClockPtr c)
       : valid(c), frame(c), bytes(c), off(c), last(c), ready(c), seq(c),
-        msg(c) {
-    Fields(valid, frame, bytes, off, last, ready, seq, msg);
+        accepted_seq(c), error(c), msg(c) {
+    Fields(valid, frame, bytes, off, last, ready, seq, accepted_seq, error,
+           msg);
   }
 
   void Drive(uint64_t frame_seq, uint64_t n, uint64_t at, bool is_last,
-             MessagePtr const& m) {
+             MessagePtr const &m, uint64_t code = 0) {
+    error = code;
     valid = 1;
     frame = frame_seq;
     bytes = n;
@@ -97,33 +107,54 @@ class PayloadPort : public Logic {
   bool Ready() const { return ready.Get() != 0; }
   uint64_t Seq() const { return seq.Get(); }
 
- private:
+private:
   uint64_t issue_seq = 0;
 };
 
 // 一侧完成的上报：Lane → Completion RS。
 class HalfDonePort : public Logic {
- public:
-  Logic64 valid, commit_seq, half, drained;
+public:
+  Logic64 valid, commit_seq, half, drained, error;
 
   explicit HalfDonePort(ClockPtr c)
-      : valid(c), commit_seq(c), half(c), drained(c) {
-    Fields(valid, commit_seq, half, drained);
+      : valid(c), commit_seq(c), half(c), drained(c), error(c) {
+    Fields(valid, commit_seq, half, drained, error);
   }
 
-  void Drive(uint64_t seq, uint64_t which, bool is_drained) {
+  void Drive(uint64_t seq, uint64_t which, bool is_drained, uint64_t code = 0) {
     valid = 1;
     commit_seq = seq;
     half = which;
     drained = is_drained ? 1 : 0;
+    error = code;
   }
   void Idle() {
     valid = 0;
     commit_seq = 0;
     half = 0;
     drained = 0;
+    error = 0;
   }
   bool Valid() const { return valid.Get() != 0; }
+};
+
+class DteExceptionPort : public Logic {
+public:
+  Logic64 valid, error, entry_id, stream_id, task_id, user_id, path_id;
+  explicit DteExceptionPort(ClockPtr clock)
+      : valid(clock), error(clock), entry_id(clock), stream_id(clock),
+        task_id(clock), user_id(clock), path_id(clock) {
+    Fields(valid, error, entry_id, stream_id, task_id, user_id, path_id);
+  }
+  void Drive(Descriptor const &desc) {
+    valid = 1;
+    error = desc.error;
+    entry_id = desc.entry_id;
+    stream_id = desc.stream_id;
+    task_id = desc.task_id;
+    user_id = desc.user_id;
+    path_id = desc.path_id;
+  }
 };
 
 // DSA → RV core 的 dsa_rq：读寄存器的返回，异步、脉冲。
@@ -131,7 +162,7 @@ class HalfDonePort : public Logic {
 // 读不支持同步返回，所以下发与返回是两条线：dsa_iss 发出去时把目的寄存器编号
 // 记进 dsa_rq，数据回来时按记录的顺序写回 gpr。
 class DsaRdataPort : public Logic {
- public:
+public:
   Logic64 valid, rdata, seq;
 
   explicit DsaRdataPort(ClockPtr c) : valid(c), rdata(c), seq(c) {
@@ -163,7 +194,7 @@ class DsaRdataPort : public Logic {
 // 只有 Commit 一家，所以承诺在下一拍仍然成立。“三样一起拿”因此还是原样：
 // 三个口的 ready 都为真才发，谁没准备好就一起等。
 class AdmitPort : public Logic {
- public:
+public:
   Logic64 valid, ready, seq;
   LogicPtr<Descriptor> desc;
 
@@ -195,7 +226,7 @@ class AdmitPort : public Logic {
 // 启动寄存器就是这样，写一次执行一次），所以不能按 (addr, data) 认重复，只能
 // 按序号认。请求方每换一笔就把序号加一。
 class DsaCfgPort : public Logic {
- public:
+public:
   Logic64 req_valid, req_we, req_addr, req_wdata, req_ready, req_seq;
   Logic64 req_stream, req_task, req_user, req_path, req_vc;
 
@@ -249,7 +280,7 @@ class DsaCfgPort : public Logic {
   uint64_t Seq() const { return req_seq.Get(); }
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

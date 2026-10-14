@@ -1,9 +1,10 @@
 // User_Match 与三条发射通路。
 //
-// User_Match 按 {user_id, path_id, reissue} 判用户、按 PID 找搬入任务、按任务类型
-// 与 reissue 定跳过哪几项。DTE 那一条发射通路里 DataIn 与 Generated 全部按年龄
-// 比；三条通路各自独立打拍，同一拍可以并行下发三个 task；选中之后非抢占保持，
-// 直到 RV core 回 ACCEPT。DTE 命令带的 VCID 取自 ROUTER_TABLE。
+// User_Match 按 {user_id, path_id, reissue} 判用户、按 PID
+// 找搬入任务、按任务类型 与 reissue 定跳过哪几项。DTE 那一条发射通路里 DataIn
+// 与 Generated 全部按年龄 比；三条通路各自独立打拍，同一拍可以并行下发三个
+// task；选中之后非抢占保持， 直到 RV core 回 ACCEPT。DTE 命令带的 VCID 取自
+// ROUTER_TABLE。
 
 #include <gtest/gtest.h>
 
@@ -11,11 +12,11 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/ip/chip/core/ts/dte_arb.h"
 #include "bach/ip/chip/core/ts/mu_vu_arb.h"
 #include "bach/ip/chip/core/ts/stream_table.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -56,7 +57,7 @@ std::shared_ptr<StreamWrite> Ready(uint64_t slot, uint64_t user, SendUnit unit,
 
 // 表、三条通路、User_Match 与两侧的驱动都在这一个协程里。
 class IssueBench : public BachModule {
- public:
+public:
   struct Trig {
     uint64_t at = 0, user = 0, path = 0;
     bool reissue = false;
@@ -67,8 +68,8 @@ class IssueBench : public BachModule {
   };
   // 种子表项走 install 那个整项写口：create 那个留给 User_Match。
 
-  IssueBench(ClockPtr c, CfgReg& reg, StreamTable& tab, UserMatch& match,
-             DteArb& dte, UnitArb& mu, UnitArb& vu)
+  IssueBench(ClockPtr c, CfgReg &reg, StreamTable &tab, UserMatch &match,
+             DteArb &dte, UnitArb &mu, UnitArb &vu)
       : BachModule(c, "bench"), cfg(reg), table(tab), um(match), dte_arb(dte),
         mu_arb(mu), vu_arb(vu) {}
 
@@ -82,7 +83,7 @@ class IssueBench : public BachModule {
   };
   std::vector<Got> dte_log, mu_log, vu_log;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     bool ok = now >= ready_from;
@@ -90,21 +91,23 @@ class IssueBench : public BachModule {
     Take(mu_arb.Cmd(), mu_log, now, ok, mu_key);
     Take(vu_arb.Cmd(), vu_log, now, ok, vu_key);
     FeedTrigger(now);
-    for (auto const& s : seeds) {
-      if (s.at == now) table.Port(kWrInstall).Drive(s.w);
-    }
     cfg.RunStep();
     dte_arb.RunStep();
     mu_arb.RunStep();
     vu_arb.RunStep();
     um.RunStep();
+    for (auto const &s : seeds) {
+      if (s.at == now)
+        table.Port(kWrCreate).Drive(s.w);
+    }
+
     table.RunStep();
   }
 
- private:
+private:
   // 扮演 RV core：这一拍收得下就记一笔并回 ready，否则拉低。
-  void Take(TaskCmdPort& cmd, std::vector<Got>& log, uint64_t now, bool ok,
-            uint64_t& last_key) {
+  void Take(TaskCmdPort &cmd, std::vector<Got> &log, uint64_t now, bool ok,
+            uint64_t &last_key) {
     if (!cmd.Valid() || !ok) {
       cmd.DriveReady(false);
       return;
@@ -117,8 +120,7 @@ class IssueBench : public BachModule {
                    1;
     if (key != last_key) {
       log.push_back({now, cmd.stream_id.Get(), cmd.task_id.Get(),
-                     cmd.user_id.Get(), cmd.vcid.Get(),
-                     cmd.task_dsa_en.Get()});
+                     cmd.user_id.Get(), cmd.vcid.Get(), cmd.task_dsa_en.Get()});
       last_key = key;
     }
     cmd.DriveReady(true);
@@ -130,7 +132,7 @@ class IssueBench : public BachModule {
       um.Trigger().Idle();
       return;
     }
-    Trig const& t = trigs[cursor];
+    Trig const &t = trigs[cursor];
     if (now < t.at) {
       um.Trigger().Idle();
       return;
@@ -147,12 +149,12 @@ class IssueBench : public BachModule {
     }
   }
 
-  CfgReg& cfg;
-  StreamTable& table;
-  UserMatch& um;
-  DteArb& dte_arb;
-  UnitArb& mu_arb;
-  UnitArb& vu_arb;
+  CfgReg &cfg;
+  StreamTable &table;
+  UserMatch &um;
+  DteArb &dte_arb;
+  UnitArb &mu_arb;
+  UnitArb &vu_arb;
   uint64_t cursor = 0, sent_at = 0;
   uint64_t dte_key = 0, mu_key = 0, vu_key = 0;
 };
@@ -207,12 +209,12 @@ TaskEntry EndOn(SendUnit unit) {
   return t;
 }
 
-}  // namespace
+} // namespace
 
 // R core 与 B core 上进来的包不建 stream 表项：只把 datain 任务登记进
 // DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID 15 / TID 63，同一个
 // 用户来第二次照样登记。
-TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
+TEST(BachTsIssue, SelfStartBypassDoesNotAddUserSlots) {
   std::vector<IssueBench::Got> d;
   uint64_t used = 0;
   {
@@ -239,13 +241,13 @@ TEST(BachTsIssue, SelfStartCoreDatainDoesNotCreateAStream) {
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
     d = h.dte_log;
-    used = b.table->TailPtr() - b.table->HeadPtr();
+    used = b.table->Occupied();
   }
   RT::Reset();
   // 表里那一项是上电时自启动建的，不是进来的包建的：包只登记 datain 任务。
   EXPECT_EQ(used, 1u);
   ASSERT_EQ(d.size(), 2u) << "同一个用户来两次要登记两次";
-  for (auto const& one : d) {
+  for (auto const &one : d) {
     EXPECT_EQ(one.user, 77u);
     EXPECT_EQ(one.stream, kBypassSid);
     EXPECT_EQ(one.task, kBypassTid);
@@ -327,7 +329,7 @@ TEST(BachTsIssue, HeldCommandStaysUntilAccept) {
 }
 
 // DataIn 与 Generated 按年龄比：DataIn 那一格更老时先发它，不是一律垫底。
-TEST(BachTsIssue, DataInGoesByAgeAgainstGenerated) {
+TEST(BachTsIssue, SameSidDataInPrecedesGeneratedWork) {
   std::vector<IssueBench::Got> d;
   {
     EnsureSlots();
@@ -359,13 +361,14 @@ TEST(BachTsIssue, DataInGoesByAgeAgainstGenerated) {
   ASSERT_GE(d.size(), 2u);
   // 第一笔是 stream0 自己的 task 0：同一个 stream 上 Generated 优先于 DataIn。
   EXPECT_EQ(d[0].stream, 0u);
-  EXPECT_EQ(d[0].task, 0u) << "同一 Stream 时优先选 Generated";
+  EXPECT_EQ(d[0].task, 1u) << "同一 Stream 时优先选 Generated";
   // 第二笔应当是那一格 DataIn（stream0，task 1），而不是更新的 stream1。
   EXPECT_EQ(d[1].stream, 0u) << "DataIn 那一格更老，排在 stream1 前面";
-  EXPECT_EQ(d[1].task, 1u);
+  EXPECT_EQ(d[1].task, 0u);
 }
 
-// Broadcast 重发的搬入且 reissue=0：搬入照做，配对的搬出跳过；reissue=1 两者都做。
+// Broadcast 重发的搬入且 reissue=0：搬入照做，配对的搬出跳过；reissue=1
+// 两者都做。
 TEST(BachTsIssue, BroadcastReissueInSkipsOnlyTheEgress) {
   std::vector<IssueBench::Got> d0, d1;
   StreamEntry e0, e1;
@@ -458,7 +461,7 @@ TEST(BachTsIssue, ExistingUserMatchesByPid) {
     RT::JoinAll();
     d = h.dte_log;
     bits = b.table->Peek(0).done_bitmap;
-    used = b.table->TailPtr() - b.table->HeadPtr();
+    used = b.table->Occupied();
   }
   RT::Reset();
   EXPECT_EQ(used, 1u) << "同一个用户只建一项";
@@ -469,7 +472,8 @@ TEST(BachTsIssue, ExistingUserMatchesByPid) {
   EXPECT_EQ(bits, 0b100u) << "配对的搬出跳过";
 }
 
-// DTE 命令带的 VCID 按当前任务的 PID 查 ROUTER_TABLE；DSA 使能看 TASK_RECV_UNIT。
+// DTE 命令带的 VCID 按当前任务的 PID 查 ROUTER_TABLE；DSA 使能看
+// TASK_RECV_UNIT。
 TEST(BachTsIssue, DteCmdCarriesVcidAndRecvUnit) {
   std::vector<IssueBench::Got> d;
   {

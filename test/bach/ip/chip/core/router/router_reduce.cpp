@@ -364,7 +364,6 @@ TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
   EXPECT_EQ(state.input_depth, (std::array<uint64_t, 3>{1, 1, 0}));
   EXPECT_EQ(state.input_heads[0].msg->path_id, 3u);
   EXPECT_EQ(state.input_heads[1].msg->path_id, 3u);
-  EXPECT_TRUE(state.parked.empty());
 }
 
 // 上游保证 task 2 先完成时，同一个用户分区可继续做 task 14，两笔结果分别计算。
@@ -399,7 +398,7 @@ TEST(BachReduce, EarlierTaskCompletesBeforeLaterTaskEnters) {
 }
 
 // 上下文保护：当前任务的结果还没全部发出时，同一个 user 的下一笔不得覆盖它。
-// 挡住的那个包收在 park 里，前一笔的结果发完之后再进来。
+// 挡住的那个包留在输入缓冲里，前一笔的结果发完之后再进来。
 TEST(BachReduce, NextPacketOfTheSameUserDoesNotOverwrite) {
   std::vector<float> values;
   std::vector<uint64_t> seqs;

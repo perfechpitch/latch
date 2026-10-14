@@ -60,7 +60,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 <rect x="260" y="180" width="520" height="58" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
 <text x="270" y="197" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#2563eb" font-weight="700" text-anchor="start">TS　任务调度器</text>
 <text x="270" y="212" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">task_chain 64 项 · stream_table 16 项顺序 FIFO · 三条发射通路 DTE_Arb / MU_Arb / VU_Arb，年龄优先</text>
-<text x="270" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">固定硬件逻辑，上电配定四种工作模式 · 调度延时 2～3 T · 七路完成事件合流（RV ack ×3 · DSA ack ×3 · Reduce Done）</text>
+<text x="270" y="225" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">固定硬件调度 · 三种模式 · 六路ACK与独立RMEM返回</text>
 <rect x="810" y="180" width="140" height="58" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="820" y="197" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Share Mem</text>
 <text x="820" y="212" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">32 KB · 3 个 RV core 共享</text>
@@ -92,9 +92,9 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 <text x="750" y="326" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">自定义指令读写 DSA 寄存器</text>
 <rect x="740" y="368" width="210" height="70" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
 <text x="750" y="385" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#0d9488" font-weight="700" text-anchor="start">DTE DSA</text>
-<text x="750" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">2 ch / 4 lane</text>
-<text x="750" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">Header Parser · TaskQueue ×4</text>
-<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">AGCU · Hmem 与 Fast LUT（待评估）</text>
+<text x="750" y="400" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">五Channel／十lane</text>
+<text x="750" y="413" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">全局TaskQ16 · WR Q4／Channel</text>
+<text x="750" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">全局TaskQ · 五Channel · HeaderTable800B</text>
 <rect x="260" y="478" width="340" height="80" rx="6" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
 <text x="270" y="495" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#d97706" font-weight="700" text-anchor="start">Matrix Mem</text>
 <text x="270" y="510" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">32 MB + 4 MB scale · 64 bank</text>
@@ -288,9 +288,9 @@ Bach 用**任务隔离**代替显式一致性维护，建模时这一块可以�
 | 4 | MU / VU 写 Task 输出 | Release + Task Done |
 | 5 | DSA 写输出 | Release + Chain Done |
 
-配图：[Bach_core_MAS_TOP 3 张画板](<Bach/04_四、MAS（Micro Architecture SPEC）/03_Bach_core_MAS_TOP（pending）>)（core 内部连接图、地址空间分配、DTE RV core 调度 DTE）+ 2 张内嵌绘图（`d01` core 外部连接图、`d02` 内存管理流程）
+配图：[Bach_core_MAS_TOP 3 张画板](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/03_Bach_core_MAS_TOP（pending）>)（core 内部连接图、地址空间分配、DTE RV core 调度 DTE）+ 2 张内嵌绘图（`d01` core 外部连接图、`d02` 内存管理流程）
 
-内嵌表格：[Bach_core_MAS_TOP 7 子表](_sheets/_JUGvs3)（Task 类型与对应资源 / 典型操作 / 切分边界、模型各阶段的 RV 配置内容与 DSA 计算、三个平面的分工、约束定义、三张地址结构说明）
+内嵌表格：[Bach_core_MAS_TOP 7 子表](</home/colin/develop/perfechpitch/_sheets/_JUGvs3>)（Task 类型与对应资源 / 典型操作 / 切分边界、模型各阶段的 RV 配置内容与 DSA 计算、三个平面的分工、约束定义、三张地址结构说明）
 
 来源：`04_四、MAS/03_Bach_core_MAS_TOP（pending）.md`、`07_RV Core.md`、`06_第四阶段/04_core内调度机制.md`
 
@@ -298,7 +298,7 @@ Bach 用**任务隔离**代替显式一致性维护，建模时这一块可以�
 
 ## TS 任务调度器
 
-TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按任务链走的硬化调度器**，调度延时 2～3 cycle。
+TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按任务链走的硬化调度器**，按 TG、资源许可、Fire Hold 与 Core 接受的寄存边界逐拍计时。
 
 **TS 是一块固定的硬件逻辑，不是可编程的调度器**：
 
@@ -314,7 +314,7 @@ TS 决定多用户如何在 DTE / MU / VU 三条执行链上流水。它是**按
 3. 同一个执行单元有多个候选时选最老的
 4. 收到完成事件推进度，并在链尾退休
 
-展开在[《TS 任务调度器》](03-ts-任务调度器.md)：两张表的字段、四个动作的规则、三处复杂性（异步 datain、下游反压、B / R core 双链），以及配置检查、异常和时延口径。
+展开在[《TS 任务调度器》](03-ts-任务调度器.md)：Task LUT 与 Stream Map、DataIn claimed／Future 接受、三方向 credit 和 RMEM 许可，以及 ACK 配对、首 Trigger 激活和用户退休。
 
 ***
 
@@ -476,7 +476,7 @@ Fetch Access Fault 的判定：取指地址超出 ITCM 区间，或取指地址�
 * **单个用户各 DSA 对应的软件调度程序在 RV core 上执行时间不超过 200 cycle**
 * 通过 task_queue 提前缓存 task，实现用户与用户之间 task 的无 bubble 调度
 
-配图：[RV Core 15 张内嵌绘图](<Bach/04_四、MAS（Micro Architecture SPEC）/07_RV Core>)：`d01` core 内整体框图、`d02` 外部连接、`d03` **内部流水图**、`d04~d08` pc_gen / ITCM / loop_bp / decode / dispatch 各级、`d09~d11` SEU / LSU / dsa_iss、`d12~d15` 四类异常的流水清空范围
+配图：[RV Core 15 张内嵌绘图](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/07_RV Core>)：`d01` core 内整体框图、`d02` 外部连接、`d03` **内部流水图**、`d04~d08` pc_gen / ITCM / loop_bp / decode / dispatch 各级、`d09~d11` SEU / LSU / dsa_iss、`d12~d15` 四类异常的流水清空范围
 
 来源：`04_四、MAS/07_RV Core.md`、`_sheets/_XT24ss/1qdnTs.csv`（异常类型表）、`01_ISA描述.xlsx`（RV Core sheet）
 

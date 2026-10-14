@@ -9,8 +9,8 @@
 // 对外只有两组连接：三个 R2R 方向各一条 256 B/T 的双向链路，与 ctrl_noc 的配置
 // 写事务口。没有第三条路：core 的一切进出都过 Router。
 //
-// 七个单元一律构造。坏 core 由 core_bad_mask 标出：Router 进透传档，TS、RV core、
-// DSA 与存储不步进、不记波形。
+// 七个单元一律构造。坏 core 由 core_bad_mask 标出：Router 进透传档，TS、RV
+// core、 DSA 与存储不步进、不记波形。
 //
 // core 不保存角色，行为逐项取自配置：自启动取自 TS 的 SELF_START，B core 搬出查
 // 哪几个方向取自 B_CORE_DIRECTION，进核落点、Ack 与标志表取自 DTE 的进核配置。
@@ -25,7 +25,6 @@
 #include <vector>
 
 #include "bach/ip/chip/chip_ports.h"
-#include "bach/ip/module_base.h"
 #include "bach/ip/chip/core/dte/dte.h"
 #include "bach/ip/chip/core/memory/core_mem.h"
 #include "bach/ip/chip/core/memory/matrix_mem.h"
@@ -35,14 +34,15 @@
 #include "bach/ip/chip/core/rv_core/rv_core.h"
 #include "bach/ip/chip/core/ts/ts.h"
 #include "bach/ip/chip/core/vu/vu.h"
+#include "bach/ip/module_base.h"
 
 namespace latch {
 namespace bach {
 
 // 只读上下文，core 内各模块共用。构造期写入，之后不变。
 struct CoreContext {
-  uint64_t core_id = 0;      // 本 chip 内的编号
-  uint64_t gx = 0, gy = 0;   // 全局坐标
+  uint64_t core_id = 0;    // 本 chip 内的编号
+  uint64_t gx = 0, gy = 0; // 全局坐标
   // 本 core 自己挂时钟（占一个常驻协程），还是由 chip 那一层顺序调 RunStep()。
   // core 之间只经 LinkEnd 通讯，那一组端口全部打拍，所以两种驱动方式逐拍结果
   // 相同。挂时钟时 core 之间才能真正并行。
@@ -50,16 +50,17 @@ struct CoreContext {
 };
 
 class Core : public BachModule {
- public:
-  Core(ClockPtr clock, const std::string& name, CoreContext const& context,
+public:
+  Core(ClockPtr clock, const std::string &name, CoreContext const &context,
        uint64_t parent = 0)
       : BachModule(clock, name, parent, context.tick), ctx(context) {
     RouterCfg rcfg;
     rcfg.core_id = ctx.core_id;
     rcfg.tick = false;
     // 波形上一个 core 记两层：EmitTrace() 那组精选信号直接挂在 core 下面，外加
-    // 底下各单元模块自己的全部信号（层次 chip<i>.core<j>.<单元>.<模块>.<信号>）。
-    // 全量在 48 chip 规模下信号上万、波形很大，只想看流程就把下一行取消注释、
+    // 底下各单元模块自己的全部信号（层次
+    // chip<i>.core<j>.<单元>.<模块>.<信号>）。 全量在 48 chip
+    // 规模下信号上万、波形很大，只想看流程就把下一行取消注释、
     // 退回只发精选信号（或调小 moe_lpu 的 kTraceChips）。
     // TraceOffScope off;
     router = std::make_unique<Router>(clock, "router", rcfg, Id());
@@ -94,12 +95,14 @@ class Core : public BachModule {
   void SetCoreBadMask(uint64_t mask) { router->SetCoreBadMask(mask); }
   bool Bad() const { return router->Bad(); }
 
-  CoreContext const& Context() const { return ctx; }
+  CoreContext const &Context() const { return ctx; }
   // 三个 RV core 都进 wait 后拉高，SCP 据此开放业务接收权限。坏 core 恒为真。
   bool Ready() const {
-    if (Bad()) return true;
-    for (auto const& r : rv) {
-      if (!r->Ready()) return false;
+    if (Bad())
+      return true;
+    for (auto const &r : rv) {
+      if (!r->Ready())
+        return false;
     }
     return true;
   }
@@ -109,56 +112,70 @@ class Core : public BachModule {
   // 走方法调用而不是端口：端点与目的模块都在装配这一个协程里，而且这几条通路
   // 只在 boot 期用；业务期是 RV core 的 dsa_iss 在写 DSA 的那个口，两者不
   // 同时。VU 那一侧例外，它本来就有三条独立的配置通路，Ctrl-NOC 占其中一条。
-  void CfgWrite(CfgRoute const& r, bool we, uint64_t data) {
-    if (!we) return;
+  uint64_t CfgRead(CfgRoute const &route) {
+    if (route.target == kCfgTs)
+      return ts->Cfg().Access(route.offset, false).data;
+    if (route.target == kCfgDte)
+      return dte->Regfile().ConfigRead(route.offset);
+    return 0;
+  }
+  void CfgWrite(CfgRoute const &r, bool we, uint64_t data) {
+    if (!we)
+      return;
     switch (r.target) {
-      case kCfgRouter:
-        // Router 段经 ctrl_noc 只收 core_bad_mask，RouterTable 由装载那一侧铺。
-        if (r.offset == kCfgRouterCoreBadMask) router->SetCoreBadMask(data);
-        break;
-      case kCfgTs:
-        ts->Cfg().SetStreamNum(data == 0 ? 1 : data);
-        break;
-      case kCfgDte:
-        // DTE 的寄存器由它的 Commit 那一侧收，boot 期只配 Hmem 的表。
-        break;
-      case kCfgMu:
-        mu->Regfile().CfgWrite(r.offset, data);
-        break;
-      case kCfgVu:
-        // VU 有三条独立的配置通路，Ctrl-NOC 占其中一条，走端口。
-        break;
-      case kCfgItcm: {
-        std::vector<uint8_t> word(4);
-        for (int k = 0; k < 4; ++k) word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
-        rv[r.index]->PokeItcm(r.offset, word);
-        break;
-      }
-      case kCfgSmem:
-        PokeWord(*smem, r.offset, data);
-        break;
-      case kCfgCmem:
-        PokeWord(*cmem, r.offset, data);
-        break;
-      case kCfgMmem:
-        PokeWord(*mmem, r.offset, data);
-        break;
-      default:
-        break;
+    case kCfgRouter:
+      // Router 段经 ctrl_noc 只收 core_bad_mask，RouterTable 由装载那一侧铺。
+      if (r.offset == kCfgRouterCoreBadMask)
+        router->SetCoreBadMask(data);
+      break;
+    case kCfgTs:
+      ts->Cfg().Access(r.offset, true, data);
+      if (r.offset == 0x20c && ts->Cfg().InitFinished())
+        ts->Table().Configure(ts->Cfg().StreamNum());
+      break;
+    case kCfgDte:
+      dte->Regfile().ConfigWrite(r.offset, data);
+      break;
+    case kCfgMu:
+      mu->Regfile().CfgWrite(r.offset, data);
+      break;
+    case kCfgVu:
+      // VU 有三条独立的配置通路，Ctrl-NOC 占其中一条，走端口。
+      break;
+    case kCfgItcm: {
+      std::vector<uint8_t> word(4);
+      for (int k = 0; k < 4; ++k)
+        word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
+      rv[r.index]->PokeItcm(r.offset, word);
+      break;
+    }
+    case kCfgSmem:
+      PokeWord(*smem, r.offset, data);
+      break;
+    case kCfgCmem:
+      PokeWord(*cmem, r.offset, data);
+      break;
+    case kCfgMmem:
+      PokeWord(*mmem, r.offset, data);
+      break;
+    default:
+      break;
     }
   }
 
   // ── 观测 ──
-  Router& GetRouter() { return *router; }
-  Ts& GetTs() { return *ts; }
-  RvCore& Rv(uint64_t i) { return *rv.at(i); }
-  Dte& GetDte() { return *dte; }
-  Mu& GetMu() { return *mu; }
-  Vu& GetVu() { return *vu; }
-  CoreMem& Cmem() { return *cmem; }
-  MatrixMem& Mmem() { return *mmem; }
-  ShareMem& Smem() { return *smem; }
-  void PokeSmemWord(uint64_t offset, uint64_t data) { PokeWord(*smem, offset, data); }
+  Router &GetRouter() { return *router; }
+  Ts &GetTs() { return *ts; }
+  RvCore &Rv(uint64_t i) { return *rv.at(i); }
+  Dte &GetDte() { return *dte; }
+  Mu &GetMu() { return *mu; }
+  Vu &GetVu() { return *vu; }
+  CoreMem &Cmem() { return *cmem; }
+  MatrixMem &Mmem() { return *mmem; }
+  ShareMem &Smem() { return *smem; }
+  void PokeSmemWord(uint64_t offset, uint64_t data) {
+    PokeWord(*smem, offset, data);
+  }
 
   // 末级先做：一笔活在一拍里最多前进一级。存储排在最前，因为它是各条通路的末端。
   // 坏 core 只有 Router 步进。
@@ -174,7 +191,8 @@ class Core : public BachModule {
     vu->RunStep();
     mu->RunStep();
     dte->RunStep();
-    for (auto& r : rv) r->RunStep();
+    for (auto &r : rv)
+      r->RunStep();
     ts->RunStep();
     EmitTrace();
   }
@@ -184,8 +202,10 @@ class Core : public BachModule {
   // 访问器读，读的是本拍这一遍 RunStep() 算完的值。
   void EmitTrace() {
     // 四个入口站：三个 R2R 方向，加本 core 的 DTE 出核进 Router 那一路。
-    static const char* kFwd[4] = {"fwd_mid", "fwd_left", "fwd_right", "fwd_core"};
-    static const char* kOcc[4] = {"occ_mid", "occ_left", "occ_right", "occ_core"};
+    static const char *kFwd[4] = {"fwd_mid", "fwd_left", "fwd_right",
+                                  "fwd_core"};
+    static const char *kOcc[4] = {"occ_mid", "occ_left", "occ_right",
+                                  "occ_core"};
     for (uint64_t d = 0; d < 4; ++d) {
       TracePerCycle(kFwd[d], router->Station(d).Forwarded());
       TracePerCycle(kOcc[d], router->Station(d).Occupancy());
@@ -195,7 +215,8 @@ class Core : public BachModule {
     TracePerCycle("core_in", router->GetCoreStation().OutBufDepth());
     EmitRouter();
     // 坏 core 与 TS 没配过任务的好 core 只有 Router 在用，只记上面那一组。
-    if (Bad() || !ts->Cfg().HasTask()) return;
+    if (Bad() || !ts->Cfg().HasTask())
+      return;
     TracePerCycle("core_out", dte->OutBuf().Occupancy());
     TracePerCycle("ts_inflight", ts->Table().InFlight());
     TracePerCycle("ts_issue", ts->DteArbiter().Issued() +
@@ -206,30 +227,31 @@ class Core : public BachModule {
     EmitStep();
     EmitDsa();
     EmitRv();
-    EmitSteps();
   }
 
   // Router 里设计文档画出来的那几个方框，各记一两个量：
   //
-  //   out_mid / out_left / out_right / out_core  Xbar 往这四个出口各发出的 flit 数
-  //   out_rdc   Xbar 送进 ReduceModule 三条 lane 的 flit 数之和
-  //   cs_trig   CoreStation 发给 TS 的 trigger 数
-  //   rdc_ctx   ReduceModule 占着几个用户上下文
-  //   reissue   CoreMem 重发那一侧暂存着、还没重发出去的笔数
+  //   out_mid / out_left / out_right / out_core  Xbar 往这四个出口各发出的 flit
+  //   数 out_rdc   Xbar 送进 ReduceModule 三条 lane 的 flit 数之和 cs_trig
+  //   CoreStation 发给 TS 的 trigger 数 rdc_ctx   ReduceModule
+  //   占着几个用户上下文 reissue   CoreMem 重发那一侧暂存着、还没重发出去的笔数
   //   retire    Retire 广播过的用户数
   //   cmcm_q    CreditMonitor 里排队等资源的申请数
   //
   // out_*、cs_trig、retire 是只加不清零的累计数，其余是水位。RouterTable 是静态
   // 配置，不记。
   void EmitRouter() {
-    static const char* kOut[4] = {"out_mid", "out_left", "out_right", "out_core"};
-    Xbar& xb = router->GetXbar();
-    for (uint64_t o = 0; o < 4; ++o) TracePerCycle(kOut[o], xb.SentCount(o));
-    TracePerCycle("out_rdc", xb.SentCount(kOutReduce0) + xb.SentCount(kOutReduce1) +
+    static const char *kOut[4] = {"out_mid", "out_left", "out_right",
+                                  "out_core"};
+    Xbar &xb = router->GetXbar();
+    for (uint64_t o = 0; o < 4; ++o)
+      TracePerCycle(kOut[o], xb.SentCount(o));
+    TracePerCycle("out_rdc", xb.SentCount(kOutReduce0) +
+                                 xb.SentCount(kOutReduce1) +
                                  xb.SentCount(kOutReduce2));
     TracePerCycle("cs_trig", router->GetCoreStation().Triggers());
     TracePerCycle("rdc_ctx", router->GetReduce().ContextUsed());
-    CoreMemReissue& rs = router->GetReissue();
+    CoreMemReissue &rs = router->GetReissue();
     uint64_t stored = rs.Stored(), reissued = rs.Reissued();
     TracePerCycle("reissue", stored >= reissued ? stored - reissued : 0);
     TracePerCycle("retire", router->GetRetire().Broadcast());
@@ -253,31 +275,29 @@ class Core : public BachModule {
   // 三条通路各管各的 stream，同一拍可以各发各的，所以三个信号都按路分位，不能
   // 只留一路。
   void EmitIssue() {
-    TaskCmdPort* cmd[3] = {&ts->DteCmd(), &ts->MuCmd(), &ts->VuCmd()};
-    uint64_t mask = 0, pack = 0, users = 0, streams = 0;
+    TaskCmdPort *cmd[3] = {&ts->DteCmd(), &ts->MuCmd(), &ts->VuCmd()};
+    uint64_t mask = 0, pack = 0, users = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       uint64_t s = cmd[u]->Seq();
-      uint64_t id = 0xFFu, user = 0xFFFFu, stream = 0xFFu;
+      uint64_t id = 0xFFu, user = 0xFFFFu;
       if (s != issue_seq[u]) {
         issue_seq[u] = s;
         mask |= 1ull << u;
         id = cmd[u]->task_id.Get() & 0xFFu;
         user = cmd[u]->user_id.Get() & 0xFFFFu;
-        stream = cmd[u]->stream_id.Get() & 0xFFu;
       }
       pack |= id << (8 * u);
       users |= user << (16 * u);
-      streams |= stream << (8 * u);
     }
     TracePerCycle("ts_unit", mask);
     TracePerCycle("ts_task", pack);
     TracePerCycle("ts_user", users);
-    TracePerCycle("ts_stream", streams);
   }
 
   // 本拍 TS 里新出现的这一步，与它被下发那一拍。
   //
-  //   ts_create   建表笔数（单调）：新用户到了建一个表项，或自启动 core 上一条链
+  //   ts_create   建表笔数（单调）：新用户到了建一个表项，或自启动 core
+  //   上一条链
   //               退休后原地重新激活。
   //   ts_install  装后继笔数（单调）：上一步做完，TaskCtrl 把下一项写进表项。
   //
@@ -301,36 +321,30 @@ class Core : public BachModule {
     ts_create_seq = made;
     ts_reactivate_seq = again;
     TracePerCycle("ts_create", made + again);
-    TracePerCycle("ts_create_task",
-                  fresh ? (ts->Matcher().MadeTask() & 0xFFu)
-                        : (renewed ? 0u : 0xFFu));
-    TracePerCycle("ts_create_user",
-                  (fresh && ts->Matcher().MadeUserValid())
-                      ? (ts->Matcher().MadeUser() & 0xFFFFu)
-                      : 0xFFFFu);
-    TracePerCycle("ts_create_stream",
-                  fresh ? (ts->Matcher().MadeStream() & 0xFFu)
-                        : (renewed ? (ts->Credit().ReactivatedStream() & 0xFFu)
-                                   : 0xFFu));
+    TracePerCycle("ts_create_task", fresh ? (ts->Matcher().MadeTask() & 0xFFu)
+                                          : (renewed ? 0u : 0xFFu));
+    TracePerCycle("ts_create_user", (fresh && ts->Matcher().MadeUserValid())
+                                        ? (ts->Matcher().MadeUser() & 0xFFFFu)
+                                        : 0xFFFFu);
 
     uint64_t install = ts->Ctrl().Installed();
     bool next = install != ts_install_seq;
     ts_install_seq = install;
     TracePerCycle("ts_install", install);
+    // 身份取实际安装的后继；下一批候选和批内被取消的后继不覆盖完成事件。
     TracePerCycle("ts_install_task",
-                  next ? (ts->Ctrl().NextTask() & 0xFFu) : 0xFFu);
+                  next ? (ts->Ctrl().AcceptedTask() & 0xFFu) : 0xFFu);
     TracePerCycle("ts_install_user",
-                  (next && ts->Ctrl().NextUserValid())
-                      ? (ts->Ctrl().NextUser() & 0xFFFFu)
+                  (next && ts->Ctrl().AcceptedUserValid())
+                      ? (ts->Ctrl().AcceptedUser() & 0xFFFFu)
                       : 0xFFFFu);
-    TracePerCycle("ts_install_stream",
-                  next ? (ts->Ctrl().NextStream() & 0xFFu) : 0xFFu);
   }
 
   // 三个 DSA 各自对一笔 task 的执行时间，两个端点各发三个信号。
   //
   //   dsa_start  位掩码，bit0 DTE、bit1 MU、bit2 VU —— 与 ts_unit 同位序。
-  //   dsa_done   位掩码，同上。这是 DSA 自己的完成脉冲，也就是它发给 TS 的那一路。
+  //   dsa_done   位掩码，同上。这是 DSA 自己的完成脉冲，也就是它发给 TS
+  //   的那一路。
   //
   // 起点取的是“过门槛”那一拍，不是写 trigger 那一拍。写 trigger 只是把任务收
   // 进各自的寄存器，真正开始还要过一道闸，而且三个单元的闸门各不相同：
@@ -338,7 +352,8 @@ class Core : public BachModule {
   //        三样资源都拿得到；出核任务还要等 VC credit。进核、出核都由 RV core
   //        配置起，都算。
   //   MU   进 issue_q，drain 走完且队列有空位。
-  //   VU   一个 task 的第一条宏指令被 ISQ 收下，静态配置已释放、上一条已被取走。
+  //   VU   一个 task 的第一条宏指令被 ISQ
+  //   收下，静态配置已释放、上一条已被取走。
   // 这三个闸门等多久都可能，所以“收下任务”与“开始算”不能混为一谈。
   //
   // 终点是各家把完成报回来的那一拍：
@@ -352,25 +367,33 @@ class Core : public BachModule {
   // 0xFF / 0xFFFF。三家的完成脉冲本身都不带 user（Drive 只给 stream 与 task），
   // 这里填的是各单元侧存下来的那一份：都是 trigger 写带进来的 user。
   //
-  // VU 另有两拍单独发：一个 task 的第一条宏指令被 config_register 收下 trigger 那一拍
-  // （dsa_task_trigger），以及同一条真正发行进执行流水那一拍（dsa_task_dispatch），
-  // 也就是 VU-DSA-ISQ 那一行的两端；这两拍之间隔的就是「收下了为什么还不算」。
-  // 只有 VU 有，位掩码上永远只抬 bit2。判据见 config_register.h 的 Trigger() 与
-  // pipe_ctrl.h 的 Accept()。
+  // 每个单位另有「收下」与「真正发行」两拍单独发：dsa_task_trigger 是单元把这一笔
+  // 收进自己的配置入口那一拍（MU 写 TASK_TRIGGER 被 regfile 锁成一笔、VU 被
+  // config_register 收下 trigger），dsa_task_dispatch 是它真正发行进执行通路那一拍
+  // （MU 第一个 tile 开始发起访存、VU 宏指令进流水）。也就是 MU-DSA-ISQ / VU-DSA-ISQ
+  // 那两行的两端；这两拍之间隔的就是「收下了为什么还不算」。
+  // MU 抬 bit1、VU 抬 bit2，DTE 恒 0。判据见 mu/regfile.h 的 WriteReg 与 mu/mu.h 的
+  // Ctrl::Load()，以及 vu/config_register.h 的 Trigger() 与 vu/pipe_ctrl.h 的 Accept()。
+  //
+  // 另有 dsa_calc_start / dsa_calc_done：一笔任务在矩阵执行单元里进出所跨那一段的两端
+  // （只有 MU 有，恒抬 bit1）。起点是第一个 tile 进 exe、终点是最后一个 tile 的后一拍，
+  // 量的是这笔任务的真实 MAC 时间（kblock × 专家数 × nblock 拍），不把 10 级流水深度
+  // 算进去。判据见 mu/mu.h 的 Ctrl::Compute()。
   void EmitDsa() {
-    uint64_t start_mask = 0, start_task = 0, start_user = 0, start_stream = 0;
-    uint64_t done_mask = 0, done_task = 0, done_user = 0, done_stream = 0;
-    uint64_t trig_mask = 0, trig_task = 0, trig_user = 0, trig_stream = 0;
-    uint64_t disp_mask = 0, disp_task = 0, disp_user = 0, disp_stream = 0;
+    uint64_t start_mask = 0, start_task = 0, start_user = 0;
+    uint64_t done_mask = 0, done_task = 0, done_user = 0;
+    uint64_t trig_mask = 0, trig_task = 0, trig_user = 0;
+    uint64_t disp_mask = 0, disp_task = 0, disp_user = 0;
+    uint64_t calcmask = 0, calctask = 0, calcuser = 0;
+    uint64_t cendmask = 0, cendtask = 0, cenduser = 0;
+    uint64_t namask = 0, natask = 0, nauser = 0;
     for (uint64_t u = 0; u < 3; ++u) {
       DsaEv s = DsaStartOf(u);
-      uint64_t ss = 0xFFu, ds = 0xFFu, trig_s = 0xFFu, ps = 0xFFu;
       if (s.seq != dsa_start_seq[u]) {
         dsa_start_seq[u] = s.seq;
         start_mask |= 1ull << u;
         start_task |= (s.task & 0xFFu) << (8 * u);
         start_user |= (s.user & 0xFFFFu) << (16 * u);
-        ss = s.stream;
       }
       DsaEv d = DsaDoneOf(u);
       if (d.seq != dsa_done_seq[u]) {
@@ -378,7 +401,6 @@ class Core : public BachModule {
         done_mask |= 1ull << u;
         done_task |= (d.task & 0xFFu) << (8 * u);
         done_user |= (d.user & 0xFFFFu) << (16 * u);
-        ds = d.stream;
       }
       DsaEv t = DsaTaskTriggerOf(u);
       if (t.seq != dsa_task_trig_seq[u]) {
@@ -386,7 +408,6 @@ class Core : public BachModule {
         trig_mask |= 1ull << u;
         trig_task |= (t.task & 0xFFu) << (8 * u);
         trig_user |= (t.user & 0xFFFFu) << (16 * u);
-        trig_s = t.stream;
       }
       DsaEv p = DsaTaskDispatchOf(u);
       if (p.seq != dsa_task_disp_seq[u]) {
@@ -394,29 +415,67 @@ class Core : public BachModule {
         disp_mask |= 1ull << u;
         disp_task |= (p.task & 0xFFu) << (8 * u);
         disp_user |= (p.user & 0xFFFFu) << (16 * u);
-        ps = p.stream;
       }
-      start_stream |= (ss & 0xFFu) << (8 * u);
-      done_stream |= (ds & 0xFFu) << (8 * u);
-      trig_stream |= (trig_s & 0xFFu) << (8 * u);
-      disp_stream |= (ps & 0xFFu) << (8 * u);
+      DsaEv cs = DsaCalcStartOf(u);
+      if (cs.seq != dsa_calc_start_seq[u]) {
+        dsa_calc_start_seq[u] = cs.seq;
+        calcmask |= 1ull << u;
+        calctask |= (cs.task & 0xFFu) << (8 * u);
+        calcuser |= (cs.user & 0xFFFFu) << (16 * u);
+      }
+      DsaEv ce = DsaCalcDoneOf(u);
+      if (ce.seq != dsa_calc_done_seq[u]) {
+        dsa_calc_done_seq[u] = ce.seq;
+        cendmask |= 1ull << u;
+        cendtask |= (ce.task & 0xFFu) << (8 * u);
+        cenduser |= (ce.user & 0xFFFFu) << (16 * u);
+      }
+      DsaEv na = DsaDoneNoAckOf(u);
+      if (na.seq != dsa_done_noack_seq[u]) {
+        dsa_done_noack_seq[u] = na.seq;
+        namask |= 1ull << u;
+        natask |= (na.task & 0xFFu) << (8 * u);
+        nauser |= (na.user & 0xFFFFu) << (16 * u);
+      }
     }
     TracePerCycle("dsa_start", start_mask);
     TracePerCycle("dsa_start_task", start_task);
     TracePerCycle("dsa_start_user", start_user);
-    TracePerCycle("dsa_start_stream", start_stream);
     TracePerCycle("dsa_done", done_mask);
     TracePerCycle("dsa_done_task", done_task);
     TracePerCycle("dsa_done_user", done_user);
-    TracePerCycle("dsa_done_stream", done_stream);
     TracePerCycle("dsa_task_trigger", trig_mask);
     TracePerCycle("dsa_task_trigger_task", trig_task);
     TracePerCycle("dsa_task_trigger_user", trig_user);
-    TracePerCycle("dsa_task_trigger_stream", trig_stream);
     TracePerCycle("dsa_task_dispatch", disp_mask);
     TracePerCycle("dsa_task_dispatch_task", disp_task);
     TracePerCycle("dsa_task_dispatch_user", disp_user);
-    TracePerCycle("dsa_task_dispatch_stream", disp_stream);
+    // 这一笔任务配置过的寄存器数（标量，只有 MU 有）。在发行那一拍与 task / user
+    // 一起锁存，Perfetto 的 MU-DSA args 靠它带上「这笔任务配置了多少个寄存器」。
+    TracePerCycle("dsa_dispatch_cfg_count", mu->DispatchCfgCount());
+    TracePerCycle("dsa_calc_start", calcmask);
+    TracePerCycle("dsa_calc_start_task", calctask);
+    TracePerCycle("dsa_calc_start_user", calcuser);
+    // 这笔计算的尺寸与数据类型（标量，只有 MU 有）：专家数 / K / N（M 恒为 1）、K/N
+    // 各分几块、原语本身的 K/N、token/weight 的 dtype 与输出是否 BF16。spans 里
+    // calc_dims 在 calc_start 那一拍取它们，Perfetto 的 MU-DSA-CALC args 靠它们带上
+    // GEMM 规模。
+    TracePerCycle("dsa_calc_start_expert", mu->CalcStartExpert());
+    TracePerCycle("dsa_calc_start_k", mu->CalcStartK());
+    TracePerCycle("dsa_calc_start_n", mu->CalcStartN());
+    TracePerCycle("dsa_calc_start_kblock", mu->CalcStartKblock());
+    TracePerCycle("dsa_calc_start_nblock", mu->CalcStartNblock());
+    TracePerCycle("dsa_calc_start_prim_k", mu->CalcStartPrimK());
+    TracePerCycle("dsa_calc_start_prim_n", mu->CalcStartPrimN());
+    TracePerCycle("dsa_calc_start_adtype", mu->CalcStartADtype());
+    TracePerCycle("dsa_calc_start_bdtype", mu->CalcStartBDtype());
+    TracePerCycle("dsa_calc_start_outbf16", mu->CalcStartOutBf16());
+    TracePerCycle("dsa_calc_done", cendmask);
+    TracePerCycle("dsa_calc_done_task", cendtask);
+    TracePerCycle("dsa_calc_done_user", cenduser);
+    TracePerCycle("dsa_done_noack", namask);
+    TracePerCycle("dsa_done_noack_task", natask);
+    TracePerCycle("dsa_done_noack_user", nauser);
   }
 
   // 三个 RV core 各自对一笔 task 的执行时间，两个端点各发三个信号。
@@ -430,21 +489,19 @@ class Core : public BachModule {
   // 时间。交还是一定发生的，通不通知 TS 由 kernel 写进 task_done 的值定，波形
   // 上以交还为准，这样不通知 TS 的那几档也有闭合点。
   //
-  // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()），不含 DSA 自己的执行时间。
-  // VU 写完最后一条 trigger 就交还：身份已经锁在那笔请求上。
+  // 窗口含 kernel 里轮询 DSA 的时间（MU 的 mu_wait()），不含 DSA
+  // 自己的执行时间。 VU 写完最后一条 trigger 就交还：身份已经锁在那笔请求上。
   void EmitRv() {
-    uint64_t start_mask = 0, start_task = 0, start_user = 0, start_stream = 0;
-    uint64_t done_mask = 0, done_task = 0, done_user = 0, done_stream = 0;
+    uint64_t start_mask = 0, start_task = 0, start_user = 0;
+    uint64_t done_mask = 0, done_task = 0, done_user = 0;
     for (uint64_t u = 0; u < 3; ++u) {
-      RvTaskQueue& tq = rv[u]->TaskQueue();
+      RvTaskQueue &tq = rv[u]->TaskQueue();
       uint64_t s = tq.Started();
-      uint64_t ss = 0xFFu, ds = 0xFFu;
       if (s != rv_start_seq[u]) {
         rv_start_seq[u] = s;
         start_mask |= 1ull << u;
         start_task |= (tq.StartTask() & 0xFFu) << (8 * u);
         start_user |= (tq.StartUser() & 0xFFFFu) << (16 * u);
-        ss = tq.StartStream();
       }
       uint64_t d = tq.Finishes();
       if (d != rv_done_seq[u]) {
@@ -452,120 +509,30 @@ class Core : public BachModule {
         done_mask |= 1ull << u;
         done_task |= (tq.DoneTask() & 0xFFu) << (8 * u);
         done_user |= (tq.DoneUser() & 0xFFFFu) << (16 * u);
-        ds = tq.DoneStream();
       }
-      start_stream |= (ss & 0xFFu) << (8 * u);
-      done_stream |= (ds & 0xFFu) << (8 * u);
     }
     TracePerCycle("rv_start", start_mask);
     TracePerCycle("rv_start_task", start_task);
     TracePerCycle("rv_start_user", start_user);
-    TracePerCycle("rv_start_stream", start_stream);
     TracePerCycle("rv_done", done_mask);
     TracePerCycle("rv_done_task", done_task);
     TracePerCycle("rv_done_user", done_user);
-    TracePerCycle("rv_done_stream", done_stream);
-  }
-
-  // DTE / MU 内部步骤。整段 DSA 在波形上仍是 dsa_start→dsa_done 那一块，Perfetto
-  // 另用这里的起止把排队、读、写、加载、计算、写回拆开。计数器只在变化那一拍
-  // 把身份一起记下。
-  void EmitSteps() {
-    EmitDteSteps();
-    EmitMuSteps();
-  }
-
-  void EmitDteSteps() {
-    Commit& c = dte->Committer();
-    if (c.QBeginCnt() != dte_q_begin_seen) {
-      dte_q_begin_seen = c.QBeginCnt();
-      TracePerCycle("dte_q_b_user", c.QBeginUser());
-      TracePerCycle("dte_q_b_task", c.QBeginTask());
-      TracePerCycle("dte_q_b_stream", c.QBeginStream());
-      TracePerCycle("dte_q_begin", dte_q_begin_seen);
-    }
-    if (c.QEndCnt() != dte_q_end_seen) {
-      dte_q_end_seen = c.QEndCnt();
-      TracePerCycle("dte_q_e_user", c.QEndUser());
-      TracePerCycle("dte_q_e_task", c.QEndTask());
-      TracePerCycle("dte_q_e_stream", c.QEndStream());
-      TracePerCycle("dte_q_end", dte_q_end_seen);
-    }
-    for (uint64_t i = 0; i < dte->LaneCount() && i < dte_rd_begin_seen.size();
-         ++i) {
-      Lane& lane = dte->GetLane(i);
-      EmitHalf(i, "rd", lane.RdPulse(), dte_rd_begin_seen[i], dte_rd_end_seen[i]);
-      EmitHalf(i, "wr", lane.WrPulse(), dte_wr_begin_seen[i], dte_wr_end_seen[i]);
-    }
-  }
-
-  void EmitHalf(uint64_t lane, const char* half, Lane::HalfPulse const& p,
-                uint64_t& begin_seen, uint64_t& end_seen) {
-    std::string base = "dte_l" + std::to_string(lane) + "_" + half;
-    if (p.begin_cnt != begin_seen) {
-      begin_seen = p.begin_cnt;
-      TracePerCycle(base + "_b_user", p.b_user);
-      TracePerCycle(base + "_b_task", p.b_task);
-      TracePerCycle(base + "_b_stream", p.b_stream);
-      TracePerCycle(base + "_b_bytes", p.b_bytes);
-      TracePerCycle(base + "_begin", begin_seen);
-    }
-    if (p.end_cnt != end_seen) {
-      end_seen = p.end_cnt;
-      TracePerCycle(base + "_e_user", p.e_user);
-      TracePerCycle(base + "_e_task", p.e_task);
-      TracePerCycle(base + "_e_stream", p.e_stream);
-      TracePerCycle(base + "_end", end_seen);
-    }
-  }
-
-  void EmitMuPhase(const char* name, Mu::PhasePulse const& p,
-                   uint64_t& begin_seen, uint64_t& end_seen, bool dims) {
-    std::string base = name;
-    if (p.begin_cnt != begin_seen) {
-      begin_seen = p.begin_cnt;
-      TracePerCycle(base + "_b_user", p.b_user);
-      TracePerCycle(base + "_b_task", p.b_task);
-      TracePerCycle(base + "_b_stream", p.b_stream);
-      if (dims) {
-        TracePerCycle(base + "_m", p.m);
-        TracePerCycle(base + "_k", p.k);
-        TracePerCycle(base + "_n", p.n);
-        TracePerCycle(base + "_experts", p.experts);
-        TracePerCycle(base + "_kblock", p.kblock);
-        TracePerCycle(base + "_nblock", p.nblock);
-      }
-      TracePerCycle(base + "_begin", begin_seen);
-    }
-    if (p.end_cnt != end_seen) {
-      end_seen = p.end_cnt;
-      TracePerCycle(base + "_e_user", p.e_user);
-      TracePerCycle(base + "_e_task", p.e_task);
-      TracePerCycle(base + "_e_stream", p.e_stream);
-      TracePerCycle(base + "_end", end_seen);
-    }
-  }
-
-  void EmitMuSteps() {
-    EmitMuPhase("mu_load", mu->LoadPhase(), mu_load_begin_seen, mu_load_end_seen,
-                false);
-    EmitMuPhase("mu_comp", mu->CompPhase(), mu_comp_begin_seen, mu_comp_end_seen,
-                true);
-    EmitMuPhase("mu_store", mu->StorePhase(), mu_store_begin_seen,
-                mu_store_end_seen, false);
   }
 
   bool Quiescent() const override {
-    if (!router->Quiescent()) return false;
-    if (Bad()) return true;
-    for (auto const& r : rv) {
-      if (!r->Quiescent()) return false;
+    if (!router->Quiescent())
+      return false;
+    if (Bad())
+      return true;
+    for (auto const &r : rv) {
+      if (!r->Quiescent())
+        return false;
     }
     return ts->Quiescent() && dte->Quiescent() && mu->Quiescent() &&
            vu->Quiescent();
   }
 
- private:
+private:
   void Wire() {
     // B core 的搬出查的是广播那几个方向的下游资源。方向由软件写进 TS 的
     // B_CORE_DIRECTION，Router 用的时候现读；为 0 时按本 core 的进核资源查。
@@ -578,53 +545,68 @@ class Core : public BachModule {
 
   // Router 与 TS 之间的四条控制线。
   void WireRouterToTs() {
-    // Core 统一驱动子模块；归约只接收本核已准入用户，并在首 flit 授予时预留数据区。
-    router->GetXbar().SetReduceAdmission([this](Message const& m) {
-      bool admitted = ts->Cfg().SelfStartCore() ||
-                      router->GetXbar().StreamHolds(kOutCore, m.user_id);
-      uint64_t done = 0;
-      StreamEntry const* current = nullptr;
-      for (uint64_t s = 0; s < kStreamNum; ++s) {
-        auto const& e = ts->Table().Peek(s);
-        if (e.valid && e.user_id_vld && e.user_id == m.user_id) {
-          admitted = true;
-          done = e.done_bitmap;
-          current = &e;
-          break;
-        }
-      }
-      if (!admitted) return false;
-      // 同一笔归约里各核的 task_id 各自编号，不能拿发送方 reduce_seq 对本地任务号。
-      // 有未做完的本地 type-4 时，只收它那条 path，避免后面的汇聚插到前面。
-      // 这条 path 在任务链里根本没有 type-4（只汇上游分量、再按 flow_dir 送走，
-      // 链上只留 stall_way 的 reissue）时也要收：否则包进不了归约模块，
-      // reissue 又等不到进核的包，两边都停。
-      bool has_local = false;
-      for (uint64_t t = 0; t < kTaskChainNum; ++t) {
-        auto const& task = ts->Cfg().Task(t);
-        if (!task.valid || !task.IsReduce()) continue;
-        uint64_t path = task.path_id;
-        if (current && (current->task_id == t ||
-                        (current->pid_pending && current->task_id + 1 == t))) {
-          path = current->task_path_id;
-        }
-        if (m.path_id != path) {
-          if ((done & (1ull << t)) == 0) return false;
-          continue;
-        }
-        has_local = true;
-        if (done & (1ull << t)) continue;
-        return router->GetReduce().CanAcceptHead(m);
-      }
-      if (has_local) return false;
-      return router->GetReduce().CanAcceptHead(m);
-    }, [this](Message const& m) { router->GetReduce().ReserveHead(m); });
+    // Core 统一驱动子模块；归约只接收本核已准入用户，并在首 flit
+    // 授予时预留数据区。
+    router->GetXbar().SetReduceAdmission(
+        [this](Message const &m) {
+          bool admitted = ts->Cfg().SelfStartCore() ||
+                          router->GetXbar().StreamHolds(kOutCore, m.user_id);
+          uint64_t done = 0;
+          StreamEntry const *current = nullptr;
+          for (uint64_t s = 0; s < kStreamNum; ++s) {
+            auto const &e = ts->Table().Peek(s);
+            if (e.valid && e.user_id_vld && e.user_id == m.user_id) {
+              admitted = true;
+              done = e.done_bitmap;
+              current = &e;
+              break;
+            }
+          }
+          if (!admitted)
+            return false;
+          // 同一笔归约里各核的 task_id 各自编号（pcode），不能拿发方的
+          // reduce_seq 对本地任务号，一律按 path 认。
+          // 任务链上用这条 path 的 type-4 有没有；这条 path 在链上根本没有
+          // type-4（只汇上游分量、再按 flow_dir 送走，链上只留 stall_way 的
+          // reissue）时也要收：否则包进不了归约模块，reissue 又等不到进核的
+          // 包，两边都停。
+          auto path_of = [&](uint64_t t) {
+            if (current &&
+                (current->task_id == t ||
+                 (current->pid_pending && current->task_id + 1 == t)))
+              return current->task_path_id;
+            return ts->Cfg().Task(t).path_id;
+          };
+          bool has_local = false;
+          for (uint64_t t = 0; t < kTaskChainNum && !has_local; ++t) {
+            auto const &task = ts->Cfg().Task(t);
+            has_local = task.valid && task.IsReduce() && path_of(t) == m.path_id;
+          }
+          if (!has_local)
+            return router->GetReduce().CanAcceptHead(m);
+          // 已占用的 RMEM 只接它那条 path，后继不得越过前次归约。
+          if (current && current->rmem_busy)
+            return m.path_id == current->rmem_pid &&
+                   router->GetReduce().CanAcceptHead(m);
+          // 只接最早尚未完成的那一笔 type-4 的 path；本地仍在计算时，上游
+          // 分量可先存入。
+          for (uint64_t t = 0; t < kTaskChainNum; ++t) {
+            auto const &task = ts->Cfg().Task(t);
+            if (!task.valid || !task.IsReduce() || (done & (1ull << t)))
+              continue;
+            return m.path_id == path_of(t) &&
+                   router->GetReduce().CanAcceptHead(m);
+          }
+          return false;
+        },
+        [this](Message const &m) { router->GetReduce().ReserveHead(m); });
     ts->AttachTrigger(router->TriggerPtr());
-    ts->AttachCreditReq(router->CreditReqPtr());
-    ts->AttachCreditGrant(router->CreditGrantPtr());
+    ts->AttachDirectionReturns(router->GetXbar().DirectionReturnsPtr());
+    router->GetXbar().AttachTsDirections(ts->DirectionOwnersPtr());
     ts->AttachRetire(router->RetireReqPtr());
     ts->AttachReduceDone(router->ReduceDonePtr());
     ts->AttachRtab(&router->Table());
+    router->GetReduce().AttachSlotReuse(ts->Table().SlotReusePtr());
     // Router 的 CoreMem 重发完成后报给 TS，TS 据此清掉那一项的重发标记。
     ts->AttachReissueDone(router->GetReissue().DonePtr());
   }
@@ -663,6 +645,10 @@ class Core : public BachModule {
   void WireRouterToDte() {
     dte->AttachFromRouter(router->ToDtePtr());
     dte->AttachToRouter(router->FromDtePtr());
+    auto &station = router->GetCoreStation();
+    station.EnableDteCredits();
+    dte->AttachTxCredits(station.DteCreditPtr(), station.PrivateDepth(),
+                         station.SharedDepth());
   }
 
   // 三块存储的各个 master 口。Matrix Mem 对三个 RV core 都不可见，VU 也读不到。
@@ -690,15 +676,13 @@ class Core : public BachModule {
     dte->AttachSmemWr(smem->PortPtr(kSmemDteDsa));
     // DTE→MU 的 topK 数据线：DTE 搬运时按 stream_id 把进核包里的 topK 直接写进
     // MU 的 topK_ep_table，两端各持同一根线的两端。
-    auto topk_port = std::make_shared<MuTopkPort>(clk);
-    dte->AttachMuTopk(topk_port);
-    mu->AttachMuTopk(topk_port);
-    // DTE 出核造包那一路要从 MU 的 topK_ep_table 读 topK（B core 广播：bc_datain
-    // 写进去、bc_send 读出来附回要发的包），把 MU 的 GenEpInfo 指给 DTE。
+
+    // DTE 出核造包那一路要从 MU 的 topK_ep_table 读 topK（B core
+    // 广播：bc_datain 写进去、bc_send 读出来附回要发的包），把 MU 的 GenEpInfo
+    // 指给 DTE。
     dte->AttachMuTopkEp(&mu->EpInfo());
     // B/R core 的包头上下文落 Core Mem（不是 Hmem），DTE 出核造包与进核落库都要
     // 用 Core Mem 的同步 Poke/Peek，把 Core Mem 的 BankedMem 指过去。
-    dte->AttachCmemSync(cmem.get());
     // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
     // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
     rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));
@@ -707,59 +691,90 @@ class Core : public BachModule {
     rv[0]->AttachHdr(router->HdrPtr());
   }
 
-  static void PokeWord(BankedMem& mem, uint64_t at, uint64_t data) {
+  static void PokeWord(BankedMem &mem, uint64_t at, uint64_t data) {
     std::vector<uint8_t> word(4);
-    for (int k = 0; k < 4; ++k) word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
+    for (int k = 0; k < 4; ++k)
+      word[k] = uint8_t((data >> (8 * k)) & 0xFFu);
     mem.Poke(at, word);
   }
 
   CoreContext ctx;
   // 三个 DSA 的两个端点各要从一家的访问器上读。u：0 DTE、1 MU、2 VU。
   struct DsaEv {
-    uint64_t seq = 0, task = 0, user = 0xFFFFu, stream = 0xFFu;
+    uint64_t seq = 0, task = 0, user = 0xFFFFu;
   };
 
   DsaEv DsaStartOf(uint64_t u) {
     if (u == 0) {
-      Commit& c = dte->Committer();
-      return {c.RvAdmitted(), c.StartTask(), c.StartUser(), c.StartStream()};
+      Commit &c = dte->Committer();
+      return {c.RvAdmitted(), c.StartTask(), c.StartUser()};
     }
     if (u == 1) {
-      MuIssueQ& iq = mu->IssueQ();
-      return {iq.Issued(), iq.StartTask(), iq.StartUser(), iq.StartStream()};
+      MuIssueQ &iq = mu->IssueQ();
+      return {iq.Issued(), iq.StartTask(), iq.StartUser()};
     }
-    VuIsq& isq = vu->Isq();
-    return {isq.Started(), isq.StartTask(), isq.StartUser(), isq.StartStream()};
+    VuIsq &isq = vu->Isq();
+    return {isq.Started(), isq.StartTask(), isq.StartUser()};
   }
 
   DsaEv DsaDoneOf(uint64_t u) {
     if (u == 0) {
-      CompletionRs& c = dte->Completion();
-      return {c.Reported(), c.DoneTask(), c.DoneUser(), c.DoneStream()};
+      CompletionRs &c = dte->Completion();
+      return {c.Reported(), c.DoneTask(), c.DoneUser()};
     }
     if (u == 1) {
-      return {mu->DoneCnt(), mu->DoneTask(), mu->DoneUser(), mu->DoneStream()};
+      return {mu->DoneCnt(), mu->DoneTask(), mu->DoneUser()};
     }
     // VU 只在置了 EVENT_EN 的宏指令退休时报，与它发给 TS 的是同一拍。
     return {vu->Retire().MacroDoneCnt(), vu->Retire().MacroDoneTask(),
-            vu->Retire().MacroDoneUser(), vu->Retire().MacroDoneStream()};
+            vu->Retire().MacroDoneUser()};
   }
 
-  // VU 那条 task 起点宏指令的两端：trigger 被 config_register 收下、以及它真正发行
-  // 进执行流水。只有 VU（u == 2）有，另两位恒 0 —— 0 这个值也正好是它们初始的 seq，
-  // 于是永远不抬那两位。
+  // 一笔任务在单元里的两端：被收下、以及真正发行进执行通路。MU 与 VU 各有一对，
+  // 波形上就是它们那两行的「为什么收下了还不算」。DTE（u == 0）恒 0 —— 0 也正好是
+  // 它初始的 seq，于是永远不抬 bit0。
+  //
+  // 同一条信号按位通三位，所以不用新增信号名。两家的「收下」都在单元的配置入口：
+  // MU 是 regfile 把写 TASK_TRIGGER 那一拍锁成一笔，VU 是 config_register 收下
+  // trigger。「真正发行」MU 是第一个 tile 开始发起访存，VU 是宏指令进执行流水。
   DsaEv DsaTaskTriggerOf(uint64_t u) {
+    if (u == 1) {
+      MuRegfile& r = mu->Regfile();
+      return {r.Triggers(), r.AcceptedTask(), r.AcceptedUser()};
+    }
     if (u != 2) return {};
     VuConfigRegister& c = vu->ConfigRegister();
-    return {c.TaskTriggers(), c.TaskTriggerTask(), c.TaskTriggerUser(),
-            c.TaskTriggerStream()};
+    return {c.TaskTriggers(), c.TaskTriggerTask(), c.TaskTriggerUser()};
   }
 
   DsaEv DsaTaskDispatchOf(uint64_t u) {
+    if (u == 1) {
+      return {mu->DispatchCnt(), mu->DispatchTask(), mu->DispatchUser()};
+    }
     if (u != 2) return {};
     VuPipeCtrl& p = vu->PipeCtrl();
-    return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser(),
-            p.TaskDispatchStream()};
+    return {p.TaskDispatched(), p.TaskDispatchTask(), p.TaskDispatchUser()};
+  }
+
+  // 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）。只有 DTE（u == 0）有 ——
+  // 自启动 core 的 Bypass DataIn（保留号 63）与权重加载阶段的 datain 走这一路。
+  // 与 DsaDoneOf(0) 互斥，波形上 DTE-DSA 的终点取两者之一。
+  DsaEv DsaDoneNoAckOf(uint64_t u) {
+    if (u != 0) return {};
+    CompletionRs& c = dte->Completion();
+    return {c.NoAckCnt(), c.NoAckTask(), c.NoAckUser()};
+  }
+
+  // 一笔任务在矩阵执行单元里进出所跨那一段的两端，只有 MU（u == 1）有：起点是它
+  // 第一个 tile 进 exe，终点是最后一个 tile 的后一拍。另两位恒 0。
+  DsaEv DsaCalcStartOf(uint64_t u) {
+    if (u != 1) return {};
+    return {mu->CalcStartCnt(), mu->CalcStartTask(), mu->CalcStartUser()};
+  }
+
+  DsaEv DsaCalcDoneOf(uint64_t u) {
+    if (u != 1) return {};
+    return {mu->CalcDoneCnt(), mu->CalcDoneTask(), mu->CalcDoneUser()};
   }
 
   // 三条发射通路上一次见到的 seq，EmitIssue() 用它认新下发的那一笔。
@@ -768,17 +783,15 @@ class Core : public BachModule {
   std::array<uint64_t, 3> dsa_start_seq{}, dsa_done_seq{};
   // 同上，VU 那条 task 起点宏指令的 trigger / 发行笔数。
   std::array<uint64_t, 3> dsa_task_trig_seq{}, dsa_task_disp_seq{};
+  // 同上，MU 那一段计算的两个端点。
+  std::array<uint64_t, 3> dsa_calc_start_seq{}, dsa_calc_done_seq{};
+  // 同上，DTE 那批「完成了但不报」的笔数。
+  std::array<uint64_t, 3> dsa_done_noack_seq{};
   // 三个 RV core 上一次见到的起/完笔数，EmitRv() 用它认本拍新发生的那一笔。
   std::array<uint64_t, 3> rv_start_seq{}, rv_done_seq{};
-  // 上一次见到的建表、重新激活与装后继笔数，EmitStep() 用它认本拍新出现的那一步。
+  // 上一次见到的建表、重新激活与装后继笔数，EmitStep()
+  // 用它认本拍新出现的那一步。
   uint64_t ts_create_seq = 0, ts_reactivate_seq = 0, ts_install_seq = 0;
-  // DTE 排队与五个通道读写两半、MU 三段的上一次笔数。EmitSteps 用它们认新的一步。
-  uint64_t dte_q_begin_seen = 0, dte_q_end_seen = 0;
-  std::array<uint64_t, 5> dte_rd_begin_seen{}, dte_rd_end_seen{};
-  std::array<uint64_t, 5> dte_wr_begin_seen{}, dte_wr_end_seen{};
-  uint64_t mu_load_begin_seen = 0, mu_load_end_seen = 0;
-  uint64_t mu_comp_begin_seen = 0, mu_comp_end_seen = 0;
-  uint64_t mu_store_begin_seen = 0, mu_store_end_seen = 0;
   std::unique_ptr<Router> router;
   std::unique_ptr<Ts> ts;
   std::array<std::unique_ptr<RvCore>, 3> rv;
@@ -790,7 +803,7 @@ class Core : public BachModule {
   std::unique_ptr<ShareMem> smem;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

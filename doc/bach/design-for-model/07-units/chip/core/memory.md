@@ -354,6 +354,8 @@
 | F20 | 分区由 `cmem_part` 一组配置寄存器定，boot 期经 ctrl_noc 写入，运行期不变：`stream_base` 与 `stream_stride`（16 个 stream 分片）、`scale_base`、`topk_base`、`header_base`、`reissue_base` 与 `reissue_pkts_per_vc`（Router 溢流重发的暂存区，每 VC 几个整包）、`p2p_base[3]` 与 `p2p_entries[3]`（每方向一张 P2P 阻塞缓冲）|
 | F21 | 本模块只按物理地址读写，不检查请求落在哪个分区。分区之间不重叠由软件保证，写 `TS_INIT_FINISH` 那一步不查这组寄存器 |
 
+DTE访问CM scale区用端口地址bit13，颗粒度128B，低8bit索引256项，共32KB；DTE byte mask是每路纯128bit字节使能。MU/VU的132B数据加scale旁带规则属于它们自己的端口，不用于DTE。DTE的全局地址窗口大小2MB用于译码，物理CM仍为1MB数据加32KB scale。
+
 ### Matrix Mem
 
 | 编号 | 功能 |
@@ -364,7 +366,7 @@
 | F25 | 最大访存带宽 (8 + 1) KB/T（scale 模式；非 scale 模式最大 8 KB/T） |
 | F26 | 访问延迟：master 请求进 MM 到读出或 bvalid，50T 以内 |
 | F27 | 地址粒度 128 B，不支持按 Byte mask 读写 |
-| F27a | DTE 与 ctrl_noc 按 128 B 写入。顺序写会先写满前 8 个 SRAM，再写 9～16 个，最后两个 scale SRAM 一次只收得下 128 bit × 2 = 32 B，接口利用率掉下来 |
+| F27a | DTE逻辑256B访问拆成两路128B；Mmem SRAM无byte mask，部分字节写走读改写。M Top sel=1的topK仅使用[0]路，每项256B分两笔128B |
 | F27b | 改成循环写：把每个 SRAM（2048 × 128 bit）的深度按 512 拆成 4 组，轮流写，就能按 128 B 的带宽写满所有 SRAM。4608 个地址分成 9 组、每组深度 512，一次同时访问 8 个 128 bit 的 SRAM，合起来 128 B |
 | F28 | 各 master 的带宽与 lane 内延迟：DTE 读写各 256 B/T（写 9T、读 8T）；MU 只读 (8 + 1) KB/T（8T）；ctrl_noc 读写 4 B/T，地址对齐 128 B、数据粒度 4 B、burst len 最大 32 |
 | F29 | 硬约束：DTE、ctrl_noc、MU 三者不能出现两个 master 同时访问相同 bank；同时访问时只执行 MU 请求，并通过计数器记录报错 |
@@ -403,9 +405,10 @@
 ## 3　接口
 
 ```
-port cmem_dte_rd / cmem_dte_wr (slave, valid/ready, clk)   // DTE DSA，256 B/T
-  in  req_valid · req_addr[17:0] · req_wdata[2047:0] · req_be[255:0] · req_scale_en
-  out req_ready · rsp_valid · rsp_rdata[2047:0] · rsp_scale[63:0]
+port cmem_dte_rd / cmem_dte_wr (slave, valid/ready, clk)   // 两路128B配对Fire
+  in  req_vld[1:0] · req_addr[1:0][13:0] · wr_data[1:0][1023:0] · byte_mask[1:0][127:0]
+  out req_rdy[1:0] · rd_bvld[1:0] · rd_data[1:0][1023:0] · wr_bvld[1:0] · ecc_err
+  in  rd_brdy[1:0] · wr_brdy[1:0]                           // addr bit13选择scale，低8bit索引
 port cmem_mu_rd / cmem_mu_wr (slave, valid/ready, clk)     // MU DSA，132 B/T
   in  req_valid · req_addr[17:0] · req_wdata[1023:0] · req_scale[31:0] · req_be[127:0]
   out req_ready · rsp_valid · rsp_rdata[1023:0] · rsp_scale[31:0]
@@ -418,18 +421,19 @@ port cmem_rv (slave, valid/ready, clk)                     // DTE RV core 的 cm
 port cmem_reissue (slave, valid/ready, clk)                // Router 的 CoreMem 重发暂存，256 B
   in  req_valid · req_we · req_addr[17:0] · req_wdata[2047:0]
   out req_ready · rsp_valid · rsp_rdata[2047:0]
-port mmem_dte_rd / mmem_dte_wr (slave, valid/ready, clk)   // DTE DSA，256 B/T
-  in  req_valid · req_addr[24:0] · req_wdata[2047:0] · req_scale_en
-  out req_ready · rsp_valid · rsp_rdata[2047:0] · rsp_scale[63:0]
+port mmem_dte_rd / mmem_dte_wr (slave, valid/ready, clk)   // M Top，两路各128B
+  in req_vld[1:0] · sel · req_addr[1:0][18:0] · wr_data[1:0][1023:0] · byte_mask[1:0][127:0]
+  out req_rdy[1:0] · rd_bvld[1:0] · rd_data[1:0][1023:0] · wr_bvld[1:0] · ecc_err
+  in rd_brdy[1:0] · wr_brdy[1:0]                             // sel0 MM配对；sel1 topK只[0]两笔
 port mmem_mu_rd (slave, valid/ready, clk)                  // MU DSA 只读，一个行地址广播到各 bank
   in  req_valid · req_addr[24:0]
   out req_ready · rsp_valid · rsp_rdata[65535:0] · rsp_scale[8191:0]
 port smem_rv[u] (slave, valid/ready, clk)                  // u ∈ {DTE, MU, VU} 的 sm_lsq，32 bit
   in  req_valid · req_we · req_addr[14:0] · req_wdata[31:0] · req_be[3:0]
   out req_ready · rsp_valid · rsp_rdata[31:0]
-port smem_dte_wr (slave, valid/ready, clk)                 // DTE DSA 的 shareMem 表项写
-  in  req_valid · req_addr[14:0] · req_wdata[31:0]
-  out req_ready
+port smem_dte_wr (slave, valid/ready, clk)                 // 4B控制写，对齐128B物理接口
+  in req_valid · req_addr[31:0] · req_wdata[1023:0] · byte_mask[127:0]
+  out req_ready · bresp                                     // mask低4位有效，响应后才允许Ack退休
 port cfg (slave, ctrl_noc 写事务, clk)                     // 三块存储各一个后门口，4 B/T
   in  cfg_valid · cfg_addr[23:0] · cfg_we · cfg_wdata[31:0]
   out cfg_rdata[31:0]

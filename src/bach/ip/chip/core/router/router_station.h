@@ -29,8 +29,6 @@
 
 #include <array>
 #include <deque>
-#include <functional>
-#include <iterator>
 #include <map>
 #include <string>
 #include <utility>
@@ -83,10 +81,6 @@ class RouterStation : public BachModule {
   // 透传档，坏 core 的 Router 由 core_bad_mask 打开：不投递本 core、不检查业务
   // credit、不支持阻塞重发。
   void SetPassThrough(bool on) { pass_through = on; }
-  // 队头被归约挡住、入口只剩深度余量时，用它判断这一包现在能不能进归约。
-  void SetAdmitBypass(std::function<bool(Message const&)> fn) {
-    admit_bypass = std::move(fn);
-  }
 
   uint64_t Occupancy() const { return occupancy.Get(); }
   uint64_t Forwarded() const { return forwarded.Get(); }
@@ -142,6 +136,14 @@ class RouterStation : public BachModule {
   // M1：按包头的 VC 号写进对应 VC Buffer，private 满了借 shared。
   void AcceptFlit() {
     FlitView f = ReadFlit(up->flit);
+    // 逐 flit 的入口观测：Perfetto 的 router 入口轨道按它折「收包头 → 收完包尾」。
+    // 无效拍全 0，保证 TracePerCycle 逐拍提交、脉冲不粘连。flit_size 是包 size
+    // （数据通道字节数，含 topK），挂在 Message 上、整包共享。
+    TracePerCycle("flit_head", f.valid && f.head ? 1u : 0u);
+    TracePerCycle("flit_tail", f.valid && f.tail ? 1u : 0u);
+    TracePerCycle("flit_user", f.valid && f.msg ? f.msg->user_id : 0u);
+    TracePerCycle("flit_path", f.valid && f.msg ? f.msg->path_id : 0u);
+    TracePerCycle("flit_size", f.valid && f.msg ? f.msg->size : 0u);
     if (!f.valid) return;
     uint64_t v = f.vc;
     LOGCHECK(v < kVcNum, "RouterStation: 包头的 VC 号越界。");
@@ -223,87 +225,11 @@ class RouterStation : public BachModule {
       ++forwarded_pending;
       up_back->flit.Idle();
       up_back->release.Drive(true, v, false, 0);
-      if (slack_on && s.f.tail && s.f.msg && s.f.msg->user_id == slack_user &&
-          s.f.msg->path_id == slack_path &&
-          s.f.msg->reduce_seq == slack_seq) {
-        slack_on = false;
-      }
       return;
     }
     req->IdleReq();
     up_back->flit.Idle();
     up_back->release.Idle();
-  }
-
-  // 队头是还不能进归约的下一包时，同 VC 后面若有当前归约还在等的一拍，先发那一拍。
-  int FindBypass(uint64_t v) const {
-    if (!admit_bypass) return -1;
-    constexpr uint64_t reduce_mask = (1ull << kOutReduce0) |
-        (1ull << kOutReduce1) | (1ull << kOutReduce2);
-    for (uint64_t i = 1; i < vc_buf[v].size(); ++i) {
-      FlitView const& g = vc_buf[v][i].f;
-      if (!g.msg) continue;
-      RouteEntry const& ge = rtab.Lookup(copy, g.msg->path_id);
-      if (!ge.valid) continue;
-      uint64_t glane = ReduceLaneOf(ge, g, v);
-      uint64_t gmask = OutMaskOf(ge, *g.msg, glane);
-      if ((gmask & reduce_mask) == 0) continue;
-      uint64_t gnvc = NextVcOf(ge, gmask, g.vc);
-      if (!req->SlackFor(gnvc)) continue;
-      bool same = slack_on && g.msg->user_id == slack_user &&
-                  g.msg->path_id == slack_path &&
-                  g.msg->reduce_seq == slack_seq;
-      if (g.head) {
-        if (!admit_bypass(*g.msg)) continue;
-      } else if (!same) {
-        continue;
-      }
-      return static_cast<int>(i);
-    }
-    return -1;
-  }
-
-  bool SendAt(uint64_t v, uint64_t at) {
-    Slot slot = vc_buf[v][at];
-    FlitView const& g = slot.f;
-    RouteEntry const& ge = rtab.Lookup(copy, g.msg->path_id);
-    uint64_t glane = ReduceLaneOf(ge, g, v);
-    uint64_t gmask = OutMaskOf(ge, *g.msg, glane);
-    uint64_t gnvc = NextVcOf(ge, gmask, g.vc);
-    req->valid = 1;
-    req->out_mask = gmask;
-    req->vc = gnvc;
-    req->head = g.head ? 1 : 0;
-    req->tail = g.tail ? 1 : 0;
-    req->bytes = g.bytes;
-    req->path_id = g.msg->path_id;
-    req->user_id = g.msg->user_id;
-    req->enters_core = (!pass_through && ge.EntersCore(g.msg->path_core_mask))
-                           ? 1 : 0;
-    req->stall_way = (!pass_through && ge.stall_way) ? 1 : 0;
-    req->stream_need = pass_through ? 0 : ge.stream_need;
-    req->whole_packet = 0;
-    req->credit_require = pass_through ? 0 : RequireOf(ge, gmask);
-    req->msg = g.msg;
-    req->seq = ++req_seq;
-    rr_last = v;
-    if (CoreOperands(ge) && g.head) TakeOperand(ge, *g.msg, glane, v);
-    vc_buf[v].erase(std::next(vc_buf[v].begin(), static_cast<std::ptrdiff_t>(at)));
-    if (slot.used_shared) {
-      --shared_used;
-    } else {
-      --private_used[v];
-    }
-    ++forwarded_pending;
-    up_back->flit.Idle();
-    up_back->release.Drive(true, v, false, 0);
-    slack_on = !g.tail;
-    if (!g.tail) {
-      slack_user = g.msg->user_id;
-      slack_path = g.msg->path_id;
-      slack_seq = g.msg->reduce_seq;
-    }
-    return true;
   }
 
   // 走到头的那一笔：出队，把 VC 槽还给上游，这一拍不发请求。一拍吃一个 flit。
@@ -427,9 +353,6 @@ class RouterStation : public BachModule {
   RouterTable& rtab;
   uint64_t copy;
   bool pass_through = false;
-  std::function<bool(Message const&)> admit_bypass;
-  bool slack_on = false;
-  uint64_t slack_user = 0, slack_path = 0, slack_seq = 0;
 
   LinkEndPtr up, up_back;
   std::shared_ptr<XbarReqPort> req;

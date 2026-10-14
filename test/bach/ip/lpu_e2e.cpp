@@ -17,9 +17,9 @@
 #include <string>
 #include <vector>
 
+#include "bach/ip/lpu.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/lpu.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -40,7 +40,7 @@ void EnsureSlots(uint64_t coros = 0) {
 
 // core 与 chip 各占一个常驻协程。它们之间只经打拍的端口通讯，所以与 LPU 一个
 // 协程顺序驱动逐拍结果相同，区别只在能不能并行。
-LpuCfg TickingCfg(std::vector<uint64_t> const& want) {
+LpuCfg TickingCfg(std::vector<uint64_t> const &want) {
   LpuCfg c = LpuBuildOnly(want);
   c.core_tick = true;
   c.chip_tick = true;
@@ -51,11 +51,12 @@ std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-uint64_t SymbolOf(std::string const& name) {
+uint64_t SymbolOf(std::string const &name) {
   std::ifstream f(KernelDir() + "kernel_dte.sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -116,8 +117,10 @@ std::vector<uint64_t> CorePath(uint64_t in_port, uint64_t out_port) {
   uint64_t in_row = in_port == kChipN ? 0 : 1;
   uint64_t out_row = out_port == kChipE ? 0 : 1;
   std::vector<uint64_t> p;
-  for (uint64_t c = 0; c < cols; ++c) p.push_back(in_row * cols + c);
-  if (in_row != out_row) p.push_back(out_row * cols + cols - 1);
+  for (uint64_t c = 0; c < cols; ++c)
+    p.push_back(in_row * cols + c);
+  if (in_row != out_row)
+    p.push_back(out_row * cols + cols - 1);
   return p;
 }
 
@@ -127,7 +130,7 @@ uint64_t FlowAt(uint64_t i, uint64_t n, bool cross) {
   return cross && i + 2 == n ? kFlowMid : kFlowRight;
 }
 
-bool CrossRow(Hop const& h) {
+bool CrossRow(Hop const &h) {
   return (h.in_port == kChipN) != (h.out_port == kChipE);
 }
 
@@ -149,7 +152,7 @@ RouteEntry PassTo(uint64_t flow, uint64_t ext_dst = 0) {
 }
 
 // 一个 core 上的两步链：收进来搬进 Core Mem，再按 out_path 发出去。
-void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
+void WriteRelayChain(Core &core, uint64_t in_path, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -168,11 +171,12 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
 
   core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
 
 // 只转发的一颗：路上每颗 core 都给这条 path 配一项，包不进核。
-void WirePassChip(Chip& chip, Hop const& h, uint64_t path) {
+void WirePassChip(Chip &chip, Hop const &h, uint64_t path) {
   std::vector<uint64_t> p = CorePath(h.in_port, h.out_port);
   for (uint64_t i = 0; i < p.size(); ++i) {
     chip.GetCore(p[i]).GetRouter().Preload(
@@ -183,15 +187,16 @@ void WirePassChip(Chip& chip, Hop const& h, uint64_t path) {
 // 落地的一颗：包在路上第一颗计算 core 进核，搬进 Core Mem 再发出去。不派角色
 // 的 core 与坏 core 只转发，落不了任务。
 // ext_dst 只有出口那颗填：它的出核包要经 PCIe Switch 才到得了出口桩。
-uint64_t WireLandingChip(LpuTables const& t, Chip& chip, Hop const& h,
-                         uint64_t in_path, uint64_t out_path, uint64_t ext_dst) {
+uint64_t WireLandingChip(LpuTables const &t, Chip &chip, Hop const &h,
+                         uint64_t in_path, uint64_t out_path,
+                         uint64_t ext_dst) {
   std::vector<uint64_t> p = CorePath(h.in_port, h.out_port);
   uint64_t n = p.size();
   uint64_t chip_id = ChipIdOf(chip.Gx(), chip.Gy());
 
   uint64_t landing = n;
   for (uint64_t i = 0; i < n; ++i) {
-    Core& c = chip.GetCore(p[i]);
+    Core &c = chip.GetCore(p[i]);
     uint64_t flow = FlowAt(i, n, CrossRow(h));
     if (landing == n && !c.Bad() &&
         t.logical_map[chip_id][p[i]].role == CoreRole::kCompute) {
@@ -214,8 +219,8 @@ uint64_t WireLandingChip(LpuTables const& t, Chip& chip, Hop const& h,
 // 一个 LPU 上的模块全部由这一个协程驱动。表的读数在协程里抄下来，主线程读不到
 // 协程里的 Logic。
 class LpuDriver : public BachModule {
- public:
-  LpuDriver(ClockPtr c, Lpu& target, std::vector<Core*> watch,
+public:
+  LpuDriver(ClockPtr c, Lpu &target, std::vector<Core *> watch,
             std::vector<LinkEndPtr> probe = {})
       : BachModule(c, "driver"), lpu(target), cores(std::move(watch)),
         wires(std::move(probe)) {
@@ -231,7 +236,7 @@ class LpuDriver : public BachModule {
   std::vector<uint64_t> wire_cnt;
   bool stop_when_done = false;
 
- protected:
+protected:
   void Step() override {
     // head_ptr 是 Stream_table 自己 Step() 里改的普通成员，别的协程不读它；
     // 停钟之后再取。Triggers() 是 Logic64，只在协程里读得到当拍的值。
@@ -243,21 +248,23 @@ class LpuDriver : public BachModule {
     if (now != done && done_at == 0) {
       done_at = CycleNow();
       // 收齐了就停钟：这一层跑满上限要几分钟，尾巴上全是空拍。
-      if (stop_when_done) clk->Stop();
+      if (stop_when_done)
+        clk->Stop();
     }
     done = now;
     mismatch = lpu.Out().MismatchCount();
     for (uint64_t i = 0; i < wires.size(); ++i) {
-      if (ReadFlit(wires[i]->flit).valid) ++wire_cnt[i];
+      if (ReadFlit(wires[i]->flit).valid)
+        ++wire_cnt[i];
     }
     injected = lpu.In().Injected();
     sw_in = lpu.Switch(0).Forwarded();
     chip_in = lpu.GetChip(0, 0).Port(kChipW).Rx().Assembled();
   }
 
- private:
-  Lpu& lpu;
-  std::vector<Core*> cores;
+private:
+  Lpu &lpu;
+  std::vector<Core *> cores;
   std::vector<LinkEndPtr> wires;
 };
 
@@ -269,20 +276,22 @@ std::vector<uint8_t> TokenBytes(uint64_t token) {
   return b;
 }
 
-}  // namespace
+} // namespace
 
 // 一个 token 从入口桩进来，在入口那颗 chip 上搬进 Core Mem 再发出去，穿过中间
 // 十三颗只转发的 chip，在出口那颗上再搬一次，从出口桩出来。收到的字节与注入的
 // 相等。
 TEST(BachLpuE2e, TokenCrossesTheArray) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   std::vector<uint8_t> payload = TokenBytes(0);
   std::vector<uint64_t> heads;
   uint64_t done = 0, mismatch = 0, done_at = 0;
   {
     std::vector<Hop> plan = RoutePlan();
     std::vector<uint64_t> want;
-    for (Hop const& h : plan) want.push_back(ChipIdOf(h.gx, h.gy));
+    for (Hop const &h : plan)
+      want.push_back(ChipIdOf(h.gx, h.gy));
     EnsureSlots(want.size() * (kMaxCorePerChip + 1));
     ClockPtr clk = MakeClock(0, kPeriod);
     Lpu lpu(clk, "lpu", Tables(), TickingCfg(want));
@@ -291,13 +300,13 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
     // 三个 path：3 号进入口那颗，4 号穿过中间那十三颗，5 号从出口那颗出到片外。
     // 一颗 core 上进核与出核是两条不同的 path，因为同一个号只能配一种走法。
     constexpr uint64_t kInPath = 3, kMidPath = 4, kOutPath = 5;
-    std::vector<Core*> landing;
+    std::vector<Core *> landing;
     for (uint64_t k = 0; k < plan.size(); ++k) {
-      Hop const& h = plan[k];
-      Chip& chip = lpu.GetChip(h.gx, h.gy);
+      Hop const &h = plan[k];
+      Chip &chip = lpu.GetChip(h.gx, h.gy);
       if (k == 0) {
-        landing.push_back(&chip.GetCore(WireLandingChip(
-            lpu.Tables(), chip, h, kInPath, kMidPath, 0)));
+        landing.push_back(&chip.GetCore(
+            WireLandingChip(lpu.Tables(), chip, h, kInPath, kMidPath, 0)));
       } else if (k + 1 == plan.size()) {
         landing.push_back(&chip.GetCore(WireLandingChip(
             lpu.Tables(), chip, h, kMidPath, kOutPath, kNodeOutStub)));
@@ -325,7 +334,8 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
     // 两头各一段以太网，3000 T 一段；中间十四段 C2C 加十五颗 chip 的转发。
     clk->Continue(25000 * kPeriod);
     RT::JoinAll();
-    for (Core* c : landing) heads.push_back(c->GetTs().Table().HeadPtr());
+    for (Core *c : landing)
+      heads.push_back(c->GetTs().Table().Occupied());
     done = driver.done;
     mismatch = driver.mismatch;
     done_at = driver.done_at;
@@ -337,7 +347,7 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
   EXPECT_GT(done_at, 2 * 3000u) << "两段以太网的时间没记上";
   EXPECT_EQ(mismatch, 0u) << "出口桩收到的字节与注入的不一样";
   for (uint64_t i = 0; i < heads.size(); ++i) {
-    EXPECT_EQ(heads[i], 1u) << "第 " << i << " 颗落地的 chip 上这个用户没退休";
+    EXPECT_EQ(heads[i], 0u) << "第 " << i << " 颗落地的 chip 上这个用户没退休";
   }
 }
 
@@ -345,7 +355,8 @@ TEST(BachLpuE2e, TokenCrossesTheArray) {
 // 的段与 flit 折算，落在这颗 chip 上搬进 Core Mem，用户退休。发出去那一笔停在
 // 没有对端的 E 口上。
 TEST(BachLpuE2e, TokenEntersTheFirstChip) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   std::vector<uint8_t> payload = TokenBytes(0);
   uint64_t head = 0, injected = 0, sw_in = 0, chip_in = 0;
   uint64_t trigger = 0, relayed = 0;
@@ -360,8 +371,8 @@ TEST(BachLpuE2e, TokenEntersTheFirstChip) {
     h.gy = 0;
     h.in_port = kChipW;
     h.out_port = kChipE;
-    Chip& chip = lpu.GetChip(0, 0);
-    Core& core = chip.GetCore(WireLandingChip(lpu.Tables(), chip, h, 3, 4, 0));
+    Chip &chip = lpu.GetChip(0, 0);
+    Core &core = chip.GetCore(WireLandingChip(lpu.Tables(), chip, h, 3, 4, 0));
 
     InjectItem it;
     it.inject_cycle = 2;
@@ -378,7 +389,7 @@ TEST(BachLpuE2e, TokenEntersTheFirstChip) {
     LpuDriver driver(clk, lpu, {&core}, {chip.GetCore(5).OutWire(2)});
     clk->Continue(6000 * kPeriod);
     RT::JoinAll();
-    head = core.GetTs().Table().HeadPtr();
+    head = core.GetTs().Table().Occupied();
     trigger = driver.triggers[0];
     injected = driver.injected;
     sw_in = driver.sw_in;
@@ -392,5 +403,5 @@ TEST(BachLpuE2e, TokenEntersTheFirstChip) {
   EXPECT_EQ(chip_in, 1u) << "入口那颗 chip 的桥没拼回这个包";
   EXPECT_GT(relayed, 0u) << "不派角色的那颗 core 没把包转出去";
   EXPECT_EQ(trigger, 1u) << "落地那颗 core 没收到这个包";
-  EXPECT_EQ(head, 1u) << "这颗 chip 上这个用户没退休";
+  EXPECT_EQ(head, 0u) << "这颗 chip 上这个用户没退休";
 }

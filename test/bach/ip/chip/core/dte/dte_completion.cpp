@@ -5,13 +5,14 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "bach/ip/chip/core/dte/completion_rs.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/core/dte/completion_rs.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -35,7 +36,7 @@ std::shared_ptr<Descriptor> Task(uint64_t commit_seq, uint64_t stream,
 
 // 扮演 Commit 占位、扮演两侧的完成上报、收 TS 那一路。
 class CompHarness : public BachModule {
- public:
+public:
   struct AdmitJob {
     uint64_t at = 0;
     std::shared_ptr<Descriptor> d;
@@ -47,14 +48,15 @@ class CompHarness : public BachModule {
     bool drained = true;
   };
 
-  CompHarness(ClockPtr c, CompletionRs& target)
+  CompHarness(ClockPtr c, CompletionRs &target)
       : BachModule(c, "harness"), rs(target) {}
 
   std::vector<AdmitJob> admits;
+  std::function<void(uint64_t)> observe;
   std::vector<HalfJob> halves;
 
   struct Report {
-    uint64_t at = 0, stream = 0, task = 0;
+    uint64_t at = 0, stream = 0, task = 0, user = 0;
   };
   std::vector<Report> reports;
 
@@ -63,20 +65,22 @@ class CompHarness : public BachModule {
     uint64_t at = 0, addr = 0, data = 0;
   };
   std::vector<SmemWrite> smem;
+  std::vector<uint64_t> smem_responses;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     // 末级先做：先看上一拍报出来的。
     if (rs.ToTs().Valid()) {
       reports.push_back({now, rs.ToTs().stream_id.Get(),
-                         rs.ToTs().task_id.Get()});
+                         rs.ToTs().task_id.Get(), rs.ToTs().user_id.Get()});
     }
 
     rs.RdDone().Idle();
     rs.WrDone().Idle();
-    for (auto const& h : halves) {
-      if (h.at != now) continue;
+    for (auto const &h : halves) {
+      if (h.at != now)
+        continue;
       if (h.is_rd) {
         rs.RdDone().Drive(h.commit_seq, kRd, h.drained);
       } else {
@@ -85,13 +89,15 @@ class CompHarness : public BachModule {
     }
 
     bool drove = false;
-    for (auto const& a : admits) {
-      if (a.at != now) continue;
+    for (auto const &a : admits) {
+      if (a.at != now)
+        continue;
       rs.AdmitPtr()->Drive(a.d, ++admit_seq);
       drove = true;
       break;
     }
-    if (!drove) rs.AdmitPtr()->Idle();
+    if (!drove)
+      rs.AdmitPtr()->Idle();
 
     // shareMem 那一路：一直收得下，写出来的当场记下。
     MemReqView w = ReadMemReq(rs.SmemWr());
@@ -104,18 +110,24 @@ class CompHarness : public BachModule {
         }
       }
       smem.push_back({now, w.addr, v});
+      smem_responses.push_back(now + 5);
     }
-    rs.SmemWr().DriveSlave(true, false, nullptr);
+    bool response = !smem_responses.empty() && smem_responses.front() <= now;
+    if (response)
+      smem_responses.erase(smem_responses.begin());
+    rs.SmemWr().DriveSlave(true, response, nullptr);
 
     rs.RunStep();
+    if (observe)
+      observe(now);
   }
 
- private:
-  CompletionRs& rs;
+private:
+  CompletionRs &rs;
   uint64_t admit_seq = 0, last_smem_seq = 0;
 };
 
-}  // namespace
+} // namespace
 
 // 两侧都到齐、都 drained 才算完：少一样就不报。
 TEST(BachCompletionRs, JoinNeedsBothSidesDrained) {
@@ -188,7 +200,7 @@ TEST(BachCompletionRs, ShareMemEntryIsWrittenBeforeTheReport) {
   EXPECT_EQ(smem[0].addr, 0x40u);
   EXPECT_EQ(smem[0].data, 2u);
   ASSERT_EQ(reports.size(), 1u);
-  EXPECT_LT(smem[0].at, reports[0].at) << "写出去了才通知 TS";
+  EXPECT_GE(reports[0].at, smem[0].at + 5) << "SM写响应完成后才通知TS";
 }
 
 // 不带 ack_ts_en 的那一笔照样写 shareMem，只是不通知 TS。
@@ -281,11 +293,18 @@ TEST(BachCompletionRs, TaskLastDecidesTheReport) {
       ClockPtr clk = MakeClock(0, kPeriod);
       CompletionRs rs(clk, "rs", 0, false);
       CompHarness h(clk, rs);
-      h.admits = {{2, Task(1, 5, 3, task_last)}};
+      auto desc = Task(1, 5, 3, task_last);
+      desc->user_id = 123;
+      h.admits = {{2, desc}};
       h.halves = {{6, 1, true, true}, {8, 1, false, true}};
       clk->Continue(30 * kPeriod);
       RT::JoinAll();
       n = h.reports.size();
+      EXPECT_EQ(rs.NoAckCnt(), task_last ? 0u : 1u);
+      if (!task_last) {
+        EXPECT_EQ(rs.NoAckTask(), 3u);
+        EXPECT_EQ(rs.NoAckUser(), 123u);
+      }
     }
     RT::Reset();
     return n;
@@ -337,4 +356,105 @@ TEST(BachCompletionRs, FullTableStopsAdmitting) {
   RT::Reset();
   EXPECT_TRUE(room_at_start);
   EXPECT_FALSE(room_when_full) << "十六项占满之后不再有空位";
+}
+
+TEST(BachCompletionRs, PhysicalCompletionCanReorderButSmAndAckCannot) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  CompletionRs rs(clock, "rs", 0, false);
+  CompHarness driver(clock, rs);
+  auto first = Task(1, 2, 7);
+  auto second = Task(2, 3, 7);
+  auto third = Task(3, 4, 7, false);
+  first->user_id = 101;
+  second->user_id = 102;
+  first->wr_sharemem_flag = second->wr_sharemem_flag = third->wr_sharemem_flag =
+      true;
+  first->smem_addr = 4;
+  second->smem_addr = 8;
+  third->smem_addr = 12;
+  first->smem_data = 1;
+  second->smem_data = 2;
+  third->smem_data = 3;
+  second->route = Route::kCmToRouter;
+  second->vc = 1;
+  third->route = Route::kCmToRouter;
+  third->vc = 2;
+  driver.admits = {{2, first}, {3, second}, {4, third}};
+  driver.halves = {{7, 2, true, true},  {8, 2, false, true},
+                   {9, 3, true, true},  {10, 3, false, true},
+                   {20, 1, true, true}, {21, 1, false, true}};
+  clock->Continue(60);
+  RT::JoinAll();
+  ASSERT_EQ(driver.smem.size(), 3u);
+  EXPECT_EQ(driver.smem[0].addr, 4u);
+  EXPECT_EQ(driver.smem[1].addr, 8u);
+  EXPECT_EQ(driver.smem[2].addr, 12u);
+  ASSERT_EQ(driver.reports.size(), 2u);
+  EXPECT_EQ(driver.reports[0].user, 101u);
+  EXPECT_EQ(driver.reports[1].user, 102u);
+  EXPECT_GE(driver.reports[0].at, driver.smem[0].at + 5);
+  EXPECT_GE(driver.reports[1].at, driver.smem[1].at + 5);
+  EXPECT_TRUE(rs.Quiescent());
+  RT::Reset();
+}
+
+TEST(BachCompletionRs, YoungerErrorWaitsForHeadAndFirstErrorIsRetained) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  CompletionRs rs(clock, "rs", 0, false);
+  CompHarness driver(clock, rs);
+  auto head = Task(1, 1, 2);
+  auto bad = Task(2, 3, 4);
+  bad->error = 3;
+  bad->entry_id = 1;
+  bad->user_id = 77;
+  auto later = Task(3, 5, 6);
+  later->error = 7;
+  later->entry_id = 2;
+  driver.admits = {{2, head}, {3, bad}, {4, later}};
+  driver.halves = {{20, 1, true, true}, {21, 1, false, true}};
+  driver.observe = [&](uint64_t now) {
+    if (now == 15) {
+      EXPECT_EQ(rs.Error(), 0u);
+    }
+  };
+  clock->Continue(50);
+  RT::JoinAll();
+  EXPECT_EQ(rs.Error(), 3u);
+  EXPECT_EQ(rs.ErrorEntry(), 1u);
+  EXPECT_EQ(rs.Interrupt(), 1u);
+  EXPECT_EQ(driver.reports.size(), 1u);
+  EXPECT_FALSE(rs.Quiescent());
+  rs.SetInterruptMask(1);
+  EXPECT_EQ(rs.Interrupt(), 0u);
+  rs.ClearError(1);
+  EXPECT_EQ(rs.Error(), 0u);
+  RT::Reset();
+}
+
+
+TEST(BachCompletionRs, ErrorHeadKeepsEntryAndStopsYoungerAck) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  CompletionRs rs(clock, "rs", 0, false);
+  CompHarness driver(clock, rs);
+  auto bad = Task(1, 1, 2);
+  bad->error = 3;
+  auto younger = Task(2, 2, 3);
+  younger->entry_id = 1;
+  younger->wr_sharemem_flag = true;
+  younger->smem_addr = 8;
+  driver.admits = {{2, bad}, {3, younger}};
+  driver.halves = {{5, 2, true, true}, {6, 2, false, true}};
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(rs.Error(), 3u);
+  EXPECT_NE(rs.EntryState(1), 0u);
+  EXPECT_NE(rs.EntryState(2), 0u);
+  EXPECT_FALSE(rs.Quiescent());
+  EXPECT_TRUE(driver.reports.empty());
+  EXPECT_TRUE(driver.smem.empty());
+  EXPECT_EQ(rs.NoAckCnt(), 0u);
+  RT::Reset();
 }

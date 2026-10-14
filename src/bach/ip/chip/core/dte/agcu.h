@@ -1,137 +1,179 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_AGCU_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_AGCU_
-
-// AGCU：地址生成与端点译码。
-//
-//   stream_start_i = CFG_ADDRi + SID × CFG_STRIDEi
-//
-// 端点有两套写法。模型内部用地址高 4 bit 作 tag（latch 自己的 kernel 与用例）：
-//
-//   0x0_______  Cmem 数据（低 20 bit，1 MB）
-//   0x1_______  Mmem 数据（低 26 bit，36 MB）
-//   0x2_______  Scale 旁带
-//   0x3_______  topK_table
-//   0x4_______  header_table
-//
-// 文档绝对地址（pcode 产物）在叠过 SID × stride 之后换成 tag：
-//
-//   0x4840_0000 + o          Cmem 数据     → tag 0
-//   0x4850_0000 + o          Cmem SF       → tag 2，偏移 o×32
-//   0x48C0_0000 + o          Mmem 数据     → tag 1（容量检查仍按 36 MB）
-//   0x4AC0_0000 + o          Mmem SF       → tag 2，偏移 o×32
-//   0x4802_B000 + n×0x80     header_table  → tag 4
-//   0x4803_3000 + n×0x100    topK_table    → tag 3
-
-#include <cstdint>
-
 #include "bach/ip/chip/core/dte/dte_types.h"
-
+#include <algorithm>
+#include <array>
+#include <limits>
 namespace latch {
 namespace bach {
-
-constexpr uint64_t kDocCmemBase = 0x48400000;
-constexpr uint64_t kDocCmemBytes = 1024 * 1024;
-constexpr uint64_t kDocCmemSfBase = 0x48500000;
-constexpr uint64_t kDocCmemSfBytes = 32 * 1024;
-constexpr uint64_t kDocMmemBase = 0x48C00000;
-constexpr uint64_t kDocMmemBytes = 32ull * 1024 * 1024;
-constexpr uint64_t kDocMmemSfBase = 0x4AC00000;
-constexpr uint64_t kDocMmemSfBytes = 4ull * 1024 * 1024;
-constexpr uint64_t kDocHeaderTableBase = 0x4802B000;
-constexpr uint64_t kDocHeaderTableBytes = 4 * 1024;
-constexpr uint64_t kDocHeaderEntryBytes = 0x80;
-constexpr uint64_t kDocTopkTableBase = 0x48033000;
-constexpr uint64_t kDocTopkTableBytes = 4 * 1024;
-constexpr uint64_t kDocTopkEntryBytes = 0x100;
-constexpr uint64_t kDocSfGroupBytes = 32;
+struct DteWindows {
+  uint64_t cm_base = 0, cm_size = 2 * 1024 * 1024;
+  uint64_t mm_base = 0x10000000, mm_size = 36 * 1024 * 1024;
+  uint64_t topk_base = 0x20000000, topk_size = 4096;
+  uint64_t header_base = 0x30000000, header_size = 512;
+};
+// 文档绝对地址（pcode 产物）那一套窗口，与上面的模型窗口同时认。布局与模型窗口
+// 一一对应：Core Mem 1 MB 之后紧跟 32 KB scale（0x4850_0000），Matrix Mem 32 MB
+// 数据之后紧跟 4 MB SF（0x4AC0_0000），topK_table 在 MU_DSA + 0x3000，
+// header_table 在 DTE_DSA + 0x3000。
+constexpr DteWindows kDocDteWindows{0x48400000, 2 * 1024 * 1024,
+                                    0x48C00000, 36 * 1024 * 1024,
+                                    0x48033000, 4096,
+                                    0x4802B000, 512};
+// Share Mem 的文档地址。CFG_SM_W_ADDR 可以写这一套，也可以写窗口内偏移。
 constexpr uint64_t kDocSmemBase = 0x48300000;
 constexpr uint64_t kDocSmemBytes = 32 * 1024;
-
-class Agcu {
- public:
-  static uint64_t SmemOffset(uint64_t addr) {
-    if (InDoc(addr, kDocSmemBase, kDocSmemBytes)) return addr - kDocSmemBase;
-    return addr;
-  }
-  static bool IsDocAddr(uint64_t addr) {
-    return InDoc(addr, kDocCmemBase, kDocCmemBytes) ||
-           InDoc(addr, kDocCmemSfBase, kDocCmemSfBytes) ||
-           InDoc(addr, kDocMmemBase, kDocMmemBytes) ||
-           InDoc(addr, kDocMmemSfBase, kDocMmemSfBytes) ||
-           InDoc(addr, kDocHeaderTableBase, kDocHeaderTableBytes) ||
-           InDoc(addr, kDocTopkTableBase, kDocTopkTableBytes);
-  }
-  static uint64_t FromDoc(uint64_t addr) {
-    if (InDoc(addr, kDocCmemBase, kDocCmemBytes)) {
-      return Tag(0x0, addr - kDocCmemBase);
-    }
-    if (InDoc(addr, kDocCmemSfBase, kDocCmemSfBytes)) {
-      return Tag(0x2, (addr - kDocCmemSfBase) * kDocSfGroupBytes);
-    }
-    if (InDoc(addr, kDocMmemBase, kDocMmemBytes)) {
-      return Tag(0x1, addr - kDocMmemBase);
-    }
-    if (InDoc(addr, kDocMmemSfBase, kDocMmemSfBytes)) {
-      return Tag(0x2, (addr - kDocMmemSfBase) * kDocSfGroupBytes);
-    }
-    if (InDoc(addr, kDocHeaderTableBase, kDocHeaderTableBytes)) {
-      return Tag(0x4, (addr - kDocHeaderTableBase) / kDocHeaderEntryBytes);
-    }
-    if (InDoc(addr, kDocTopkTableBase, kDocTopkTableBytes)) {
-      return Tag(0x3, (addr - kDocTopkTableBase) / kDocTopkEntryBytes);
-    }
-    return addr;
-  }
-
-  static SegEndpoint Decode(uint64_t addr) {
-    switch ((addr >> kEpShift) & kEpMask) {
-      case 0x1: return SegEndpoint::kMmem;
-      case 0x2: return SegEndpoint::kScale;
-      case 0x3: return SegEndpoint::kTopk;
-      case 0x4: return SegEndpoint::kHeader;
-      default: return SegEndpoint::kCmem;
-    }
-  }
-
-  void ExpandOut(Segment& s, uint64_t sid, Route route) const {
-    bool src_mem = route == Route::kCmToRouter || route == Route::kMmToRouter ||
-                   route == Route::kMmToCm;
-    bool dst_mem = route == Route::kRouterToCm || route == Route::kRouterToMm ||
-                   route == Route::kMmToCm;
-    uint64_t src_stride = (route == Route::kMmToCm) ? 0 : s.stride;
-    uint64_t dst_stride = s.stride;
-    if (IsDocAddr(s.src)) {
-      s.src = FromDoc(s.src + sid * src_stride);
-      src_stride = 0;
-    }
-    if (IsDocAddr(s.dst)) {
-      s.dst = FromDoc(s.dst + sid * dst_stride);
-      dst_stride = 0;
-    }
-    s.src_kind = Decode(s.src);
-    s.dst_kind = Decode(s.dst);
-    if (src_mem) {
-      s.src_addr = (s.src & kEpDataMask) + sid * src_stride;
-    } else {
-      s.src_addr = 0;
-    }
-    if (dst_mem) {
-      s.dst_addr = (s.dst & kEpDataMask) + sid * dst_stride;
-    } else {
-      s.dst_addr = 0;
-    }
-  }
-
- private:
-  static bool InDoc(uint64_t a, uint64_t base, uint64_t bytes) {
-    return a >= base && a < base + bytes;
-  }
-  static uint64_t Tag(uint64_t tag, uint64_t off) {
-    return (tag << kEpShift) | (off & kEpDataMask);
-  }
+enum DteError : uint64_t {
+  kDteNoError = 0,
+  kDteEndpointError = 1,
+  kDteWindowError = 2,
+  kDteAlignmentError = 3,
+  kDteLengthError = 4,
+  kDteOverflowError = 5,
+  kDteRouteError = 6,
+  kDteResponseError = 7,
+  kDtePacketError = 8,
 };
+class Agcu {
+public:
+  explicit Agcu(DteWindows const &ranges = {}) : windows(ranges) {}
+  static SegEndpoint Decode(uint64_t addr) { return Agcu{}.Endpoint(addr); }
+  // 这个地址是不是文档绝对地址那一套（pcode 产物）。
+  static bool IsDocAddr(uint64_t addr) {
+    return EndpointIn(kDocDteWindows, addr) != SegEndpoint::kInvalid;
+  }
+  static uint64_t SmemOffset(uint64_t addr) {
+    return In(addr, kDocSmemBase, kDocSmemBytes) ? addr - kDocSmemBase : addr;
+  }
+  SegEndpoint Endpoint(uint64_t addr) const {
+    SegEndpoint ep = EndpointIn(windows, addr);
+    return ep != SegEndpoint::kInvalid ? ep : EndpointIn(kDocDteWindows, addr);
+  }
+  uint64_t Offset(uint64_t addr, SegEndpoint endpoint) const {
+    DteWindows const &w =
+        EndpointIn(windows, addr) != SegEndpoint::kInvalid ? windows
+                                                           : kDocDteWindows;
+    return OffsetIn(w, addr, endpoint);
+  }
+  static SegEndpoint EndpointIn(DteWindows const &windows, uint64_t addr) {
+    if (In(addr, windows.cm_base, windows.cm_size))
+      return ((addr - windows.cm_base) & (1ull << 20)) ? SegEndpoint::kScale
+                                                       : SegEndpoint::kCmem;
+    if (In(addr, windows.mm_base, windows.mm_size))
+      return SegEndpoint::kMmem;
+    if (In(addr, windows.topk_base, windows.topk_size))
+      return SegEndpoint::kTopk;
+    if (In(addr, windows.header_base, windows.header_size))
+      return SegEndpoint::kHeader;
+    return SegEndpoint::kInvalid;
+  }
+  static uint64_t OffsetIn(DteWindows const &windows, uint64_t addr,
+                           SegEndpoint endpoint) {
+    switch (endpoint) {
+    case SegEndpoint::kCmem:
+      return addr - windows.cm_base;
+    case SegEndpoint::kScale:
+      return addr - windows.cm_base - (1ull << 20);
+    case SegEndpoint::kMmem:
+      return addr - windows.mm_base;
+    case SegEndpoint::kTopk:
+      return addr - windows.topk_base;
+    case SegEndpoint::kHeader:
+      return addr - windows.header_base;
+    default:
+      return addr;
+    }
+  }
+  uint64_t Limit(SegEndpoint ep) const {
+    switch (ep) {
+    case SegEndpoint::kCmem:
+      return std::min<uint64_t>(windows.cm_size, 1024 * 1024);
+    case SegEndpoint::kScale:
+      return windows.cm_size > 1024 * 1024
+                 ? std::min<uint64_t>(windows.cm_size - 1024 * 1024, 32 * 1024)
+                 : 0;
+    case SegEndpoint::kMmem:
+      return windows.mm_size;
+    case SegEndpoint::kTopk:
+      return windows.topk_size;
+    case SegEndpoint::kHeader:
+      return windows.header_size;
+    default:
+      return 0;
+    }
+  }
+  void ExpandOut(Segment &s, uint64_t sid, Route route) const {
+    bool source = !IsInbound(route);
+    bool destination = IsInbound(route) || route == Route::kMmToCm;
+    s.src_kind = source ? Endpoint(s.src) : SegEndpoint::kInvalid;
+    s.dst_kind = destination ? Endpoint(s.dst) : SegEndpoint::kInvalid;
+    if (source)
+      s.src_addr = Offset(s.src, s.src_kind) +
+                   (route == Route::kMmToCm ? 0 : sid * s.stride);
+    if (destination)
+      s.dst_addr = Offset(s.dst, s.dst_kind) + sid * s.stride;
+  }
+  uint64_t Validate(Descriptor &d) const {
+    if (uint64_t(d.route) > 4 || d.stream_id > 15 || d.vc > 3 ||
+        d.task_id >= 64 || d.user_id > 65535 || d.path_id > 255)
+      return kDteRouteError;
+    if (d.seg[0].len != 32)
+      return kDteLengthError;
+    uint64_t payload = 0;
+    for (uint64_t i = 0; i < 4; ++i) {
+      auto &s = d.seg[i];
+      if (!s.valid)
+        continue;
+      if (i == 0 && IsInbound(d.route) && d.hw_header_op)
+        continue;
+      ExpandOut(s, d.stream_id, d.route);
+      for (uint64_t end = 0; end < 2; ++end) {
+        if ((end == 0 && IsInbound(d.route)) ||
+            (end == 1 && !IsInbound(d.route) && d.route != Route::kMmToCm))
+          continue;
+        uint64_t base = end == 0 ? s.src : s.dst;
+        uint64_t stride = end == 0 && d.route == Route::kMmToCm ? 0 : s.stride;
+        if (base > 0xffffffffull ||
+            (d.stream_id && stride > (0xffffffffull - base) / d.stream_id))
+          return kDteOverflowError;
+        uint64_t full = base + d.stream_id * stride;
+        SegEndpoint ep = end == 0 ? s.src_kind : s.dst_kind;
+        uint64_t offset = end == 0 ? s.src_addr : s.dst_addr;
+        if (full > 0xffffffffull)
+          return kDteOverflowError;
+        if (ep == SegEndpoint::kInvalid || Endpoint(full) != ep)
+          return kDteEndpointError;
+        if (ep == SegEndpoint::kHeader) {
+          if (i != 0 || offset >= Limit(ep))
+            return kDteWindowError;
+        } else {
+          if (offset > Limit(ep) || s.len > Limit(ep) - offset)
+            return kDteWindowError;
+          if (offset & 7 || s.len & 7)
+            return kDteAlignmentError;
+          // 表项按 256 B 对齐。段长可以短于一项：pcode 的 topK 段是 56 B。
+          if (ep == SegEndpoint::kTopk && ((offset & 255) || s.len > 256))
+            return kDteAlignmentError;
+        }
+      }
+      if (i)
+        payload += s.len;
+      if (d.route == Route::kMmToCm && s.dst_kind != SegEndpoint::kCmem &&
+          s.dst_kind != SegEndpoint::kScale &&
+          s.dst_kind != SegEndpoint::kHeader)
+        return kDteRouteError;
+    }
+    if (d.route != Route::kMmToCm && payload > kMaxTaskBytes)
+      return kDteLengthError;
+    return 0;
+  }
 
-}  // namespace bach
-}  // namespace latch
-
+private:
+  static bool In(uint64_t addr, uint64_t base, uint64_t size) {
+    return addr >= base && addr - base < size;
+  }
+  DteWindows windows;
+};
+} // namespace bach
+} // namespace latch
 #endif

@@ -1,9 +1,10 @@
 // TS 这一侧的 credit 与退休。
 //
-// 退休是 Head-only 的：head_ptr 那一项第 0 项到 End 项的完成位全部置起才退。顺序
-// 不能反，先向 Router 发 credit 返还请求，Router 收下之后才清该槽位的 valid 并推
-// head_ptr。credit 申请只对 CREDIT_EN 的普通任务发，带 UserID、StreamID、TaskID、
-// PathID 四个号；逐级 reduce 任务要的是本级 Rmem 的 credit，TS 自己记。
+// 退休是 Head-only 的：head_ptr 那一项第 0 项到 End
+// 项的完成位全部置起才退。顺序 不能反，先向 Router 发 credit 返还请求，Router
+// 收下之后才清该槽位的 valid 并推 head_ptr。credit 申请只对 CREDIT_EN
+// 的普通任务发，带 UserID、StreamID、TaskID、 PathID 四个号；逐级 reduce
+// 任务要的是本级 Rmem 的 credit，TS 自己记。
 
 #include <gtest/gtest.h>
 
@@ -11,10 +12,10 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/ip/chip/core/ts/credit_monitor.h"
 #include "bach/ip/chip/core/ts/stream_table.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -37,7 +38,7 @@ TaskEntry Step(bool credit_en, uint64_t path_id = 0, bool end = false) {
 }
 
 // 一项就是 End 的链。
-void OneTaskChain(CfgReg& cfg) {
+void OneTaskChain(CfgReg &cfg) {
   cfg.WriteTask(0, Step(false, 0, true));
   cfg.SetInitFinish();
 }
@@ -59,7 +60,7 @@ std::shared_ptr<StreamWrite> Sitting(uint64_t slot, uint64_t user,
 }
 
 class CreditBench : public BachModule {
- public:
+public:
   struct Seed {
     uint64_t at = 0;
     std::shared_ptr<StreamWrite> w;
@@ -68,7 +69,7 @@ class CreditBench : public BachModule {
     uint64_t at = 0, stream = 0, task = 0, path = 0;
   };
 
-  CreditBench(ClockPtr c, CfgReg& reg, StreamTable& tab, TsCreditMonitor& cm)
+  CreditBench(ClockPtr c, CfgReg &reg, StreamTable &tab, TsCreditMonitor &cm)
       : BachModule(c, "bench"), cfg(reg), table(tab), credit(cm) {}
 
   std::vector<Seed> seeds;
@@ -84,7 +85,7 @@ class CreditBench : public BachModule {
   // 计数器是打拍的，只能在仿真里读。
   uint64_t rmem_admitted = 0;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     // 末级先做：先看上一拍摆出来的申请与退休请求。
@@ -109,11 +110,13 @@ class CreditBench : public BachModule {
     credit.RetireReq().DriveAccepted(ok);
 
     credit.Grant().Idle();
-    for (auto const& g : grants) {
-      if (g.at == now) credit.Grant().Drive(g.stream, g.task, g.path);
+    for (auto const &g : grants) {
+      if (g.at == now)
+        credit.Grant().Drive(g.stream, g.task, g.path);
     }
-    for (auto const& s : seeds) {
-      if (s.at == now) table.Port(kWrCreate).Drive(s.w);
+    for (auto const &s : seeds) {
+      if (s.at == now)
+        table.Port(kWrCreate).Drive(s.w);
     }
     cfg.RunStep();
     credit.RunStep();
@@ -121,10 +124,10 @@ class CreditBench : public BachModule {
     rmem_admitted = credit.RmemAdmitted();
   }
 
- private:
-  CfgReg& cfg;
-  StreamTable& table;
-  TsCreditMonitor& credit;
+private:
+  CfgReg &cfg;
+  StreamTable &table;
+  TsCreditMonitor &credit;
 };
 
 struct Bench {
@@ -138,40 +141,39 @@ struct Bench {
     table = std::make_unique<StreamTable>(c, "table", 0, false);
     credit = std::make_unique<TsCreditMonitor>(c, "credit", *cfg, 0, false);
     credit->AttachSnapshot(table->SnapPtr());
+    table->AttachRetire(credit->RetirePtr());
     table->Rebind(kWrCreditWake, credit->WakePtr());
     table->Rebind(kWrRetirement, credit->RetireWrPtr());
   }
 };
 
-}  // namespace
+} // namespace
 
-// credit 申请只对 CREDIT_EN 的 task 发，且带上四个号。
-TEST(BachTsCredit, RequestCarriesTheFourIds) {
-  std::vector<CreditBench::Req> reqs;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    Bench b(clk);
-    b.cfg->WriteTask(0, Step(/*credit_en=*/false));
-    b.cfg->WriteTask(1, Step(/*credit_en=*/true, /*path_id=*/6));
-    CreditBench h(clk, *b.cfg, *b.table, *b.credit);
-    // stream0 停在不要 credit 的 task 0，stream1 停在要 credit 的 task 1。
-    h.seeds = {{2, Sitting(0, 11, 0, TaskFsm::kWait)},
-               {3, Sitting(1, 22, 1, TaskFsm::kWait)}};
-    clk->Continue(30 * kPeriod);
-    RT::JoinAll();
-    reqs = h.reqs;
-  }
+// Internal direction grants commit READY and the debit atomically.
+TEST(BachTsCredit, InternalGrantDebitsAllRequiredDirections) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  b.cfg->WriteTask(0, Step(true, 6, true));
+  b.cfg->WriteRouterTable(6, 3, 2);
+  b.table->AttachCfg(*b.cfg);
+  CreditBench h(clk, *b.cfg, *b.table, *b.credit);
+  auto w = Sitting(0, 22, 0, TaskFsm::kWaitCredit);
+  w->entry.task_path_id = 6;
+  h.seeds = {{2, w}};
+  clk->Continue(30);
+  RT::JoinAll();
+  EXPECT_EQ(b.table->Peek(0).task_fsm, TaskFsm::kReady);
+  EXPECT_EQ(b.table->Peek(0).drct_used, 3u);
+  EXPECT_EQ(b.credit->DirectionCount(0), 15u);
+  EXPECT_EQ(b.credit->DirectionCount(1), 15u);
+  EXPECT_EQ(b.credit->DirectionCount(2), 16u);
+  EXPECT_TRUE(h.reqs.empty());
   RT::Reset();
-  ASSERT_EQ(reqs.size(), 1u) << "只给要 credit 的那一项发";
-  EXPECT_EQ(reqs[0].user, 22u);
-  EXPECT_EQ(reqs[0].stream, 1u);
-  EXPECT_EQ(reqs[0].task, 1u);
-  EXPECT_EQ(reqs[0].path, 6u);
 }
 
 // Router 授予后把对应 task 置 READY，并把这一项的重发标记也置起来。
-TEST(BachTsCredit, GrantWakesTheTaskAndSetsReissue) {
+TEST(BachTsCredit, NoRequiredDirectionBecomesReadyWithoutReissue) {
   TaskFsm fsm = TaskFsm::kIdle;
   bool reissue = false;
   {
@@ -180,7 +182,7 @@ TEST(BachTsCredit, GrantWakesTheTaskAndSetsReissue) {
     Bench b(clk);
     b.cfg->WriteTask(0, Step(/*credit_en=*/true, 4));
     CreditBench h(clk, *b.cfg, *b.table, *b.credit);
-    h.seeds = {{2, Sitting(0, 11, 0, TaskFsm::kWait)}};
+    h.seeds = {{2, Sitting(0, 11, 0, TaskFsm::kWaitCredit)}};
     h.grants = {{10, 0, 0, 4}};
     clk->Continue(30 * kPeriod);
     RT::JoinAll();
@@ -189,7 +191,7 @@ TEST(BachTsCredit, GrantWakesTheTaskAndSetsReissue) {
   }
   RT::Reset();
   EXPECT_EQ(fsm, TaskFsm::kReady);
-  EXPECT_TRUE(reissue) << "credit 到了的同时把重发标记置上";
+  EXPECT_FALSE(reissue) << "credit 到了的同时把重发标记置上";
 }
 
 // Head-only：只有 head_ptr 指着的那一项能退休，后面的即使先做完也要等。
@@ -218,7 +220,7 @@ TEST(BachTsCredit, OnlyTheHeadEntryRetires) {
 }
 
 // 顺序不能反：Router 收下 credit 返还之前不清 valid，收下之后才清并推 head。
-TEST(BachTsCredit, ClearsOnlyAfterRouterAccepts) {
+TEST(BachTsCredit, RetirementDoesNotWaitForRouterAcceptance) {
   bool valid_while_waiting = false, valid_after = true;
   uint64_t head_after = 0;
   {
@@ -228,7 +230,7 @@ TEST(BachTsCredit, ClearsOnlyAfterRouterAccepts) {
     OneTaskChain(*b.cfg);
     CreditBench h(clk, *b.cfg, *b.table, *b.credit);
     h.seeds = {{2, Sitting(0, 11, 0, TaskFsm::kFinish, 0b1)}};
-    h.retire_accept_from = 100000;  // Router 一直不收
+    h.retire_accept_from = 100000; // Router 一直不收
     clk->Continue(40 * kPeriod);
     RT::JoinAll();
     valid_while_waiting = b.table->Peek(0).valid;
@@ -248,9 +250,9 @@ TEST(BachTsCredit, ClearsOnlyAfterRouterAccepts) {
     head_after = b.table->HeadPtr();
   }
   RT::Reset();
-  EXPECT_TRUE(valid_while_waiting) << "Router 没收下就一直保持，不清 valid";
+  EXPECT_FALSE(valid_while_waiting) << "Router 没收下就一直保持，不清 valid";
   EXPECT_FALSE(valid_after) << "收下之后才清";
-  EXPECT_EQ(head_after, 1u) << "head_ptr 跟着推一格";
+  EXPECT_EQ(head_after, 0u) << "head_ptr 跟着推一格";
 }
 
 // 退休一项之后 head 指向下一项，它做完了也能退。
@@ -313,10 +315,12 @@ TEST(BachTsCredit, ReduceTakesTheLocalRmemCredit) {
     b.cfg->WriteTask(0, red);
     b.cfg->SetInitFinish();
     CreditBench h(clk, *b.cfg, *b.table, *b.credit);
-    auto free_one = Sitting(0, 11, 0, TaskFsm::kWait);
+    auto free_one = Sitting(0, 11, 0, TaskFsm::kWaitCredit);
     free_one->entry.task_type = TaskType::kReduce;
-    auto busy_one = Sitting(1, 22, 0, TaskFsm::kWait);
+    free_one->entry.task_fsm = TaskFsm::kReduceWait;
+    auto busy_one = Sitting(1, 22, 0, TaskFsm::kWaitCredit);
     busy_one->entry.task_type = TaskType::kReduce;
+    busy_one->entry.task_fsm = TaskFsm::kReduceWait;
     busy_one->entry.rmem_busy = true;
     h.seeds = {{2, free_one}, {3, busy_one}};
     clk->Continue(30 * kPeriod);
@@ -328,7 +332,7 @@ TEST(BachTsCredit, ReduceTakesTheLocalRmemCredit) {
   }
   RT::Reset();
   EXPECT_EQ(free_fsm, TaskFsm::kReady);
-  EXPECT_EQ(busy_fsm, TaskFsm::kWait) << "上一笔 reduce 还没做完";
+  EXPECT_EQ(busy_fsm, TaskFsm::kReduceWait) << "上一笔 reduce 还没做完";
   EXPECT_EQ(admitted, 1u);
   EXPECT_TRUE(reqs.empty()) << "reduce 不向 Router 申请 credit";
 }

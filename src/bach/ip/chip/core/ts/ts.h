@@ -6,8 +6,9 @@
 // 自身没有 Cycle()：构造各模块、把写口接到 Stream_table 上、把表快照分发给要读
 // 表的那几个。
 //
-// TS 的全部工作收在两张表和四个动作里：task_chain 说清这类 core 的操作流长什么样，
-// stream_table 说清每个在途用户走到了哪一步；四个动作是新用户到了建表、判当前
+// TS 的全部工作收在两张表和四个动作里：task_chain 说清这类 core
+// 的操作流长什么样， stream_table
+// 说清每个在途用户走到了哪一步；四个动作是新用户到了建表、判当前
 // 这一步的前置条件齐了没有、同一个执行单元有多个候选时选最老的、收到完成事件
 // 推进度并在链尾退休。
 //
@@ -36,48 +37,58 @@ struct TsCfg {
 };
 
 class Ts {
- public:
-  Ts(ClockPtr clock, const std::string& name, TsCfg const& setting,
+public:
+  Ts(ClockPtr clock, const std::string &name, TsCfg const &setting,
      uint64_t parent = 0)
       : clk(clock), cfg_setting(setting) {
     const uint64_t gid = TraceGroup(name, parent);
     cfg = std::make_unique<CfgReg>(clock, "cfg", gid, setting.tick);
-    table = std::make_unique<StreamTable>(clock, "stream_table", gid,
-                                          setting.tick);
-    user_match = std::make_unique<UserMatch>(clock, "user_match", *cfg,
-                                             gid, setting.tick);
-    task_ctrl = std::make_unique<TaskCtrl>(clock, "task_ctrl", *cfg, gid,
-                                           setting.tick);
-    dte_arb = std::make_unique<DteArb>(clock, "dte_arb", *user_match, *cfg,
-                                       gid, setting.tick);
+    table =
+        std::make_unique<StreamTable>(clock, "stream_table", gid, setting.tick);
+    user_match = std::make_unique<UserMatch>(clock, "user_match", *cfg, gid,
+                                             setting.tick);
+    task_ctrl =
+        std::make_unique<TaskCtrl>(clock, "task_ctrl", *cfg, gid, setting.tick);
+    dte_arb = std::make_unique<DteArb>(clock, "dte_arb", *user_match, *cfg, gid,
+                                       setting.tick);
     mu_arb = std::make_unique<UnitArb>(clock, "mu_arb", SendUnit::kMu, *cfg,
                                        gid, setting.tick);
     vu_arb = std::make_unique<UnitArb>(clock, "vu_arb", SendUnit::kVu, *cfg,
                                        gid, setting.tick);
-    task_done = std::make_unique<TaskDone>(clock, "task_done", *cfg, gid,
-                                           setting.tick);
+    task_done =
+        std::make_unique<TaskDone>(clock, "task_done", *cfg, gid, setting.tick);
     credit = std::make_unique<TsCreditMonitor>(clock, "credit", *cfg, gid,
                                                setting.tick);
+    table->AttachCfg(*cfg);
+    table->AttachRetire(std::make_shared<RetirePort>(clock));
+    table->AttachDatainGuard(user_match->CandidatePtr());
+    table->AttachRetire(credit->RetirePtr());
     Wire();
   }
 
   // ── 配置面 ──
-  CfgReg& Cfg() { return *cfg; }
+  CfgReg &Cfg() { return *cfg; }
 
-  // 配置的最后一步：写 TS_INIT_FINISH。查完整张配置表，自启动的 core（B core
-  // 与 R core）随即建满 stream_num 个表项，不等 Router trigger。权重加载模式不
-  // 启动任务链，这时不建。
+  // 配置的最后一步：写TS_INIT_FINISH，检查并保存Task0模板、N及模式。
+  // SELF_START直到首个Router Trigger才批量激活匿名槽；权重模式
+  // 不启动业务任务链。
   void InitFinish() {
     cfg->SetInitFinish();
-    if (cfg->SelfStartCore() && !cfg->WeightsMode()) {
-      table->SelfStart(cfg->Task(0), cfg->StreamNum());
+    if (cfg->InitFinished()) {
+      table->Configure(cfg->StreamNum());
     }
   }
 
   // ── 对外：接 Router ──
-  TriggerPort& Trigger() { return user_match->Trigger(); }
+  TriggerPort &Trigger() { return user_match->Trigger(); }
   void AttachTrigger(std::shared_ptr<TriggerPort> p) {
     user_match->AttachTrigger(std::move(p));
+  }
+  void AttachDirectionReturns(std::shared_ptr<DirectionReturnPort> p) {
+    table->AttachDirectionReturns(std::move(p));
+  }
+  std::shared_ptr<DirectionOwnerPort> DirectionOwnersPtr() const {
+    return table->DirectionOwnersPtr();
   }
   void AttachCreditReq(std::shared_ptr<CreditReqPort> p) {
     credit->AttachReq(std::move(p));
@@ -86,25 +97,26 @@ class Ts {
     credit->AttachGrant(std::move(p));
   }
   void AttachRetire(std::shared_ptr<RetirePort> p) {
+    table->AttachRetire(p);
     credit->AttachRetire(std::move(p));
   }
   void AttachReduceDone(std::shared_ptr<ReduceDonePort> p) {
     task_done->AttachRdcDone(std::move(p));
   }
-  void AttachRtab(RouterTable* t) { task_done->AttachRtab(t); }
+  void AttachRtab(RouterTable *t) { credit->AttachRtab(t); }
   void AttachReissueDone(std::shared_ptr<ReissueDonePort> p) {
     credit->AttachReissueDone(std::move(p));
   }
 
   // ── 对外：接三个 RV core ──
-  TaskCmdPort& DteCmd() { return dte_arb->Cmd(); }
-  TaskCmdPort& MuCmd() { return mu_arb->Cmd(); }
-  TaskCmdPort& VuCmd() { return vu_arb->Cmd(); }
+  TaskCmdPort &DteCmd() { return dte_arb->Cmd(); }
+  TaskCmdPort &MuCmd() { return mu_arb->Cmd(); }
+  TaskCmdPort &VuCmd() { return vu_arb->Cmd(); }
   std::shared_ptr<TaskCmdPort> DteCmdPtr() const { return dte_arb->CmdPtr(); }
   std::shared_ptr<TaskCmdPort> MuCmdPtr() const { return mu_arb->CmdPtr(); }
   std::shared_ptr<TaskCmdPort> VuCmdPtr() const { return vu_arb->CmdPtr(); }
-  DonePort& RvDone(uint64_t u) { return task_done->RvDone(u); }
-  DonePort& DsaDone(uint64_t u) { return task_done->DsaDone(u); }
+  DonePort &RvDone(uint64_t u) { return task_done->RvDone(u); }
+  DonePort &DsaDone(uint64_t u) { return task_done->DsaDone(u); }
   // 装配层把这几根线交给 RV core 与 DSA，两端指向同一个对象。
   std::shared_ptr<DonePort> RvDonePtr(uint64_t u) const {
     return task_done->RvDonePtr(u);
@@ -114,14 +126,14 @@ class Ts {
   }
 
   // ── 观测 ──
-  StreamTable& Table() { return *table; }
-  UserMatch& Matcher() { return *user_match; }
-  TaskCtrl& Ctrl() { return *task_ctrl; }
-  DteArb& DteArbiter() { return *dte_arb; }
-  UnitArb& MuArbiter() { return *mu_arb; }
-  UnitArb& VuArbiter() { return *vu_arb; }
-  TaskDone& Done() { return *task_done; }
-  TsCreditMonitor& Credit() { return *credit; }
+  StreamTable &Table() { return *table; }
+  UserMatch &Matcher() { return *user_match; }
+  TaskCtrl &Ctrl() { return *task_ctrl; }
+  DteArb &DteArbiter() { return *dte_arb; }
+  UnitArb &MuArbiter() { return *mu_arb; }
+  UnitArb &VuArbiter() { return *vu_arb; }
+  TaskDone &Done() { return *task_done; }
+  TsCreditMonitor &Credit() { return *credit; }
 
   void RunStep() {
     cfg->RunStep();
@@ -142,7 +154,7 @@ class Ts {
            task_done->Quiescent() && credit->Quiescent();
   }
 
- private:
+private:
   void Wire() {
     // 物理写口接到 Stream_table 上，顺序就是优先级。
     Bind(kWrRetirement, credit->RetireWrPtr());
@@ -156,7 +168,8 @@ class Ts {
     Bind(kWrCreditWake, credit->WakePtr());
     Bind(kWrCreate, user_match->CreatePtr());
 
-    // 表快照分发给要读表的那几个。它们读上一拍的快照，不碰 Stream_table 的容器。
+    // 表快照分发给要读表的那几个。它们读上一拍的快照，不碰 Stream_table
+    // 的容器。
     auto snap = table->SnapPtr();
     user_match->AttachSnapshot(snap);
     task_ctrl->AttachSnapshot(snap);
@@ -185,7 +198,7 @@ class Ts {
   std::unique_ptr<TsCreditMonitor> credit;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

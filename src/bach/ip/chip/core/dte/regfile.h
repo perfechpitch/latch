@@ -1,44 +1,22 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_REGFILE_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_REGFILE_
 
-// DTE 的软件配置寄存器组：RV core 看得见的那一层。
-//
-// 对齐飞书《DTE DSA》文档的 16KB 地址空间：
-//   0x0000~0x03FF  Config：CFG_TRIGGER + 19 项任务配置寄存器
-//   0x0400~0x07FF  Ctrl/Status（本模型不落地）
-//   0x0800~0x0BFF  Profile（不落地）
-//   0x0C00~0x0FFF  Debug（不落地）
-//   0x1000~0x1FFF  Template：8 个 × 128B，每个 19 项（0x00~0x48，无 TRIGGER）
-//   0x2000~0x2FFF  Glb Cfg TaskQ（16 项 × 256B，只读回读）
-//   0x3000~0x3FFF  Header Table（16 项 × 128B，本模型走 Hmem，此处只读回读）
-//
-// 起任务的过程：RV core 一条指令写一个寄存器，最后写 CFG_TRIGGER（0x0000）。写
-// trigger 那一拍采样这笔写带进来的 STUPV 身份（streamID/taskID/userID/pathID/vcid，
-// RV 在发出 dsaw 时从 CSR 抄进请求），合并 19 项配置组装成一个 4 段位 Descriptor
-// 交给 Commit。
-//
-// 快速配置（Template）：CFG_TRIGGER[0] temp_valid 置位时，以 temp_index 选中的
-// 模板为底，被显式写过的 Cfg Reg File 字段覆盖模板字段；temp_valid 清 0 时全部取
-// Cfg Reg File（普通配置）。为此维护一个 19 项“已显式写”dirty 掩码，Trigger Fire
-// 时清零。
-//
-// 反压：Commit 的中央 TaskQueue 满时它不收这一笔 Descriptor，本模块保持着重发，
-// 同时拉低 dsa_cfg 的 req_ready 反压 RV core。
-//
-// 读寄存器隔几拍才回：读不支持同步返回，返回数据走独立的 dsa_rdata 口。同拍
-// 回的话 dsa_rq 那边还没把这一笔的目的寄存器记进队列，脉冲就丢了。
+// DTE configuration and templates snapshot one descriptor on Trigger. All RV
+// accesses backpressure when the global queue is full. Read responses return on
+// the next cycle; control/readback is supplied by the aggregate DTE.
 
 #include <array>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/dte/agcu.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
@@ -52,7 +30,7 @@ constexpr uint64_t kDteTemplateNum = 8;
 
 // ── Config 区 19 项任务配置寄存器（0x0004~0x004C，全部 R/W）──
 // 段 i 一组 {ADDRi_SRC, ADDRi_DST, STRIDEi, DATA_LENi}。
-constexpr uint64_t kDteRegTrigger = 0x000;  // CFG_TRIGGER，WO
+constexpr uint64_t kDteRegTrigger = 0x000; // CFG_TRIGGER，WO
 constexpr uint64_t kDteRegAddr0Src = 0x004;
 constexpr uint64_t kDteRegAddr0Dst = 0x008;
 constexpr uint64_t kDteRegAddr1Src = 0x00C;
@@ -77,118 +55,230 @@ constexpr uint64_t kDteRegTransMode = 0x04C;
 constexpr uint64_t kDteFieldNum = 19;
 
 // ── CFG_TRIGGER（WO，4 bit，0x0000）位域 ──
-constexpr uint64_t kDteTempValid = 1ull << 0;       // [0] 启用 Config Template
-constexpr uint64_t kDteTempIndexShift = 1;          // [3:1] 配置表 1~8 号
+constexpr uint64_t kDteTempValid = 1ull << 0; // [0] 启用 Config Template
+constexpr uint64_t kDteTempIndexShift = 1;    // [3:1] 配置表 1~8 号
 constexpr uint64_t kDteTempIndexMask = 0x7;
 
 // ── CFG_TRANS_MODE（R/W，10 bit，0x004C）位域 ──
-constexpr uint64_t kDteModeMask = 0x7;              // [2:0] transfer_mode
-constexpr uint64_t kDteSegValidShift = 3;           // [5:3] seg_valid[2:0]（段1~3；段0 恒参与）
+constexpr uint64_t kDteModeMask = 0x7; // [2:0] transfer_mode
+constexpr uint64_t kDteSegValidShift =
+    4; // [6:4] seg_valid[2:0]，bit3保留（段1~3；段0 恒参与）
 constexpr uint64_t kDteSegValidMask = 0x7;
-constexpr uint64_t kDteHwHeaderOp = 1ull << 7;      // [7] 源端为 Router 时 1 = 丢包头
-constexpr uint64_t kDteWrSharememFlag = 1ull << 8;  // [8] 完成后写 ShareMem
-constexpr uint64_t kDteAckTsEn = 1ull << 9;         // [9] 完成后通知 TS（原 task_last）
+// pcode（BACHIR 11）沿用另一套位序：seg_valid 在 [5:3]，bit6 保留。装载时按
+// 版本改；默认是上面的模型位序。
+constexpr uint64_t kDteSegValidShiftPcode = 3;
+inline uint64_t &DteSegValidShift() {
+  static uint64_t shift = kDteSegValidShift;
+  return shift;
+}
+constexpr uint64_t kDteWrSharememFlag = 1ull << 8; // [8] 完成后写 ShareMem
+constexpr uint64_t kDteAckTsEn = 1ull << 9; // [9] 完成后通知 TS（原 task_last）
 
 // 一套 19 项配置。既是 Cfg Reg File 的内容，也是 8 套模板里每一套的内容。
 struct DteConfig {
   Segment seg[4]{};
-  uint64_t smem_addr = 0;   // CFG_SM_W_ADDR
-  uint64_t smem_data = 0;   // CFG_SM_W_DATA
-  uint64_t trans_mode = 0;  // CFG_TRANS_MODE
+  uint64_t smem_addr = 0;  // CFG_SM_W_ADDR
+  uint64_t smem_data = 0;  // CFG_SM_W_DATA
+  uint64_t trans_mode = 0; // CFG_TRANS_MODE
 
-  // 19 项字段按模板内的顺序读/写：0~7 是 ADDR0..3 的 SRC/DST，8~11 是 STRIDE0..3，
-  // 12~15 是 DATA_LEN0..3，16/17 是 SM_W_ADDR/DATA，18 是 TRANS_MODE。
+  // 19 项字段按模板内的顺序读/写：0~7 是 ADDR0..3 的 SRC/DST，8~11 是
+  // STRIDE0..3， 12~15 是 DATA_LEN0..3，16/17 是 SM_W_ADDR/DATA，18 是
+  // TRANS_MODE。
   uint64_t Field(uint64_t i) const {
     switch (i) {
-      case 0: return seg[0].src;  case 1: return seg[0].dst;
-      case 2: return seg[1].src;  case 3: return seg[1].dst;
-      case 4: return seg[2].src;  case 5: return seg[2].dst;
-      case 6: return seg[3].src;  case 7: return seg[3].dst;
-      case 8: return seg[0].stride;  case 9: return seg[1].stride;
-      case 10: return seg[2].stride; case 11: return seg[3].stride;
-      case 12: return seg[0].len;  case 13: return seg[1].len;
-      case 14: return seg[2].len;  case 15: return seg[3].len;
-      case 16: return smem_addr;   case 17: return smem_data;
-      case 18: return trans_mode;
-      default: return 0;
+    case 0:
+      return seg[0].src;
+    case 1:
+      return seg[0].dst;
+    case 2:
+      return seg[1].src;
+    case 3:
+      return seg[1].dst;
+    case 4:
+      return seg[2].src;
+    case 5:
+      return seg[2].dst;
+    case 6:
+      return seg[3].src;
+    case 7:
+      return seg[3].dst;
+    case 8:
+      return seg[0].stride;
+    case 9:
+      return seg[1].stride;
+    case 10:
+      return seg[2].stride;
+    case 11:
+      return seg[3].stride;
+    case 12:
+      return seg[0].len;
+    case 13:
+      return seg[1].len;
+    case 14:
+      return seg[2].len;
+    case 15:
+      return seg[3].len;
+    case 16:
+      return smem_addr;
+    case 17:
+      return smem_data;
+    case 18:
+      return trans_mode;
+    default:
+      return 0;
     }
   }
   void SetField(uint64_t i, uint64_t v) {
+    v &= 0xffffffffull;
     switch (i) {
-      case 0: seg[0].src = v; return;  case 1: seg[0].dst = v; return;
-      case 2: seg[1].src = v; return;  case 3: seg[1].dst = v; return;
-      case 4: seg[2].src = v; return;  case 5: seg[2].dst = v; return;
-      case 6: seg[3].src = v; return;  case 7: seg[3].dst = v; return;
-      case 8: seg[0].stride = v; return;  case 9: seg[1].stride = v; return;
-      case 10: seg[2].stride = v; return; case 11: seg[3].stride = v; return;
-      case 12: seg[0].len = v & 0xFFFF; return;
-      case 13: seg[1].len = v & 0xFFFF; return;
-      case 14: seg[2].len = v & 0xFFFF; return;
-      case 15: seg[3].len = v & 0xFFFF; return;
-      case 16: smem_addr = v; return;   case 17: smem_data = v; return;
-      case 18: trans_mode = v; return;
-      default: return;
+    case 0:
+      seg[0].src = v;
+      return;
+    case 1:
+      seg[0].dst = v;
+      return;
+    case 2:
+      seg[1].src = v;
+      return;
+    case 3:
+      seg[1].dst = v;
+      return;
+    case 4:
+      seg[2].src = v;
+      return;
+    case 5:
+      seg[2].dst = v;
+      return;
+    case 6:
+      seg[3].src = v;
+      return;
+    case 7:
+      seg[3].dst = v;
+      return;
+    case 8:
+      seg[0].stride = v;
+      return;
+    case 9:
+      seg[1].stride = v;
+      return;
+    case 10:
+      seg[2].stride = v;
+      return;
+    case 11:
+      seg[3].stride = v;
+      return;
+    case 12:
+      seg[0].len = v & 0xFFFF;
+      return;
+    case 13:
+      seg[1].len = v & 0xFFFF;
+      return;
+    case 14:
+      seg[2].len = v & 0xFFFF;
+      return;
+    case 15:
+      seg[3].len = v & 0xFFFF;
+      return;
+    case 16:
+      smem_addr = v;
+      return;
+    case 17:
+      smem_data = v;
+      return;
+    case 18:
+      trans_mode = v & 0x3f7;
+      return;
+    default:
+      return;
     }
   }
 };
 
 class DteRegfile : public BachModule {
- public:
-  DteRegfile(ClockPtr clock, const std::string& name, Agcu const& addr_gen,
+public:
+  DteRegfile(ClockPtr clock, const std::string &name, Agcu const &addr_gen,
              uint64_t parent = 0, bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        agcu(addr_gen),
+      : BachModule(clock, name, parent, tick), agcu(addr_gen),
         cfg(std::make_shared<DsaCfgPort>(clock)),
         out(std::make_shared<DescPort>(clock)),
-        rdata(std::make_shared<DsaRdataPort>(clock)),
-        triggers(clock),
+        rdata(std::make_shared<DsaRdataPort>(clock)), triggers(clock),
         writes(clock) {}
 
   // ── 对外 ──
-  void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
-  DsaCfgPort& Cfg() { return *cfg; }
+  DsaCfgPort &Cfg() { return *cfg; }
   std::shared_ptr<DsaCfgPort> CfgPtr() const { return cfg; }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return rdata; }
   // 起任务这一笔交给 Commit 的 from_rv 口：一根线两端是同一个对象。
   std::shared_ptr<DescPort> OutPtr() const { return out; }
 
+  // Aggregate DTE configuration callbacks run in the same simulation coroutine.
+  void BindControl(std::function<uint64_t(uint64_t)> read,
+                   std::function<void(uint64_t, uint64_t)> write) {
+    control_read = std::move(read);
+    control_write = std::move(write);
+  }
+  void BindError(std::function<bool()> read) { error_state = std::move(read); }
+  void ConfigWrite(uint64_t at, uint64_t data) { WriteReg(at, data); }
+  uint64_t ConfigRead(uint64_t at) const { return ReadReg(at); }
   // ── 观测 ──
   uint64_t Triggers() const { return trig_cnt; }
   uint64_t Writes() const { return write_cnt; }
-  bool Quiescent() const override { return !held && pending_read.empty(); }
+  bool Quiescent() const override {
+    return submitted.empty() && pending_read.empty();
+  }
 
- protected:
+protected:
   void Step() override {
     rdata_used = false;
+    cfg_start_ev = false;
+    trig_ev = false;
+    cfg_start_task = 0xFFu;
+    cfg_start_user = 0xFFFFu;
+    trig_task = 0xFFu;
+    trig_user = 0xFFFFu;
     // 末级先做：先看上一笔 Descriptor 被 Commit 收下没有，再收新的寄存器写。
     Drain();
     ReturnRead();
     TakeCfg();
     Publish();
-    if (!rdata_used) rdata->Idle();
+    if (!rdata_used)
+      rdata->Idle();
 
-    // 中央 TaskQueue 满时本模块手上压着一笔发不出去，此时不再收新的配置写。
-    cfg->DriveReady(!held);
+    cfg->DriveReady(InError() || out->Credits() > submitted.size());
     triggers = trig_cnt;
     writes = write_cnt;
-    TracePerCycle("holding", held ? 1 : 0);
+    TracePerCycle("submitted", submitted.size());
+    // 一笔任务的配置两端：第一次写 Config 区寄存器（起点）与写 trigger（终点），
+    // 身份都取这一笔配置写带进来的 STUPV，Python 侧按 (user, task) 配对。
+    TracePerCycle("dsa_cfg_start", cfg_start_ev ? 1 : 0);
+    TracePerCycle("dsa_cfg_start_task", cfg_start_task);
+    TracePerCycle("dsa_cfg_start_user", cfg_start_user);
+    TracePerCycle("dsa_trigger", trig_ev ? 1 : 0);
+    TracePerCycle("dsa_trigger_task", trig_task);
+    TracePerCycle("dsa_trigger_user", trig_user);
+    // 写 trigger 那一拍的配置寄存器数（标量）。Python 侧按 (user, task) 与 DTE-Core
+    // 那一行配对，带出「这笔任务配置了多少个寄存器」。
+    TracePerCycle("dsa_trigger_cfg_count", trig_cfg_count);
   }
 
- private:
+private:
+  bool InError() const { return error_state && error_state(); }
   void Drain() {
-    if (!held) return;
-    if (!out->Accepted()) return;
-    held.reset();
+    uint64_t ack = out->AcceptedSeq();
+    while (!submitted.empty() && submitted.front() <= ack)
+      submitted.pop_front();
+    out->Idle();
   }
 
   void TakeCfg() {
-    if (held) return;
-    if (!cfg->Valid() || cfg->Seq() == last_seq) return;
+    if (!cfg->Valid() || cfg->Seq() == last_seq)
+      return;
+    if (!InError() && out->Credits() <= submitted.size())
+      return;
     last_seq = cfg->Seq();
     uint64_t at = cfg->req_addr.Get();
     if (cfg->req_we.Get() == 0) {
-      pending_read.push_back({CycleNow() + kDsaReadLatency, ReadReg(at),
-                              last_seq});
+      pending_read.push_back({CycleNow() + 1, ReadReg(at), last_seq});
       return;
     }
     ++write_cnt;
@@ -196,25 +286,26 @@ class DteRegfile : public BachModule {
   }
 
   void ReturnRead() {
-    if (pending_read.empty()) return;
-    ReadBack const& r = pending_read.front();
-    if (r.at > CycleNow()) return;
+    if (pending_read.empty())
+      return;
+    ReadBack const &r = pending_read.front();
+    if (r.at > CycleNow())
+      return;
     rdata->Drive(r.value, r.seq);
     rdata_used = true;
     pending_read.pop_front();
   }
 
-  void Publish() {
-    if (held) {
-      out->Drive(held->desc, held->seq);
+  void Publish() {}
+
+  void WriteReg(uint64_t at, uint64_t data) {
+    if (at & 3)
+      return;
+    if (control_write && at >= 0x400 && at < 0x4000 &&
+        !(at >= 0x1000 && at < 0x2000)) {
+      control_write(at, data);
       return;
     }
-    out->Idle();
-  }
-
-  // 地址空间三段落地的只有 Config 与 Template 两段；Ctrl/Status、Profile、Debug
-  // 与 TaskQ 回读都不参与起任务（TaskQ/HeaderTable 只读回读返回 0）。
-  void WriteReg(uint64_t at, uint64_t data) {
     // CFG_TRIGGER：写 0x0000 就是提交任务。
     if (at == kDteRegTrigger) {
       Fire(data);
@@ -222,7 +313,18 @@ class DteRegfile : public BachModule {
     }
     // Config 区 19 项（0x0004~0x004C）。
     if (at >= kDteConfigBase + 0x004 && at <= kDteRegTransMode) {
+      // 任务配置寄存器每写一次记一笔：一笔任务配置过多少个寄存器。写 trigger 那
+      // 一刻锁进 trig_cfg_count 再清零，好让下一笔任务重新数。Template 区走下面
+      // 那一支，不计（它是持久配置，不是随任务下发的那一套）。
+      ++cfg_write_cnt;
       int64_t idx = (at - 0x004) / 4;
+      // dirty 在 trigger 时清零，所以本拍还全 0 就是这笔任务的第一笔配置写。
+      if (dirty == 0) {
+        DsaTaskIds ids = cfg->TaskIds();
+        cfg_start_ev = true;
+        cfg_start_task = ids.task & 0xFFu;
+        cfg_start_user = ids.user & 0xFFFFu;
+      }
       cfg_file.SetField(idx, data);
       dirty |= 1ull << idx;
       return;
@@ -232,14 +334,20 @@ class DteRegfile : public BachModule {
       uint64_t rel = at - kDteTemplateBase;
       uint64_t idx = rel / kDteTemplateStride;
       uint64_t off = rel % kDteTemplateStride;
-      if (idx >= kDteTemplateNum || off >= kDteFieldNum * 4) return;
+      if (idx >= kDteTemplateNum || off >= kDteFieldNum * 4)
+        return;
       tpl[idx].SetField(off / 4, data);
       return;
     }
-    // 其余几段不落地。
+    // Reserved words ignore writes.
   }
 
   uint64_t ReadReg(uint64_t at) const {
+    if (at & 3)
+      return 0;
+    if (control_read && at >= 0x400 && at < 0x4000 &&
+        !(at >= 0x1000 && at < 0x2000))
+      return control_read(at);
     if (at >= kDteConfigBase + 0x004 && at <= kDteRegTransMode) {
       return cfg_file.Field((at - 0x004) / 4);
     }
@@ -247,7 +355,8 @@ class DteRegfile : public BachModule {
       uint64_t rel = at - kDteTemplateBase;
       uint64_t idx = rel / kDteTemplateStride;
       uint64_t off = rel % kDteTemplateStride;
-      if (idx >= kDteTemplateNum || off >= kDteFieldNum * 4) return 0;
+      if (idx >= kDteTemplateNum || off >= kDteFieldNum * 4)
+        return 0;
       return tpl[idx].Field(off / 4);
     }
     return 0;
@@ -255,6 +364,11 @@ class DteRegfile : public BachModule {
 
   // 写 CFG_TRIGGER 那一拍：合并配置 → 采样 STUPV → 组装 4 段位 Descriptor。
   void Fire(uint64_t trigger) {
+    if (InError()) {
+      dirty = 0;
+      cfg_write_cnt = 0;
+      return;
+    }
     bool temp_valid = (trigger & kDteTempValid) != 0;
     uint64_t temp_idx = (trigger >> kDteTempIndexShift) & kDteTempIndexMask;
 
@@ -264,7 +378,8 @@ class DteRegfile : public BachModule {
     if (temp_valid) {
       merged = tpl[temp_idx];
       for (uint64_t i = 0; i < kDteFieldNum; ++i) {
-        if (dirty & (1ull << i)) merged.SetField(i, cfg_file.Field(i));
+        if (dirty & (1ull << i))
+          merged.SetField(i, cfg_file.Field(i));
       }
     } else {
       merged = cfg_file;
@@ -281,9 +396,9 @@ class DteRegfile : public BachModule {
     d->path_id = ids.path;
     d->vc = ids.vc;
     d->route = Route(merged.trans_mode & kDteModeMask);
-    uint64_t seg_valid = (merged.trans_mode >> kDteSegValidShift) &
-                         kDteSegValidMask;
-    d->hw_header_drop = (merged.trans_mode & kDteHwHeaderOp) != 0;
+    d->hw_header_op = ((merged.trans_mode >> 7) & 1) != 0;
+    uint64_t seg_valid =
+        (merged.trans_mode >> DteSegValidShift()) & kDteSegValidMask;
     d->wr_sharemem_flag = (merged.trans_mode & kDteWrSharememFlag) != 0;
     // 源文档只有一个「是否通知 TS」的位（ack_ts_en），不通知的任务由 kernel 配
     // TRANS_MODE 时就不置这一位。
@@ -294,8 +409,8 @@ class DteRegfile : public BachModule {
     // 逐段拷贝配置：段 0（包头）恒参与，段 1~3 由 seg_valid[i-1] 决定是否参与。
     // 每段都按地址译码端点，段 0 也走这一步：CFG_ADDR0 的地址 tag 决定包头落
     // header_table（0x4，计算 core）还是 Core Mem（0x0，B/R core）。段 0 打
-    // is_header，永远不占 payload 数据通道，DataDst/PayloadBytes 这类按端点判断的
-    // 辅助函数会跳过它。
+    // is_header，永远不占 payload 数据通道，DataDst/PayloadBytes
+    // 这类按端点判断的 辅助函数会跳过它。
     for (uint64_t i = 0; i < 4; ++i) {
       Segment s;
       s.valid = (i == 0) || ((seg_valid >> (i - 1)) & 1u);
@@ -310,11 +425,24 @@ class DteRegfile : public BachModule {
       d->seg[i] = s;
     }
 
-    held = Held{d, out->NextSeq()};
+    d->error = agcu.Validate(*d);
+    uint64_t seq = out->NextSeq();
+    submitted.push_back(seq);
+    out->Drive(d, seq);
     ++trig_cnt;
     dirty = 0;
+    trig_ev = true;
+    trig_task = d->task_id & 0xFFu;
+    trig_user = d->user_id & 0xFFFFu;
+    // 这笔任务配置过的寄存器数，写 trigger 这一拍锁存，随波形带出去（Perfetto 的
+    // DTE-Core args 靠它带上「这笔任务配置了多少个寄存器」）。
+    trig_cfg_count = cfg_write_cnt;
+    cfg_write_cnt = 0;
   }
 
+  std::function<uint64_t(uint64_t)> control_read;
+  std::function<void(uint64_t, uint64_t)> control_write;
+  std::function<bool()> error_state;
   Agcu agcu;
   std::shared_ptr<DsaCfgPort> cfg;
   std::shared_ptr<DescPort> out;
@@ -331,18 +459,24 @@ class DteRegfile : public BachModule {
   std::array<DteConfig, kDteTemplateNum> tpl{};
 
   // 一笔已组好、等 Commit 收下的 Descriptor。
-  struct Held {
-    std::shared_ptr<Descriptor> desc;
-    uint64_t seq = 0;
-  };
-  std::optional<Held> held;
+  std::deque<uint64_t> submitted;
   bool rdata_used = false;
   uint64_t last_seq = 0, trig_cnt = 0, write_cnt = 0;
+
+  // 一笔任务配置两端的波形事件：第一次写 Config 区寄存器、写 trigger。身份取这一
+  // 笔配置写带进来的 STUPV（与 trigger 那一拍同一份），本拍没有就填 0xFF / 0xFFFF。
+  bool cfg_start_ev = false, trig_ev = false;
+  uint64_t cfg_start_task = 0xFFu, cfg_start_user = 0xFFFFu;
+  uint64_t trig_task = 0xFFu, trig_user = 0xFFFFu;
+  // 从上一笔 trigger 到这一拍，Config 区任务配置寄存器（0x004~0x04C）被写了几次。
+  // 写 trigger 那一刻锁进 trig_cfg_count 再清零，好让下一笔任务重新数。
+  uint64_t cfg_write_cnt = 0;
+  uint64_t trig_cfg_count = 0;
 
   Logic64 triggers, writes;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

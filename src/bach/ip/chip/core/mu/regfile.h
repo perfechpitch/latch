@@ -138,6 +138,10 @@ struct MuTaskCfg {
   uint64_t task_id = 0;
   uint64_t user_id = 0;
 
+  // 这一笔任务配置过的寄存器数：从上一笔 trigger 到写 TASK_TRIGGER 之间，软件写
+  // 任务配置寄存器（0x004~0x028）的次数。写 trigger 那一刻锁存，供波形带出去。
+  uint64_t cfg_count = 0;
+
   // 一条原语的 K 与 N，由 primitive_type 从物理阵列折出。
   uint64_t PrimK() const { return primitive_type == 1 ? kMuArrayK / 2 : kMuArrayK; }
   uint64_t PrimN() const { return primitive_type == 1 ? kMuArrayN * 2 : kMuArrayN; }
@@ -187,6 +191,10 @@ class MuRegfile : public BachModule {
 
   MuTaskCfg const& Live() const { return live; }
   uint64_t Triggers() const { return triggers.Get(); }
+  // 收下的那一笔的身份，Core 层发 dsa_task_trigger 用。笔数 Triggers() 已经有 ——
+  // 每次写 trigger 锁成一笔就自增一次，反压（DriveReady(!pending)）保证不会丢。
+  uint64_t AcceptedTask() const { return latched.task_id; }
+  uint64_t AcceptedUser() const { return latched.user_id; }
 
   bool Quiescent() const override { return !pending; }
 
@@ -246,32 +254,41 @@ class MuRegfile : public BachModule {
 
   void WriteReg(uint64_t addr, uint64_t v) {
     if (addr == kMuTaskTrigger) {
-      // [0] temp_valid、[2:1] temp_index。没写过的模版视作不用模版，写 1 只表示启动。
-      uint64_t temp_idx = (v >> kMuTriggerTempIndexShift) & kMuTriggerTempIndexMask;
+      // [0] temp_valid、[2:1] temp_index。没写过的模版视作不用模版，写 trigger
+      // 本身就是启动。身份信号在这一拍采样，必须最后写。
+      uint64_t temp_idx =
+          (v >> kMuTriggerTempIndexShift) & kMuTriggerTempIndexMask;
       if ((v & kMuTriggerValid) && tpl_set[temp_idx]) {
         std::array<uint64_t, kMuTemplateFields> merged = tpl[temp_idx];
-        for (uint64_t i = 0; i < kMuTemplateFields; ++i) {
-          if (dirty & (1ull << i)) merged[i] = fields[i];
-        }
-        for (uint64_t i = 0; i < kMuTemplateFields; ++i) ApplyField(i, merged[i]);
+        for (uint64_t i = 0; i < kMuTemplateFields; ++i)
+          if (dirty & (1ull << i))
+            merged[i] = fields[i];
+        for (uint64_t i = 0; i < kMuTemplateFields; ++i)
+          ApplyField(i, merged[i]);
       }
       dirty = 0;
       DsaTaskIds ids = cfg_port->TaskIds();
       live.stream_id = ids.stream;
       live.task_id = ids.task;
       live.user_id = ids.user;
+      live.cfg_count = cfg_write_cnt;
+      cfg_write_cnt = 0;
       latched = live;
       pending = true;
       ++trigger_pending;
       return;
     }
     if (IsTaskField(addr)) {
+      // 任务配置寄存器（0x004~0x028）每写一次记一笔：一笔任务配置过多少个
+      // 寄存器。TASK_TRIGGER 是启动位不算配置，模版区与静态配置也不计。
+      ++cfg_write_cnt;
       uint64_t i = FieldOf(addr);
       fields[i] = v;
       dirty |= 1ull << i;
       ApplyField(i, v);
       return;
     }
+    // 模版区：0x1000 起 4 套 × 128 B，每套前 10 个字对应 PRIMITIVE_DIM..MODE。
     if (addr >= kMuTemplateBase &&
         addr < kMuTemplateBase + kMuTemplateNum * kMuTemplateStride) {
       uint64_t rel = addr - kMuTemplateBase;
@@ -344,6 +361,9 @@ class MuRegfile : public BachModule {
   bool pending = false;
   uint64_t last_seq = 0;
   uint64_t trigger_pending = 0;
+  // 从上一笔 trigger 到这一拍，任务配置寄存器（0x004~0x028）被写了几次。写 trigger
+  // 那一刻锁进 latched.cfg_count 再清零，好让下一笔任务重新数。
+  uint64_t cfg_write_cnt = 0;
 
   Logic64 triggers;
 };

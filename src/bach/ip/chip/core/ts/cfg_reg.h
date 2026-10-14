@@ -3,25 +3,27 @@
 
 // CFG_REG：TS 的全部配置寄存器与由它们派生出来的东西。
 //
-// 寄存器照《Task Scheduler MAS》的地址映射：TASK_CHAIN_0～63 各占 PC 与 ATTR 两个
-// 32 位字（0x000～0x1FC），DATAIN_TASK_PC / ATTR（0x200、0x204），STREAM_NUM
+// 寄存器照《Task Scheduler MAS》的地址映射：TASK_CHAIN_0～63 各占 PC 与 ATTR
+// 两个 32 位字（0x000～0x1FC），DATAIN_TASK_PC /
+// ATTR（0x200、0x204），STREAM_NUM
 // （0x208），TS_INIT_FINISH（0x20C），TS_STATE（0x210），SELF_START（0x214），
-// ROUTER_TABLE_0～63（0x400～0x4FC）。B_CORE_DIRECTION、trigger_task_chain_en 与按
-// path_id 索引的流量控制取自《TS_通信机制》，MAS 的地址映射里没有。
+// ROUTER_TABLE_0～63（0x400～0x4FC）。B_CORE_DIRECTION、trigger_task_chain_en
+// 与按 path_id 索引的流量控制取自《TS_通信机制》，MAS 的地址映射里没有。
 //
 // 配置顺序：权重加载阶段只配 DATAIN_TASK，WEIGHTS_MODE 置 1；业务流配置先写
 // STREAM_NUM 与 SELF_START，再逐项写任务链，每项先 PC 后 ATTR，最后写
 // TS_INIT_FINISH。写 TS_INIT_FINISH 后查整张配置表，查出错误写进 TS_STATE。
 //
-// 查表的同时派生两张 64 位掩码：DATA_IN_MASK 与 THROUGH_END_MASK。后者是第 0 项到
-// 唯一 End 项，Task_ctrl 找后继、Retirement 判退休都只看这个范围。
+// 查表的同时派生两张 64 位掩码：DATA_IN_MASK 与 THROUGH_END_MASK。后者是第 0
+// 项到 唯一 End 项，Task_ctrl 找后继、Retirement 判退休都只看这个范围。
 
 #include <array>
+#include <memory>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/ts/ts_types.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
@@ -35,41 +37,55 @@ enum TsStateBit : uint64_t {
 constexpr uint64_t kTsRouteNum = 64;
 
 // ROUTER_TABLE 的一项：这条 path 往哪几个方向走、用哪个 VC。方向只保存与读回；
-// VCID 随 DTE 任务一起下发。TASK_DIR 的位：bit0 上下，bit1 左，bit2 右，bit3 本地。
+// VCID 随 DTE 任务一起下发。TASK_DIR 的位：bit0 上下，bit1 左，bit2 右，bit3
+// 本地。
 struct TsRoute {
   uint64_t dir = 0;
   uint64_t vcid = 0;
 };
 
+class TsApbPort : public Logic {
+public:
+  Logic64 psel, penable, pwrite, paddr, pwdata, pstrb, pready, prdata, pslverr;
+  explicit TsApbPort(ClockPtr clock)
+      : psel(clock), penable(clock), pwrite(clock), paddr(clock), pwdata(clock),
+        pstrb(clock), pready(clock), prdata(clock), pslverr(clock) {
+    Fields(psel, penable, pwrite, paddr, pwdata, pstrb, pready, prdata,
+           pslverr);
+  }
+};
 class CfgReg : public BachModule {
- public:
-  CfgReg(ClockPtr clock, const std::string& name, uint64_t parent = 0,
+public:
+  CfgReg(ClockPtr clock, const std::string &name, uint64_t parent = 0,
          bool tick = true)
-      : BachModule(clock, name, parent, tick), state(clock) {
+      : BachModule(clock, name, parent, tick), state(clock),
+        apb(std::make_shared<TsApbPort>(clock)) {
     chain.fill(TaskEntry{});
     route.fill(TsRoute{});
   }
 
+  std::shared_ptr<TsApbPort> ApbPtr() const { return apb; }
   // ── 配置面。boot 期由 ctrl_noc 逐项写，这里给的是等价的直接接口 ──
   // 一项任务的 PC 与 ATTR 一起写；写 ATTR 时硬件把 TASK_VALID 置起来。
   void WriteTask(uint64_t idx, TaskEntry e) {
     LOGCHECK(idx < kTaskChainNum, "CfgReg: task_chain 下标越界。");
     e.valid = true;
-    chain[idx] = e;
+    chain[idx] = PreserveReserved(e, chain[idx]);
     task_written = true;
+    pc_written[idx] = attr_written[idx] = true;
   }
   void WriteDatainTask(uint64_t task_pc, bool weights_mode) {
     datain_pc = task_pc;
     weights_mode_on = weights_mode;
     datain_valid = true;
+    datain_pc_written = datain_attr_written = true;
   }
   // 超过 16 的值只能写入 16。
   void SetStreamNum(uint64_t n) {
-    LOGCHECK(n >= 1, "CfgReg: stream_num 至少是 1。");
     stream_num = n > kStreamNum ? kStreamNum : n;
   }
-  // SELF_START：1 表示自启动模式，Task 0 不等 Router trigger 就直接启动。B core
-  // 与 R core 是这一档。
+  // SELF_START保存特殊启动模式；B/R Core在首Trigger后激活匿名Task0。
+  // 配置置位本身不创建Stream。
   void SetSelfStart(bool on) { self_start = on; }
   void WriteRouterTable(uint64_t pid, uint64_t dir, uint64_t vcid) {
     LOGCHECK(pid < kTsRouteNum, "CfgReg: ROUTER_TABLE 下标越界。");
@@ -88,25 +104,115 @@ class CfgReg : public BachModule {
     init_finish = true;
     DeriveMasks();
     Check();
+    init_finish = ts_state == 0 && !weights_mode_on;
+  }
+
+  struct ApbResult {
+    uint32_t data = 0;
+    bool error = false;
+  };
+  ApbResult Access(uint32_t address, bool write, uint32_t value = 0,
+                   uint32_t strobe = 15) {
+    if (address >= 0x8000 || (address & 3) || (write && strobe != 15))
+      return {0, true};
+    if (write && init_finish)
+      return {0, true};
+    if (address < 0x200) {
+      uint64_t tid = address / 8;
+      bool attr = (address & 4) != 0;
+      TaskEntry &t = chain[tid];
+      if (write) {
+        if (!attr) {
+          t.task_pc = value;
+          pc_written[tid] = true;
+        } else {
+          TaskEntry previous = t;
+          t.send_unit = SendUnit(value & 3);
+          t.recv_unit = RecvUnit((value >> 2) & 3);
+          t.wait_wake = ((value >> 4) & 1) != 0;
+          t.task_type = TaskType((value >> 5) & 7);
+          t.p2p_reissue_tid = (value >> 8) & 63;
+          t.credit_en = ((value >> 14) & 1) != 0;
+          t.path_id = (value >> 15) & 255;
+          t.end = ((value >> 23) & 1) != 0;
+          t.valid = true;
+          t = PreserveReserved(t, previous);
+          attr_written[tid] = true;
+        }
+        task_written = true;
+      }
+      uint32_t bits =
+          uint32_t(t.send_unit) | (uint32_t(t.recv_unit) << 2) |
+          (uint32_t(t.wait_wake) << 4) | (uint32_t(t.task_type) << 5) |
+          (uint32_t(t.p2p_reissue_tid) << 8) | (uint32_t(t.credit_en) << 14) |
+          (uint32_t(t.path_id) << 15) | (uint32_t(t.end) << 23) |
+          (uint32_t(t.valid) << 31);
+      return {attr ? bits : uint32_t(t.task_pc), false};
+    }
+    if (address >= 0x400 && address < 0x500) {
+      uint64_t pid = (address - 0x400) / 4;
+      if (write)
+        route[pid] = {value & 15, (value >> 4) & 3};
+      return {uint32_t(route[pid].dir | (route[pid].vcid << 4)), false};
+    }
+    switch (address) {
+    case 0x200:
+      if (write) {
+        datain_pc = value;
+        datain_pc_written = true;
+      }
+      return {uint32_t(datain_pc), false};
+    case 0x204:
+      if (write) {
+        weights_mode_on = (value & 1) != 0;
+        datain_attr_written = true;
+        datain_valid = true;
+      }
+      return {uint32_t(weights_mode_on) | (uint32_t(datain_valid) << 31),
+              false};
+    case 0x208:
+      if (write)
+        SetStreamNum(value & 31);
+      return {uint32_t(stream_num), false};
+    case 0x20c:
+      if (write) {
+        if (value & 1)
+          SetInitFinish();
+        else {
+          init_finish = false;
+          ts_state = 0;
+        }
+      }
+      return {uint32_t(init_finish), false};
+    case 0x210:
+      return {uint32_t(ts_state), write};
+    case 0x214:
+      if (write)
+        self_start = (value & 1) != 0;
+      return {uint32_t(self_start), false};
+    default:
+      return {0, true};
+    }
   }
 
   // ── 数据面读口 ──
-  TaskEntry const& Task(uint64_t idx) const {
+  TaskEntry const &Task(uint64_t idx) const {
     LOGCHECK(idx < kTaskChainNum, "CfgReg: task_chain 下标越界。");
     return chain[idx];
   }
-  TsRoute const& Route(uint64_t pid) const {
-    LOGCHECK(pid < kTsRouteNum, "CfgReg: ROUTER_TABLE 下标越界。");
-    return route[pid];
+  TsRoute const &Route(uint64_t pid) const {
+    return route[pid & (kTsRouteNum - 1)];
   }
-  // Router 送来的 PID 对的是哪一个搬入任务：在 wait_wake 的项里找 path_id 相同、
-  // 这个用户还没做完的最低一项。同一个 PID 可以对多个任务。找不到返回
+  // Router 送来的 PID 对的是哪一个搬入任务：在 wait_wake 的项里找 path_id
+  // 相同、 这个用户还没做完的最低一项。同一个 PID 可以对多个任务。找不到返回
   // kTaskChainNum。
   uint64_t MatchDatain(uint64_t pid, uint64_t done) const {
     for (uint64_t i = 0; i < kTaskChainNum; ++i) {
-      TaskEntry const& t = chain[i];
-      if (!t.valid || !t.IsDataIn() || t.path_id != pid) continue;
-      if ((done >> i) & 1u) continue;
+      TaskEntry const &t = chain[i];
+      if (!t.valid || !t.IsDataIn() || t.path_id != pid)
+        continue;
+      if ((done >> i) & 1u)
+        continue;
       return i;
     }
     return kTaskChainNum;
@@ -120,7 +226,9 @@ class CfgReg : public BachModule {
   bool TriggerChainEn() const { return trigger_chain_en; }
   bool InitFinished() const { return init_finish; }
   bool WeightsMode() const { return weights_mode_on; }
-  bool DatainValid() const { return datain_valid; }
+  bool DatainValid() const {
+    return datain_valid && datain_pc_written && datain_attr_written;
+  }
   // 任务链写过至少一项，或者 datain 任务写过。
   bool HasTask() const { return task_written || datain_valid; }
   uint64_t DatainPc() const { return datain_pc; }
@@ -130,68 +238,114 @@ class CfgReg : public BachModule {
   }
   uint64_t TsState() const { return ts_state; }
 
- protected:
+protected:
   void Step() override {
+    apb->pready = 1;
+    apb->pslverr = 0;
+    if (!apb->psel.Get() || !apb->penable.Get())
+      apb_accepted = false;
+    else if (!apb_accepted) {
+      auto result = Access(apb->paddr.Get(), apb->pwrite.Get(),
+                           apb->pwdata.Get(), apb->pstrb.Get());
+      apb->prdata = result.data;
+      apb->pslverr = result.error;
+      apb_accepted = true;
+    }
     state = ts_state;
     TracePerCycle("ts_state", ts_state);
   }
 
- private:
+private:
+  static TaskEntry PreserveReserved(TaskEntry next, TaskEntry const &previous) {
+    if (uint64_t(next.send_unit) > 2)
+      next.send_unit = previous.send_unit;
+    if (uint64_t(next.recv_unit) > 2)
+      next.recv_unit = previous.recv_unit;
+    if (uint64_t(next.task_type) > 5)
+      next.task_type = previous.task_type;
+    return next;
+  }
   void DeriveMasks() {
     data_in_mask = through_end_mask = 0;
     for (uint64_t i = 0; i < kTaskChainNum; ++i) {
-      if (!chain[i].valid) break;
-      if (chain[i].IsDataIn()) data_in_mask |= 1ull << i;
+      if (!chain[i].valid)
+        break;
+      if (chain[i].IsDataIn())
+        data_in_mask |= 1ull << i;
       through_end_mask |= 1ull << i;
-      if (chain[i].end) break;
+      if (chain[i].end)
+        break;
     }
   }
 
   // 写 TS_INIT_FINISH 时查整张配置表。权重加载时不查。
   void Check() {
     ts_state = 0;
-    if (weights_mode_on) return;
-    bool bad = false;
+    if (weights_mode_on) {
+      ts_state = kStateChainError;
+      return;
+    }
+    bool bad = !chain[0].valid || stream_num == 0;
     uint64_t valid_cnt = 0, end_cnt = 0;
     bool hole = false, seen_invalid = false, after_end = false;
     for (uint64_t i = 0; i < kTaskChainNum; ++i) {
-      TaskEntry const& t = chain[i];
+      TaskEntry const &t = chain[i];
+      if (pc_written[i] != attr_written[i])
+        bad = true;
       if (!t.valid) {
         seen_invalid = true;
         continue;
       }
-      if (seen_invalid) hole = true;       // 任务不连续设置 valid
-      if (end_cnt > 0) after_end = true;   // End 后面还有 valid
+      if (seen_invalid)
+        hole = true; // 任务不连续设置 valid
+      if (end_cnt > 0)
+        after_end = true; // End 后面还有 valid
+      if (!pc_written[i] || !attr_written[i] || uint64_t(t.send_unit) > 2 ||
+          uint64_t(t.recv_unit) > 2 || uint64_t(t.task_type) > 5)
+        bad = true;
       ++valid_cnt;
-      if (t.end) ++end_cnt;
+      if (t.end)
+        ++end_cnt;
       // 单 task：重发的搬出与 reduce 必须标 credit_en；P2P 重发的搬入必须标
       // wait_wake。
-      if ((t.task_type == TaskType::kReissueOut ||
-           t.task_type == TaskType::kReduce) && !t.credit_en) {
+      if (t.task_type == TaskType::kReissueOut && !t.credit_en) {
         bad = true;
       }
-      if (t.task_type == TaskType::kP2pReissueIn && !t.wait_wake) bad = true;
+      if (t.task_type == TaskType::kP2pReissueIn && !t.wait_wake)
+        bad = true;
       // 重发搬入配对的那一项必须是重发的搬出任务。
       if (t.task_type == TaskType::kP2pReissueIn ||
           t.task_type == TaskType::kBcastReissueIn) {
-        TaskEntry const& out = chain[t.p2p_reissue_tid];
-        if (!out.valid || out.task_type != TaskType::kReissueOut) bad = true;
+        if (t.p2p_reissue_tid >= kTaskChainNum) {
+          bad = true;
+          continue;
+        }
+        TaskEntry const &out = chain[t.p2p_reissue_tid];
+        if (!out.valid || out.task_type != TaskType::kReissueOut)
+          bad = true;
       }
     }
-    if (hole || after_end || end_cnt > 1) bad = true;
-    if (valid_cnt > 0 && end_cnt == 0) bad = true;
+    if (hole || after_end || end_cnt > 1)
+      bad = true;
+    if (valid_cnt > 0 && end_cnt == 0)
+      bad = true;
     // 自启动模式下 task_chain 与 datain_task 都要配。
-    if (self_start && (valid_cnt == 0 || !datain_valid)) bad = true;
-    if (bad) ts_state |= kStateChainError;
+    if (self_start && (valid_cnt == 0 || !datain_valid || !datain_pc_written ||
+                       !datain_attr_written))
+      bad = true;
+    if (bad)
+      ts_state |= kStateChainError;
   }
 
   std::array<TaskEntry, kTaskChainNum> chain;
+  std::array<bool, kTaskChainNum> pc_written{}, attr_written{};
   std::array<TsRoute, kTsRouteNum> route;
   std::array<bool, kTaskChainNum> flowctl_en{};
   std::array<uint64_t, kTaskChainNum> flowctl_window{};
 
   uint64_t datain_pc = 0;
   bool weights_mode_on = false, datain_valid = false;
+  bool datain_pc_written = false, datain_attr_written = false;
   bool task_written = false;
   uint64_t stream_num = kStreamNum;
   bool self_start = false;
@@ -203,9 +357,11 @@ class CfgReg : public BachModule {
   uint64_t data_in_mask = 0, through_end_mask = 0;
 
   Logic64 state;
+  std::shared_ptr<TsApbPort> apb;
+  bool apb_accepted = false;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

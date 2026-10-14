@@ -1,7 +1,8 @@
 // TS 的行为基线。
 //
-// 头两个用例看整条通路：单 stream 单 task 从 trigger 走到退休，三步的链逐步推进。
-// 其余覆盖写口冲突、提前完成的 datain 被跳过、表满时反压 trigger、逐级 reduce
+// 头两个用例看整条通路：单 stream 单 task 从 trigger
+// 走到退休，三步的链逐步推进。 其余覆盖写口冲突、提前完成的 datain
+// 被跳过、表满时反压 trigger、逐级 reduce
 // 任务一项一项下发、配置检查这几条最容易实现错的。
 
 #include <gtest/gtest.h>
@@ -9,9 +10,9 @@
 #include <memory>
 #include <vector>
 
+#include "bach/ip/chip/core/ts/ts.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/core/ts/ts.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -32,14 +33,22 @@ TaskEntry MakeTask(SendUnit unit, bool end, bool dsa = true) {
   return t;
 }
 
+TaskEntry DatainTask(SendUnit unit, bool end, bool dsa = true) {
+  auto t = MakeTask(unit, end, dsa);
+  t.wait_wake = true;
+  return t;
+}
+
 // 扮演 Router：在指定拍推一笔 trigger，看见 ready 就撤。
 class RouterSide : public BachModule {
- public:
-  RouterSide(ClockPtr c, Ts& sched, uint64_t fire_at, uint64_t uid,
+public:
+  RouterSide(ClockPtr c, Ts &sched, uint64_t fire_at, uint64_t uid,
              uint64_t pid = 0)
       : BachModule(c, "router"), ts(sched), at(fire_at), user(uid), path(pid) {}
 
   bool sent = false;
+  bool trigger_hold = false;
+  uint64_t trigger_at = 0;
   // 同一个 user 在这一拍再推一笔 trigger，0 表示不推。
   uint64_t again_at = 0;
   bool sent_again = false;
@@ -50,18 +59,26 @@ class RouterSide : public BachModule {
   uint64_t credit_req_seen = 0;
   bool retire_hold = false;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
-    if (!sent && now >= at) {
-      ts.Trigger().Drive(user, path, /*reissue=*/false);
-      if (ts.Trigger().Ready()) sent = true;
-    } else if (again_at != 0 && !sent_again && now >= again_at) {
-      ts.Trigger().Drive(user, path, /*reissue=*/false);
-      if (ts.Trigger().Ready()) sent_again = true;
-    } else {
+    bool first = !sent && now >= at;
+    bool second = sent && again_at && !sent_again && now >= again_at;
+    if (first || second) {
+      if (!trigger_hold) {
+        ts.Trigger().Drive(user, path, false);
+        trigger_hold = true;
+        trigger_at = now;
+      } else if (now >= trigger_at + 2 && ts.Trigger().Ready()) {
+        if (first)
+          sent = true;
+        else
+          sent_again = true;
+        trigger_hold = false;
+        ts.Trigger().Idle();
+      }
+    } else
       ts.Trigger().Idle();
-    }
     // Router 侧一律收下退休请求。
     //
     // 一次 valid/ready 握手最少两拍：发送方拉 valid，接收方下一拍拉 accepted，
@@ -79,21 +96,22 @@ class RouterSide : public BachModule {
     }
     ts.Credit().RetireReq().DriveAccepted(accept_retire);
     // credit 申请也一律收下，但不授予（除非测试另接）。
-    if (ts.Credit().Req().Valid()) ++credit_req_seen;
+    if (ts.Credit().Req().Valid())
+      ++credit_req_seen;
     ts.Credit().Req().DriveReady(true);
     ts.Credit().Grant().Idle();
     ts.Done().RdcDone().Idle();
   }
 
- private:
-  Ts& ts;
+private:
+  Ts &ts;
   uint64_t at, user, path;
 };
 
 // 扮演三个 RV core 与它们的 DSA：收 task，隔几拍两路 ACK 一起报。
 class UnitSide : public BachModule {
- public:
-  UnitSide(ClockPtr c, Ts& sched, uint64_t lat, uint64_t at = 0,
+public:
+  UnitSide(ClockPtr c, Ts &sched, uint64_t lat, uint64_t at = 0,
            uint64_t which = 0)
       : BachModule(c, "units"), ts(sched), latency(lat), inject_at(at),
         inject_task(which) {}
@@ -101,7 +119,7 @@ class UnitSide : public BachModule {
   uint64_t dte_cmds = 0, mu_cmds = 0, vu_cmds = 0;
   std::vector<uint64_t> dte_tasks;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     Serve(ts.DteCmd(), 0, dte_cmds, now, &dte_tasks);
@@ -124,9 +142,9 @@ class UnitSide : public BachModule {
     }
   }
 
- private:
-  void Serve(TaskCmdPort& cmd, uint64_t u, uint64_t& cnt, uint64_t now,
-             std::vector<uint64_t>* log) {
+private:
+  void Serve(TaskCmdPort &cmd, uint64_t u, uint64_t &cnt, uint64_t now,
+             std::vector<uint64_t> *log) {
     // 同一笔会连着两拍出现在端口上（TS 要等 ready 打一拍才撤 valid），按
     // (stream, task) 认它，不重复受理。
     if (cmd.Valid() && fire[u] == 0) {
@@ -138,20 +156,21 @@ class UnitSide : public BachModule {
         stream[u] = s;
         task[u] = t;
         last_key[u] = key;
-        if (log) log->push_back(t);
+        if (log)
+          log->push_back(t);
         fire[u] = now + latency;
       }
     }
     cmd.DriveReady(fire[u] == 0 || fire[u] > now);
   }
 
-  Ts& ts;
+  Ts &ts;
   uint64_t latency;
   uint64_t inject_at = 0, inject_task = 0;
   std::array<uint64_t, 3> fire{}, stream{}, task{}, last_key{};
 };
 
-}  // namespace
+} // namespace
 
 // 步 6 的判据：单 stream 单 task 从 trigger 到 retire 走完。
 TEST(BachTs, OneUserRunsFromTriggerToRetire) {
@@ -162,7 +181,7 @@ TEST(BachTs, OneUserRunsFromTriggerToRetire) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
-    ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, /*end=*/true));
+    ts.Cfg().WriteTask(0, DatainTask(SendUnit::kDte, /*end=*/true));
     ts.InitFinish();
 
     RouterSide router(clk, ts, /*at=*/2, /*user=*/77);
@@ -178,11 +197,11 @@ TEST(BachTs, OneUserRunsFromTriggerToRetire) {
     slot_free = !ts.Table().Peek(0).valid;
   }
   RT::Reset();
-  EXPECT_EQ(dte_cmds, 1u);      // 下发了一笔
-  EXPECT_EQ(retire_seen, 1u);   // 走到了退休
+  EXPECT_EQ(dte_cmds, 1u);    // 下发了一笔
+  EXPECT_EQ(retire_seen, 1u); // 走到了退休
   EXPECT_EQ(retire_user, 77u);
-  EXPECT_TRUE(slot_free);       // Router 收下后才清 valid
-  EXPECT_EQ(head, tail);        // 推了 head_ptr，表空了
+  EXPECT_TRUE(slot_free); // Router 收下后才清 valid
+  EXPECT_EQ(head, tail);  // 推了 head_ptr，表空了
 }
 
 // 一条三步的链：DTE → MU → VU，逐步推进，最后退休。
@@ -192,7 +211,7 @@ TEST(BachTs, WalksTheWholeChain) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
-    ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, false));
+    ts.Cfg().WriteTask(0, DatainTask(SendUnit::kDte, false));
     ts.Cfg().WriteTask(1, MakeTask(SendUnit::kMu, false));
     ts.Cfg().WriteTask(2, MakeTask(SendUnit::kVu, true));
     ts.InitFinish();
@@ -223,12 +242,12 @@ TEST(BachTs, WritePortPriorityOnSameStream) {
 
     // 手动接两个口，同一拍写同一个 stream。install 的优先级高于 create。
     class TwoWriters : public BachModule {
-     public:
-      TwoWriters(ClockPtr c, StreamTable& target)
+    public:
+      TwoWriters(ClockPtr c, StreamTable &target)
           : BachModule(c, "tw"), tab(target) {}
       uint64_t install_ok = 0, create_ok = 0;
 
-     protected:
+    protected:
       void Step() override {
         uint64_t now = CycleNow();
         if (now == 1) {
@@ -249,18 +268,21 @@ TEST(BachTs, WritePortPriorityOnSameStream) {
           tab.Port(kWrCreate).Drive(b);
         } else if (now == 3) {
           // accepted 是 Stream_table 上一拍写的，所以要晚一拍读
-          if (tab.Port(kWrInstall).Accepted()) ++install_ok;
-          if (tab.Port(kWrCreate).Accepted()) ++create_ok;
+          if (tab.Port(kWrInstall).Accepted())
+            ++install_ok;
+          if (tab.Port(kWrCreate).Accepted())
+            ++create_ok;
           tab.Port(kWrInstall).Idle();
         } else if (now > 3) {
-          if (tab.Port(kWrCreate).Accepted()) ++create_ok;
+          if (tab.Port(kWrCreate).Accepted())
+            ++create_ok;
           tab.Port(kWrCreate).Idle();
           tab.Port(kWrInstall).Idle();
         }
       }
 
-     private:
-      StreamTable& tab;
+    private:
+      StreamTable &tab;
     };
     TwoWriters tw(clk, table);
     clk->Continue(20 * kPeriod);
@@ -282,17 +304,17 @@ TEST(BachTs, SkipsCompletedDatainTask) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
     // task0 普通、task1 是 datain、task2 普通收尾
-    ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, false));
+    ts.Cfg().WriteTask(0, DatainTask(SendUnit::kDte, false));
     TaskEntry din = MakeTask(SendUnit::kDte, false);
-    din.wait_wake = true;   // 这一项是 datain，PID 与 trigger 带的不同
+    din.wait_wake = true; // 这一项是 datain，PID 与 trigger 带的不同
     din.path_id = 9;
     ts.Cfg().WriteTask(1, din);
     ts.Cfg().WriteTask(2, MakeTask(SendUnit::kDte, true));
     ts.InitFinish();
 
     RouterSide router(clk, ts, 2, 99);
-    // 第 8 拍注入一笔 task1 的完成：datain 提前到了，done_bitmap 的第 1 位先亮，
-    // 而主线的 task_id 还停在 0。
+    // 第 8 拍注入一笔 task1 的完成：datain 提前到了，done_bitmap 的第 1
+    // 位先亮， 而主线的 task_id 还停在 0。
     UnitSide units(clk, ts, 2, /*inject_at=*/8, /*inject_task=*/1);
 
     clk->Continue(150 * kPeriod);
@@ -307,7 +329,8 @@ TEST(BachTs, SkipsCompletedDatainTask) {
 }
 
 // 同一个 user 先后两个 token：第一个的链走完，第 60 拍第二个进来。retire 为真时
-// 第一个的 stream 已经退休，第二个建新表项把链再走一遍，返回 DTE 收到的 task 序列。
+// 第一个的 stream 已经退休，第二个建新表项把链再走一遍，返回 DTE 收到的 task
+// 序列。
 std::vector<uint64_t> RunSameUserTwice(bool retire) {
   std::vector<uint64_t> tasks;
   {
@@ -336,10 +359,10 @@ std::vector<uint64_t> RunSameUserTwice(bool retire) {
 // 系统保证有效的 user_id 唯一。一个 user 的 stream 退休了，同一个号再进来就是新
 // 用户，链从头走一遍；stream 做完了还没退休时同一个号又进来，任务链上没有这条
 // path 还没做的搬入任务，这一笔没有去处，断言失败。
-TEST(BachTs, SameUserBeforeRetireIsAnError) {
+TEST(BachTs, SameUserCanCreateAgainAfterValidOnlyRetirement) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EQ(RunSameUserTwice(true), std::vector<uint64_t>({0, 1, 0, 1}));
-  EXPECT_DEATH(RunSameUserTwice(false), "");
+  EXPECT_EQ(RunSameUserTwice(false), std::vector<uint64_t>({0, 1, 0, 1}));
 }
 
 // 表满时拉低 trigger 的 ready，不丢请求。
@@ -350,22 +373,30 @@ TEST(BachTs, BackpressuresTriggerWhenTableIsFull) {
     ClockPtr clk = MakeClock(0, kPeriod);
     TsCfg cfg;
     Ts ts(clk, "ts", cfg);
-    ts.Cfg().SetStreamNum(2);   // 只给两个坑
+    ts.Cfg().SetStreamNum(2); // 只给两个坑
     // 一条永远不完成的链：没有 RV core 来 ack，表项一直占着
-    ts.Cfg().WriteTask(0, MakeTask(SendUnit::kDte, true));
+    ts.Cfg().WriteTask(0, DatainTask(SendUnit::kDte, true));
     ts.InitFinish();
 
     // 连着灌四个不同的用户
     class ManyUsers : public BachModule {
-     public:
-      ManyUsers(ClockPtr c, Ts& sched) : BachModule(c, "mu"), ts(sched) {}
-      uint64_t sent = 0;
+    public:
+      ManyUsers(ClockPtr c, Ts &sched) : BachModule(c, "mu"), ts(sched) {}
+      uint64_t sent = 0, issued_at = 0;
+      bool holding = false;
 
-     protected:
+    protected:
       void Step() override {
         if (sent < 4) {
-          ts.Trigger().Drive(100 + sent, 0, false);
-          if (ts.Trigger().Ready()) ++sent;
+          if (!holding) {
+            ts.Trigger().Drive(100 + sent, 0, false);
+            holding = true;
+            issued_at = CycleNow();
+          } else if (CycleNow() >= issued_at + 2 && ts.Trigger().Ready()) {
+            ++sent;
+            holding = false;
+            ts.Trigger().Idle();
+          }
         } else {
           ts.Trigger().Idle();
         }
@@ -373,7 +404,7 @@ TEST(BachTs, BackpressuresTriggerWhenTableIsFull) {
         ts.Credit().Req().DriveReady(true);
         ts.Credit().Grant().Idle();
         ts.Done().RdcDone().Idle();
-        ts.DteCmd().DriveReady(false);   // RV core 一直不收
+        ts.DteCmd().DriveReady(false); // RV core 一直不收
         ts.MuCmd().DriveReady(false);
         ts.VuCmd().DriveReady(false);
         for (uint64_t u = 0; u < 3; ++u) {
@@ -382,15 +413,16 @@ TEST(BachTs, BackpressuresTriggerWhenTableIsFull) {
         }
       }
 
-     private:
-      Ts& ts;
+    private:
+      Ts &ts;
     };
     ManyUsers mu(clk, ts);
     clk->Continue(100 * kPeriod);
     RT::JoinAll();
     uint64_t used = 0;
     for (uint64_t i = 0; i < kStreamNum; ++i) {
-      if (ts.Table().Peek(i).valid) ++used;
+      if (ts.Table().Peek(i).valid)
+        ++used;
     }
     created = used;
   }
@@ -408,26 +440,29 @@ TEST(BachTs, ReduceIssuesOneTaskAtATime) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
+    ts.Cfg().WriteTask(0, DatainTask(SendUnit::kDte, false));
     for (uint64_t k = 0; k < 3; ++k) {
       TaskEntry red = MakeTask(SendUnit::kDte, k == 2);
       red.task_type = TaskType::kReduce;
       red.credit_en = true;
-      ts.Cfg().WriteTask(k, red);
+      ts.Cfg().WriteTask(k + 1, red);
     }
     ts.InitFinish();
 
     class ReduceDriver : public BachModule {
-     public:
-      ReduceDriver(ClockPtr c, Ts& sched) : BachModule(c, "rd"), ts(sched) {}
+    public:
+      ReduceDriver(ClockPtr c, Ts &sched) : BachModule(c, "rd"), ts(sched) {}
       std::vector<uint64_t> tasks, at;
       uint64_t finished = 0, admitted = 0, finished_at_25 = 0;
 
-     protected:
+    protected:
       void Step() override {
         uint64_t now = CycleNow();
         // trigger 驱一次，按序号认，保持几拍再撤。
-        if (now == 2) ts.Trigger().Drive(55, 0, false);
-        if (now == 8) ts.Trigger().Idle();
+        if (now == 2)
+          ts.Trigger().Drive(55, 0, false);
+        if (now == 8)
+          ts.Trigger().Idle();
         ts.Credit().RetireReq().DriveAccepted(true);
         ts.Credit().Req().DriveReady(true);
         ts.Credit().Grant().Idle();
@@ -435,11 +470,13 @@ TEST(BachTs, ReduceIssuesOneTaskAtATime) {
         ts.MuCmd().DriveReady(true);
         ts.VuCmd().DriveReady(true);
 
-        TaskCmdPort& cmd = ts.DteCmd();
+        TaskCmdPort &cmd = ts.DteCmd();
         if (cmd.Valid() && cmd.Seq() != last_seq) {
           last_seq = cmd.Seq();
-          tasks.push_back(cmd.task_id.Get());
-          at.push_back(now);
+          if (cmd.task_id.Get() > 0) {
+            tasks.push_back(cmd.task_id.Get());
+            at.push_back(now);
+          }
         }
 
         // 第 k 项：本地两路 ACK 在 20 + 30k 拍，Router 的 Reduce Done 在
@@ -449,20 +486,24 @@ TEST(BachTs, ReduceIssuesOneTaskAtATime) {
           ts.DsaDone(u).Idle();
         }
         ts.Done().RdcDone().Idle();
+        if (now == 10)
+          ts.DsaDone(0).Drive(0, 0);
         for (uint64_t k = 0; k < 3; ++k) {
           if (now == 20 + 30 * k) {
-            ts.RvDone(0).Drive(0, k);
-            ts.DsaDone(0).Drive(0, k);
+            ts.RvDone(0).Drive(0, k + 1);
+            ts.DsaDone(0).Drive(0, k + 1);
           }
-          if (now == 30 + 30 * k) ts.Done().RdcDone().Drive(55, k);
+          if (now == 30 + 30 * k)
+            ts.Done().RdcDone().Drive(55, k);
         }
-        if (now == 25) finished_at_25 = ts.Done().Finished();
+        if (now == 25)
+          finished_at_25 = ts.Done().Finished();
         finished = ts.Done().Finished();
         admitted = ts.Credit().RmemAdmitted();
       }
 
-     private:
-      Ts& ts;
+    private:
+      Ts &ts;
       uint64_t last_seq = 0;
     };
     ReduceDriver rd(clk, ts);
@@ -476,11 +517,11 @@ TEST(BachTs, ReduceIssuesOneTaskAtATime) {
   }
   RT::Reset();
   ASSERT_EQ(tasks.size(), 3u) << "三项各下发一次";
-  EXPECT_EQ(tasks, (std::vector<uint64_t>{0, 1, 2}));
+  EXPECT_EQ(tasks, (std::vector<uint64_t>{1, 2, 3}));
   EXPECT_GT(at[1], 30u) << "第 1 项等第 0 项的 Reduce Done 之后才发";
   EXPECT_GT(at[2], 60u) << "第 2 项等第 1 项的 Reduce Done 之后才发";
-  EXPECT_EQ(finished_at_25, 0u) << "本地两路 ACK 只算搬完";
-  EXPECT_EQ(finished, 3u);
+  EXPECT_EQ(finished_at_25, 2u) << "本地两路 ACK 只算搬完";
+  EXPECT_EQ(finished, 4u);
   EXPECT_EQ(admitted, 3u);
 }
 
@@ -488,8 +529,9 @@ namespace {
 
 constexpr uint64_t kNever = ~0ull;
 
-// 自启动 core 的配置：Task 0 发 MU、只收 RV core 那一路，第 2 个任务发 DTE 并收尾。
-void WriteSelfStartChain(Ts& ts, uint64_t stream_num) {
+// 自启动 core 的配置：Task 0 发 MU、只收 RV core 那一路，第 2 个任务发 DTE
+// 并收尾。
+void WriteSelfStartChain(Ts &ts, uint64_t stream_num) {
   ts.Cfg().WriteTask(0, MakeTask(SendUnit::kMu, /*end=*/false, /*dsa=*/false));
   ts.Cfg().WriteTask(1, MakeTask(SendUnit::kDte, /*end=*/true, /*dsa=*/false));
   ts.Cfg().WriteDatainTask(0x300, /*weights_mode=*/false);
@@ -501,20 +543,20 @@ void WriteSelfStartChain(Ts& ts, uint64_t stream_num) {
 // 扮演自启动 core 上的三个 RV core：命令来一笔收一笔，隔几拍报 RV core 那一路
 // 完成。几笔可以同时在做，一拍报一笔。完成带回用户号，自启动的表项靠它补。
 class SelfStartUnits : public BachModule {
- public:
+public:
   struct Got {
     uint64_t at = 0, unit = 0, stream = 0, task = 0;
   };
 
-  SelfStartUnits(ClockPtr c, Ts& sched, std::array<uint64_t, 3> lat)
+  SelfStartUnits(ClockPtr c, Ts &sched, std::array<uint64_t, 3> lat)
       : BachModule(c, "units"), ts(sched), latency(lat) {}
 
   std::vector<Got> issued, done;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
-    TaskCmdPort* cmd[3] = {&ts.DteCmd(), &ts.MuCmd(), &ts.VuCmd()};
+    TaskCmdPort *cmd[3] = {&ts.DteCmd(), &ts.MuCmd(), &ts.VuCmd()};
     for (uint64_t u = 0; u < 3; ++u) {
       // 同一笔会连着几拍出现在端口上，按序号认它。
       if (cmd[u]->Valid() && cmd[u]->Seq() != last_seq[u]) {
@@ -536,18 +578,18 @@ class SelfStartUnits : public BachModule {
     }
   }
 
- private:
-  Ts& ts;
+private:
+  Ts &ts;
   std::array<uint64_t, 3> latency;
   std::array<uint64_t, 3> last_seq{}, head{};
   std::array<std::vector<std::pair<uint64_t, Got>>, 3> pending;
 };
 
-}  // namespace
+} // namespace
 
 // 自启动 core：上电建满 stream_num 条链，各条链的 Task 0 按链的次序连续下发，
-// 不等上一条链的 Task 0 做完（《Task Scheduler》：同时激活16个用户的自启动任务，
-// 进行task仲裁，进行发射）。
+// 不等上一条链的 Task 0 做完（《Task
+// Scheduler》：同时激活16个用户的自启动任务， 进行task仲裁，进行发射）。
 TEST(BachTs, SelfStartIssuesTask0sBackToBack) {
   std::vector<SelfStartUnits::Got> issued, done;
   {
@@ -555,7 +597,7 @@ TEST(BachTs, SelfStartIssuesTask0sBackToBack) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
     WriteSelfStartChain(ts, 4);
-    RouterSide router(clk, ts, kNever, 0);
+    RouterSide router(clk, ts, 2, 0);
     // MU 做 Task 0 用 10 拍，DTE 做第 2 个任务用 40 拍。
     SelfStartUnits units(clk, ts, {40, 10, 10});
     clk->Continue(200 * kPeriod);
@@ -565,11 +607,13 @@ TEST(BachTs, SelfStartIssuesTask0sBackToBack) {
   }
   RT::Reset();
   std::vector<SelfStartUnits::Got> t0_issue, t0_done;
-  for (auto const& g : issued) {
-    if (g.task == 0) t0_issue.push_back(g);
+  for (auto const &g : issued) {
+    if (g.task == 0)
+      t0_issue.push_back(g);
   }
-  for (auto const& g : done) {
-    if (g.task == 0) t0_done.push_back(g);
+  for (auto const &g : done) {
+    if (g.task == 0)
+      t0_done.push_back(g);
   }
   ASSERT_GE(t0_issue.size(), 4u);
   ASSERT_GE(t0_done.size(), 1u);
@@ -592,12 +636,13 @@ TEST(BachTs, SelfStartChainRestartsInPlace) {
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
     WriteSelfStartChain(ts, 2);
-    RouterSide router(clk, ts, kNever, 0);
+    RouterSide router(clk, ts, 2, 0);
     SelfStartUnits units(clk, ts, {5, 5, 5});
     clk->Continue(200 * kPeriod);
     RT::JoinAll();
-    for (auto const& g : units.issued) {
-      if (g.task == 0) t0_streams.push_back(g.stream);
+    for (auto const &g : units.issued) {
+      if (g.task == 0)
+        t0_streams.push_back(g.stream);
     }
     retire_seen = router.retire_seen;
     in_flight = ts.Table().Occupied();
@@ -609,7 +654,7 @@ TEST(BachTs, SelfStartChainRestartsInPlace) {
   for (uint64_t k = 0; k < 6; ++k) {
     EXPECT_EQ(t0_streams[k], k % 2) << "重新激活的链排到队尾，两条链轮流";
   }
-  EXPECT_GE(retire_seen, 2u) << "退休照常先交给 Router";
+  EXPECT_EQ(retire_seen, 0u) << "SELF_START重新激活不发外部退休脉冲";
   EXPECT_EQ(in_flight, 2u) << "表一直是满的";
   EXPECT_TRUE(both_valid);
   EXPECT_FALSE(third_valid) << "只在原来的 stream 上重新激活";
@@ -617,15 +662,17 @@ TEST(BachTs, SelfStartChainRestartsInPlace) {
 
 // 自启动 core 在权重加载模式下写 TS_INIT_FINISH 不建表：这一阶段不启动任务链。
 // 切回业务模式再写一次，才建满 stream_num 个表项。
-TEST(BachTs, SelfStartBuildsNothingInWeightsMode) {
+TEST(BachTs, SelfStartSubmissionWaitsForFirstTrigger) {
   bool built_in_weights = true, built_in_business = false;
   uint64_t in_flight = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Ts ts(clk, "ts", TsCfg{});
-    ts.Cfg().WriteTask(0, MakeTask(SendUnit::kMu, /*end=*/false, /*dsa=*/false));
-    ts.Cfg().WriteTask(1, MakeTask(SendUnit::kDte, /*end=*/true, /*dsa=*/false));
+    ts.Cfg().WriteTask(0,
+                       MakeTask(SendUnit::kMu, /*end=*/false, /*dsa=*/false));
+    ts.Cfg().WriteTask(1,
+                       MakeTask(SendUnit::kDte, /*end=*/true, /*dsa=*/false));
     ts.Cfg().SetSelfStart(true);
     ts.Cfg().SetStreamNum(4);
     ts.Cfg().WriteDatainTask(0x300, /*weights_mode=*/true);
@@ -638,8 +685,8 @@ TEST(BachTs, SelfStartBuildsNothingInWeightsMode) {
   }
   RT::Reset();
   EXPECT_FALSE(built_in_weights) << "权重加载模式不启动任务链";
-  EXPECT_TRUE(built_in_business);
-  EXPECT_EQ(in_flight, 4u);
+  EXPECT_FALSE(built_in_business);
+  EXPECT_EQ(in_flight, 0u);
 }
 
 // 配置检查：一条链上出现两个 TASK_END 是错的。
@@ -668,7 +715,7 @@ TEST(BachTs, RejectsHoleInChain) {
     ClockPtr clk = MakeClock(0, kPeriod);
     CfgReg cfg(clk, "cfg");
     cfg.WriteTask(0, MakeTask(SendUnit::kDte, false));
-    cfg.WriteTask(2, MakeTask(SendUnit::kMu, true));  // 跳过了 1
+    cfg.WriteTask(2, MakeTask(SendUnit::kMu, true)); // 跳过了 1
     cfg.SetInitFinish();
     clk->Continue(10 * kPeriod);
     RT::JoinAll();
@@ -676,4 +723,20 @@ TEST(BachTs, RejectsHoleInChain) {
   }
   RT::Reset();
   EXPECT_TRUE((state & kStateChainError) != 0);
+}
+
+TEST(BachTs, InvalidConfigurationDoesNotStartSelfStartStreamsOnTrigger) {
+  EnsureSlots();
+  auto clock = MakeClock(0, kPeriod);
+  Ts ts(clock, "ts", TsCfg{});
+  ts.Cfg().SetSelfStart(true);
+  ts.Cfg().WriteDatainTask(0x100, false);
+  ts.InitFinish();
+  RouterSide router(clock, ts, 2, 77);
+  clock->Continue(30);
+  RT::JoinAll();
+  EXPECT_FALSE(ts.Cfg().InitFinished());
+  EXPECT_EQ(ts.Table().Occupied(), 0u);
+  EXPECT_EQ(ts.Matcher().Made(), 0u);
+  RT::Reset();
 }

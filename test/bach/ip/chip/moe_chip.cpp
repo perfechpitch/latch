@@ -1,10 +1,10 @@
 // 一层 MoE 按 EP6+TP8 的 KN 拆分摊在一颗 chip、一行两颗 chip 与一个 EP 组上。
 //
-// 每颗 chip 上：B core 把 token 广播进 8 个计算 core，各 core 算 token 第 s 段的
-// FC1、FC3 部分和，沿 chip 内归约链逐跳在 Router 上相加，链尾交回 dot core；dot
-// core 做 silu·dot·量化，把 FC2 输入广播回本 chip；8 个 core 各算 FC2 第 s 段，另
-// 外 7 个各走自己那一条 path 发给 dot core，拼成 concat。一行 chip 的 dot core 沿
-// 行链逐跳归约进本行 R core，各行 R core 逐行相加。
+// 每颗 chip 上：B core 把 token 广播进 8 个计算 core，各 core 算 token 第 s
+// 段的 FC1、FC3 部分和，沿 chip 内归约链逐跳在 Router 上相加，链尾交回 dot
+// core；dot core 做 silu·dot·量化，把 FC2 输入广播回本 chip；8 个 core 各算 FC2
+// 第 s 段，另 外 7 个各走自己那一条 path 发给 dot core，拼成 concat。一行 chip
+// 的 dot core 沿 行链逐跳归约进本行 R core，各行 R core 逐行相加。
 //
 // 与 core/moe.cpp 那一份的区别：那一份只在一个 core 内，这里多出 chip 内归约、
 // FC2 输入广播、concat、行链与 R core 那几段。配置表与 kernel 都从编译器产的
@@ -21,9 +21,9 @@ using namespace latch::bach::moetest;
 namespace {
 
 // 建 n 颗 chip：第 i 颗在第 gy[i] 层、第 gx[i] 列。
-std::vector<std::unique_ptr<Chip>> MakeChips(
-    ClockPtr clk, std::vector<uint64_t> const& gx,
-    std::vector<uint64_t> const& gy) {
+std::vector<std::unique_ptr<Chip>> MakeChips(ClockPtr clk,
+                                             std::vector<uint64_t> const &gx,
+                                             std::vector<uint64_t> const &gy) {
   std::vector<std::unique_ptr<Chip>> owned;
   for (uint64_t i = 0; i < gx.size(); ++i) {
     ChipCfg cfg;
@@ -37,14 +37,15 @@ std::vector<std::unique_ptr<Chip>> MakeChips(
   return owned;
 }
 
-std::vector<Chip*> Raw(std::vector<std::unique_ptr<Chip>> const& owned) {
-  std::vector<Chip*> all;
-  for (auto const& c : owned) all.push_back(c.get());
+std::vector<Chip *> Raw(std::vector<std::unique_ptr<Chip>> const &owned) {
+  std::vector<Chip *> all;
+  for (auto const &c : owned)
+    all.push_back(c.get());
   return all;
 }
 
 // 一颗 chip 的 8 个计算 core 铺好数据。chip 是它在 EP 组里的序号。
-void SetUpChipData(Chip& chip, uint64_t group, uint64_t index) {
+void SetUpChipData(Chip &chip, uint64_t group, uint64_t index) {
   for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
     SetUpCoreData(chip.GetCore(CoreOfSlot(chip.Gx(), slot)), group, index,
                   slot);
@@ -52,19 +53,20 @@ void SetUpChipData(Chip& chip, uint64_t group, uint64_t index) {
 }
 
 // R core 链首那一个只有本行结果，槽的另一半一直是 0，等一笔就走。
-void MarkRcoreHead(Chip& chip) {
+void MarkRcoreHead(Chip &chip) {
   chip.GetCore(kRcoreId).Smem().Poke(kn::kRcHeadOff, {1, 0, 0, 0});
 }
 
-}  // namespace
+} // namespace
 
 // 一颗第一列 chip 上的完整一段：token 从 W 口进来，坐在那个口上的 core5 不派角
 // 色、只往上转一跳，B core（core0）留一份在自己的 Matrix Mem，再广播给 8 个计算
-// core。部分和归约进 dot core core9，FC2 输入广播回本 chip，8 段 FC2 在 dot core
-// 上拼成 concat。它是行首也是行尾，行链只有它一跳，结果经 core4 从 E 口出来。各
-// 步中间量与出口上的结果都与参考实现逐字节相同。
+// core。部分和归约进 dot core core9，FC2 输入广播回本 chip，8 段 FC2 在 dot
+// core 上拼成 concat。它是行首也是行尾，行链只有它一跳，结果经 core4 从 E
+// 口出来。各 步中间量与出口上的结果都与参考实现逐字节相同。
 TEST(BachMoeChip, BcoreStartsTheBroadcast) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 20000;
   Vectors want = ReadVectors("moe_chip.txt");
   ASSERT_FALSE(want.Empty())
@@ -78,7 +80,7 @@ TEST(BachMoeChip, BcoreStartsTheBroadcast) {
     TraceInto("moe_chip_bcast");
     ClockPtr clk = MakeClock(0, kPeriod);
     auto owned = MakeChips(clk, {0}, {0});
-    std::vector<Chip*> all = Raw(owned);
+    std::vector<Chip *> all = Raw(owned);
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
 
@@ -98,9 +100,10 @@ TEST(BachMoeChip, BcoreStartsTheBroadcast) {
     got = harness.out_msgs;
     inflight = harness.inflight;
     std::cerr << "  停钟在第 " << harness.stopped_at << " 拍\n";
-    Core& bcore = all[0]->GetCore(0);
+    Core &bcore = all[0]->GetCore(0);
     kept = bcore.Mmem().Peek(BcoreLand(0), kn::kBcTokenBytes);
-    kept_scale = bcore.Mmem().PeekScale(BcoreLand(0), kn::kBcTokenBytes / 32);
+    kept_scale = bcore.Mmem().Peek(BcoreLand(0) + kn::kBcTokenBytes,
+                                   kn::kBcTokenBytes / 32);
     CheckChip(*all[0], want, "c0.");
   }
   TraceDone();
@@ -117,7 +120,8 @@ TEST(BachMoeChip, BcoreStartsTheBroadcast) {
 // dot core core8 加上本 chip 的结果，落进 R core core9 的 Matrix Mem。R core 是
 // 链首，另一半一直是 0，加完经 core4 从 E 口出去。
 TEST(BachMoeChip, OneRowOfTwoChipsLandsInTheReductionCore) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 30000;
   Vectors want = ReadVectors("moe_two_groups.txt");
   ASSERT_FALSE(want.Empty())
@@ -133,13 +137,14 @@ TEST(BachMoeChip, OneRowOfTwoChipsLandsInTheReductionCore) {
     TraceInto("moe_chip_two_groups");
     ClockPtr clk = MakeClock(0, kPeriod);
     auto owned = MakeChips(clk, {kIndex[0], kIndex[1]}, {0, 0});
-    std::vector<Chip*> all = Raw(owned);
+    std::vector<Chip *> all = Raw(owned);
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
 
     BundleStat st = LoadBundle(all, BundleRoot(), "moe_two_groups");
     ASSERT_EQ(st.chips, 2u);
-    for (uint64_t i = 0; i < 2; ++i) SetUpChipData(*all[i], 0, kIndex[i]);
+    for (uint64_t i = 0; i < 2; ++i)
+      SetUpChipData(*all[i], 0, kIndex[i]);
     MarkRcoreHead(*all[1]);
 
     SpreadHarness harness(clk, all, {{0, kChipE, 1, kChipW}}, feed, sink, 0,
@@ -164,10 +169,11 @@ TEST(BachMoeChip, OneRowOfTwoChipsLandsInTheReductionCore) {
 
 // 一个 EP 组的 8 颗 chip：两层 × 4 列，token 从左上角那颗 chip 的 W 口进它的 B
 // core，一发覆盖 64 个计算 core。每颗 chip 各做 chip 内那一段；两行各沿行链归约
-// 进本行 R core，第 0 行 R core 是链首，结果从 S 口下到第 1 行 R core 的后一半，
-// 第 1 行 R core 加完经 core4 从 E 口出去。
+// 进本行 R core，第 0 行 R core 是链首，结果从 S 口下到第 1 行 R core
+// 的后一半， 第 1 行 R core 加完经 core4 从 E 口出去。
 TEST(BachMoeChip, OneEpGroupHasTwoReductionCores) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 60000;
   constexpr uint64_t kRows = 2;
   constexpr uint64_t kChips = kRows * kGridX;
@@ -188,14 +194,15 @@ TEST(BachMoeChip, OneEpGroupHasTwoReductionCores) {
       gy.push_back(i / kGridX);
     }
     auto owned = MakeChips(clk, gx, gy);
-    std::vector<Chip*> all = Raw(owned);
+    std::vector<Chip *> all = Raw(owned);
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
 
     BundleStat st = LoadBundle(all, BundleRoot(), "moe_group");
     ASSERT_EQ(st.chips, kChips);
     ASSERT_EQ(st.cores, kChips * kMaxCorePerChip);
-    for (uint64_t i = 0; i < kChips; ++i) SetUpChipData(*all[i], 0, i);
+    for (uint64_t i = 0; i < kChips; ++i)
+      SetUpChipData(*all[i], 0, i);
     MarkRcoreHead(*all[kGridX - 1]);
 
     SpreadHarness harness(clk, all, GridLinks(kRows, kGridX), feed, sink, 0,
@@ -210,7 +217,7 @@ TEST(BachMoeChip, OneEpGroupHasTwoReductionCores) {
       CheckChip(*all[i], want, "c" + std::to_string(i) + ".");
     }
     for (uint64_t r = 0; r < kRows; ++r) {
-      Chip& last = *all[(r + 1) * kGridX - 1];
+      Chip &last = *all[(r + 1) * kGridX - 1];
       rows.push_back(RcoreHalf(last, 0));
       prev.push_back(RcoreHalf(last, 1));
     }
@@ -232,11 +239,12 @@ TEST(BachMoeChip, OneEpGroupHasTwoReductionCores) {
 // 装模型那一段接在业务前面：权重不经 SCP，走 Host 那条 msg 流从数据面进来。
 // 每个计算 core 的 W1 与 W2 在组内第 0 个专家那一片的开头各留两个 tile 不预
 // 置，数据与 scale 都清成 0，改由两个包搬进 Matrix Mem。一条 path 走遍格子里的
-// 8 个 core，落在哪一个由包头的 path_core_mask 挑，落到哪个地址由包头的 dst_addr
-// 定，scale 随包头的标记落进 scale 旁带。各 core 都收够之后切业务模式，再发
-// token，结果与权重全部预置时逐字节相同。
+// 8 个 core，落在哪一个由包头的 path_core_mask 挑，落到哪个地址由包头的
+// dst_addr 定，scale 随包头的标记落进 scale 旁带。各 core
+// 都收够之后切业务模式，再发 token，结果与权重全部预置时逐字节相同。
 TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   constexpr uint64_t kMaxCycles = 60000;
   // 一个包 64 flit，留够它走完那棵树再落进 Matrix Mem。
   constexpr uint64_t kGap = 400;
@@ -255,8 +263,8 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
     TraceInto("moe_chip_weights");
     ClockPtr clk = MakeClock(0, kPeriod);
     auto owned = MakeChips(clk, {0}, {0});
-    std::vector<Chip*> all = Raw(owned);
-    Chip& chip = *all[0];
+    std::vector<Chip *> all = Raw(owned);
+    Chip &chip = *all[0];
     C2cBridge feed(clk, "feed", StubCfg());
     C2cBridge sink(clk, "sink", StubCfg());
 
@@ -264,7 +272,7 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
     SetUpChipData(chip, 0, 0);
     std::vector<MessagePtr> load;
     for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      Core& core = chip.GetCore(CoreOfSlot(0, slot));
+      Core &core = chip.GetCore(CoreOfSlot(0, slot));
       for (uint64_t at : kHole) {
         std::vector<uint8_t> data = core.Mmem().Peek(at, kWeightsChunk);
         std::vector<uint8_t> scale = core.Mmem().PeekScale(at, kWeightsScale);
@@ -288,7 +296,8 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
       for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
         std::vector<uint8_t> n =
             chip.GetCore(CoreOfSlot(0, slot)).Smem().Peek(kWeightsCntOff, 4);
-        if (n[0] < 2) return false;
+        if (n[0] < 2)
+          return false;
       }
       return true;
     };
@@ -305,7 +314,7 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
     std::cerr << "  切业务模式在第 " << switched_at << " 拍，停钟在第 "
               << harness.stopped_at << " 拍\n";
     for (uint64_t slot = 0; slot < kCorePerChip; ++slot) {
-      Core& core = chip.GetCore(CoreOfSlot(0, slot));
+      Core &core = chip.GetCore(CoreOfSlot(0, slot));
       for (uint64_t at : kHole) {
         landed.push_back(core.Mmem().Peek(at, kWeightsChunk));
         landed.push_back(core.Mmem().PeekScale(at, kWeightsScale));
@@ -324,4 +333,35 @@ TEST(BachMoeChip, WeightsComeInBeforeTheFirstToken) {
   }
   CheckInflight(inflight);
   CheckOut(got, want.Bytes("out"), kn::RcLand(kUserId, 0));
+}
+
+TEST(BachMoeChip, MoreThanOneStreamWindowContinuesToRun) {
+  EnsureSlots(kMaxCorePerChip + 1);
+  TraceInto("moe_chip_stream_window");
+  {
+    auto clock = MakeClock(0, kPeriod);
+    auto owned = MakeChips(clock, {0}, {0});
+    auto chips = Raw(owned);
+    C2cBridge feed(clock, "feed", StubCfg()), sink(clock, "sink", StubCfg());
+    LoadBundle(chips, BundleRoot(), "moe_chip");
+    SetUpChipData(*chips[0], 0, 0);
+    SpreadHarness driver(clock, chips, {}, feed, sink, 0, kChipW, 0, kChipE, 2,
+                         12000, MessagePtr());
+    driver.token_gap = 100;
+    for (uint64_t user = 0; user < 32; ++user)
+      driver.tokens.push_back(MakeToken(kBcastInPath, 0, user, user));
+    clock->Continue();
+    RT::JoinAll();
+    auto &broadcast = chips[0]->GetCore(0);
+    EXPECT_EQ(broadcast.GetTs().Credit().Reactivated(), 32u);
+    EXPECT_EQ(broadcast.GetDte().Completion().Error(), 0u);
+    EXPECT_EQ(broadcast.GetDte().Committer().Occupied(), 0u);
+    std::set<uint64_t> users;
+    for (auto const &message : driver.out_msgs)
+      users.insert(message->user_id);
+    EXPECT_EQ(users.size(), 32u);
+    EXPECT_EQ(driver.out_msgs.size(), 32u);
+  }
+  TraceDone();
+  RT::Reset();
 }

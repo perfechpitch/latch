@@ -225,14 +225,6 @@ class Router {
     xbar->SetReduceAdmission(
         [this](Message const& m) { return reduce->CanAcceptHead(m); },
         [this](Message const& m) { reduce->ReserveHead(m); });
-    xbar->SetWaitingInput([this](Message const& m) {
-      return reduce->WaitingInput(m);
-    });
-    for (auto& st : stations) {
-      st->SetAdmitBypass([this](Message const& m) {
-        return xbar->WaitingInput(m);
-      });
-    }
     xbar->SetForwardSkip([this](uint64_t user, uint64_t path) {
       core_station->NoteSkipReissue(user, path);
     });

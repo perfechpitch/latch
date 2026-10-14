@@ -81,7 +81,6 @@ class MuIssueQ : public BachModule {
     ++issue_pending;
     start_task = cfg.task_id;
     start_user = cfg.user_id;
-    start_stream = cfg.stream_id;
   }
 
   // 取第一笔还停在某个阶段的任务。顺序执行：只看队头那几笔。
@@ -133,7 +132,6 @@ class MuIssueQ : public BachModule {
   // 要用：这一层自己的信号在 chip 级被 TraceOffScope 关掉了。
   uint64_t StartTask() const { return start_task; }
   uint64_t StartUser() const { return start_user; }
-  uint64_t StartStream() const { return start_stream; }
 
   bool Quiescent() const override { return q.empty(); }
 
@@ -149,7 +147,7 @@ class MuIssueQ : public BachModule {
   uint64_t next_seq = 0, issue_pending = 0;
 
   // 刚进队列那一笔的身份，供 Core 层发波形。
-  uint64_t start_task = 0, start_user = 0, start_stream = 0;
+  uint64_t start_task = 0, start_user = 0;
 
   Logic64 depth, issued;
 };

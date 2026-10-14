@@ -182,7 +182,6 @@ class VuConfigRegister : public BachModule {
   uint64_t TaskTriggers() const { return task_trigger_cnt; }
   uint64_t TaskTriggerTask() const { return trig_task; }
   uint64_t TaskTriggerUser() const { return trig_user; }
-  uint64_t TaskTriggerStream() const { return trig_stream; }
   uint64_t BlockedWrites() const { return blocked_cnt; }
   // 配置通路上生效的寄存器写次数。
   uint64_t Writes() const { return write_cnt; }
@@ -548,7 +547,6 @@ class VuConfigRegister : public BachModule {
       ++task_trigger_cnt;
       trig_task = inst->task_id;
       trig_user = inst->user_id;
-      trig_stream = inst->stream_id;
     }
   }
 
@@ -636,7 +634,7 @@ class VuConfigRegister : public BachModule {
   uint64_t trigger_cnt = 0, blocked_cnt = 0, write_cnt = 0;
   // task 起点的 trigger：笔数、最近一笔的身份，以及判「这条是不是 task 的第一条」
   // 要的两样（收过没有、上一条的 EVENT_EN）。判据见 Trigger()。
-  uint64_t task_trigger_cnt = 0, trig_task = 0, trig_user = 0, trig_stream = 0;
+  uint64_t task_trigger_cnt = 0, trig_task = 0, trig_user = 0;
   bool any_trig = false, prev_event_en = false;
   uint64_t status = 0, macro_inst_left = 0, error_code = 0, profile_ctrl = 0;
   uint64_t error_info = 0, snap_addr = 0;

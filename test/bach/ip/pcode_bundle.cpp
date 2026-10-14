@@ -370,12 +370,28 @@ class PcodeHarness : public BachModule {
   void Step() override {
     uint64_t now = CycleNow();
     LinkEndPtr feed_in = in_stub.FromCore();
-    // 第 1 名在第 2 拍注入，之后每一名隔 kUserGap 拍。
-    if (sent < msgs.size() && now >= next_at) {
-      MessagePtr m = msgs[sent++];
-      feed_in->flit.Drive(/*vc=*/0, /*is_head=*/true, /*is_tail=*/true, m->size, m);
-      std::cerr << "  用户 " << m->user_id << " 注入，第 " << now << " 拍\n";
-      next_at = now + kUserGap;
+    // 第 1 名在第 2 拍开始注入，一拍一个 flit（每个最多 kFlitBytes，Header
+    // Parser 按 flit 收）；发完一名再隔 kUserGap 拍发下一名。
+    if (!cur && sent < msgs.size() && now >= next_at) {
+      cur = msgs[sent];
+      beat = 0;
+      std::cerr << "  用户 " << cur->user_id << " 注入，第 " << now << " 拍\n";
+    }
+    if (cur) {
+      uint64_t total = cur->TotalBytes();
+      uint64_t flits = (total + kFlitBytes - 1) / kFlitBytes;
+      if (flits == 0) flits = 1;
+      uint64_t left = total - beat * kFlitBytes;
+      uint64_t n = left > kFlitBytes ? kFlitBytes : left;
+      bool last = beat + 1 == flits;
+      feed_in->flit.Drive(/*vc=*/0, /*is_head=*/beat == 0, /*is_tail=*/last, n,
+                          cur);
+      ++beat;
+      if (last) {
+        cur.reset();
+        ++sent;
+        next_at = now + kUserGap;
+      }
     } else {
       feed_in->flit.Idle();
     }
@@ -468,6 +484,8 @@ class PcodeHarness : public BachModule {
   std::vector<MessagePtr> msgs;
   uint64_t sent = 0;
   uint64_t next_at = 2;
+  MessagePtr cur;
+  uint64_t beat = 0;
   uint64_t last_sig = 0, last_change = 0;
 };
 
@@ -624,10 +642,6 @@ TEST(PcodeBundle, Ep1OneToken) {
                     << (t.busy ? " busy" : "") << (t.reserved ? " rsv" : "")
                     << " exp 0x" << std::hex << t.expect_mask << " got 0x"
                     << t.in_done_mask << std::dec;
-        }
-        for (auto const& p : red.parked) {
-          std::cerr << " park u" << p.user_id << " p" << p.path_id << " seq "
-                    << p.reduce_seq << " n" << p.flits;
         }
         if (red.deny_why != 0) {
           std::cerr << " deny " << red.deny_why << " u" << red.deny_user

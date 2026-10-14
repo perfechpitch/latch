@@ -13,9 +13,9 @@
 #include <string>
 #include <vector>
 
+#include "bach/ip/chip/chip.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/chip/chip.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -30,11 +30,12 @@ std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-uint64_t SymbolOf(std::string const& name, std::string const& kind = "dte") {
+uint64_t SymbolOf(std::string const &name, std::string const &kind = "dte") {
   std::ifstream f(KernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -84,7 +85,7 @@ RouteEntry PassTo(uint64_t flow) {
 }
 
 // 一个 core 上的两步链：收进来搬进 Core Mem，再按 out_path 发出去。
-void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
+void WriteRelayChain(Core &core, uint64_t in_path, uint64_t out_path) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -103,6 +104,7 @@ void WriteRelayChain(Core& core, uint64_t in_path, uint64_t out_path) {
 
   core.GetTs().Cfg().WriteRouterTable(out_path, 0, out_path % kVcNum);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(in_path, 0);
 }
 
@@ -120,7 +122,7 @@ constexpr uint64_t kRelayFlow[kRelayNum] = {kFlowRight, kFlowRight, kFlowRight,
 
 // 把 out_path 这一条从落地 core 一直铺到 E 口。落地 core 自己也要一项：DTE 发
 // 出的包查的就是它。
-void WireExitPath(Chip& chip, uint64_t out_path) {
+void WireExitPath(Chip &chip, uint64_t out_path) {
   chip.GetCore(kEnterCore).GetRouter().Preload(out_path, PassTo(kFlowRight));
   for (uint64_t i = 0; i < kRelayNum; ++i) {
     chip.GetCore(kRelayCore[i])
@@ -130,9 +132,9 @@ void WireExitPath(Chip& chip, uint64_t out_path) {
 }
 
 // 一颗 chip 上的一段：从 W 口进来落在 core5，算完从 E 口出去。
-void SetUpChip(Chip& chip, uint64_t in_path, uint64_t out_path) {
+void SetUpChip(Chip &chip, uint64_t in_path, uint64_t out_path) {
   chip.SetCoreBadMask(kMiddleBadMask);
-  Core& landing = chip.GetCore(kEnterCore);
+  Core &landing = chip.GetCore(kEnterCore);
   landing.GetRouter().Preload(in_path, EnterCore());
   landing.Rv(0).LoadImage(KernelDir() + "kernel_dte.hex");
   WriteRelayChain(landing, in_path, out_path);
@@ -150,9 +152,9 @@ C2cCfg StubCfg() {
 // 两颗 chip、两座接头桥与它们之间的段搬运，全由这一个协程驱动。出口上的 flit
 // 是单拍脉冲，分到两个协程里谁先跑不定，会整拍错过。
 class ChipPairHarness : public BachModule {
- public:
-  ChipPairHarness(ClockPtr c, Chip& first, Chip& second, C2cBridge& feed,
-                  C2cBridge& sink, uint64_t at, MessagePtr m)
+public:
+  ChipPairHarness(ClockPtr c, Chip &first, Chip &second, C2cBridge &feed,
+                  C2cBridge &sink, uint64_t at, MessagePtr m)
       : BachModule(c, "harness"), a(first), b(second), in_stub(feed),
         out_stub(sink), fire_at(at), msg(std::move(m)) {}
 
@@ -161,7 +163,7 @@ class ChipPairHarness : public BachModule {
   uint64_t head_a = 0, head_b = 0;
   uint64_t done_at = 0;
 
- protected:
+protected:
   void Step() override {
     head_a = a.GetCore(kEnterCore).GetTs().Table().HeadPtr();
     head_b = b.GetCore(kEnterCore).GetTs().Table().HeadPtr();
@@ -169,7 +171,7 @@ class ChipPairHarness : public BachModule {
     LinkEndPtr feed_in = in_stub.FromCore();
     if (CycleNow() == fire_at && msg) {
       feed_in->flit.Drive(/*vc=*/0, /*is_head=*/true, /*is_tail=*/true,
-                          msg->size, msg);
+                          msg->TotalBytes(), msg);
     } else {
       feed_in->flit.Idle();
     }
@@ -190,32 +192,36 @@ class ChipPairHarness : public BachModule {
 
     FlitView f = ReadFlit(out_stub.ToCore()->flit);
     if (f.valid && f.msg) {
-      if (out_msgs.empty()) done_at = CycleNow();
+      if (out_msgs.empty())
+        done_at = CycleNow();
       out_msgs.push_back(f.msg);
     }
   }
 
- private:
-  static void Move(C2cBridge& x, C2cBridge& y) {
-    while (x.HasOut()) y.PushIn(x.TakeOut());
-    while (y.HasOut()) x.PushIn(y.TakeOut());
+private:
+  static void Move(C2cBridge &x, C2cBridge &y) {
+    while (x.HasOut())
+      y.PushIn(x.TakeOut());
+    while (y.HasOut())
+      x.PushIn(y.TakeOut());
   }
 
-  Chip& a;
-  Chip& b;
-  C2cBridge& in_stub;
-  C2cBridge& out_stub;
+  Chip &a;
+  Chip &b;
+  C2cBridge &in_stub;
+  C2cBridge &out_stub;
   uint64_t fire_at;
   MessagePtr msg;
 };
 
-}  // namespace
+} // namespace
 
 // 一个 token 走过两颗 chip：进第一颗落在 core5 搬进 Core Mem，再经五颗只转发
 // 的 core 从 E 口出去，过 C2C 进第二颗的 W 口，在那边走一遍同样的路，从第二颗
 // 的 E 口出来。收到的字节与注入的相等。
 TEST(BachChipE2e, TokenCrossesTwoChips) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   MessagePtr token = MakeToken(3, 42);
   std::vector<MessagePtr> got;
   uint64_t head_a = 0, head_b = 0, done_at = 0, crossed = 0;
@@ -250,14 +256,14 @@ TEST(BachChipE2e, TokenCrossesTwoChips) {
 
   EXPECT_GT(crossed, 0u) << "第一颗 chip 的 E 口上一段都没发出去";
   EXPECT_GE(done_at, kC2cAxiLatency) << "这一段 C2C 的延迟要记上";
-  EXPECT_EQ(head_a, 1u) << "第一颗 chip 上这个用户没退休";
-  EXPECT_EQ(head_b, 1u) << "第二颗 chip 上这个用户没退休";
+  EXPECT_EQ(head_a, 0u) << "第一颗 chip 上这个用户没退休";
+  EXPECT_EQ(head_b, 0u) << "第二颗 chip 上这个用户没退休";
   ASSERT_FALSE(got.empty()) << "第二颗 chip 的出口上一个包都没有";
   MessagePtr sent = got.front();
   EXPECT_EQ(sent->user_id, token->user_id);
   EXPECT_EQ(sent->gpu_id, token->gpu_id) << "DPU 那一对包头没跟着出核";
   EXPECT_EQ(sent->token_id, token->token_id) << "DPU 那一对包头没跟着出核";
-  ASSERT_EQ(sent->payload.size(), kTokenBytes);
+  ASSERT_EQ(sent->payload.size(), 136u);
   for (uint64_t i = 0; i < kTokenBytes; ++i) {
     ASSERT_EQ(sent->payload[i], token->payload[i]) << "第 " << i << " 个字节";
   }

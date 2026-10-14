@@ -19,45 +19,68 @@
 #include <optional>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
 
 class DteOutArb : public BachModule {
- public:
+public:
   // 四个出核通道，与 Router 的四个 VC 一一对应。
   static constexpr uint64_t kOutNum = kVcNum;
 
-  DteOutArb(ClockPtr clock, const std::string& name, uint64_t parent = 0,
+  DteOutArb(ClockPtr clock, const std::string &name, uint64_t parent = 0,
             bool tick = true)
       : BachModule(clock, name, parent, tick),
-        out(std::make_shared<CoreDataPort>(clock)),
-        sent(clock) {
+        out(std::make_shared<CoreDataPort>(clock)), sent(clock) {
     for (uint64_t i = 0; i < kOutNum; ++i) {
       side[i] = std::make_shared<CoreDataPort>(clock);
+      tail_done[i] = std::make_shared<Logic64>(clock);
     }
   }
 
   std::shared_ptr<CoreDataPort> LanePort(uint64_t i) const {
     return side.at(i);
   }
-  CoreDataPort& Out() { return *out; }
+  CoreDataPort &Out() { return *out; }
   void AttachOut(std::shared_ptr<CoreDataPort> p) { out = std::move(p); }
 
+  std::shared_ptr<Logic64> TailDonePtr(uint64_t lane) const {
+    return tail_done.at(lane);
+  }
+  void AttachCredits(std::shared_ptr<DteTxCreditPort> p, VcDepth const &depth,
+                     uint64_t shared) {
+    credit = std::move(p);
+    private_depth = private_cr = depth;
+    shared_depth = shared_cr = shared;
+  }
+  uint64_t Credits(uint64_t vc) const { return private_cr.at(vc) + shared_cr; }
   uint64_t Sent() const { return sent_cnt; }
   bool Quiescent() const override {
-    for (auto const& q : slot) {
-      if (!q.empty()) return false;
+    for (auto const &q : slot) {
+      if (!q.empty())
+        return false;
     }
     return !held;
   }
 
- protected:
+protected:
   void Step() override {
+    if (credit) {
+      auto returned = credit->returned_mask.Get();
+      for (uint64_t vc = 0; vc < kVcNum; ++vc)
+        if (returned & (1ull << vc)) {
+          if (private_cr[vc] < private_depth[vc])
+            ++private_cr[vc];
+          else {
+            LOGCHECK(shared_cr < shared_depth, "DTE TX: excess credit return");
+            ++shared_cr;
+          }
+        }
+    }
     Drain();
     Collect();
     Forward();
@@ -68,7 +91,7 @@ class DteOutArb : public BachModule {
     TracePerCycle("sent", sent_cnt);
   }
 
- private:
+private:
   static constexpr uint64_t kSlotDepth = 4;
   static constexpr uint64_t kSlotMark = 2;
 
@@ -81,19 +104,25 @@ class DteOutArb : public BachModule {
 
   // 上一拍发出去的被 Router 收下了没有。
   void Drain() {
-    if (!held) return;
-    if (!out->Ready()) return;
+    if (!held)
+      return;
+    if (!out->Ready())
+      return;
     bool last = held->last;
     held.reset();
     ++sent_cnt;
     // 带 tlast 的那一拍发完才让出授权。
-    if (last) grant = (grant + 1) % kOutNum;
+    if (last && held_lane < kOutNum)
+      *tail_done[held_lane] = held_seq;
+    if (last)
+      grant = (grant + 1) % kOutNum;
   }
 
   void Collect() {
     for (uint64_t i = 0; i < kOutNum; ++i) {
       CoreDataView d = ReadCoreData(*side[i]);
-      if (!d.valid || d.seq == seen[i]) continue;
+      if (!d.valid || d.seq == seen[i])
+        continue;
       LOGCHECK(slot[i].size() < kSlotDepth,
                "DteOutArb: 那几格满了。通道应当先看 ready 再发。");
       seen[i] = d.seq;
@@ -109,14 +138,32 @@ class DteOutArb : public BachModule {
     }
     for (uint64_t k = 0; k < kOutNum; ++k) {
       uint64_t i = (grant + k) % kOutNum;
-      if (slot[i].empty()) continue;
+      if (slot[i].empty())
+        continue;
       // 一个包发到一半时不换通道。
-      if (in_frame && i != grant) continue;
+      if (!credit && in_frame && i != grant)
+        continue;
+      uint64_t vc = slot[i].front().vc;
+      if (credit && !private_cr[vc] && !shared_cr)
+        continue;
       held = slot[i].front();
       slot[i].pop_front();
+      held_lane = i;
+      held_seq = held->msg ? held->msg->seq : 0;
       grant = i;
       in_frame = !held->last;
       out->Drive(held->bytes, held->last, held->hdr, held->vc, held->msg);
+      if (credit) {
+        if (private_cr[vc])
+          --private_cr[vc];
+        else
+          --shared_cr;
+        if (held->last)
+          *tail_done[i] = held_seq;
+        held.reset();
+        ++sent_cnt;
+        grant = (i + 1) % kOutNum;
+      }
       return;
     }
     out->Idle();
@@ -127,6 +174,10 @@ class DteOutArb : public BachModule {
   std::array<uint64_t, kOutNum> seen{};
   std::shared_ptr<CoreDataPort> out;
 
+  std::shared_ptr<DteTxCreditPort> credit;
+  VcDepth private_depth{}, private_cr{};
+  uint64_t shared_depth = 0, shared_cr = 0, held_lane = 0, held_seq = 0;
+  std::array<std::shared_ptr<Logic64>, kOutNum> tail_done;
   std::optional<Beat> held;
   bool in_frame = false;
   uint64_t grant = 0, sent_cnt = 0;
@@ -134,7 +185,7 @@ class DteOutArb : public BachModule {
   Logic64 sent;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

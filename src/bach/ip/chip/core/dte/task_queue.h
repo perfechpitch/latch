@@ -14,12 +14,10 @@
 //
 // 这两样都只被所属 Lane 的 Step() 触碰，所以是普通类，不是 ClkModule。
 
-#include <cstdint>
 #include <deque>
-#include <vector>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_types.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
@@ -35,8 +33,8 @@ struct ActiveCtx {
   uint64_t outstanding = 0; // 已发出未回来的请求数
   bool issue_done = false;
   bool drained = false;
-  uint64_t filled = 0;      // 出核读回来的数据已经填了多少字节进包
-  bool sent_first = false;  // 出核这一包的首拍发出去没有：首拍带 thdr
+  uint64_t filled = 0;     // 出核读回来的数据已经填了多少字节进包
+  bool sent_first = false; // 出核这一包的首拍发出去没有：首拍带 thdr
   // 写那一侧：落地到整包的第几个字节，与当前这一拍里落了多少：一拍跨两段时分两
   // 次写。
   uint64_t off = 0;
@@ -46,31 +44,28 @@ struct ActiveCtx {
   // 进核：这一笔的包头上下文落库没有（收下第一拍时落一次；落 Hmem 还是 Core Mem
   // 看段 0 端点）。
   bool hdr_stored = false;
-  // 进核 topK 段：pcode 把 topK 放在 payload 里，按段长攒齐再写 MU。
-  std::vector<uint8_t> topk_acc;
-  // 出核读请求的发出顺序：1 读 Core Mem，0 读 Matrix Mem。两块存储延迟不同，
-  // 响应按到达先收进各自的队列，再按这个顺序配回。
-  std::deque<uint8_t> rd_mem;
 };
 
 class TaskQueue {
- public:
-  bool Full() const { return q.size() >= kTaskQueueDepth; }
+public:
+  explicit TaskQueue(uint64_t n = kTaskQueueDepth) : capacity(n) {}
+  bool Full() const { return q.size() >= capacity; }
   bool Empty() const { return q.empty(); }
   uint64_t Size() const { return q.size(); }
 
-  void Push(Descriptor const& d) {
+  void Push(Descriptor const &d) {
     LOGCHECK(!Full(), "DTE TaskQueue: 满了。Commit 应当先确认有空位再接纳。");
     q.push_back(d);
   }
-  Descriptor const& Front() const { return q.front(); }
+  Descriptor const &Front() const { return q.front(); }
   void Pop() { q.pop_front(); }
 
- private:
+private:
+  uint64_t capacity;
   std::deque<Descriptor> q;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

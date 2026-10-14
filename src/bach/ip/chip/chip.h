@@ -1,8 +1,8 @@
 #ifndef _LATCH_BACH_IP_CHIP_CHIP_
 #define _LATCH_BACH_IP_CHIP_CHIP_
 
-// Chip：一片里 2×5 共 10 个 core 的阵列，加四座 C2C Bridge、每 core 一个 ctrl_noc
-// 端点与一个 SCP 桩。
+// Chip：一片里 2×5 共 10 个 core 的阵列，加四座 C2C Bridge、每 core 一个
+// ctrl_noc 端点与一个 SCP 桩。
 //
 // 自己不打拍：这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与四座 Bridge 里，core 内
 // 的在各单元的模块里。
@@ -24,13 +24,13 @@
 #include <string>
 #include <vector>
 
-#include "base/log.h"
 #include "bach/ip/chip/c2c_bridge.h"
 #include "bach/ip/chip/chip_ports.h"
 #include "bach/ip/chip/core/core.h"
 #include "bach/ip/chip/ctrl_noc.h"
 #include "bach/ip/chip/scp.h"
 #include "bach/ip/link/link.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
@@ -49,7 +49,7 @@ enum ChipPort : uint64_t {
 };
 
 struct ChipCfg {
-  uint64_t gx = 0, gy = 0;   // 本 chip 在 LPU 里的坐标
+  uint64_t gx = 0, gy = 0; // 本 chip 在 LPU 里的坐标
   // 四个 C2C 口各一份参数。同层左右与同列上下用 C2C，跨 tray 那两处换纵向
   // 参数，接 PCIe Switch 的那个口用 PCIe ↔ Router，都由 LPU 按链路表填。
   std::array<C2cCfg, kChipPortNum> port{};
@@ -63,8 +63,8 @@ struct ChipCfg {
 };
 
 class Chip : public BachModule {
- public:
-  Chip(ClockPtr clock, const std::string& name, ChipCfg const& setting)
+public:
+  Chip(ClockPtr clock, const std::string &name, ChipCfg const &setting)
       : BachModule(clock, name, 0, setting.chip_tick), cfg(setting),
         cols(kChipCols) {
     uint64_t n = kChipCoreNum;
@@ -74,8 +74,8 @@ class Chip : public BachModule {
       ctx.gx = cfg.gx;
       ctx.gy = cfg.gy;
       ctx.tick = cfg.core_tick;
-      cores.push_back(std::make_unique<Core>(
-          clock, "core" + std::to_string(i), ctx, Id()));
+      cores.push_back(
+          std::make_unique<Core>(clock, "core" + std::to_string(i), ctx, Id()));
       // Ctrl-NOC 端点上跑的是 boot 期的配置写，不是业务数据，不记波形。
       {
         TraceOffScope off;
@@ -84,7 +84,8 @@ class Chip : public BachModule {
       }
     }
     scp = std::make_unique<ScpStub>(clock, "scp", n, Id(), false);
-    for (uint64_t i = 0; i < n; ++i) noc[i]->AttachCtrl(scp->CtrlPtr());
+    for (uint64_t i = 0; i < n; ++i)
+      noc[i]->AttachCtrl(scp->CtrlPtr());
 
     BuildLinks();
     BuildBridges();
@@ -94,18 +95,19 @@ class Chip : public BachModule {
   //
   // 两片对接就是把一侧的 TakeOut() 喂给另一侧的 PushIn()。C2C 上传的是段与
   // release，不是 flit。位宽转换与拆包合包在桥里做完了。
-  C2cBridge& Port(uint64_t d) { return *bridges.at(d); }
+  C2cBridge &Port(uint64_t d) { return *bridges.at(d); }
 
-  ScpStub& Scp() { return *scp; }
-  Core& GetCore(uint64_t i) { return *cores.at(i); }
-  CtrlNocEndpoint& Noc(uint64_t i) { return *noc.at(i); }
+  ScpStub &Scp() { return *scp; }
+  Core &GetCore(uint64_t i) { return *cores.at(i); }
+  CtrlNocEndpoint &Noc(uint64_t i) { return *noc.at(i); }
   uint64_t CoreNum() const { return cores.size(); }
   uint64_t Gx() const { return cfg.gx; }
   uint64_t Gy() const { return cfg.gy; }
-  // core_bad_mask 写进每个 core 的 Router，与 SCP 在 Router 配置阶段逐 core 写同
-  // 一个值等价。业务开始之前写完。
+  // core_bad_mask 写进每个 core 的 Router，与 SCP 在 Router 配置阶段逐 core
+  // 写同 一个值等价。业务开始之前写完。
   void SetCoreBadMask(uint64_t mask) {
-    for (auto& c : cores) c->SetCoreBadMask(mask);
+    for (auto &c : cores)
+      c->SetCoreBadMask(mask);
   }
   uint64_t CoreBadMask() { return cores[0]->GetRouter().Table().CoreBadMask(); }
 
@@ -113,13 +115,16 @@ class Chip : public BachModule {
   // TakeOut() 与 PushIn() 这一对直接改容器的方法。其余按 chip_tick：不挂时钟
   // 时就在这里接着跑，挂了就由本 chip 自己那个协程跑。
   void RunOutside() {
-    for (auto& b : bridges) b->RunStep();
-    if (!cfg.chip_tick) Step();
+    for (auto &b : bridges)
+      b->RunStep();
+    if (!cfg.chip_tick)
+      Step();
   }
 
   // 末级先做：链路在最外，SCP 在最里。
   void Step() override {
-    for (auto& l : links) l->RunStep();
+    for (auto &l : links)
+      l->RunStep();
     // core 自己挂时钟时不在这里推：它在自己那个协程里跑，读它的 Ready() 就是
     // 跨协程读普通成员。boot 期那两条通路（Deliver 与 SetCoreReady）只在
     // 由本层顺序驱动时走。
@@ -127,7 +132,8 @@ class Chip : public BachModule {
       scp->RunStep();
       return;
     }
-    for (auto& c : cores) c->RunStep();
+    for (auto &c : cores)
+      c->RunStep();
     for (uint64_t i = 0; i < noc.size(); ++i) {
       noc[i]->RunStep();
       Deliver(i);
@@ -139,16 +145,18 @@ class Chip : public BachModule {
   // 这个数要在停钟之后取：它翻的是各 core 内部的普通容器，core 各占协程时在
   // 协程外读就是跨协程读非 atomic 的量。
   bool Quiescent() const override {
-    for (auto const& c : cores) {
-      if (!c->Quiescent()) return false;
+    for (auto const &c : cores) {
+      if (!c->Quiescent())
+        return false;
     }
-    for (auto const& b : bridges) {
-      if (!b->Quiescent()) return false;
+    for (auto const &b : bridges) {
+      if (!b->Quiescent())
+        return false;
     }
     return scp->Quiescent();
   }
 
- private:
+private:
   // 同行相邻 core 的 left 与 right 用一对 Link 对接；core[i] 与 core[i+5] 的
   // mid 口直连。左右那一档担 10 T 的走线，mid 两端上下相对、没有走线段。
   void BuildLinks() {
@@ -161,15 +169,15 @@ class Chip : public BachModule {
       }
     }
     for (uint64_t c = 0; c < cols; ++c) {
-      Connect("mid" + std::to_string(c), c, uint64_t(Dir::kDirMid),
-              c + cols, uint64_t(Dir::kDirMid), LinkR2RMid());
+      Connect("mid" + std::to_string(c), c, uint64_t(Dir::kDirMid), c + cols,
+              uint64_t(Dir::kDirMid), LinkR2RMid());
     }
   }
 
   // 一对 Link：a 的出口到 b 的入口，b 的出口到 a 的入口。credit 的回程各走
   // 各的实例，与数据同参数。
-  void Connect(const std::string& name, uint64_t a, uint64_t da, uint64_t b,
-               uint64_t db, LinkParams const& params) {
+  void Connect(const std::string &name, uint64_t a, uint64_t da, uint64_t b,
+               uint64_t db, LinkParams const &params) {
     // 片内这几十条链路不记波形：一条链路上走了多少、堵没堵，在它两端那两个
     // RouterStation 的 forwarded 与 occupancy 上都读得出来，一颗 chip 五十多条
     // 链路各记三个信号，翻起来全是重复的。
@@ -186,8 +194,8 @@ class Chip : public BachModule {
              cores[b]->BackWire(db));
   }
 
-  void MakeLink(const std::string& name, uint64_t parent,
-                LinkParams const& params, LinkEndPtr from, LinkEndPtr to) {
+  void MakeLink(const std::string &name, uint64_t parent,
+                LinkParams const &params, LinkEndPtr from, LinkEndPtr to) {
     auto l = std::make_unique<Link>(clk, name, params, parent, false);
     l->AttachIn(std::move(from));
     l->AttachOut(std::move(to));
@@ -197,7 +205,7 @@ class Chip : public BachModule {
   // 每行左右两端的 core 各接一座 Bridge：core0 → N，core4 → E，core5 → W，
   // core9 → S。
   void BuildBridges() {
-    static const char* kNames[kChipPortNum] = {"n", "e", "w", "s"};
+    static const char *kNames[kChipPortNum] = {"n", "e", "w", "s"};
     uint64_t edge[kChipPortNum] = {0, cols - 1, cols, 2 * cols - 1};
     uint64_t dir[kChipPortNum] = {
         uint64_t(Dir::kDirLeft), uint64_t(Dir::kDirRight),
@@ -224,9 +232,13 @@ class Chip : public BachModule {
   // 走方法调用而不是端口：端点与目的模块都在装配这一个协程里，一拍里的次序由
   // RunStep 的调用顺序定死。
   void Deliver(uint64_t i) {
-    CfgEvent const& e = noc[i]->Event();
-    if (!e.valid) return;
-    cores[i]->CfgWrite(e.route, e.we, e.wdata);
+    CfgEvent const &e = noc[i]->Event();
+    if (!e.valid)
+      return;
+    if (e.we)
+      cores[i]->CfgWrite(e.route, true, e.wdata);
+    else
+      noc[i]->SetRdata(cores[i]->CfgRead(e.route));
   }
 
   ChipCfg cfg;
@@ -238,7 +250,7 @@ class Chip : public BachModule {
   std::unique_ptr<ScpStub> scp;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif
