@@ -615,6 +615,11 @@ kernel 清单按 RV core 分：
 </svg>
 ```
 
+M6 交还时顺手记一笔观测：`done_insts = inst_cnt − task_inst_start`（`task_inst_start` 在
+M1 接下队头那拍锁 `inst_cnt`），即这笔 task 从接下到交还执行过的指令数（含 `task_done`
+自己）。Core 层把它发成 `rv_insts_*` 三条标量波形，供 Perfetto 的 X-Core 段 args 用，不影响
+任何拍数与行为。
+
 ***
 
 ## 7　参数汇总
