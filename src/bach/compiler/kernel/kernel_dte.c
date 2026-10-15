@@ -37,8 +37,8 @@ static inline __attribute__((always_inline)) void dte_fire(u32 tpl) {
 /* 包头（段 0）地址。段 0 恒参与，端点由地址高 4 bit 译码选落点（见 bach.h
  * DTE_EP_*）：计算 core 打 header tag 落 Hmem（低 28 bit 给 stream_id）；B/R
  * core 写 Core Mem 纯地址（tag 0），它们的数据都进 Matrix Mem，Core Mem
- * 让给包头、按 用户分一块（64 B，够 48 B 包头上下文）。 */
-#define CMEM_HDR_STRIDE 0x40u
+ * 让给包头、按 用户分一块（32 B，即包头上下文大小）。 */
+#define CMEM_HDR_STRIDE 0x20u
 static inline u32 dte_hdr_item(u32 item) {
   return dte_ep(DTE_EP_HDR, stream_id() * 32u + item);
 }
@@ -422,7 +422,7 @@ TASK void task_dte_rc_reduce(void) {
 }
 
 /* B core 的链一：token 落进 Matrix Mem 的环形缓冲，落点按自己收下的笔数取模算，
- * scale 随它进 scale 旁带，topK 随它按 user_id 进 MU 的 topK 表，搬完置那一格的
+ * scale 与 topK 随数据连续落（一个 token 就是一块连续载荷），搬完置那一格的
  * valid。这里把这一格是哪个用户记下来，链二发的时候要按它认人。
  *
  * 记在第几格按自己收下的笔数算，与发方算落点用的是同一条规则 */
@@ -433,9 +433,8 @@ TASK void task_dte_bc_datain(void) {
   smem_write(BC_USER_OFF + (n % BC_SLOTS) * 4, user_id() | 0x80000000u);
   smem_write(BC_RECV_OFF, n + 1);
   u32 landing = bc_land(n);
-  dte_inbound(landing, BC_TOKEN_BYTES,
-              DTE_MODE_ROUTER_TO_MMEM | DTE_SCALE_VALID | DTE_WR_SHAREMEM_FLAG |
-                  DTE_TOPK_VALID,
+  dte_inbound(landing, BC_PACKET_BYTES,
+              DTE_MODE_ROUTER_TO_MMEM | DTE_WR_SHAREMEM_FLAG,
               BC_FLAG_OFF + (landing / BC_SLOT_BYTES) * 4u, user_id(), 0,
               dte_hdr_cmem(user_id()));
   hdr_pop();

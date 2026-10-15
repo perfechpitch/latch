@@ -1504,7 +1504,7 @@ rst_n低时rx_rdy、tx_vld、所有Memory请求、RV读返回、TS完成和SM写
 | Byte8～9，[191:176] | user_id | 改为任务UID |
 | Byte16～31，[127:0] | sw_aux | 保持所读16B |
 
-CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，不沿用当前48B C++字段序列化。
+CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，不沿用当前32B C++字段序列化。
 
 ### 六种配置场景
 
