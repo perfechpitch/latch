@@ -186,7 +186,8 @@ struct DteConfig {
       smem_data = v;
       return;
     case 18:
-      trans_mode = v & 0x3f7;
+      trans_mode = v & (DteSegValidShift() == kDteSegValidShiftPcode
+                            ? 0x3bf : 0x3f7);
       return;
     default:
       return;

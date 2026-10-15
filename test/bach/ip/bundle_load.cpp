@@ -96,6 +96,25 @@ protected:
 
 } // namespace
 
+TEST_F(BachBundleCheck, InactiveSpareCoresAreNotInitialized) {
+  std::string name = "inactive_adapter";
+  std::string dir = std::string(kCheckRoot) + "/" + name;
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream out(dir + "/" + name + ".bachir");
+    out << "BACHIR 11\nCHIP 0 0\n";
+    for (uint64_t p = 0; p < kChipCoreNum; ++p)
+      out << "CORE 0 " << p << " 3\n";
+  }
+  auto stat = LoadBundle({chip.get()}, kCheckRoot, name);
+  EXPECT_EQ(stat.tasks, 0u);
+  for (uint64_t p = 0; p < kChipCoreNum; ++p) {
+    auto const &cfg = chip->GetCore(p).GetTs().Cfg();
+    EXPECT_FALSE(cfg.InitFinished());
+    EXPECT_EQ(cfg.TsState(), 0u);
+  }
+}
+
 // 原样那一份：10 个 core 各一条 CORE，没有坏 core，B core 自启动。
 TEST_F(BachBundleCheck, TheCompiledBundleLoads) {
   std::vector<Chip *> all = {chip.get()};

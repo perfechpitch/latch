@@ -35,6 +35,18 @@ constexpr uint64_t kVuIoSize = 20 * 1024;
 // DTCM 8 KB，存 BSS、寄存器溢出与堆栈。排在 VU IO 之后。
 constexpr uint64_t kDtcmBase = 0x00020000;
 constexpr uint64_t kDtcmSize = 8 * 1024;
+// BachFlow 固件的 DTCM 窗口。与上面那一段是同一块存储的别名，落在 DTE
+// Core Mem 窗口里，路由优先级高于 Core Mem，访存不进 LSQ。
+constexpr uint64_t kDtcmAliasBase = 0x00100000;
+// 新 ABI 的栈顶：别名窗口的顶。TS 跳过 firmware 的 _start，模型要自己写 SP。
+constexpr uint64_t kBachflowSp = kDtcmAliasBase + kDtcmSize;
+
+// 哪一套 ABI。旧的栈顶在旧 DTCM 窗口顶上；BachFlow 的在别名窗口顶上。
+// GP 两套都是旧窗口的 .data 起点加 0x800，不另造一个。
+enum class RvAbi : uint32_t {
+  kLegacy = 0,
+  kBachflow = 1,
+};
 
 // task 控制区：自定义 CSR 的读口与 task_done 的写口。
 //

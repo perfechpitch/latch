@@ -419,8 +419,10 @@ inline BundleStat LoadBundle(std::vector<Chip *> const &chips,
       core.GetTs().Cfg().WriteDatainTask(c.datain_pc, c.datain_weights);
     }
     // 写 TS_INIT_FINISH：查整张配置表，自启动的 core 随即建满表项。
-    core.GetTs().InitFinish();
-    core.GetDte().Resume();
+    if (core.GetTs().Cfg().HasTask()) {
+      core.GetTs().InitFinish();
+      core.GetDte().Resume();
+    }
   }
   return stat;
 }
