@@ -45,4 +45,12 @@ if(Python3_FOUND)
   add_test(NAME tracetto
            COMMAND ${Python3_EXECUTABLE}
                    ${LATCH_ROOT_DIR}/src/utils/tracetto/selftest_tracetto.py)
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import numpy"
+                  RESULT_VARIABLE GOLDEN_NUMPY_RESULT
+                  OUTPUT_QUIET ERROR_QUIET)
+  if(GOLDEN_NUMPY_RESULT EQUAL 0)
+    add_test(NAME checkpoint_golden
+             COMMAND ${Python3_EXECUTABLE}
+                     ${LATCH_ROOT_DIR}/src/bach/compiler/reference/selftest_checkpoint_golden.py)
+  endif()
 endif()
