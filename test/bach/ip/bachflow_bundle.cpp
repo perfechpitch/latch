@@ -1,0 +1,369 @@
+// 48 颗 chip 的有界 exact-token 验证。普通套件里跳过实包执行。
+//
+// 没设 BACHFLOW_EXACT_RUN 就跳过。设了却缺 bundle、端点或两份 token，失败。
+// 地址和物理 core 只从环境来。主线程从编好的包读出来再填。
+// 出口期望逻辑 7（fc2_concat，chip 47 物理 8）。进口期望逻辑 8。
+// 不要把出口断言成逻辑 8。用户 101 和 202 各一份文件，不改字节。
+
+#include <gtest/gtest.h>
+
+#include <cstdlib>
+#include <filesystem>
+
+#include "bach/ip/bundle_load.h"
+#include "bach/ip/chip/chip.h"
+#include "bach/ip/lpu_grid.h"
+#include "test/bach/ip/chip/bachflow_input.h"
+
+using namespace latch;
+using namespace latch::bach;
+using namespace latch::bach::ep1exact;
+
+namespace {
+
+std::string ScratchOut() {
+  char const *v = std::getenv("BACHFLOW_OUT_DIR");
+  if (v && *v)
+    return v;
+  return "/tmp/ep1-exact-out";
+}
+
+std::vector<std::unique_ptr<Chip>> MakeChips(ClockPtr clk) {
+  std::vector<std::unique_ptr<Chip>> owned;
+  for (uint64_t i = 0; i < kChipNum; ++i) {
+    ChipCfg cfg;
+    cfg.gx = GxOfChip(i);
+    cfg.gy = GyOfChip(i);
+    cfg.core_tick = false;
+    cfg.chip_tick = false;
+    owned.push_back(
+        std::make_unique<Chip>(clk, "chip" + std::to_string(i), cfg));
+  }
+  return owned;
+}
+
+uint64_t PrefillPackedInputScales(std::string const &path,
+                                 std::vector<Chip *> const &chips) {
+  std::ifstream input(path);
+  LOGCHECK(input.good(), "读不出输入 scale 模板。");
+  std::map<std::tuple<uint64_t, uint64_t, uint64_t>, std::map<uint64_t, uint64_t>> templates;
+  std::string line;
+  while (std::getline(input, line)) {
+    std::istringstream row(line);
+    std::string tag;
+    uint64_t chip, core, unit, offset, value;
+    if (!(row >> tag) || tag != "DSAREG") continue;
+    if (!(row >> chip >> core >> unit >> offset >> value) || unit != 1) continue;
+    if (offset < kMuTemplateBase ||
+        offset >= kMuTemplateBase + kMuTemplateNum * kMuTemplateStride) continue;
+    uint64_t relative = offset - kMuTemplateBase;
+    templates[{chip, core, relative / kMuTemplateStride}][relative % kMuTemplateStride] = value;
+  }
+  uint64_t count = 0;
+  for (auto const &entry : templates) {
+    auto const &words = entry.second;
+    auto mode_pos = words.find(kMuPrimitiveMode - kMuPrimitiveDim);
+    if (mode_pos == words.end()) continue;
+    uint64_t mode = mode_pos->second;
+    // 只预填完整广播 token 区间，不只填本核的 K 切片。
+    // FC2 的 ep_reduce 输入由 VU 产生，不能覆盖其 scale。
+    if (!(mode & (1ull << kMuADataTypeShift)) || (mode & kMuRouterEpReduceEn)) continue;
+    uint64_t dim = words.at(0), base = MuStripDocBase(words.at(kMuAAddr - kMuPrimitiveDim));
+    uint64_t stride = words.at(kMuAStreamStride - kMuPrimitiveDim);
+    uint64_t k = (dim >> kMuKblockShift) * ((mode & 1) ? 64 : 128);
+    auto [chip, core, index] = entry.first;
+    LOGCHECK(chip < chips.size() && core < chips[chip]->CoreNum() &&
+                 k && k % 32 == 0 && base < kMuDocCmemBytes &&
+                 stride == kInputStride && base + k <= kDataBytes,
+             "输入 scale 模板不在完整广播 token 区间内。");
+    for (uint64_t sid = 0; sid < kInputStreams; ++sid)
+      chips[chip]->GetCore(core).Cmem().PokeScale(sid * stride, ByteBlock(kScaleBytes, 0x7f));
+    ++count;
+  }
+  return count;
+}
+
+} // namespace
+
+TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
+  DteInputModeScope input_mode;
+  if (std::getenv("BACHFLOW_EXACT_RUN") == nullptr) {
+    GTEST_SKIP() << "没设 BACHFLOW_EXACT_RUN，不装 48 chip。";
+  }
+  std::string root = EnvOr("BACHFLOW_BUNDLE_ROOT", "");
+  std::string name = EnvOr("BACHFLOW_BUNDLE_NAME", "");
+  if (root.empty() || name.empty()) {
+    FAIL() << "设了 BACHFLOW_EXACT_RUN 但没有 BACHFLOW_BUNDLE_ROOT / NAME。";
+  }
+  Endpoint in = IngressFromEnv();
+  Endpoint out = EgressFromEnv();
+  if (!EndpointSet(in) || !EndpointSet(out)) {
+    FAIL() << "进核与出核的 chip / physical / addr 必须由环境给出。";
+  }
+  if (in.chip >= kChipNum || out.chip >= kChipNum ||
+      in.physical >= kChipCoreNum || out.physical >= kChipCoreNum) {
+    FAIL() << "chip 或物理 core 越界。";
+  }
+  int64_t want_in = static_cast<int64_t>(EnvU64("BACHFLOW_INGRESS_LOGICAL", 8));
+  int64_t want_out = static_cast<int64_t>(EnvU64("BACHFLOW_EGRESS_LOGICAL", 7));
+  if (want_out == 8) {
+    FAIL() << "出口不是逻辑 8。fc2_concat 在逻辑 7。";
+  }
+
+  std::string golden = EnvOr("BACHFLOW_GOLDEN_DIR", "");
+  if (golden.empty()) {
+    FAIL() << "设了 BACHFLOW_EXACT_RUN 但没有 BACHFLOW_GOLDEN_DIR。";
+  }
+  // 第一次只跑 101。两份一起跑要显式设 BACHFLOW_USER_COUNT=2。
+  uint64_t user_count = EnvU64("BACHFLOW_USER_COUNT", 1);
+  if (user_count != 1 && user_count != 2) {
+    FAIL() << "BACHFLOW_USER_COUNT 只能是 1 或 2。";
+  }
+  std::vector<uint8_t> body101, body202;
+  std::string why;
+  ASSERT_TRUE(LoadSavedFile(golden + "/user101.token", &body101, &why)) << why;
+  if (user_count == 2) {
+    ASSERT_TRUE(LoadSavedFile(golden + "/user202.token", &body202, &why)) << why;
+    EXPECT_NE(body101, body202);
+  }
+
+  EnsureSlots(kChipNum * (kMaxCorePerChip + 1));
+  ClockPtr clk = MakeClock(0, kPeriod);
+  TraceOffScope trace_off;
+  auto owned = MakeChips(clk);
+  std::vector<Chip *> all;
+  for (auto const &c : owned)
+    all.push_back(c.get());
+  ASSERT_EQ(all.size(), 48u);
+
+  uint64_t weight_count = 0;
+  LogicalMap logical = LoadAdapterInput(all, root, name, &weight_count);
+  ASSERT_FALSE(logical.empty());
+  ASSERT_GE(weight_count, 384u * 9u);
+  int64_t got_in = -2, got_out = -2;
+  ASSERT_TRUE(LogicalOf(logical, in.chip, in.physical, &got_in));
+  ASSERT_TRUE(LogicalOf(logical, out.chip, out.physical, &got_out));
+  EXPECT_EQ(got_in, want_in);
+  EXPECT_EQ(got_out, want_out);
+  EXPECT_NE(got_out, int64_t{8});
+
+  Core &ingress = all[in.chip]->GetCore(in.physical);
+  ASSERT_TRUE(PathFree(ingress, kIngressPath))
+      << "PathID " << kIngressPath << " 已被占用，拒绝覆盖";
+  ingress.GetRouter().Preload(kIngressPath, IngressEntry());
+
+  C2cBridge feed(clk, "feed", StubCfg());
+  C2cBridge sink(clk, "sink", StubCfg());
+  uint64_t limit = EnvU64("BACHFLOW_CYCLE_LIMIT", 3000);
+  ExactHarness harness(clk, all, GridLinks(kGridY, kGridX), feed, sink, in.chip,
+                       kChipW, out.chip, kChipE,
+                       all[out.chip]->GetCore(out.physical), out.physical,
+                       limit);
+  harness.expected = user_count;
+  std::filesystem::create_directories(ScratchOut());
+  std::ofstream transport(ScratchOut() + "/transport.txt");
+  ASSERT_TRUE(transport.good());
+  transport << "seg_shift " << DteSegValidShift() << " template_mode "
+            << ingress.GetDte().Regfile().ConfigRead(0x1048) << '\n';
+  uint64_t last_desc = 0, last_rx = 0, last_error = 0;
+  uint64_t inlet_count = 0;
+  std::set<uint64_t> inlet_users, broadcast_users;
+  auto compute_pos = std::find_if(logical.begin(), logical.end(),
+      [](auto const &entry) { return entry.first.first == 0 && entry.second == 0; });
+  ASSERT_NE(compute_pos, logical.end());
+  Core &first_compute = all[0]->GetCore(compute_pos->first.second);
+  bool transport_only = EnvU64("BACHFLOW_TRANSPORT_ONLY", 0) != 0;
+  bool input_sf_prefill = EnvU64("BACHFLOW_INPUT_SF_PREFILL", 0) != 0;
+  bool legacy_mapping = EnvU64("BACHFLOW_LEGACY_REDUCE_MAPPING", 0) != 0;
+  ASSERT_TRUE(transport_only || legacy_mapping)
+      << "Full execution requires the explicitly approved legacy mapping experiment.";
+  if (!transport_only) {
+    std::ifstream bundle(root + "/" + name + "/" + name + ".bachir");
+    std::string text((std::istreambuf_iterator<char>(bundle)), std::istreambuf_iterator<char>());
+    ASSERT_NE(text.find("LEGACY_REDUCE_MAPPING"), std::string::npos)
+        << "Refusing the old unnormalized diagnostic bundle.";
+    ASSERT_GE(out.addr, kMuDocCmemBase);
+    ASSERT_LT(out.addr, kMuDocCmemBase + kMuDocCmemBytes);
+    harness.output_addr = out.addr - kMuDocCmemBase;
+    harness.output_bytes = kDataBytes * 2;
+  }
+  if (input_sf_prefill) {
+    ASSERT_TRUE(std::all_of(body101.end() - kScaleBytes, body101.end(),
+                           [](uint8_t value) { return value == 0x7f; }));
+    if (user_count == 2) {
+      ASSERT_TRUE(std::all_of(body202.end() - kScaleBytes, body202.end(),
+                             [](uint8_t value) { return value == 0x7f; }));
+    }
+    uint64_t prefilled = PrefillPackedInputScales(root + "/" + name + "/" + name + ".bachir", all);
+    ASSERT_EQ(prefilled, 256u) << "Gate/up input templates only; no FC2/VU scale writes.";
+    transport << "input_sf_prefill 1 templates " << prefilled << '\n';
+  }
+  harness.observe = [&](uint64_t cycle) {
+    if (cycle % 256 == 0) {
+      uint64_t instructions = 0, mu_dispatch = 0, mu_done = 0;
+      for (auto *chip : all) {
+        for (uint64_t p = 0; p < chip->CoreNum(); ++p) {
+          auto &core = chip->GetCore(p);
+          for (uint64_t unit = 0; unit < 3; ++unit)
+            instructions += core.Rv(unit).Exec().Insts();
+          mu_dispatch += core.GetMu().DispatchCnt();
+          mu_done += core.GetMu().DoneCnt();
+        }
+      }
+      transport << "progress cycle " << cycle << " insts " << instructions
+                << " mu_dispatch " << mu_dispatch << " mu_done " << mu_done << '\n';
+      transport.flush();
+    }
+    auto &dte = ingress.GetDte();
+    auto &port = dte.FromRv();
+    if (port.Valid() && port.Seq() != last_desc) {
+      last_desc = port.Seq();
+      auto d = port.Desc();
+      transport << "descriptor " << cycle << " seq " << last_desc
+                << " task " << d->task_id << " route " << uint64_t(d->route)
+                << " error " << d->error;
+      for (uint64_t i = 0; i < 4; ++i)
+        transport << " seg" << i << ' ' << d->seg[i].valid << ' '
+                  << d->seg[i].len << ' ' << d->seg[i].dst_addr;
+      transport << '\n';
+    }
+    auto rx = ReadCoreData(dte.FromRouter());
+    if (rx.valid && rx.seq != last_rx) {
+      last_rx = rx.seq;
+      transport << "rx " << cycle << " seq " << rx.seq << " bytes "
+                << rx.bytes << " header " << rx.hdr << " last " << rx.last
+                << " total " << (rx.msg ? rx.msg->TotalBytes() : 0) << '\n';
+    }
+    if (dte.ToTs().Valid() && dte.ToTs().task_id.Get() == 63 &&
+        inlet_count < user_count) {
+      uint64_t slot = inlet_count++;
+      uint64_t user = slot == 0 ? 101 : 202;
+      auto const &body = slot == 0 ? body101 : body202;
+      auto topk = ingress.Cmem().Peek(0x8000 + slot * kTopkBytes, kTopkBytes);
+      auto data_sf = ingress.Mmem().Peek(slot * (kDataBytes + kScaleBytes),
+                                         kDataBytes + kScaleBytes);
+      ByteBlock want_topk(body.begin(), body.begin() + kTopkBytes);
+      ByteBlock want_data_sf(body.begin() + kTopkBytes, body.end());
+      EXPECT_EQ(topk, want_topk);
+      EXPECT_EQ(data_sf, want_data_sf);
+      auto header = ingress.Cmem().Peek(slot * 32, 32);
+      EXPECT_EQ(uint64_t(header[8]) | uint64_t(header[9]) << 8, user);
+      inlet_users.insert(user);
+      transport << "inlet_check " << cycle << " user " << user
+                << " slot " << slot << " topk " << (topk == want_topk)
+                << " data_sf " << (data_sf == want_data_sf) << '\n';
+    }
+    auto &ack = first_compute.GetDte().ToTs();
+    if (ack.Valid() && ack.task_id.Get() == 0 &&
+        !broadcast_users.count(ack.user_id.Get())) {
+      uint64_t user = ack.user_id.Get(), sid = ack.stream_id.Get();
+      EXPECT_TRUE(harness.requested_users.count(user));
+      auto const &body = user == 101 ? body101 : body202;
+      if (body.size() != kSavedBytes) {
+        ADD_FAILURE() << "Unexpected broadcast user " << user;
+        harness.halted = true;
+        return;
+      }
+      auto topk = first_compute.GetMu().EpInfo().TopkBytes(sid);
+      ByteBlock want_topk(body.begin(), body.begin() + kTopkBytes);
+      auto got = first_compute.Cmem().Peek(sid * 0x10000, kDataBytes + kScaleBytes);
+      ByteBlock want(body.begin() + kTopkBytes, body.end());
+      EXPECT_GE(topk.size(), kTopkBytes);
+      if (topk.size() >= kTopkBytes) {
+        EXPECT_EQ(ByteBlock(topk.begin(), topk.begin() + kTopkBytes), want_topk);
+      }
+      EXPECT_EQ(got, want);
+      auto associated_sf = first_compute.Cmem().PeekScale(sid * 0x10000, kScaleBytes);
+      ByteBlock want_sf(body.end() - kScaleBytes, body.end());
+      EXPECT_EQ(associated_sf, want_sf);
+      broadcast_users.insert(user);
+      transport << "broadcast_check " << cycle << " sid " << sid
+                << " user " << user << " topk_bytes " << topk.size()
+                << " data_sf " << (got == want)
+                << " associated_sf " << (associated_sf == want_sf) << '\n';
+      if (transport_only && broadcast_users == harness.requested_users) {
+        harness.halted = true;
+        clk->Stop();
+      }
+    }
+    if (dte.Completion().Error() != last_error) {
+      last_error = dte.Completion().Error();
+      transport << "error " << cycle << ' ' << last_error << '\n';
+    }
+  };
+  harness.saved.push_back(body101);
+  harness.queue.push_back(ExactToken(101, kIngressPath, in.addr, body101, 101));
+  if (user_count == 2) {
+    harness.saved.push_back(body202);
+    harness.queue.push_back(
+        ExactToken(202, kIngressPath, in.addr, body202, 202));
+  }
+  harness.watches.push_back(
+      {in.chip, in.physical, &all[in.chip]->GetCore(in.physical)});
+  harness.watches.push_back(
+      {out.chip, out.physical, &all[out.chip]->GetCore(out.physical)});
+  harness.watches.push_back({0, compute_pos->first.second, &first_compute});
+
+  harness.requested_users = {101};
+  if (user_count == 2) harness.requested_users.insert(202);
+
+  // 检查排队身份后执行有界时钟。
+  EXPECT_EQ(harness.queue.size(), user_count);
+  EXPECT_EQ(harness.queue[0]->user_id, 101u);
+  EXPECT_EQ(harness.queue[0]->size, kSavedBytes);
+  if (user_count == 2) {
+    EXPECT_EQ(harness.queue[1]->user_id, 202u);
+    EXPECT_NE(harness.queue[0]->payload, harness.queue[1]->payload);
+  }
+
+  std::filesystem::create_directories(ScratchOut());
+  clk->Continue(limit + 2);
+  RT::JoinAll();
+  RunResult const &note = harness.result;
+  std::ofstream diagnostics(ScratchOut() + "/cores.txt");
+  ASSERT_TRUE(diagnostics.good());
+  for (uint64_t c = 0; c < all.size(); ++c) {
+    for (uint64_t p = 0; p < all[c]->CoreNum(); ++p) {
+      auto &core = all[c]->GetCore(p);
+      if (core.Bad() || !core.GetTs().Cfg().HasTask()) continue;
+      diagnostics << c << ' ' << p << " dte_error "
+                  << core.GetDte().Completion().Error()
+                  << " inflight " << core.GetTs().Table().InFlight();
+      for (uint64_t u = 0; u < 3; ++u)
+        diagnostics << " pc" << u << ' ' << core.Rv(u).Exec().Pc()
+                    << " inst" << u << ' ' << core.Rv(u).Exec().Insts();
+      diagnostics << '\n';
+      auto snapshot = core.GetTs().Table().SnapPtr()->Get();
+      if (snapshot) {
+        for (uint64_t sid = 0; sid < snapshot->slot_num; ++sid) {
+          auto const &entry = snapshot->entry[sid];
+          if (!entry.valid || !entry.user_id_vld) continue;
+          diagnostics << "task " << c << ' ' << p << " user " << entry.user_id
+                      << " sid " << sid << " allocation " << entry.allocation
+                      << " index " << entry.task_id << " fsm " << uint64_t(entry.task_fsm)
+                      << " done " << entry.done_bitmap << " path " << entry.task_path_id << '\n';
+        }
+      }
+    }
+  }
+  std::vector<uint64_t> users = {101};
+  if (user_count == 2)
+    users.push_back(202);
+  WriteRecords(ScratchOut() + "/run.txt", note, users);
+  WriteBf16(ScratchOut(), note);
+  if (transport_only) {
+    EXPECT_EQ(inlet_users, harness.requested_users);
+    EXPECT_EQ(broadcast_users, harness.requested_users);
+    EXPECT_EQ(ingress.GetDte().Completion().Error(), 0u);
+    EXPECT_EQ(first_compute.GetDte().Completion().Error(), 0u);
+  } else {
+    EXPECT_TRUE(note.completed_by_end) << "stopped at cycle " << note.stopped_at;
+    EXPECT_EQ(note.stored_outputs.size(), user_count);
+    for (uint64_t user : users) {
+      auto found = note.stored_outputs.find(user);
+      ASSERT_NE(found, note.stored_outputs.end());
+      EXPECT_EQ(found->second.bytes.size(), kDataBytes * 2);
+    }
+  }
+  RT::Reset();
+}

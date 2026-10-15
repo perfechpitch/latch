@@ -53,4 +53,15 @@ if(Python3_FOUND)
              COMMAND ${Python3_EXECUTABLE}
                      ${LATCH_ROOT_DIR}/src/bach/compiler/reference/selftest_checkpoint_golden.py)
   endif()
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c
+                  "import pytest, bachflow, bachflow_runtime, bachflow_codegen"
+                  RESULT_VARIABLE BACHFLOW_PYTHON_RESULT
+                  OUTPUT_QUIET ERROR_QUIET)
+  if(BACHFLOW_PYTHON_RESULT EQUAL 0)
+    add_test(NAME bachflow_input
+             COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                     ${LATCH_ROOT_DIR}/src/bach/compiler/bachflow/tests)
+    set_tests_properties(bachflow_input PROPERTIES
+                         ENVIRONMENT "PYTHONPATH=${LATCH_ROOT_DIR}/src")
+  endif()
 endif()
