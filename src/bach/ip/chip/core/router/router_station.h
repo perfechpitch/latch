@@ -134,6 +134,7 @@ class RouterStation : public BachModule {
     TracePerCycle("flit_user", f.valid && f.msg ? f.msg->user_id : 0u);
     TracePerCycle("flit_path", f.valid && f.msg ? f.msg->path_id : 0u);
     TracePerCycle("flit_size", f.valid && f.msg ? f.msg->size : 0u);
+    TracePerCycle("flit_vc", f.valid ? f.vc : 0u);
     if (!f.valid) return;
     uint64_t v = f.vc;
     LOGCHECK(v < kVcNum, "RouterStation: 包头的 VC 号越界。");

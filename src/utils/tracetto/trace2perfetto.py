@@ -129,8 +129,8 @@ def dte_label(unit: str, seg) -> str:
 
 
 def router_label(unit: str, seg) -> str:
-    """Router 入口轨道的段上那行字：`User_id 77 RTR-MID path 3 7拍`。段是 5 元，
-    取前四项（t0/t1/user/path），size 只进 args 不进名字。"""
+    """Router 入口轨道的段上那行字：`User_id 77 RTR-MID path 3 7拍`。段是 6 元，
+    取前四项（t0/t1/user/path），size 与 vc 只进 args 不进名字。"""
     t0, t1, user, path = seg[0], seg[1], seg[2], seg[3]
     return f"User_id {user} {unit} path {path} {t1 - t0}拍"
 
@@ -340,32 +340,33 @@ def build(prefix: str) -> dict:
                 dte_events.sort(key=lambda e: e["ts"])
                 slices.extend(dte_events)
             # Router 四个入口站：每段是一个包（收包头 → 收完包尾），args 带 user/
-            # path/bytes。轨道号与元数据那边同一个公式，段按 ROUTER_DIRS 顺序排。
+            # path/bytes/vc_id。轨道号与元数据那边同一个公式，段按 ROUTER_DIRS 顺序排。
             if key in rtr_spans_by_core:
                 rtr_events: List[dict] = []
                 for d, dname in enumerate(ROUTER_SLOT_UNITS):
                     tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + d
                     for seg in rtr_spans_by_core[key][ROUTER_DIRS[d]]:
-                        t0, t1, user, path, size = seg
+                        t0, t1, user, path, size, vc = seg
                         rtr_events.append({
                             "name": router_label(dname, seg),
                             "ph": "X", "ts": t0 * NS_TO_US,
                             "dur": (t1 - t0) * NS_TO_US,
                             "pid": pid, "tid": tid,
                             "args": {"user": user, "path": path,
-                                     "bytes": size}})
+                                     "bytes": size, "vc_id": vc}})
                         spans_cnt += 1
                 rtr_events.sort(key=lambda e: e["ts"])
                 slices.extend(rtr_events)
             # Reduce 模块三路入口 + 一路出口：入口每段是一个包（收包头 → 收完包尾）、
-            # 出口是（写包头 → 写完包尾），args 带 user/path/bytes。轨道号与元数据那边
-            # 同一个公式，段按 REDUCE_SIDES 顺序排。
+            # 出口是（写包头 → 写完包尾），args 带 user/path/bytes（reduce 不记 VC，段
+            # 里那个 vc 恒 0，不进 args）。轨道号与元数据那边同一个公式，段按
+            # REDUCE_SIDES 顺序排。
             if key in red_spans_by_core:
                 red_events: List[dict] = []
                 for s, sname in enumerate(REDUCE_SLOT_UNITS):
                     tid = len(S.ROWS) + 1 + len(DTE_TRACKS) + len(ROUTER_DIRS) + s
                     for seg in red_spans_by_core[key][REDUCE_SIDES[s]]:
-                        t0, t1, user, path, size = seg
+                        t0, t1, user, path, size, _vc = seg
                         red_events.append({
                             "name": router_label(sname, seg),
                             "ph": "X", "ts": t0 * NS_TO_US,

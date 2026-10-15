@@ -203,21 +203,23 @@ DTE_WR_LOC = (SIG_DTE_WR_START_HEAD_LOC, SIG_DTE_WR_START_DATA_LOC,
 # ── Router 四个入口站（st_mid / st_left / st_right / st_core）的 flit 信号，挂在
 #    chip<i>.core<j>.router.st_<dir> 下，由 router_ingress_paths 单独扫。每个 flit
 #    进站那一拍记：是不是包头/包尾、user_id、path_id、包 size（数据通道字节数，含
-#    topK）。Perfetto 的 router 入口轨道按它折「收包头 → 收完包尾」一段。
+#    topK）、VC 号。Perfetto 的 router 入口轨道按它折「收包头 → 收完包尾」一段。
 SIG_RTR_FLIT_HEAD = "flit_head"
 SIG_RTR_FLIT_TAIL = "flit_tail"
 SIG_RTR_FLIT_USER = "flit_user"
 SIG_RTR_FLIT_PATH = "flit_path"
 SIG_RTR_FLIT_SIZE = "flit_size"
+SIG_RTR_FLIT_VC = "flit_vc"
 RTR_FLIT_SIGS = (SIG_RTR_FLIT_HEAD, SIG_RTR_FLIT_TAIL, SIG_RTR_FLIT_USER,
-                 SIG_RTR_FLIT_PATH, SIG_RTR_FLIT_SIZE)
+                 SIG_RTR_FLIT_PATH, SIG_RTR_FLIT_SIZE, SIG_RTR_FLIT_VC)
 # 四个入口方向，与 router.h 的 kStationName 同一套顺序。
 ROUTER_DIRS = ("mid", "left", "right", "core")
 
 # Reduce 模块三路入口 + 一路出口的 flit 信号，挂在 chip<i>.core<j>.router.reduce 下
 # （信号名 mid/left/right/out 由 reduce_module.h 的 TraceReduceFlit 定）。字段名与
-# RTR_FLIT_SIGS 同一套（flit_head/tail/user/path/size）。入口是「收包头 → 收完包尾」，
-# 出口是「写包头 → 写完包尾」。三路入口与 reduce_in_mask 三位同一套编号：mid/left/right。
+# RTR_FLIT_SIGS 同一套（flit_head/tail/user/path/size），但没有 flit_vc（折段时 vc 恒
+# 0，Perfetto 的 reduce 段不带 vc_id）。入口是「收包头 → 收完包尾」，出口是「写包头 →
+# 写完包尾」。三路入口与 reduce_in_mask 三位同一套编号：mid/left/right。
 REDUCE_SIDES = ("mid", "left", "right", "out")
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
@@ -1042,32 +1044,32 @@ def reduce_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, int]]]:
 
 
 def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
-    """head/tail flit 事件折成段 `[t0, t1, user, path, size]`。
+    """head/tail flit 事件折成段 `[t0, t1, user, path, size, vc]`。
 
-    `evts` 里的元素是 `(t, is_head, is_tail, user, path, size)`。同一 `(user, path)`
+    `evts` 里的元素是 `(t, is_head, is_tail, user, path, size, vc)`。同一 `(user, path)`
     的 head 与 tail 先到先配；`head && tail` 的单 flit 包直接成 `[t, t+1]`。配不上
     head 的 tail 只记 `[t, t+1]`（波形从中间开始记），配不上 tail 的 head 延到波形
     末（确实还没收完）。配对语义同 `user_spans`。
     """
     pending: Dict[Tuple[int, int], List[tuple]] = {}
     out: List[List[int]] = []
-    for t, head, tail, user, path, size in evts:
+    for t, head, tail, user, path, size, vc in evts:
         if head and tail:
-            out.append([t, t + 1, user, path, size])
+            out.append([t, t + 1, user, path, size, vc])
             continue
         key = (user, path)
         if head:
-            pending.setdefault(key, []).append((t, size))
+            pending.setdefault(key, []).append((t, size, vc))
             continue
         q = pending.get(key)
         if q:
-            t0, sz = q.pop(0)
-            out.append([t0, t, user, path, sz])
+            t0, sz, vc0 = q.pop(0)
+            out.append([t0, t, user, path, sz, vc0])
         else:
-            out.append([t, t + 1, user, path, size])
+            out.append([t, t + 1, user, path, size, vc])
     for (user, path), lst in pending.items():
-        for t0, sz in lst:
-            out.append([t0, t_end, user, path, sz])
+        for t0, sz, vc0 in lst:
+            out.append([t0, t_end, user, path, sz, vc0])
     out.sort(key=lambda s: (s[0], s[1]))
     return out
 
@@ -1076,11 +1078,11 @@ def _flit_spans(reader: TraceReader, flat: Dict[str, int],
                 t_end: int) -> List[List[int]]:
     """一路（router 一个方向 / reduce 一个 side）的 flit 段。`flat` 是 {sig: id}。
 
-    段形状 `[t0, t1, user, path, size]`：t0 是包头 flit 进站（或写出）那一拍，t1 是
-    包尾 flit 进站（或写完）那一拍。事件时间取 head/tail/user/path/size 五条信号时间
-    点的并集 —— 只取 head/tail 的话，同一 user/path 的连续两拍 head 被 `TracePerCycle`
-    压成一段（值没变），第二笔会被漏掉；user/path/size 逐 flit 变，把它们的时间点并
-    进来才展开成一拍一笔。
+    段形状 `[t0, t1, user, path, size, vc]`：t0 是包头 flit 进站（或写出）那一拍，t1
+    是包尾 flit 进站（或写完）那一拍。事件时间取 head/tail/user/path/size/vc 六条信号
+    时间点的并集 —— 只取 head/tail 的话，同一 user/path 的连续两拍 head 被
+    `TracePerCycle` 压成一段（值没变），第二笔会被漏掉；user/path/size 逐 flit 变，把
+    它们的时间点并进来才展开成一拍一笔。reduce 那一路没有 flit_vc，vc 恒 0。
     """
 
     def ev(sid):
@@ -1093,14 +1095,15 @@ def _flit_spans(reader: TraceReader, flat: Dict[str, int],
     ut, uv = ev(flat.get(SIG_RTR_FLIT_USER))
     pt, pv = ev(flat.get(SIG_RTR_FLIT_PATH))
     st, sv = ev(flat.get(SIG_RTR_FLIT_SIZE))
+    vt, vv = ev(flat.get(SIG_RTR_FLIT_VC))
     evts = []
-    for t in sorted(set(ht) | set(tt) | set(ut) | set(pt) | set(st)):
+    for t in sorted(set(ht) | set(tt) | set(ut) | set(pt) | set(st) | set(vt)):
         head = val_at(ht, hv, t) == 1
         tail = val_at(tt, tv, t) == 1
         if not (head or tail):
             continue
         evts.append((t, head, tail, val_at(ut, uv, t), val_at(pt, pv, t),
-                     val_at(st, sv, t)))
+                     val_at(st, sv, t), val_at(vt, vv, t)))
     return fold_flits(evts, t_end)
 
 
@@ -1111,8 +1114,8 @@ def router_ingress_spans(reader: TraceReader,
     里那一个 core 的值（按方向分的信号表）。
 
     返回 `{"mid": [...], "left": [...], "right": [...], "core": [...]}`，段形状
-    `[t0, t1, user, path, size]`：t0 是包头 flit 进站那一拍，t1 是包尾 flit 进站那
-    一拍。
+    `[t0, t1, user, path, size, vc]`：t0 是包头 flit 进站那一拍，t1 是包尾 flit 进站
+    那一拍，vc 是包头那拍的 VC 号。
     """
     return {d: _flit_spans(reader, sigs.get(d, {}), t_end) for d in ROUTER_DIRS}
 
@@ -1123,8 +1126,9 @@ def reduce_spans(reader: TraceReader, sigs: Dict[str, Dict[str, int]],
     `reduce_paths` 里那一个 core 的值（按 side 分的信号表）。
 
     返回 `{"mid": [...], "left": [...], "right": [...], "out": [...]}`，段形状
-    `[t0, t1, user, path, size]`：入口 t0 是包头 flit 进站那一拍、t1 是包尾 flit 进
-    站那一拍；出口 t0 是包头 flit 写出那一拍、t1 是包尾 flit 写完那一拍。
+    `[t0, t1, user, path, size, vc]`：入口 t0 是包头 flit 进站那一拍、t1 是包尾 flit
+    进站那一拍；出口 t0 是包头 flit 写出那一拍、t1 是包尾 flit 写完那一拍。reduce 没有
+    flit_vc 信号，vc 恒 0。
     """
     return {s: _flit_spans(reader, sigs.get(s, {}), t_end) for s in REDUCE_SIDES}
 

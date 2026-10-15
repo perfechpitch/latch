@@ -533,7 +533,7 @@ def check_router_ingress():
     第二笔展开出来 —— 这正是 issue_events 注释里讲过的坑。
     """
     names = {200: "flit_head", 201: "flit_tail", 202: "flit_user",
-             203: "flit_path", 204: "flit_size"}
+             203: "flit_path", 204: "flit_size", 205: "flit_vc"}
     modules = [(1, 0, "chip0"), (2, 1, "core0"), (3, 2, "router"),
                (4, 3, "st_mid")]
     modules += [(sid, 4, names[sid]) for sid in sorted(names)]
@@ -546,6 +546,7 @@ def check_router_ingress():
               (30, 9), (31, 0), (40, 11), (41, 0)],                    # path
         204: [(10, 1024), (11, 512), (13, 1024), (14, 0), (20, 128),
               (21, 0), (30, 256), (31, 0), (40, 64), (41, 0)],         # size
+        205: [(10, 1), (11, 0), (20, 2), (30, 3), (40, 0)],            # vc
     }
     with tempfile.TemporaryDirectory() as d:
         prefix = str(Path(d) / "rtr")
@@ -554,12 +555,12 @@ def check_router_ingress():
             sigs = S.router_ingress_paths(r)["0.0"]
             spans = S.router_ingress_spans(r, sigs, 50)
     expect(spans["mid"], [
-        [10, 13, 77, 3, 1024],
-        [11, 12, 77, 5, 512],
-        [20, 21, 88, 7, 128],
-        [30, 31, 99, 9, 256],
-        [40, 50, 100, 11, 64],
-    ], "router 入口 flit 折段：多 flit、连续 head、单 flit、配不上的 tail/head")
+        [10, 13, 77, 3, 1024, 1],
+        [11, 12, 77, 5, 512, 0],
+        [20, 21, 88, 7, 128, 2],
+        [30, 31, 99, 9, 256, 3],
+        [40, 50, 100, 11, 64, 0],
+    ], "router 入口 flit 折段：多 flit、连续 head、单 flit、配不上的 tail/head，段尾带 vc")
     expect(spans["left"], [], "没信号的 left 方向空")
     expect(spans["right"], [], "没信号的 right 方向空")
     expect(spans["core"], [], "没信号的 core 方向空")
@@ -599,10 +600,10 @@ def check_reduce_flits():
         with TraceReader(prefix) as r:
             sigs = S.reduce_paths(r)["0.0"]
             spans = S.reduce_spans(r, sigs, 50)
-    expect(spans["mid"], [[10, 13, 77, 3, 1024]],
-           "reduce mid 入口 flit 折段：多 flit 包")
-    expect(spans["out"], [[20, 21, 88, 7, 64]],
-           "reduce out 出口 flit 折段：单 flit 包")
+    expect(spans["mid"], [[10, 13, 77, 3, 1024, 0]],
+           "reduce mid 入口 flit 折段：多 flit 包，没 flit_vc 所以 vc 恒 0")
+    expect(spans["out"], [[20, 21, 88, 7, 64, 0]],
+           "reduce out 出口 flit 折段：单 flit 包，没 flit_vc 所以 vc 恒 0")
     expect(spans["left"], [], "没信号的 left 入口空")
     expect(spans["right"], [], "没信号的 right 入口空")
 
