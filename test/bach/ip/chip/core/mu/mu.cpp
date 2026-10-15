@@ -427,6 +427,46 @@ TEST(Mu, TriggerLatchesConfig) {
 
 // ── 结果写回 ──
 
+TEST(Mu, TopkRegisterReadsShareDteStorageAndFollowStreamReuse) {
+  RT::Reset(1, 8);
+  auto clk = MakeClock(0, kPeriod);
+  Mu mu(clk, "mu", MuCfg{});
+  auto cfg = std::make_shared<DsaCfgPort>(clk);
+  mu.AttachCfg(cfg);
+  mu.EpInfo().WriteTopk(0, {8,0,0x11,0x22});
+  std::vector<uint8_t> last(256, 0);
+  last[0]=1; last[2]=0xcc; last[3]=0xdd;
+  last[252]=0x11; last[253]=0x22; last[254]=0x33; last[255]=0x44;
+  mu.EpInfo().WriteTopk(15, last);
+  class Reader : public BachModule {
+   public:
+    Reader(ClockPtr c, Mu& m) : BachModule(c,"topk_reader"), mu(m) {}
+    std::vector<uint64_t> values;
+   protected:
+    void Step() override {
+      mu.RunStep();
+      auto rsp=mu.RdataPtr();
+      if (rsp->Valid() && rsp->Seq()!=seen) {
+        seen=rsp->Seq(); values.push_back(rsp->rdata.Get());
+      }
+      auto now=CycleNow();
+      if (now==20) mu.EpInfo().WriteTopk(15, {2,0,0x55,0x66});
+      if (now==1) mu.Cfg().DriveRead(0x3000,1);
+      else if (now==3) mu.Cfg().DriveRead(0x3f00,2);
+      else if (now==5) mu.Cfg().DriveRead(0x3ffc,3);
+      else if (now==21) mu.Cfg().DriveRead(0x3f00,4);
+      else mu.Cfg().Idle();
+    }
+   private:
+    Mu& mu;
+    uint64_t seen=0;
+  } reader(clk,mu);
+  clk->Continue(40*kPeriod); RT::JoinAll();
+  EXPECT_EQ(reader.values, std::vector<uint64_t>({0x22110008,0xddcc0001,
+                                                 0x44332211,0x66550002}));
+  EXPECT_EQ(mu.Regfile().Triggers(), 0u);
+}
+
 TEST(Mu, StqEncodesByDtypeC) {
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);

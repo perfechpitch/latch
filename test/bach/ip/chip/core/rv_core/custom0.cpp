@@ -207,12 +207,13 @@ struct Case {
 };
 
 Case RunProgram(std::vector<uint32_t> const& words,
-                std::vector<uint64_t> const& reads, uint64_t cycles = 400) {
+                std::vector<uint64_t> const& reads, uint64_t cycles = 400,
+                RvUnit unit = RvUnit::kDte) {
   Case out;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
-    RvCore rv(clk, "rv_dte", RvUnit::kDte);
+    RvCore rv(clk, "rv_test", unit);
     class Driver : public BachModule {
      public:
       Driver(ClockPtr c, RvCore& t) : BachModule(c, "driver"), rv(t) {}
@@ -269,12 +270,21 @@ TEST(BachCustom0, WritesDsaRegisterBothAddressModes) {
   EXPECT_EQ(c.dones, 1u);
 }
 
+TEST(BachCustom0, MuRvCanReadLastTopkStreamThroughItsIoWindow) {
+  Case c = RunProgram({EncDsari(kA0, 0x3f00), EncDsawi(kA0, 0x50),
+                       EncTaskDone(1)}, {0x22110008}, 400, RvUnit::kMu);
+  ASSERT_EQ(c.read_addrs, std::vector<uint64_t>({0x3f00}));
+  ASSERT_EQ(c.writes.size(), 1u);
+  EXPECT_EQ(c.writes[0].data, 0x22110008u);
+  EXPECT_EQ(c.dones, 1u);
+}
+
 // 立即数地址的每一段都咬得住：挑几个分别落在三段里的地址，逐个过。
 //
-// 走到配置口的地址只能落在本核那个 DSA 的 IO 窗口里——DTE / MU 是 4 KB
-// （0x000～0xFFF），VU 是 20 KB。16 bit 立即数的高 4 位（imm[15:12]）超出窗口，
-// 端到端跑不到，只能在译码那一层核（见 DecodeMapsEachEncoding 的 0xBEEF）。
-// 也就是说：立即数编码给了 0～64K，真正用得上的只有窗口这么大一块。
+// 走到配置口的地址只能落在本核那个 DSA 的 IO 窗口里：DTE / MU 是 16 KB，
+// VU 是 20 KB；MU 的 0x3000～0x3FFF 对应 TopK 表。下面覆盖低地址的立即数分段，
+// MuRvCanReadLastTopkStreamThroughItsIoWindow 另测 MU 的高地址。
+// 16 bit 立即数编码覆盖 0～64K，但 0xBEEF 等窗口外地址只能做译码层测试。
 TEST(BachCustom0, ImmediateAddressLandsInWindow) {
   for (uint32_t addr : {0x0001u, 0x0020u, 0x0400u, 0x0800u, 0x0F00u}) {
     std::vector<uint32_t> words = {

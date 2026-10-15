@@ -59,6 +59,7 @@ class Mu {
     reg = std::make_unique<MuRegfile>(clock, "regfile", gid, false);
     iq = std::make_unique<MuIssueQ>(clock, "issue_q", gid, false);
     ep = std::make_unique<GenEpInfo>(clock, "gen_ep", gid, false);
+    reg->AttachTopkTable(ep.get());
     token_ldq = std::make_unique<MuLdq>(clock, "token_ldq",
                                         kTokenLdqDepth, gid, false);
     weight_ldq = std::make_unique<MuLdq>(clock, "weight_ldq",

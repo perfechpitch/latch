@@ -22,6 +22,7 @@
 #include "base/log.h"
 #include "bach/common/numeric/mx.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
+#include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -137,6 +138,7 @@ class MuRegfile : public BachModule {
   // 同时往一个端口上写就是两个写者，而它们本来就不在同一段时间里用。
   void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
   void SetPcodeMode(bool enabled) { pcode_mode = enabled; live.pcode = enabled; }
+  void AttachTopkTable(GenEpInfo const* table) { topk_table = table; }
 
   DsaCfgPort& CfgPort() { return *cfg_port; }
   std::shared_ptr<DsaCfgPort> CfgPortPtr() const { return cfg_port; }
@@ -196,6 +198,10 @@ class MuRegfile : public BachModule {
   }
 
   uint64_t ReadReg(uint64_t addr) const {
+    if (addr >= 0x3000 && addr < 0x4000) {
+      LOGCHECK(topk_table != nullptr, "MU TopK register view is not connected");
+      return topk_table->ReadTopkWord(addr - 0x3000);
+    }
     switch (addr) {
       case kMuStatus: return busy ? kMuBusy : 0;
       case kMuPrimitiveDim: return (live.kblock << kMuKblockShift) |
@@ -300,6 +306,7 @@ class MuRegfile : public BachModule {
   };
 
   std::shared_ptr<DsaCfgPort> cfg_port;
+  GenEpInfo const* topk_table = nullptr;
   bool pcode_mode = false;
   std::array<std::array<uint64_t, 10>, 4> templates{};
   std::array<uint64_t, 10> raw{};

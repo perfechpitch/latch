@@ -30,6 +30,7 @@ constexpr uint64_t kMuIoBase = 0x0000C000;
 constexpr uint64_t kVuIoBase = 0x0000D000;
 constexpr uint64_t kDteIoSize = 16 * 1024;
 constexpr uint64_t kDsaIoSize = 4 * 1024;
+constexpr uint64_t kMuIoSize = 16 * 1024;  // Includes stream TopK table 0x3000..0x3fff.
 constexpr uint64_t kVuIoSize = 20 * 1024;
 
 // DTCM 8 KB，存 BSS、寄存器溢出与堆栈。排在 VU IO 之后。

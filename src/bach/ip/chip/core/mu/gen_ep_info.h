@@ -58,6 +58,19 @@ class GenEpInfo : public BachModule {
     return table[idx];
   }
 
+  // RV register view: 16 stream entries, little-endian aligned 32-bit words.
+  // Read the same bytes written by DTE; no host-side count or parsed cache.
+  uint32_t ReadTopkWord(uint64_t offset) const {
+    LOGCHECK(offset < 16 * kTopkBytesPerStream && offset % 4 == 0,
+             "MU TopK register read outside aligned stream table");
+    auto const& bytes = TopkBytes(offset / kTopkBytesPerStream);
+    uint64_t start = offset % kTopkBytesPerStream;
+    uint32_t value = 0;
+    for (uint64_t i = 0; i < 4 && start + i < bytes.size(); ++i)
+      value |= uint32_t(bytes[start + i]) << (8 * i);
+    return value;
+  }
+
   // MU 计算时读这一份：dirty 时用 Parse 解一次，之后走缓存。
   std::vector<TopkEntry> const& Topk(uint64_t stream_id, uint64_t count) {
     LOGCHECK(stream_id < kTopkTableNum, "GenEpInfo: topK 表下标越界。");
