@@ -230,6 +230,32 @@ TEST(RvBachflow, CompilerProducedRvcFlagTaskSetsUserAndCompletes) {
   EXPECT_EQ(sm.Peek(0x1004, 4), (ByteBlock{1, 0, 0, 0}));
 }
 
+TEST(RvBachflow, LegacyCoreMemInsideAliasRequiresExplicitBachflowAbi) {
+  for (int selection = 0; selection < 3; ++selection) {
+    for (bool store : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "selection=" << selection << " store=" << store);
+      RT::Reset(8, 8);
+      auto clk = MakeClock(0, 1);
+      RvCore rv(clk, "rv", RvUnit::kDte);
+      if (selection != 0) rv.Exec().SetBachflowAbi();
+      if (selection == 2) rv.Exec().SetAbi(RvAbi::kLegacy);
+      uint8_t old_dtcm = rv.Exec().PeekByte(kDtcmBase);
+      // lui a0,0x100; addi a1,zero,120; sw OR lw at 0x100000; task_done.
+      rv.PokeItcm(0x100, Words({0x00100537, 0x07800593,
+          store ? 0x00b52023u : 0x00052603u, 0x8000200b}));
+      RvEnvironment env(clk, rv, 0x100);
+      clk->Continue(100);
+      RT::JoinAll();
+      ASSERT_TRUE(env.sent);
+      EXPECT_EQ(env.cmem_ops, selection == 1 ? 0u : 1u);
+      if (store) {
+        EXPECT_EQ(rv.Exec().PeekByte(kDtcmBase),
+                  selection == 1 ? uint8_t{120} : old_dtcm);
+      }
+    }
+  }
+}
+
 TEST(RvBachflow, AddressImmediatelyOutsideAliasStillUsesCoreMem) {
   RT::Reset(8, 8);
   auto clk = MakeClock(0, 1);

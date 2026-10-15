@@ -318,6 +318,7 @@ class RvExec : public BachModule {
   // 显式选 ABI。旧的不动；BachFlow 只把 SP 改到别名窗口顶，GP 仍是旧值。
   void SetAbi(RvAbi which) {
     abi = which;
+    MapFunctionalMemory();
     ResetAbi();
   }
   void SetBachflowAbi() { SetAbi(RvAbi::kBachflow); }
@@ -397,12 +398,23 @@ class RvExec : public BachModule {
     local = std::make_shared<systeml::MemoryBase>();
     dtcm = std::make_shared<systeml::MemoryBase>();
 
-    // ITCM 与旧 DTCM 各挂一段。别名窗口落在 DTE Core Mem 里面，优先级高于
-    // Core Mem，偏移把别名地址折回同一块 DTCM，两边写的字节是同一份。
+    MapFunctionalMemory();
+
+    engine = std::make_unique<rv32::Engine>(/*maxCycles=*/~0ull);
+    engine->Add(sys.get(), 0);
+    sys->SetHaltState(true, 0);   // 复位后等 task，不自己跑
+    ResetAbi();
+  }
+
+  void MapFunctionalMemory() {
+    router->Reset();
     router->AddPort(local, kItcmBase, kItcmSize, 0, 0, "itcm");
     router->AddPort(dtcm, kDtcmBase, kDtcmSize, 0, 0, "dtcm");
-    router->AddPort(dtcm, kDtcmAliasBase, kDtcmSize, 2,
-                    int64_t(kDtcmBase) - int64_t(kDtcmAliasBase), "dtcm_alias");
+    // 仅 BachFlow ABI 开别名。旧 DTE 在同一地址仍访问 Core Mem。
+    if (abi == RvAbi::kBachflow) {
+      router->AddPort(dtcm, kDtcmAliasBase, kDtcmSize, 2,
+                      int64_t(kDtcmBase) - int64_t(kDtcmAliasBase), "dtcm_alias");
+    }
     router->AddPort(dsa_io, DsaIoBase(), DsaIoSize(), 1, 0, "dsa");
     router->AddPort(task_ctrl, kTaskCtrlBase, kTaskCtrlSize, 1, 0, "taskctrl");
     router->AddPort(share_mem, kShareMemBase, kShareMemSize, 1, 0, "smem");
@@ -414,11 +426,6 @@ class RvExec : public BachModule {
     }
     router->AddPort(core_mem_doc, kDocCoreMemBase, kRouterIoOffset, 1, 0,
                     "cmem_doc");
-
-    engine = std::make_unique<rv32::Engine>(/*maxCycles=*/~0ull);
-    engine->Add(sys.get(), 0);
-    sys->SetHaltState(true, 0);   // 复位后等 task，不自己跑
-    ResetAbi();
   }
 
   // firmware 的 _start 头两条做的事：栈顶与全局指针。模型里 RV core 不跑
@@ -565,7 +572,7 @@ class RvExec : public BachModule {
   bool ToLsq(uint32_t inst) const {
     if ((RvIssueResOf(inst) & kResMem) == 0) return false;
     uint64_t a = MemAddr(inst);
-    if (InRange(a, kDtcmAliasBase, kDtcmSize)) return false;
+    if (abi == RvAbi::kBachflow && InRange(a, kDtcmAliasBase, kDtcmSize)) return false;
     return InRange(a, kShareMemBase, kShareMemSize) ||
            InRange(a, kDocShareMemBase, kShareMemSize) ||
            InRange(a, kDocCoreMemBase, kRouterIoOffset) ||
