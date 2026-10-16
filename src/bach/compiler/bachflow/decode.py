@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import struct
 
-from bachflow.hw.release import unpack_rows
+from bachflow.hw.release import unpack_groups, validate_release_word
 from bachflow.router_word import unpack_word
 from bachflow.ts_attr import DATAIN_TASK_ATTR, TASK_CHAIN_ATTR, unpack_attr
 
@@ -49,6 +49,6 @@ def router_word(word: int) -> dict[str, int]:
     return unpack_word(word)
 
 
-def release_rows(word: int) -> tuple[int, int, int, int]:
-    """Four 5-bit rows, low to high: Up, Down, Left, Right."""
-    return unpack_rows(word & ((1 << 20) - 1))
+def release_groups(word: int) -> tuple[int, int, int]:
+    """Three 4-bit groups, high to low: NS, West, East."""
+    return unpack_groups(validate_release_word(word))

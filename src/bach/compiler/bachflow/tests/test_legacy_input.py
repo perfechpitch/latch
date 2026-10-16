@@ -92,7 +92,7 @@ def _active(tmp):
     path = zero_path()
     path[3] = route(directionMask=0b1_0000 | 0b1000, nxtVC=1, streamCheck=1)
     return build(tmp, cores={(0, 1): {
-        "release": release(0, 0, 0, 0),
+        "release": release(0, 0, 0),
         "path": path,
         "task": [(0x20, task(TASK_SEND_UNIT=2, TASK_PATH_ID=3, TASK_END=1))],
         "stream_num": 4,
@@ -152,9 +152,9 @@ def test_bad_core_stays_spare_and_keeps_only_its_forward(tmp_path):
     path = zero_path()
     path[4] = route(directionMask=0b0100, nxtVC=2)
     buff, bwgt = build(tmp_path, mask=0x084, cores={
-        (1, 3): {"release": release(0, 0, 0, 0), "path": path,
+        (1, 3): {"release": release(0, 0, 0), "path": path,
                  "task": [(0x10, task(TASK_PATH_ID=4, TASK_END=1))], "init_finish": 1},
-        (1, 2): {"release": release(0, 0, 0, 0x4)},
+        (1, 2): {"release": release(0, 0, 0x8)},
     })
     packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
     assert ["CORE", "1", "2", "3"] in lines_of(packed.text, "CORE")

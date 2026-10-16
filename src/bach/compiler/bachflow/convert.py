@@ -26,8 +26,8 @@ from bachflow.hw.types import Coord, Direction
 from bachflow.router_word import DIR_CORE_MASK, DIRECTION_BITS
 from bachflow.segments import SEGMENT_BY_NAME
 
-from .decode import datain_attr, entries, release_rows, router_word, task_attr, u32, u32s
-from .faces import CORE_BIT, MID, STATION_BIT, Faces
+from .decode import datain_attr, entries, release_groups, router_word, task_attr, u32, u32s
+from .faces import CORE_BIT, LEFT, MID, RIGHT, STATION_BIT, Faces
 from .layer import ROLE, SMEM_LIMIT, STREAM_INIT_RESET, Core, Layer, chip_of, open_layer
 
 HEADER = "BACHIR 12"
@@ -338,38 +338,29 @@ def _routes(core: Core, faces: Faces) -> dict[int, Route]:
 def _release(core: Core, faces: Faces) -> dict[int, int]:
     """Release CSR to ``{incoming station: outgoing station mask}``.
 
-    A row is the face the release leaves on, which is the face the data came in
-    on. The row's bits are the faces the release came from. Release runs against
-    the data, so the data forward is the reverse.
+    NS, West and East groups leave on MID, LEFT and RIGHT. The p0 north
+    and p9 south ports already use LEFT and RIGHT in ``Faces``. Source bits
+    name incoming stations; Self is handled separately by native retirement.
     """
     ext = core.ext("router.release")
     if ext is None:
         return {}
-    rows = release_rows(u32(ext.data))
+    try:
+        groups = release_groups(u32(ext.data))
+    except ValueError as exc:
+        raise ConvertError(str(exc)) from exc
     out: dict[int, int] = {}
-    face = faces.faces(core.p)
-    for row_i, bits in enumerate(rows):
-        if bits & ~0x1F:
-            raise ConvertError(f"release row {row_i} is 0x{bits:x}, wider than 5 bits")
-        direction = (Direction.N, Direction.S, Direction.W, Direction.E)[row_i]
-        station = face.get(direction)
-        if station is None:
+    available = set(faces.faces(core.p).values())
+    for station, bits in zip((MID, LEFT, RIGHT), groups):
+        if station not in available:
             if bits:
-                raise ConvertError(
-                    f"release row {direction.name} is 0x{bits:x} on a core with no "
-                    "such face"
-                )
+                raise ConvertError(f"release group cites absent station {station}")
             continue
-        for bit in range(4):
+        for bit, src_station in ((1, RIGHT), (2, MID), (3, LEFT)):
             if not bits & (1 << bit):
                 continue
-            src = (Direction.N, Direction.S, Direction.W, Direction.E)[bit]
-            src_station = face.get(src)
-            if src_station is None:
-                raise ConvertError(
-                    f"release on {direction.name} cites {src.name}, which this core "
-                    "has no station for"
-                )
+            if src_station not in available:
+                raise ConvertError(f"release cites absent source station {src_station}")
             out[src_station] = out.get(src_station, 0) | STATION_BIT[station]
     return out
 

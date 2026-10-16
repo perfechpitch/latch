@@ -30,7 +30,7 @@ HALF = 16 * 1024 * 1024
 SF_BYTES = 4 * 1024 * 1024
 SCENE = Path(os.environ.get("BACHFLOW_EP1_RUN", "output/latch-validation/ep1_pp3_tp16"))
 BUFF = SCENE / "GLM5-744B-MoE-EP1PP3TP16-v0.1-FP8-L00003-of-00078.buff"
-TOKEN = SCENE / "validation/checkpoint-golden/user101.token"
+TOKEN = Path(os.environ.get("BACHFLOW_GOLDEN_DIR", str(SCENE / "validation/checkpoint-golden"))) / "user101.token"
 
 
 def _nk(n, k, fill):

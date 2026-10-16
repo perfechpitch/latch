@@ -4,7 +4,7 @@ Latch names a core's three router-to-router stations mid, left and right
 (``Dir`` 0, 1, 2 in the recovered model). On the Bach 2x5 grid those stations
 are the faces the topology actually connects:
 
-* mid is the vertical face, north on the top row and south on the bottom row
+* mid is the vertical face, south on the top row and north on the bottom row
 * left is west, and also north on the north port core (the chip's north link
   attaches to that core's west station)
 * right is east, and also south on the south port core

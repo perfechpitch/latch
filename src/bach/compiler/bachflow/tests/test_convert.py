@@ -16,7 +16,7 @@ def test_one_task_core_renders_the_chain(tmp_path):
     path = zero_path()
     path[3] = route(directionMask=0b1_0000 | 0b1000, nxtVC=1, streamCheck=1)
     buff, bwgt = build(tmp_path, cores={(0, 1): {
-            "release": release(0, 0, 0, 0),
+            "release": release(0, 0, 0),
             "path": path,
             "task": [(0x20, task(TASK_SEND_UNIT=2, TASK_PATH_ID=3, TASK_END=1))],
             "stream_num": 4,
@@ -45,9 +45,9 @@ def test_bad_core_gets_no_span_and_a_derived_forward(tmp_path):
     path = zero_path()
     path[4] = route(directionMask=0b0100, nxtVC=2)
     buff, bwgt = build(tmp_path, mask=0x084, cores={
-        (1, 3): {"release": release(0, 0, 0, 0), "path": path,
+        (1, 3): {"release": release(0, 0, 0), "path": path,
             "task": [(0x10, task(TASK_PATH_ID=4, TASK_END=1))]},
-        (1, 2): {"release": release(0, 0, 0, 0x4)},
+        (1, 2): {"release": release(0, 0, 0x8)},
     })
     bundle = convert(buff, bwgt)
     assert all(ln[1:3] != ["1", "2"] for ln in lines_of(bundle.text, "FILESPAN"))

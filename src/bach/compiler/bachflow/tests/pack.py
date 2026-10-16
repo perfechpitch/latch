@@ -11,7 +11,7 @@ import struct
 from pathlib import Path
 
 from bachflow.buff import BlobKind
-from bachflow.hw.release import pack_rows
+from bachflow.hw.release import RELEASE_FORMAT, RELEASE_FORMAT_KEY, pack_groups
 from bachflow.router_word import pack_word
 from bachflow.segments import segment_meta
 from bachflow.ts_attr import DATAIN_TASK_ATTR, TASK_CHAIN_ATTR, pack_attr, pack_entry
@@ -24,6 +24,7 @@ CORES = 10
 def _meta(masks: dict[int, int]) -> dict:
     meta: dict = {
         "general.alignment": 32,
+        RELEASE_FORMAT_KEY: RELEASE_FORMAT,
         "hw.chip_shape": [4, 4],
         "hw.core_shape": [2, 5],
         "hw.chip_count": CHIPS,
@@ -153,8 +154,8 @@ def route(**fields) -> int:
     return pack_word(fields)
 
 
-def release(*rows) -> int:
-    return pack_rows(list(rows))
+def release(ns: int, west: int, east: int) -> int:
+    return pack_groups(ns, west, east)
 
 
 def zero_path() -> list[int]:
