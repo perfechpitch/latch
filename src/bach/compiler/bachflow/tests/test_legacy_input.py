@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from bachflow.segments import SEGMENT_BY_NAME
 from bach.compiler.bachflow import ConvertError
 from bach.compiler.bachflow.legacy_input import (
     PackageError,
+    _span,
     decode_ihex,
     encode_ihex,
     package_input,
@@ -37,6 +41,36 @@ def test_ihex_keeps_bss_zeros_and_does_not_fill_the_gap():
     assert bytes(got[0x0010_0000 + i] for i in range(9)) == dtcm
     assert 4 not in got
     assert 0xFFFF not in got
+
+
+@pytest.mark.parametrize("segment", ["itcm", "dtcm"])
+def test_shifted_image_span_keeps_bytes_at_its_hex_address(tmp_path, segment):
+    offset = 0x100
+    data = b"\x00\x11\x00\x7f\x00"
+    spec = {"task": [(offset + 0x10, task(TASK_SEND_UNIT=2, TASK_END=1))],
+            "init_finish": 1, "itcm": b"\x13\x00\x00\x00"}
+    spec[segment] = data
+    spec[f"{segment}_off"] = offset
+    buff, bwgt = build(tmp_path, cores={(0, 1): spec})
+    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+    kernel = lines_of(packed.text, "KERNELCORE")[0]
+    image = decode_ihex((packed.out_dir / kernel[4]).read_text())
+    base = 0 if segment == "itcm" else 0x0010_0000
+    assert bytes(image[base + i] for i in range(offset)) == bytes(offset)
+    assert bytes(image[base + offset + i] for i in range(len(data))) == data
+    assert base + offset + len(data) not in image
+    assert lines_of(packed.text, "TCHAIN")[0][4] == "0x110"
+
+
+@pytest.mark.parametrize("name,limit", [("itcm.vu", 4096), ("dtcm.vu", 8192)])
+@pytest.mark.parametrize("case", ["negative", "overflow", "empty"])
+def test_image_span_rejects_invalid_bounds(name, limit, case):
+    offset, data = {"negative": (-1, b"\x13"), "overflow": (limit, b"\x13"),
+                    "empty": (0, b"")}[case]
+    core = SimpleNamespace(chip=0, p=1)
+    ext = SimpleNamespace(addr=SEGMENT_BY_NAME[name].base + offset, size=len(data), data=data)
+    with pytest.raises(PackageError, match="non-empty span.*within"):
+        _span(core, ext, name, limit)
 
 
 def test_ihex_emits_an_extended_address_past_64k_and_checks_the_sum():

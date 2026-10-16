@@ -123,8 +123,12 @@ def _fill(meta, blobs, c, p, spec) -> None:
         blobs.append(BlobInfo(f"smem.{p}", BlobKind.DATA, len(spec["smem"]), 0, spec["smem"]))
     if spec.get("itcm"):
         meta[f"itcm.vu.{c}.{h}.{p}.span.blob"] = f"itcm.{p}"
-        meta[f"itcm.vu.{c}.{h}.{p}.span.offset"] = 0
+        meta[f"itcm.vu.{c}.{h}.{p}.span.offset"] = spec.get("itcm_off", 0)
         blobs.append(BlobInfo(f"itcm.{p}", BlobKind.KERNEL, len(spec["itcm"]), 0, spec["itcm"]))
+    if spec.get("dtcm"):
+        meta[f"dtcm.vu.{c}.{h}.{p}.span.blob"] = f"dtcm.{p}"
+        meta[f"dtcm.vu.{c}.{h}.{p}.span.offset"] = spec.get("dtcm_off", 0)
+        blobs.append(BlobInfo(f"dtcm.{p}", BlobKind.DATA, len(spec["dtcm"]), 0, spec["dtcm"]))
     if spec.get("mmem_off") is not None:
         meta[f"mmem.{c}.{h}.{p}.span.blob"] = "mmem.blob"
         meta[f"mmem.{c}.{h}.{p}.span.offset"] = spec["mmem_off"]

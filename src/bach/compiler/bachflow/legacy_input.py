@@ -28,8 +28,9 @@ and the restored ``HasTask`` guard means such a core never reaches
 sidecar keeps the packed role. A core that is inactive but still carries a task
 record is not that shape and fails the packaging.
 
-Images are the packed ITCM and DTCM bytes, at the address the kernel was linked
-for: ITCM at 0, DTCM at ``0x100000``. Nothing is relocated or recompiled. Bytes
+Images are the final packed ITCM and DTCM bytes. Their segment offsets are
+preserved in the HEX at ITCM base 0 and DTCM base ``0x100000``, with zero-filled
+prefixes before shifted spans. Nothing is relocated or recompiled. Bytes
 the pack already stored as zero, including BSS, stay zero in the HEX. One HEX
 file is written per distinct (unit, content). A core names the file for each
 unit it actually has; a unit the pack left out is absent, not filled with an
@@ -313,12 +314,12 @@ def _image_of(core, unit: str) -> _Image | None:
 
 def _span(core, ext, name: str, limit: int) -> bytes:
     offset = ext.addr - SEGMENT_BY_NAME[name].base
-    if offset != 0 or ext.size > limit or ext.size == 0:
+    if offset < 0 or offset + ext.size > limit or ext.size == 0:
         raise PackageError(
             f"chip {core.chip} core {core.p}: {name} is {ext.size} bytes at "
-            f"+{offset:#x}, not a non-empty span from 0 within {limit:#x}"
+            f"+{offset:#x}, not a non-empty span within {limit:#x}"
         )
-    return bytes(ext.data)
+    return bytes(offset) + bytes(ext.data)
 
 
 def _images(layer, cores) -> dict[tuple[int, int], dict[str, _Image]]:
