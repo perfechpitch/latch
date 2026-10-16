@@ -75,14 +75,19 @@ public:
   // 每交出一笔加一。Xbar 按它认这一笔见没见过：两侧各自打拍，station 一拍
   // 不写端口就会回落成上一拍的值，只看 valid 会把同一笔收两遍。
   Logic64 seq;
+  // Xbar 写、station 读。hold_block 第 v 位挡住发往交叉开关 VC v 的后续包头：
+  // 整包已经进核、这笔重发还没交付完，或者有一包发出了包头、包尾还没发出。
+  // hold_pull 为 1 时，station 把还没发完的那一包剩下的 flit 从队列中间抽出来先送。
+  Logic64 hold_pull, hold_vc, hold_user, hold_path, hold_block;
 
   explicit XbarReqPort(ClockPtr c)
       : valid(c), out_mask(c), vc(c), head(c), tail(c), bytes(c), path_id(c),
         user_id(c), enters_core(c), stall_way(c), stream_need(c),
-        whole_packet(c), credit_require(c), msg(c), room(c), seq(c) {
+        whole_packet(c), credit_require(c), msg(c), room(c), seq(c),
+        hold_pull(c), hold_vc(c), hold_user(c), hold_path(c), hold_block(c) {
     Fields(valid, out_mask, vc, head, tail, bytes, path_id, user_id,
            enters_core, stall_way, stream_need, whole_packet, credit_require,
-           msg, room, seq);
+           msg, room, seq, hold_pull, hold_vc, hold_user, hold_path, hold_block);
   }
 
   void IdleReq() {
@@ -105,6 +110,10 @@ public:
   void DriveRoom(uint64_t vc_mask) { room = vc_mask; }
   // 往第 v 个 VC 上交一笔收不收得下。
   bool RoomFor(uint64_t v) const { return ((room.Get() >> v) & 1u) != 0; }
+  // 深度还没到顶。队头被归约挡住时，另一包能进归约的 flit 走这一档。
+  bool SlackFor(uint64_t v) const {
+    return ((room.Get() >> (v + kVcNum)) & 1u) != 0;
+  }
 };
 
 struct XbarReqView {

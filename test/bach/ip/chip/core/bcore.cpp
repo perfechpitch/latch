@@ -224,6 +224,37 @@ void LoadKernels(Core &core) {
 
 } // namespace
 
+// 任务表还没有这个用户时，归约按 PhyMemTable 未命中分配，不直接拒绝。
+// 16 项占满后下一用户不再分配。
+TEST(BachBcore, ReduceAllocatesWithoutATask) {
+  EnsureSlots();
+  ClockPtr clk = MakeClock(0, kPeriod);
+  Core core(clk, "core", CoreContext{});
+  auto make = [](uint64_t user) {
+    auto m = std::make_shared<Message>();
+    m->user_id = user;
+    m->path_id = 1;
+    m->size = 256;
+    return m;
+  };
+  MessagePtr first = make(7);
+  EXPECT_TRUE(core.GetRouter().GetXbar().ReduceHeadOk(*first));
+  EXPECT_EQ(core.GetTs().Table().Occupied(), 0u);
+  core.GetRouter().GetReduce().ReserveHead(*first);
+  EXPECT_TRUE(core.GetRouter().GetReduce().HoldsUser(7));
+  EXPECT_EQ(core.GetRouter().GetReduce().ContextUsed(), 1u);
+
+  for (uint64_t u = 0; u < 15; ++u) {
+    MessagePtr m = make(100 + u);
+    EXPECT_TRUE(core.GetRouter().GetXbar().ReduceHeadOk(*m));
+    core.GetRouter().GetReduce().ReserveHead(*m);
+  }
+  EXPECT_EQ(core.GetRouter().GetReduce().ContextUsed(), 16u);
+  MessagePtr extra = make(200);
+  EXPECT_FALSE(core.GetRouter().GetXbar().ReduceHeadOk(*extra));
+  RT::Reset();
+}
+
 // 一笔都没进来：head 与 tail 一直相等，链二在 task 0 上等着，出口是空的。
 TEST(BachBcore, NothingGoesOutWithoutAToken) {
   if (!KernelBuilt())

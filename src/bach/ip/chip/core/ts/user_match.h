@@ -202,6 +202,18 @@ private:
         lookup.reset();
         return;
       }
+      if (l.tid >= kTaskChainNum) {
+        std::string where;
+        for (uint64_t id = obj_id; id != 0; id = RT::GetModulePool().GetPid(id)) {
+          where = RT::GetModulePool().GetName(id) +
+                  (where.empty() ? "" : ".") + where;
+        }
+        spdlog::error(
+            "UserMatch {} 第 {} 拍：用户 {} 在 stream {} 上已经没有 path {} "
+            "还没做的搬入任务，reissue {} done 0x{:x}",
+            where, CycleNow(), l.user, l.sid, l.path, l.reissue ? 1 : 0,
+            l.exclude);
+      }
       LOGCHECK(l.tid < kTaskChainNum,
                "UserMatch: PID没有未完成且未claimed的DataIn。");
       auto const &task = cfg.Task(l.tid);

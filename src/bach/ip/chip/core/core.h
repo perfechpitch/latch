@@ -545,47 +545,46 @@ private:
 
   // Router 与 TS 之间的四条控制线。
   void WireRouterToTs() {
-    // Core 统一驱动子模块；归约只接收本核已准入用户，并在首 flit
-    // 授予时预留数据区。
+    // 归约包头授予时预留 Rmem。任务表里还没有这个用户时，按 PhyMemTable
+    // 未命中分配，不要求广播先把用户送进核。表里已有这个用户时，按 path 与
+    // 已占用的 Rmem 只收当前这一笔。
     router->GetXbar().SetReduceAdmission(
         [this](Message const &m) {
-          bool admitted = ts->Cfg().SelfStartCore() ||
-                          router->GetXbar().StreamHolds(kOutCore, m.user_id);
           uint64_t done = 0;
           StreamEntry const *current = nullptr;
+          bool in_table = false;
           for (uint64_t s = 0; s < kStreamNum; ++s) {
             auto const &e = ts->Table().Peek(s);
             if (e.valid && e.user_id_vld && e.user_id == m.user_id) {
-              admitted = true;
+              in_table = true;
               done = e.done_bitmap;
               current = &e;
               break;
             }
           }
-          if (!admitted)
-            return false;
+          if (!in_table)
+            return router->GetReduce().CanAcceptHead(m);
           // 同一笔归约里各核的 task_id 各自编号（pcode），不能拿发方的
           // reduce_seq 对本地任务号，一律按 path 认。
-          // 任务链上用这条 path 的 type-4 有没有；这条 path 在链上根本没有
-          // type-4（只汇上游分量、再按 flow_dir 送走，链上只留 stall_way 的
-          // reissue）时也要收：否则包进不了归约模块，reissue 又等不到进核的
-          // 包，两边都停。
+          // 这条 path 在链上根本没有 type-4（只汇上游分量、再按 flow_dir
+          // 送走，链上只留 stall_way 的 reissue）时也要收：否则包进不了归约
+          // 模块，reissue 又等不到进核的包，两边都停。
           auto path_of = [&](uint64_t t) {
-            if (current &&
-                (current->task_id == t ||
-                 (current->pid_pending && current->task_id + 1 == t)))
+            if (current->task_id == t ||
+                (current->pid_pending && current->task_id + 1 == t))
               return current->task_path_id;
             return ts->Cfg().Task(t).path_id;
           };
           bool has_local = false;
           for (uint64_t t = 0; t < kTaskChainNum && !has_local; ++t) {
             auto const &task = ts->Cfg().Task(t);
-            has_local = task.valid && task.IsReduce() && path_of(t) == m.path_id;
+            has_local =
+                task.valid && task.IsReduce() && path_of(t) == m.path_id;
           }
           if (!has_local)
             return router->GetReduce().CanAcceptHead(m);
           // 已占用的 RMEM 只接它那条 path，后继不得越过前次归约。
-          if (current && current->rmem_busy)
+          if (current->rmem_busy)
             return m.path_id == current->rmem_pid &&
                    router->GetReduce().CanAcceptHead(m);
           // 只接最早尚未完成的那一笔 type-4 的 path；本地仍在计算时，上游

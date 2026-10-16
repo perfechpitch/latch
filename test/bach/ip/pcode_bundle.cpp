@@ -8,9 +8,11 @@
 // （默认 pcode_ep1）。没有 bundle 就跳过。
 //
 // topK 56 B：2 B ep_counter、8×2 B 组内序号、8×4 B FP32 权重，其余填 0。
-// 组内序号加上 1 个共享槽之后必须落在前 20 个物理专家里，这样 Matrix Mem
-// 只铺这 20 个里被点到的专家，不必把 256 个路由专家都激活。
-// 数据段 6336 B 是有限 E4M3 图案。权重按 0x18000 稀疏铺进 Matrix Mem。
+// 组内序号只留前 20 个路由专家。加上共享专家共 21 个物理序号，Matrix Mem
+// 只铺这一段，不必把 256 个路由专家都激活。
+// 数据段 6336 B 是有限 E4M3 图案。权重默认来自
+// mlx-community/GLM-5-8bit-MXFP8 第 3 层（PCODE_HF_WEIGHTS，缺了就先下载）。
+// PCODE_SYNTHETIC_WEIGHTS=1 才改回按 0x18000 铺的固定图案，并和它比余弦。
 // B core 自启动。pcie 搬入把每个用户写进 Matrix Mem 的一份缓冲，check flag
 // 轮询 ShareMem 的 head/tail，看到谁 ready 再带上他的 user_id 往下发。
 // 缓冲和计算核的 stream 表都是 16 项，所以 16 名隔 1 拍注入，不必等前一名走完。
@@ -24,6 +26,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -51,7 +54,8 @@ constexpr uint64_t kUserGap = 1;          // 下一名隔 1 拍注入
 constexpr uint64_t kConcatN = 6144;
 constexpr uint64_t kExpertStride = 0x18000;
 constexpr uint64_t kSharedSlots = 1;        // 共享专家占物理序号 0
-constexpr uint64_t kExpertPool = 20;        // 只允许前 20 个物理专家
+constexpr uint64_t kRoutedPool = 20;        // 路由专家只激活 0..19
+constexpr uint64_t kExpertPool = kSharedSlots + kRoutedPool;  // 物理序号 0..20
 constexpr uint64_t kFc1Core = 1;            // chip 0 上跑 FC1 的物理核
 constexpr uint64_t kFc1Out = 0x18c0;        // 0x484018c0 剥掉 Core Mem 基址
 constexpr uint64_t kConcatAt = 0xB00;
@@ -91,7 +95,7 @@ TopkSlot TopkAt(MessagePtr const& msg, uint64_t e) {
   return {local, LoadF32(msg->payload, 2 + kRouted * 2 + e * 4)};
 }
 
-// 物理专家号 = 共享槽数 + 组内序号。源只从还能落进前 20 个的组内序号里取。
+// 物理专家号 = 共享槽数 + 组内序号。组内序号只留前 20 个路由专家。
 uint64_t PhysicalExpert(uint64_t local) {
   return kSharedSlots + local;
 }
@@ -108,7 +112,7 @@ MessagePtr MakeEp1Token(uint64_t user, uint64_t local_base) {
   StoreU16(m->payload, 0, kRouted);
   for (uint64_t e = 0; e < kRouted; ++e) {
     uint64_t local = local_base + e;
-    // 越出前 20 个就折回去，不让路由专家号铺到 256。
+    // 越出前 20 个路由专家就折回去，不让专家号铺到 256。
     if (PhysicalExpert(local) >= kExpertPool) {
       local = local % (kExpertPool - kSharedSlots);
     }
@@ -318,13 +322,116 @@ double Cosine(std::vector<float> const& got, std::vector<float> const& want) {
   return dot / std::sqrt(na * nb);
 }
 
+std::string BachflowRoot() {
+  return EnvOr("BACHFLOW_ROOT", "/mnt/c/Users/kim01/Desktop/BachFlow");
+}
+
+std::string LatchRoot() {
+  return EnvOr("LATCH_ROOT", "/mnt/c/Users/kim01/Desktop/latch");
+}
+
+std::string HfWeightsRoot() {
+  return EnvOr("PCODE_HF_WEIGHTS", BachflowRoot() + "/pcode/output/ep1_hf_weights");
+}
+
+// 只读开头 n 字节。文件更短就读到末尾。
+bool ReadPrefix(std::string const& path, ByteBlock& out, uint64_t n) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return false;
+  out.resize(static_cast<size_t>(n));
+  in.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(n));
+  auto got = in.gcount();
+  if (got < 0) return false;
+  out.resize(static_cast<size_t>(got));
+  return got > 0;
+}
+
+// 缺 latch/index.txt 时跑 fetch_ep1_hf_weights.py：先下载第 3 层，再按物理核展开 scale。
+int FetchHfWeights() {
+  std::string index = HfWeightsRoot() + "/latch/index.txt";
+  {
+    std::ifstream probe(index);
+    if (probe.good()) {
+      std::cerr << "  HF 权重索引 " << index << "\n";
+      return 0;
+    }
+  }
+  std::string cmd = "PYTHONPATH=" + BachflowRoot() + "/importer/src:" + BachflowRoot() +
+                    "/pcode/src:" + BachflowRoot() + "/defs:" + BachflowRoot() +
+                    "/route/src python3 -u " + LatchRoot() +
+                    "/test/bach/ip/fetch_ep1_hf_weights.py --out " + HfWeightsRoot();
+  std::cerr << "  " << cmd << "\n";
+  return std::system(cmd.c_str());
+}
+
+// 每个物理核一份数据，scale 已按「每 32 字节一个 E8M0」排好。
+// 专家按 0x18000 从偏移 0 排开：0 是共享专家，1..20 是前 20 个路由专家。
+// 后面的路由专家不会被 topK 点到，只灌这一段。
+bool LoadHfWeights(std::vector<Chip*> const& all) {
+  std::string dir = HfWeightsRoot() + "/latch";
+  std::ifstream index(dir + "/index.txt");
+  if (!index) return false;
+  uint64_t keep = kExpertPool * kExpertStride;
+  std::string line;
+  uint64_t n = 0, bytes = 0;
+  while (std::getline(index, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    std::istringstream ss(line);
+    uint64_t chip = 0, phys = 0, off = 0;
+    std::string data_name, scale_name;
+    if (!(ss >> chip >> phys >> off >> data_name >> scale_name)) {
+      ADD_FAILURE() << "坏的权重索引行：" << line;
+      return false;
+    }
+    if (chip >= all.size() || phys >= kChipCoreNum) {
+      ADD_FAILURE() << "权重索引越界：" << line;
+      return false;
+    }
+    ByteBlock data, scale;
+    if (!ReadPrefix(dir + "/" + data_name, data, keep) ||
+        !ReadPrefix(dir + "/" + scale_name, scale, data.size() / 32)) {
+      ADD_FAILURE() << "读不到 " << dir << "/" << data_name;
+      return false;
+    }
+    if (data.size() < keep || scale.size() * 32 < data.size()) {
+      ADD_FAILURE() << data_name << " 短于前 " << kRoutedPool << " 个路由专家";
+      return false;
+    }
+    Core& core = all[chip]->GetCore(phys);
+    if (core.Bad()) {
+      ADD_FAILURE() << "chip " << chip << " p" << phys << " 是坏核";
+      return false;
+    }
+    core.Mmem().Poke(off, data);
+    core.Mmem().PokeScale(off, scale);
+    ++n;
+    bytes += data.size();
+  }
+  std::cerr << "  HF 权重 " << n << " 个核，共享专家加前 " << kRoutedPool
+            << " 个路由专家，" << (bytes >> 20) << " MiB，" << HfWeightsRoot() << "\n";
+  return n > 0;
+}
+
+void PokeTokenScales(std::vector<Chip*> const& all) {
+  uint8_t sc = numeric::ToE8m0(1.0f);
+  ByteBlock tok_scale(kTokenK / 32, sc);
+  // token 正文是测试台自己的图案，scale 按 1。DTE 只写正文，不盖掉这里。
+  for (Chip* chip : all) {
+    for (uint64_t k = 0; k < kChipCoreNum; ++k) {
+      Core& core = chip->GetCore(k);
+      if (core.Bad()) continue;
+      core.Cmem().PokeScale(0, tok_scale);
+    }
+  }
+}
+
 void PokeExperts(std::vector<Chip*> const& all,
                  std::vector<MessagePtr> const& tokens) {
   uint8_t sc = numeric::ToE8m0(1.0f);
   ByteBlock data(kExpertStride, 0);
   ByteBlock scale(kExpertStride / 32, sc);
   ByteBlock tok_scale(kTokenK / 32, sc);
-  // 共享专家，加上各用户 topK 点到的路由专家。都在前 20 个物理序号里。
+  // 共享专家，加上各用户 topK 点到的路由专家。路由专家只在前 20 个里。
   std::vector<uint64_t> used(kExpertPool, 0);
   used[0] = 1;
   for (MessagePtr const& m : tokens) {
@@ -370,6 +477,7 @@ class PcodeHarness : public BachModule {
   void Step() override {
     uint64_t now = CycleNow();
     LinkEndPtr feed_in = in_stub.FromCore();
+    if (ReadRelease(in_stub.RcVaSa().ToCoreBack()->release).vc_valid) ++feed_room;
     // 第 1 名在第 2 拍开始注入，一拍一个 flit（每个最多 kFlitBytes，Header
     // Parser 按 flit 收）；发完一名再隔 kUserGap 拍发下一名。
     if (!cur && sent < msgs.size() && now >= next_at) {
@@ -377,7 +485,8 @@ class PcodeHarness : public BachModule {
       beat = 0;
       std::cerr << "  用户 " << cur->user_id << " 注入，第 " << now << " 拍\n";
     }
-    if (cur) {
+    if (cur && feed_room > 0) {
+      --feed_room;
       uint64_t total = cur->TotalBytes();
       uint64_t flits = (total + kFlitBytes - 1) / kFlitBytes;
       if (flits == 0) flits = 1;
@@ -486,6 +595,8 @@ class PcodeHarness : public BachModule {
   uint64_t next_at = 2;
   MessagePtr cur;
   uint64_t beat = 0;
+  // 入口桥 core 侧那一级缓冲还剩几个位置，与桥给 core 的 VC credit 同一个账。
+  uint64_t feed_room = kC2cInCap;
   uint64_t last_sig = 0, last_change = 0;
 };
 
@@ -507,6 +618,7 @@ TEST(PcodeBundle, Ep1OneToken) {
 
   uint64_t stopped = 0, b_insts = 0, compute_insts = 0, inflight = 0;
   double cosine = 0, concat_cosine = 0;
+  bool hf_weights = false;
   uint32_t sm_head = 0, sm_tail = 0;
   uint64_t snap_n = 0;
   // full：FC1 和 concat 都要 ≥ 0.99。fc1：只查 FC1。idle：只看有没有在周期上限前停钟。
@@ -546,8 +658,15 @@ TEST(PcodeBundle, Ep1OneToken) {
     for (uint64_t u = 0; u < user_count; ++u) {
       tokens.push_back(MakeEp1Token(kUserBase + u, u * kRouted));
     }
-    std::cerr << "  灌入前 " << kExpertPool << " 个专家里被点到的权重\n";
-    PokeExperts(all, tokens);
+    hf_weights = std::getenv("PCODE_SYNTHETIC_WEIGHTS") == nullptr;
+    if (hf_weights) {
+      ASSERT_EQ(FetchHfWeights(), 0) << "下载 HF 权重失败";
+      ASSERT_TRUE(LoadHfWeights(all)) << HfWeightsRoot();
+      PokeTokenScales(all);
+    } else {
+      std::cerr << "  灌入前 " << kExpertPool << " 个专家里被点到的固定图案权重\n";
+      PokeExperts(all, tokens);
+    }
     PcodeHarness harness(clk, all, GridLinks(kGridY, kGridX), feed, sink, kMaxCycles,
                          tokens);
     clk->Continue();
@@ -654,7 +773,6 @@ TEST(PcodeBundle, Ep1OneToken) {
     for (uint64_t i = 0; i < kLpuChips; ++i) {
       for (uint64_t k = 0; k < kChipCoreNum; ++k) {
         Core& c = all[i]->GetCore(k);
-        if (c.Bad()) continue;
         Router& r = c.GetRouter();
         uint64_t qd[4] = {};
         bool any = false;
@@ -670,7 +788,8 @@ TEST(PcodeBundle, Ep1OneToken) {
         }
         CoreStation& cs = r.GetCoreStation();
         if (cs.OutBufDepth() != 0 || cs.HeaderDepth() != 0) any = true;
-        if (!any) continue;
+        bool watch = (i == 4 && (k == 0 || k == 1)) || (i == 1 && k == 5);
+        if (!any && !watch) continue;
         std::cerr << "  queued chip " << i << " p" << k << " q";
         for (uint64_t d = 0; d < 4; ++d) {
           std::cerr << " " << qd[d];
@@ -699,6 +818,37 @@ TEST(PcodeBundle, Ep1OneToken) {
           ++shown;
         }
         if (cs.HeaderDepth() > shown) std::cerr << " ...";
+        std::cerr << "\n    lock";
+        for (uint64_t d = 0; d < 4; ++d) {
+          RouterStation const& rs = r.Station(d);
+          bool fh = false, ft = false;
+          std::cerr << " s" << d << "[room 0x" << std::hex << rs.LastRoom()
+                    << " blk 0x" << rs.LastBlock() << std::dec << " pull "
+                    << rs.LastPull();
+          if (rs.FrontFlag(0, fh, ft)) std::cerr << " f0 " << (fh ? "H" : "") << (ft ? "T" : "") << (!fh && !ft ? "B" : "");
+          std::cerr << "]";
+        }
+        for (uint64_t d = 0; d < kXbarInNum; ++d) {
+          std::string t = xb.LockText(d);
+          if (!t.empty()) std::cerr << " x" << d << "{" << t << " }";
+        }
+        std::cerr << " cr";
+        for (uint64_t o = 0; o < 3; ++o) {
+          std::cerr << " o" << o << ":" << xb.VcCredit(o, 0) << "+" << xb.SharedCredit(o)
+                    << "/kb" << xb.CoreCredit(o) << "/st" << xb.StreamUsed(o)
+                    << "/own" << xb.OwnerOf(o, 0);
+        }
+        std::cerr << " core st" << xb.StreamUsed(kOutCore) << "/own";
+        for (uint64_t v = 0; v < 4; ++v) std::cerr << xb.OwnerOf(kOutCore, v);
+        std::cerr << (c.Bad() ? " BAD" : "") << "\n    vcq";
+        for (uint64_t d = 0; d < 4; ++d) {
+          std::string t = r.Station(d).VcText();
+          if (!t.empty()) std::cerr << " s" << d << "{" << t << " }";
+        }
+        for (uint64_t d = 0; d < kXbarInNum; ++d) {
+          std::string t = xb.QueueText(d);
+          if (!t.empty()) std::cerr << " x" << d << "{" << t << " }";
+        }
         std::cerr << "\n";
       }
     }
@@ -719,8 +869,9 @@ TEST(PcodeBundle, Ep1OneToken) {
     concat_cosine = 1;
     snap_n = harness.snaps.size();
     EXPECT_EQ(harness.snaps.size(), tokens.size());
-    // idle 只判断有没有跑完。16 路 stream 上逐用户搜余弦，128 用户要扫两千多次整段 concat。
-    bool skip_cosine = check == "idle";
+    // idle 只判断有没有跑完。HF 权重对不上固定图案的参考，也不比余弦。
+    // 16 路 stream 上逐用户搜余弦，128 用户要扫两千多次整段 concat。
+    bool skip_cosine = check == "idle" || hf_weights;
     if (harness.snaps.size() >= 2) {
       bool same = harness.snaps[0].fc1 == harness.snaps[1].fc1 &&
                   harness.snaps[0].concat == harness.snaps[1].concat;
@@ -804,9 +955,12 @@ TEST(PcodeBundle, Ep1OneToken) {
       if (best_fc1 < cosine) cosine = best_fc1;
       if (best_cat < concat_cosine) concat_cosine = best_cat;
     }
-    if (tokens.size() >= 2) {
+    if (!hf_weights && tokens.size() >= 2) {
       double g = Cosine(GoldenConcat(tokens[0]), GoldenConcat(tokens[1]));
       std::cerr << "  两份 concat 参考之间的余弦 " << g << "\n";
+    }
+    if (hf_weights && check != "idle") {
+      std::cerr << "  权重是 HF 第 3 层，固定图案的 FC1/concat 参考不参与判断\n";
     }
   }
   if (trace_chips != 0) TraceDone();
@@ -826,10 +980,10 @@ TEST(PcodeBundle, Ep1OneToken) {
   EXPECT_GT(stopped, 2u);
   EXPECT_LT(stopped, kMaxCycles);
   EXPECT_GT(b_insts, 0u);
-  if (check == "full" || check == "fc1") {
+  if (!hf_weights && (check == "full" || check == "fc1")) {
     EXPECT_GE(cosine, kMinCosine);
   }
-  if (check == "full") {
+  if (!hf_weights && check == "full") {
     EXPECT_GE(concat_cosine, kMinCosine);
   }
 }

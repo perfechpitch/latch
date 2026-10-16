@@ -587,23 +587,19 @@ TEST(BachRouterAsm, OverflowGoesToReissue) {
   EXPECT_EQ(occ, 0u);
 }
 
-// credit 真耗光时才转存：把 40 个 credit 全用掉，第 41 笔起走 stall_way。
+// credit 耗光时包留在当前 VC 等，不改送进核，也不进 Reissue 保序。
 TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
-  uint64_t overflow = 0, stored = 0, got = 0;
+  uint64_t overflow = 0, got = 0, to_core = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     RouterCfg cfg;
-    // 要转存 10 笔，暂存区就得配得下 10 笔。配少了 CoreMemReissue 会直接停。
-    // 那是设计要的行为：不覆盖已暂存的包，也不退回“留在当前 VC 等”，免得同一个
-    // stall_way 配置在两种容量下走出两种行为。
     cfg.reissue_pkts_per_vc = 16;
     Router rt(clk, "router", cfg);
     rt.Preload(3, Forward(kFlowRight, false, /*stall_way=*/true));
 
-    // 一个方向的 credit 是 private 20 加 shared 20 共 40。前 40 笔把它用光，
-    // 之后的没资源可拿，stall_way 选转存就落进 Core Mem。发出去的 flit 会把
-    // VC Buffer 的槽腾出来，所以灌 50 笔不会把 buffer 撑爆。
+    // 一个方向的 credit 是 private 20 加 shared 20 共 40。前 40 笔把它用光。
+    // 后面的包留在 VC 里等 credit，不进核。
     std::vector<Pusher::Job> jobs;
     for (uint64_t i = 0; i < 50; ++i) {
       jobs.push_back({1 + i, MakeMsg(3, 500 + i)});
@@ -615,14 +611,14 @@ TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
     clk->Continue(300 * kPeriod);
     RT::JoinAll();
     overflow = probe.overflow;
-    stored = probe.stored;
     got = down.got;
+    to_core = rt.GetXbar().SentCount(kOutCore);
   }
   RT::Reset();
-  // 40 个 credit 用完，剩下的 10 笔都转存
+  // 40 个 credit 用完。剩下的包不进核，也不走溢流口。
   EXPECT_EQ(got, 40u);
-  EXPECT_EQ(overflow, 10u);
-  EXPECT_EQ(stored, overflow);
+  EXPECT_EQ(to_core, 0u);
+  EXPECT_EQ(overflow, 0u);
 }
 
 // 坏 core：core_bad_mask 里本 core 那一位为 1，整个 Router 进透传档，不投递本
