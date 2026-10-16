@@ -495,3 +495,264 @@ Step7 起 16 用户也不走空。在途从第 8192 拍就是 111，一直保持
 Step8 没有把 Step7 解开。16 用户在途从 437 降到 418 后不动。新占多数的是 path 3、type 2、fsm Wait（22 颗），path 2 的归约现场还在（10 颗）。32 用户钉在 521，128 用户 head 仍是 51、在途 556。Step9 的 16 用户停在同一个 418。32 用户 509，128 用户 head 51、在途 544。
 
 Step10 把 FC2 归约放进来之后在途变多，但仍然钉住：16 用户 1012，32 用户 1134，128 用户 head 51、在途 1163。16 用户 dump 里新占多数的是 path 4、type 3、fsm Wait（55 颗）。path 2 的归约还在（13 颗），path 4 上已经有 8 颗 type 4、fsm Infly。Step11、Step12 三种人数的停钟数字与 Step10 相同，concat 和 pcie 出没有再往下走。
+
+### 9.11 按飞书把整包改送进 Core 之后，Step7 的 128 用户仍不走空
+
+飞书 Router F-025：下游 Stream 不够且 `stallWay=1` 时，还没有向原目标交出任何 flit 的完整 Packet 进 Core，原目标一个 flit 都不收。flit 数不限。已经向原目标送出过头的包，保持原路径直到包尾。VC credit 不够不触发这次重发。
+
+latch 原先只在 `head && tail` 的单 flit 整包上走溢流口，进的是 `CoreMemReissue`，多 flit 留在 VC。这是 `xbar.h` 自己的限制，飞书没有这一条。`CoreMemReissue` 的出线没有接到 DTE，按 flit 计数，默认每个 VC 两笔就断言。所以整包不能走那条口。
+
+改成直接从交叉开关送进本核的 CoreStation，一拍一个 flit，直到包尾：
+
+- 包头这一拍定下来。条件是 `stallWay=1`、这一拍原目标拿不到资源、出口不是被别的入口占着、本核收得下。后面的 flit 跟进同一核，不再试原目标。已经发出过头的包身不改道。
+- 送进本核的包头打上 `reissue=1`，打在这一份副本上。多播的几个方向共享同一个 `Message`，改共享对象会把还在别的路口上的副本也标成重发。
+- 本核自己发出去的包不再送回本核。表项里的进核位描述的是从 mesh 进来的那一跳，送回去就是同一个用户的第二个 token。同一条 VC 上，包身若还排在别的包后面，把同一用户、同一 path 的后续 flit 抽出来跟着进核；别的 VC 继续走。
+- 触发仍是「原目标这一拍资源不够」，Stream 槽满和 VC credit 用光都会进来。飞书写的是只由 Stream 不足触发。这次没有把触发收窄到只有 Stream。`BachRouterAsm.StallWayStoresWhenCreditIsGone` 因此改成：40 个 credit 用完后，剩下的 10 笔单 flit 整包进核，不再进溢流口。`BachRouterAsm` 14 个测试通过。
+
+用改过的模型重跑 Step7、128 用户。bundle 是 `/tmp/latch_ep1_s07`，上限 32768，`PCODE_CHECK=idle`。日志 `/tmp/ep1_unit_logs/s07_u128_divert.log`。
+
+第 8192 拍 head=128、tail=100、在途 362、指令 38765。第 16384 拍 head=128、tail=102、在途 363、指令 38817。之后到第 32768 拍这三个数不动。快照 0 份。gtest 失败。B 核指令 8490。128 个用户都进了 B 核的环，tail 停在 102，还有 26 个没有离开这颗核。指令从第 16384 拍起完全不增加，核不再空转。
+
+停钟时 61 颗核有任务。当前任务条数：path 1、type 3、fsm Wait 136 条；path 0、type 1、fsm Wait、`done 0x1` 114 条；path 1、type 4 73 条；path 2、type 4、fsm Infly 18 条；path 0、type 0 16 条（都在 B 核）；path 0、type 2 6 条。
+
+path 0 的 type 1 是重发搬出。`done 0x1` 表示搬入已经做完，配对的搬出没有被跳过，所以这些包是带着重发标记进的核。这些核的四个口是空的，包在核里，搬出停在 Wait，等 credit。16 个 stream 槽被这些还没退休的用户占满。
+
+代表现场：
+
+- 全局 chip 0（tray 0，片内 0，gx=0，gy=0）物理核 p9，逻辑核 7。16 条 stream 里 15 条是 path 0、type 1、fsm Wait，用户 24–38。包头队列 16，都是这些 path 0。mid 口 40 个 flit 是 path 1 用户 39 的包头，出方向是归约口，hold 原因是 1。path 1 归约是 `exp 0x7 got 0x3`。
+- 全局 chip 4（tray 0，片内 4，gx=0，gy=1）物理核 p1。西口 60 个 flit，path 0 用户 16，掩码 `0xd`（北、东、核），`own 2`。包头已经向原目标交过，包身留在这条 VC 上，这一跳不再整包改送进核。
+- 全局 chip 0 物理核 p5，B 核。用户 87–102 停在 path 0、type 0、fsm Wait、`done 0x1`。包头队列 42，是 path 63 的用户 87–128。
+
+整包进核把还没发出去的 path 0 包头送进了核。改之前同一步的 128 用户已经是 head=128、tail=96，指令停在 212631 并且核还在空转；这次 tail 走到 102，指令从第 16384 拍起不再增加。搬出等的 credit 没有回来：已经发出包头的多播包身仍占着 VC，下游 stream 槽也被还没退休的用户占着。path 1 的归约输入因此仍到不了。Step7 的 128 用户没有走空。
+
+### 9.12 同一条 VC 上，进核的包没完成时后面的包不能越过它
+
+飞书 Router F-027：一个 VC 上有一包进了核、重发还没完成，后面的包不能绕过它直接发送。包身还排在后到的包头后面时，要先把这一包剩下的 flit 抽出来，让整包进核。
+
+上一节停钟时，全局 chip 4（tray 0，片内 4，gx=0，gy=1）物理核 p1 就是这个形状：path 1 用户 8 的包头已经进核，包身还在西口，排在 path 0 用户 16 的包头后面。交叉开关的水位把西口挡住，包尾进不了核，type 3 停在 Wait。
+
+`xbar.h` 和 `router_station.h` 按这条改了：
+
+- 一包已经向本核交出包头、包尾还没到时，这条 VC 上别的包不发。station 从队列中间把这一包剩下的 flit 抽出来先送。交叉开关即使已经被后到的包占到水位，也给这一包留一个位置。
+- 这一包是改送进核的，后续 flit 只进核。这一包本来就要进核，后续 flit 仍走原来的目标；目标里有一个方向这一拍发不走，整组都不发，不把包拆开。
+- 改送的整包进核之后，这条 VC 继续挡住后面的包，直到这笔重发从本核再发完包尾。`BachRouterAsm.StallWayStoresWhenCreditIsGone` 因此改成：40 个 credit 用完后只有第 41 笔进核，同 VC 上剩下的 9 笔留着。`BachRouterAsm` 14 个测试通过。
+
+第一次重跑在包尾校验上断言。核里正在收用户 20 的 path 0（6392 字节），用户 12 的 path 1 包尾插进了同一条进核通路，帧被提前收尾。进核通路不按 VC 分缓冲，一包没到尾不能再收下一包。补上「核里这包的用户和 path 对上才续发」之后，这个断言不再出现。
+
+用这版重跑 Step7、128 用户。bundle 是 `/tmp/latch_ep1_s07`，上限 32768，`PCODE_CHECK=idle`。日志 `/tmp/ep1_unit_logs/s07_u128_f027.log`。
+
+| 拍 | 指令 | 在途 | head | tail |
+|---|---|---|---|---|
+| 8192 | 48208 | 220 | 128 | 50 |
+| 16384 | 48208 | 219 | 128 | 50 |
+| 24576 | 48208 | 219 | 128 | 50 |
+| 32768 | 48208 | 219 | 128 | 50 |
+
+快照 0 份。gtest 失败。B 核指令 6382。128 个用户都进了 B 核的环，tail 停在 50。指令从第 8192 拍起不再增加。上一节同一步的 tail 是 102，这一版更早停住。
+
+代表现场是全局 chip 4 上相邻的两颗核：
+
+- 物理核 p1。西口 60 个 flit 是 path 0 用户 18。交叉开关西口深度 2，是 path 1 用户 9 的包身，出方向只有东（掩码 `0x4`）。`own 2`，包头队列里有 path 0 用户 18。path 0 用户 18 的包头已经进核，包尾还没到；path 1 用户 9 排在它后面，按 F-027 不能先走。
+- 物理核 p2，p1 的东邻。包头队列里有 path 1 用户 9（`h9:1`），type 3 用户 9–16 仍是 Wait，`own 2`。用户 9 的包头已经进了这颗核，包身还在 p1。西口 40 个 flit 是 path 0 用户 17，这一跳的 VC 已经满。
+
+p1 上 path 0 要同时往东和进核。东向 credit 没有了，整组发不出去，包身就留在 p1，核里的这包收不到包尾。path 1 用户 9 又不能越过它。p2 一直等用户 9 的包尾，西口腾不出来。两边互相等。Step7 的 128 用户没有走空。
+
+### 9.13 归约包头按 PhyMemTable 未命中分配
+
+飞书 Rmem：收到上游分量时按 UserID 查 PhyMemTable，没有命中就分配新表项，最多 16 项。latch 原先先要求这个用户已经在本核任务表里，任务表没有就直接拒绝，Rmem 的 16 项空位用不上。全局 chip 0（tray 0，片内 0，gx=0，gy=0）的 p7、p2 上，path 1 用户 7 就这样停在交叉开关里。
+
+`core.h` 的 `WireRouterToTs` 改成：任务表里没有这个用户时，直接交给 `CanAcceptHead`，未命中就分配 Rmem 分区，不新建 TS stream。用户已经在任务表里、并且还有未做完的本地归约时，仍然只收那条 path（`w1` 过滤保留）。新加单元测试 `BachBcore.ReduceAllocatesWithoutATask`：任务表为空时用户 7 的 path 1 包头可以收，`ReserveHead` 之后占 1 项；填满 16 项后用户 200 不再分配。
+
+Step7、128 用户重跑，日志 `/tmp/ep1_unit_logs/s07_u128_rmem.log`。第 8192 拍起不动，停在 32768，snaps 0，在途 54，指令 20822，ShareMem head 128、tail 26。p7、p2 的交叉开关已经空了，path 1 进了 Rmem。卡点移到广播的 VC 0：chip 0 p7 西口 40 个 flit，队头 path 0 用户 7，交叉开关空，header 0，station 不发。
+
+### 9.14 credit 不够时包留在 VC 里等
+
+飞书 Router 阻塞表（`BachFlow/pcode/refs/09_router.md` 第 505–528 行）把两件事分开：
+
+- 下游 Stream 不够、`stallWay=1`、这一包还没向原目标交过 flit，整包进 Core，原 VC 进入 Reissue 保序（F-025、F-027）。
+- 下一跳 VC credit 不够，暂停并留下上下文，下一 flit 从暂停处继续，同一 VC 后面的包不越过它，别的就绪 VC 可以发。不触发 Reissue。
+
+latch 原先只要这一拍资源不够（含 credit 为 0）且 `stall_way` 为真就 `DivertToCore`。改成 `StreamShortOnly`：只有某个网格出口的 Stream 不够、其余出口都拿得到资源时才整包改送进核。`BachRouterAsm.StallWayStoresWhenCreditIsGone` 改成：40 个 credit 用完后，剩下的包留在 VC 里等，进核数 0，溢流 0。
+
+同一轮还放宽了一条：一包包头已发、包身还在上游没到（`FlightPending` 为假）时，交叉开关不再挡这条 VC，`flight_` 也从 station 的 `hold_block` 里拿掉。这条放宽是为 p7「西口满、交叉开关空」加的，后来查明那次的真因是 9.15 的 `order_` 没清。这条放宽在 Step8 上造成两包交错（9.16），9.17 已经撤回。
+
+Step7、128 用户重跑，日志 `/tmp/ep1_unit_logs/s07_u128_credit.log`。第 16384 拍起不动，指令 74662，在途 24，tail 45。p7 上用户 7 已经离开西口，停点移到更东边。
+
+### 9.15 本口重发包的包尾从哪条路径发出都要清保序锁
+
+停钟 dump 加了交叉开关各入口的锁（`lock` 行）。全局 chip 0（tray 0，片内 0，gx=0，gy=0）的 p9：西口 VC 0 有 40 个 flit，队头是用户 23 path 0 的包头；交叉开关空；西入口挂着 `ord0:u22p0`。往南的出口接全局 chip 4（tray 0，片内 4，gx=0，gy=1）的 p0，VC credit 20+20、Core Mem credit 128 KB 都是满的，stream 占用 0。`TryInput` 遇到 `order_` 就跳过这条 VC，用户 23 一直发不出去。
+
+这把锁是用户 22 留下的。用户 22 到 p9 时往南 Stream 不够，整包改送进核，包尾置上 `order_ = {u22, p0}`。重发其实早已完成，用户 22 已经走到全局 chip 12（tray 0，片内 12，gx=0，gy=3）。漏洞在清锁：`ReleaseOrder` 只在 `TryInput` 普通授予末尾调用。本口重发的 25 个 flit 里只有包头走普通授予，其余 24 个连同包尾都从 `ContinueFlight` 发出，`ContinueFlight` 不清锁。chip 0 的 p4（`ord0:u25p0`）和全局 chip 1（tray 0，片内 1，gx=1，gy=0）的 p9（`ord0:u22p0`）是同一个原因。西边每一跳的东向 credit 都被这几口按住，B 核 tail 停在 45。
+
+`xbar.h` 新加 `AfterGrant(in, v)`。改送进核、`ContinueOpen`、`ContinueFlight`、`TryInput` 普通授予、bypass、aside 六处授予之后都调它：记 `in_packet`，本口发出包尾时调 `ReleaseOrder`。
+
+Step7、128 用户重跑，日志 `/tmp/ep1_unit_logs/s07_u128_release.log`。第 29881 拍走空，上限 32768，snaps 128，ShareMem head 128、tail 128，指令 415660。
+
+| | 改之前 | 改之后 |
+|---|---|---|
+| 第 8192 拍 tail | 45 | 91 |
+| 第 16384 拍 tail | 45 | 128 |
+| 停钟 | 32768（上限） | 29881 |
+| snaps | 0 | 128 |
+| 全部指令 | 74662 | 415660 |
+
+### 9.16 Step8：同一输出 VC 上两包交错
+
+Step8 的单元原先是 10 月 11 日生成的，早于 harvest 对齐。按 Step7 的办法重新生成，导出到 `/tmp/latch_ep1_s08`：PCIe 入口 chip 0 p5 path 63，warnings 387，tasks 1612。
+
+| 用户数 | 停钟 | snaps | head / tail | 在途 | 结论 |
+|---|---|---|---|---|---|
+| 16 | 11769 | 16 | 16 / 16 | 16 | 走空 |
+| 32 | 32768（上限） | 0 | 32 / 32 | 248 | 卡死 |
+| 128 | 32768（上限） | 0 | 128 / 81 | 366 | 卡死 |
+
+32 和 128 用户卡在同一个环上，在全局 chip 5（tray 0，片内 5，gx=1，gy=1），全局 chip 6（tray 0，片内 6，gx=2，gy=1）的状态逐字相同。chip 5 是 h23，p2、p7 只透传。dump 加了逐 VC 的队列内容（`vcq` 行），日志 `/tmp/ep1_unit_logs/s08_u32_vcq.log`。
+
+1. p9 的核口被用户 13 path 1 占着：包头已经进核，包尾还没到。核口按 F-013 一包没完不让别的包插进来，p9 西口用户 20 path 0 的包头、VC 3 上用户 12 path 2 的归约结果都进不了核。
+2. 用户 13 path 1 的包尾在 p3 西口 VC 0，排在用户 22 广播后面：`u22p0 ×8 → u13p1 ×1（包尾） → u23p0 ×26 → u14p1 ×5`。p3 西入口的 `flight_` 已经改记成用户 22，没人再把这个包尾抽出来先发。
+3. 用户 22 在 p3 要往南、往东、进核一起走，往南 credit 为 0。
+4. p8 mid 入口 VC 0 满 40（用户 21、22），用户 21 往东到 p9 的 credit 为 0。
+5. p9 西口被 VC 3 上用户 13、14 的 path 2 归约输入吃满共享窗口。用户 13 path 2 进不了归约：任务表里还有没做完的 path 1 归约，按 F-030 先拒绝 path 2（`w1`）。这又回到第 1 步。
+
+交错产生在 chip 5 的 p0。p1 西口 VC 0 的顺序是 `u16p1 ×3 → u25p0 ×26（整包） → u16p1 ×1（包尾）`。path 1 从全局 chip 1 的 p9 来，是那里的归约结果，在 VC 3 上；path 0 在 VC 0 上；两者往东都用输出 VC 0，进的是同一个 `in_q[西][0]`。用户 16 path 1 发出包头和两个包身后，后面的 flit 还在上游，`FlightPending` 为假。按 9.14 的放宽，交叉开关不挡这条 VC，station 也不挡，用户 25 的包头就插了进来。`vc_owner` 只记入口号，同一入口来的另一包照样过 `OwnerOk`。
+
+飞书第 505–506 行和 F-012：同一条 VC 上一包发出包头后发到包尾，后面的包不能越过它；被挡住时可以换别的就绪 VC。9.14 的放宽违反了这一条。
+
+### 9.17 恢复同一输出 VC 的整包独占，并修 TS 重复申请 credit
+
+**交叉开关和 station。** 撤掉 `TryInput` 里的 `FlightPending` 条件，`flight_` 那条 VC 重新放回 `hold_block`，`PullOpen` / `ContinueFlight` 抽包身先发照旧。改了三版：
+
+1. 第一版把有包没发完的 VC 整条放进 `hold_block`，连这一包自己的包身也挡住。station 每个入口一拍只有一个 `hold_pull`，同一入口两条 VC 各开一包时，另一包的包身永远轮不到。全局 chip 4（tray 0，片内 4，gx=0，gy=1）p4 西口 VC 3 上用户 30 path 2 的最后几个 flit 就这样卡住。16 用户 11833、32 用户 14521 走空，128 用户卡在 tail 71。
+2. 第二版改成 `hold_block` 只挡包头。交叉开关的 `flight_` 要晚一拍才发布到 station，这一拍里 station 又把另一包的包头插进同一条 VC，包身跟着把队列填到水位，两包互等。16 用户在全局 chip 19（tray 1，片内 3，gx=3，gy=4）p0 卡死。
+3. 第三版（保留）在 station 本地按交叉开关 VC 记 `open_ = {user, path}`：发出无包尾的包头时置上，包尾清掉。这条 VC 开着包时只发同一 user、同一 path 的包身，别的包头不发。`IssueRequest` 和 `SendAt` 两处发射都更新它。16 用户 11769、32 用户 14457 走空。128 用户在第 11918 拍断言。
+
+**128 用户的断言。** 全局 chip 30（tray 1，片内 14，gx=2，gy=7）p9 的 UserMatch：用户 58 path 0 又来一个包头，reissue 0，done 0x3，这个用户已经没有没做的搬入任务。往上游，全局 chip 10（tray 0，片内 10，gx=2，gy=2）、全局 chip 26（tray 1，片内 10，gx=2，gy=6）一直到 chip 30 的 p0、p3、p8、p9，每一核都收到两份。源头是全局 chip 6（tray 0，片内 6，gx=2，gy=1）p9：它把用户 58 path 0 整包改送进核（第 9437–9462 拍），之后本口往南把这一包发了两次（第 9544–9569 拍和第 9601–9626 拍）。别的改送进核的核都只重发一次。
+
+chip 6 p9 上 TS 的时间线（stream 9，t1 是 `broadcast_reissue_t1`）：
+
+| 拍 | 事件 |
+|---|---|
+| 9486 | t1 装进 stream 9，WAIT |
+| 9487 | TS 向 Router 申请 credit，Router 排进监听队列 |
+| 9503 | Router 回 grant，唤醒把 t1 置 READY。这一拍 TS 读的快照里 t1 还是 WAIT，又申请了一次 |
+| 9504 | Router 只按「上一笔收下的 (user, task)」去重，上一笔是用户 46 的 task 7，于是又排了一笔；DTE 第一次锁定 t1 |
+| 9505 | DTE 收到 ACCEPT，t1 改 INFLY；Router 回第二个 grant |
+| 9506 | 第二个 grant 的唤醒把 t1 从 INFLY 写回 READY |
+| 9507 | DTE 第二次锁定 t1，同一个重发任务下发两次 |
+
+唤醒写落表一拍、进快照一拍，这两拍里快照上任务仍是 WAIT，TS 会对同一个任务再申请。16、32 用户时申请稀疏，两次申请之间没有别的用户插进来，Router 的去重挡得住。第二个 grant 在 Router 侧还会多占一份资源。这个竞争和 VC 独占无关，是 128 用户的流量时序把它暴露出来的。
+
+`ts/credit_monitor.h` 的 `DoAsk` 改成每个 stream 记下已经申请过的 task（`asked` / `asked_task`）。快照里那一项离开 WAIT、换了 task 或者失效，才放开标记。这个检查每拍都做，请求还在等 Router 收下的那几拍也做。
+
+**结果。** `PCODE_CHECK=idle`，上限 32768，bundle `/tmp/latch_ep1_s08`。
+
+| 用户数 | 停钟 | snaps | head / tail | 指令 | 日志 |
+|---|---|---|---|---|---|
+| 16 | 11769 | 16 | 16 / 16 | 60591 | `s08_u16_ask.log` |
+| 32 | 14457 | 32 | 32 / 32 | 119338 | `s08_u32_ask.log` |
+| 128 | 30329 | 128 | 128 / 128 | 470647 | `s08_u128_ask.log` |
+
+三档都走空。128 用户停在 30329 拍，离上限只差约 2400 拍。
+
+单元测试：`router_assembly` 14 个、`router_core_station`、`router_reduce`、`router_scenarios`、`dte`、`dte_inbound`、`ts`、`ts_config`、`ts_issue`、`ts_done`、`ts_chain`、`ts_credit` 全过。`bcore` 的 `BachBcore.TokensGoOutInArrivalOrder` 失败，撤掉这些改动后同样失败，与本节无关。
+
+这几次都在 `PCODE_CHECK=idle` 下跑，fc1 / concat 余弦没有算。Step7 的 16、32 用户在 9.15 之后没有重跑，Step7+128 在 9.17 之后也没有重跑。
+
+### 9.18 Step9：16、32、128 用户都走空
+
+代码与 9.17 相同。Step9 单元重新生成，导出到 `/tmp/latch_ep1_s09`：PCIe 入口 chip 0 p5 path 63，warnings 387，tasks 1740。`PCODE_CHECK=idle`，上限 32768。
+
+| 用户数 | 停钟 | snaps | head / tail | 指令 | 在途 |
+|---|---|---|---|---|---|
+| 16 | 11961 | 16 | 16 / 16 | 66780 | 16 |
+| 32 | 14585 | 32 | 32 / 32 | 131662 | 16 |
+| 128 | 30457 | 128 | 128 / 128 | 519451 | 16 |
+
+在途 16 是 B 核 stream 表走空后的残留。128 用户离上限只差约 2300 拍。日志 `/tmp/ep1_unit_logs/s09_u{16,32,128}.log`。
+
+### 9.19 Step10：path 7 的汇点从同一面收到两包
+
+Step10 加进 FC2 归约（path 4–11）。单元重新生成，导出到 `/tmp/latch_ep1_s10`：warnings 387，tasks 3316。代码与 9.17 相同。
+
+| 用户数 | 停钟 | 在途 | head / tail | 说明 |
+|---|---|---|---|---|
+| 16 | 32768（上限） | 413 | 16 / 16 | 第 16384 拍起在途不变，指令只有空转的慢涨 |
+| 32 | 32768（上限） | 971 | 32 / 32 | 同上 |
+| 128 | 32768（上限） | 2293 | 128 / 111 | 第 16384 拍起完全不变 |
+
+三档卡在同一处。FC2 归约的 8 条 path 在全局 chip 35（tray 2，片内 3，gx=3，gy=8）上各在一颗核收齐：path 4 在 p0、5 在 p1、6 在 p2、7 在 p3、8 在 p5、9 在 p6、10 在 p7、11 在 p8。北邻全局 chip 31（tray 1，片内 15，gx=3，gy=7）和南面的 chip 39、43、47（tray 2，片内 7、11、15，gx=3，gy=9–11）都在这一列上。
+
+**chip 35 p3 的现场。** 西口（来自 p2）VC 0 共 52 个 flit：
+
+```
+u1p7 ×4（包尾） → u3p4 → u2p7 → u2p7 → u3p7 → u1p11 → u3p7
+```
+
+交叉开关西入口的队头是用户 1 path 7 的包头，要进归约（mask 32），准入拒绝（`w1`）。每个用户的 path 7 都从西面来了两包。
+
+p3 的任务链（h0）：t3/t4 是 path 4 转发，t5/t6 是 path 6 转发，t7 `reduce_t7` 是 path 7 本核归约，t8/t9 是 path 11 转发。用户 1 停在 t8，done `0xff`：t7 已经做完、结果已经发走，现在等 path 11。准入只收当前未完成的那条 path，path 7 的第二包被拒。用户 1 要的 `u1p11` 排在同一条 VC 后面，过不来。
+
+**倒灌。**
+
+- p2 的南口（来自 p7）40 个 flit、西口（来自 p1）46 个，队头都是用户 4 path 7，往东进 p3，东向 credit `0+0`。
+- p1、p0 西口满，往东 credit 为 0。p5、p6、p7 同样堵住，p7 的 path 7 往北进 p2。
+- chip 31 的 p2、p3、p8、p9 往南进 chip 35 p0，一路倒回去。
+- chip 35 的 p0、p1、p5–p8 和 chip 47 各核的 Rmem 上下文停在 `got 0x5` / `0x6`，少的那一路分量在这片拥堵里。
+
+32、128 用户时，全局 chip 23（tray 1，片内 7，gx=3，gy=5）的 p3 是同一个现场：用户 3 path 7 的第二包在队头 `w1`，后面还排着 `u4p7 ×2`。chip 35 p3 与 16 用户相同。
+
+**为什么来两包。** chip 35 上 path 7 的表项：
+
+| 核 | 表项 |
+|---|---|
+| p1 | transfer，向东，进 p2 西口 |
+| p7 | transfer，向北，进 p2 南口 |
+| p2（逻辑核 2） | transfer，向东，两包原样交给 p3 |
+| p3 | reduce，`operation 3`，`rdc_in_mask 0x3` |
+
+pcode 的设计（`route/DESIGN.md` 第 80、189 行）：没有本核数据的核不做 Router-reduce，收两包就原样交给下一跳的源核；源核按 reduce2 配，同一面的两包用 `reduce_sel` 分。latch 的 ReduceModule 按到达方向分路，同一面两包分不开。`latch_export.py` 的 `_fill_reduce_lanes` 把这类中间核改成中间相加，逻辑核 2 的 path 7 按要求保留原表（导出时 chip 23、chip 35 p2 path 7 两条警告）。p3 的 `rdc_in_mask` 因此只有本核加西面两位，`operation` 仍是 3：第一包到了就收齐、发出结果，第二包没有上下文可进，堵在队头。不堵的情况下结果也少加一项。
+
+Step9 之前没有 path 4–11 的归约，碰不到。日志 `/tmp/ep1_unit_logs/s10_u{16,32,128}.log`。
+
+**能走的两条改法（暂不改）：**
+
+1. 导出侧：去掉逻辑核 2 path 7 的例外，chip 23、chip 35 的 p2 也改成中间相加（两路来自西和南，方向不同），p3 只收一路。改动小，偏离 pcode 原表，也违反第 189 行「没有本核数据的核不做 Router-reduce」。
+2. latch 侧：ReduceModule 实现 `reduce_sel`，同一面同一 user、path 按两包分别计数，p3 按 reduce2 收西面两包。与 pcode 原表一致，要动归约分路、准入和 Rmem 的期望掩码。
+
+### 9.20 改 BachFlow 路由：让 p3 的两路从不同面进来
+
+提议（tray2/chip3 = 全局 chip 35，h0 无坏核）：
+
+- 输入 1：tray1/chip15（chip 31）p8 → p9 → chip 35 p0 → p1 → p2 → p3，到 p3 西面。
+- 输入 2：tray2/chip2（全局 chip 34，tray 2，片内 2，gx=2，gy=8）p4 → chip 35 p5 → p6 → p7 → p8 → p3，到 p3 南面。
+- 输出：p3 → p4 → p9 → tray2/chip7（全局 chip 39）p0。
+
+**能成立的部分。**
+
+- p3 两路分别从西、南进，方向不同，不需要 `reduce_sel`，latch 的 ReduceModule 能模拟。p3 配 reduce2，`operation 3`、`rdc_in_mask 0x7`，与 chip 35 p0 的 path 4 同一种配法。p2 不再收两包，少一组 `reduce_reissue_t12/t13`。
+- p8（逻辑核 7）和 p3（逻辑核 3）是对面邻居。`DESIGN.md` 第 197、244 行：片内搜索图按逻辑邻居建边，p8→p3 是合法直连边。
+- 第 189 行写的就是先让源核自己汇合，无解才让上一跳收两包，提议正是源核汇合。
+- 跳数不变：输入 2 和现在一样 5 跳，输出 3 跳。
+
+**输出 p3 → p4 → p9 不成立。**
+
+1. p4、p9 在 h0 是 unused 核。catalog 里 p4 是 `entry_count 0`、`release 0`，p9 是 `entry_count 0`、`release 2048`。第 39、187 行：透传核不配 RouterTable，按 release CSR 一进一出，只出现在预排路径上。第 244 行明确 `p0↔p5` / `p4↔p9` 不是预排 2-path，不能单独当搜索边。h0 下预排的只有 `p3↔p4`（E 口 attach）和 `p8↔p9`（S 口 attach），p4 从西面收进来只能往东。
+2. p9 会成为合两路上游的透传核。p8 上 path 4、5、6、8、9、10、11 的出片仍走 p8 → p9 → S，再加 p4 → p9 → S，p9 就有西、北两个入口共用 S。正向能转，反向的 release 不行：p9 当前 `2048` 是「S 来的 release 弹回西面给 p8」，加北面后要同时弹回西和北，透传核分不清这笔 credit 属于哪个上游。第 234 行「同一透传核上两条不相干的弯路不能交叉」禁止的就是这个。
+
+**几种绕法也不行。**
+
+- 输出改回 p3 → p8 → p9：p8 的 path 7 要同时把西面来的送北、北面来的送东。RouterTable 每个 PathID 一项，归约结果沿用同一个 PathID，配不出来。
+- 输入 2 从东面进 p3（p8 → p9 → p4 → p3）：p9 西面要同时往北（输入 2）和往南（其他 path 输出）。第 189 行规定一个入口面对所有 PathID 只有一种角色，透传也不多播。
+
+gx=3 这一列东边没有邻片，p4、p9 只剩南口这一个出路，几种绕法都会撞到 p8 或 p9。
+
+**其他要考虑的。**
+
+- 只对 h0 成立。边列芯片有 11 个 harvest 掩码，逻辑核映射随掩码变。p8 坏时 p8→p3 不存在；p4、p9 被映射成计算核时要配表、角色也变。要作为规则交给 `harvest_search` 每个掩码重搜，不能写死物理路径。tray1/chip7（全局 chip 23）是同一个形状。
+- p8 西口原本走 path 5、8、9、10、11（往东或本核归约），加上往北的 path 7。p3 南口因准入的 path 过滤暂时不收时（这个用户的 path 4、6 还没过 p3），path 7 会在 p8 西口队头压住后面用户的 path 8–11，包括 p8 自己 path 11 归约的输入。推算下游是往南的无环链，只会变慢、不成环，没有仿真验证。
+
+**可选做法。**
+
+- 在 latch 实现 `reduce_sel`（9.19 的第 2 条），按 pcode 原表，路由不动。
+- 沿这个思路改规划器：允许 unused 核做 `p4↔p9` 纵向透传，并且 release CSR 能在同一透传核上区分两路上游。两条都要硬件确认，单靠规划器做不到。
+- 导出时把 p2 改成中间相加（9.19 的第 1 条），latch 能跑通，但违反第 189 行，只是模型侧的近似。

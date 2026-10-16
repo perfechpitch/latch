@@ -573,13 +573,16 @@ private:
     auto const &s = c.desc.seg[c.seg];
     uint64_t ep = Endpoint(s.src_kind);
     uint64_t addr = s.src_addr + c.offset, skip = 0, n = 0;
+    // topK 一项按两个 128 B 读回同一格。段可以短于一项（pcode 的 56 B），
+    // 只读到段尾，格子也只留段长。
+    uint64_t seg_left = Length(c.desc, c.seg) - c.offset;
     if (ep == 3)
       n = 32;
     else if (ep == 2)
-      n = 128;
+      n = std::min<uint64_t>(128, seg_left);
     else {
       skip = addr % 256;
-      n = std::min(256 - skip, Length(c.desc, c.seg) - c.offset);
+      n = std::min(256 - skip, seg_left);
     }
     if (Last(c, n) && hold[0])
       return;
@@ -593,9 +596,9 @@ private:
     if (ep == 2 && c.offset % 256 == 128) {
       slot = topk_slot;
     } else {
-      uint64_t reserve = ep == 2 ? 256 : n;
+      uint64_t reserve = ep == 2 ? seg_left : n;
       slot =
-          buffer.Reserve(idx, {Tag(c.desc), reserve, Last(c, ep == 2 ? 256 : n),
+          buffer.Reserve(idx, {Tag(c.desc), reserve, Last(c, reserve),
                                nullptr, c.desc.msg, c.seg == 0});
       if (ep == 2)
         topk_slot = slot;
