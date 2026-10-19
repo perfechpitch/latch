@@ -390,6 +390,10 @@ private:
     // flow_dir 直接转发，不该进到这里。坏 core 上的包一律不进 ReduceModule。
     LOGCHECK(e.reduce_in_mask != 0,
              "ReduceModule: 这条 path 在本级 reduce_in_mask 是 0，不该进来。");
+    // reduce_in_mask 是 adapter 由上游表项推出来的，硬件表项里没有这一位，所以
+    // 这里只做模型自检，不拿它来分辨哪一笔。
+    LOGCHECK((e.reduce_in_mask >> r) & 1u,
+             "ReduceModule: 包从 reduce_in_mask 没置位的那一路进来。");
 
     auto it = ctx.find(user);
     if (it == ctx.end()) {

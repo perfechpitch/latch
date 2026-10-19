@@ -842,3 +842,19 @@ TEST(BachReduce, PacketOfAnotherNetInOpenSumIsAnError) {
   };
   EXPECT_DEATH(run(), "");
 }
+
+// 包从 reduce_in_mask 没置位的那一路进来就报错，不管这一笔开没开。
+TEST(BachReduce, PacketOnALaneOutsideTheMaskIsAnError) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  auto run = [] {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    b.tab->Preload(20, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 2, Part(77, 20, 7, 1.0f)}};
+    clk->Continue(50 * kPeriod);
+    RT::JoinAll();
+  };
+  EXPECT_DEATH(run(), "");
+}
