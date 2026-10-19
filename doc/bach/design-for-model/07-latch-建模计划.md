@@ -14,7 +14,7 @@
 三条边界：
 
 * 模型的顶层是一个 LPU，即 48 颗 chip 装模型的一层 MoE。LPU 之外的硬件一律一个桩；chip 之内的对象粒度与《Core 内硬件》《执行单元与存储》的子块一致
-* 机制全部实现，数值按 bit 级与参考实现比对
+* 目标为机制全覆盖及bit级数值比对；当前支持范围和实现缺口分别登记在单元文档
 * 《建模参数与性能模型》的参数直接成为各单元的输入
 
 本章不复述前面几章的规则，只写模型怎么承载它们。
@@ -23,13 +23,17 @@
 
 ***
 
+## 原始设计与当前实现范围
+
+设计依据为`/home/colin/develop/perfechpitch`当前同步文档。下文代码树、模块图和参数表描述现行模型：Router表64项、CoreStation含HeaderFIFO、链路实现VC／Stream两种返回；原始Router设计为256项表、Header／Payload分离且无HeaderFIFO，并保留下游Reduce credit及Reduce Release。对应协议尚未全部实现，不将代码目录或既有回归作为硬件合同已对齐的依据。
+
 ## 建模范围与对象清单
 
 ### 四条总决定
 
 1. **逐拍 cycle 模型**：功能与时序一起建，每个仲裁点、每条通路都有拍数。
-2. **机制全覆盖**：第 2 至 4 章定义的每一条机制都落到一个单元的一个函数，并有一个用例；覆盖关系在各单元文档的“机制覆盖”表里逐条登记。
-3. **bit 级数值**：MU 的累加顺序、MXFP8 的 scale block、VU 的三处舍入、Router reduce 的 FP32 中间精度都按硬件规则实现；参考实现按同样的顺序计算，逐元素比对不留容差。
+2. **机制覆盖目标**：第2至4章定义的机制分别映射到单元及验收用例；当前实现覆盖和原文尚未对齐的接口分别登记，未实现机制不以既有数值回归代替验收。
+3. **bit级数值目标**：累加顺序、scale block、舍入和中间精度按对应硬件规则验证。当前NVFP4、RNO及FP32逐模式舍入等缺口在单元文档列出，参考实现与模型一致不能证明这些能力已实现。
 4. **RV core 跑真实 RV32 程序，不建流水线**：kernel 编译成 RV32 程序，由 `src/rv32` 的功能模型逐条执行，双发射顺序执行、一拍最多两条，访存与 DSA 读的延迟另计；task_queue、dsa_iss、CSR、task_done 这些与 TS 和 DSA 交互的机制照建。
 
 ### 对象清单
@@ -251,7 +255,7 @@ src/bach/
   ip/
     module_base.h                  模块基类：Cycle() = DelayCycle(1) + Step()，Step() 内不让出
     node_context.h                 每个节点都有的编号、参数表与记录器
-    wiring.h                       接双向物理链路（数据端口对及VC/Stream两类归还）
+    wiring.h                       当前模型双向链路（数据及VC／Stream返回；尚无下游Reduce Release）
     lpu.h                          LPU 装配：构造 48 个 Chip、按 12 × 4 网格接 C2C、接 PCIe Switch 与片外桩
     lpu_grid.h                     全局坐标换算：(tray, 层, 列) ↔ (gx, gy)，片外节点与跨 chip 网关的坐标，按列给 core_bad_mask，按角色分配表生成 logical_map
     bundle_load.h                  读 bundle 里那份 .bachir，按记录名把配置分发到各 IP 的配置口
@@ -644,10 +648,10 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | Router VC Buffer 深度 | private 20 flit / VC 加每方向 shared pool 20 flit（防死锁下限 2，软件可配）|
 | Stream Resource Table 项数（每方向） | 16 |
 | VC credit 初值 | private 每 VC 20，shared 每方向 20，先扣 private 再扣 shared |
-| RouterTable 表项数、副本数、每副本写入拍数 | 64、5、1 |
+| 模型RouterTable项数、副本数、每副本写入拍数 | 64、5、1；原始Router表为256项×64bit、LO／HI原子提交，外部映射尚待统一 |
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
 | ReduceModule bank 数、RMW 拍数、每路输入缓冲深度 | 4、2、32 flit（每路输入缓冲取 DATA_NOC HAS 面积预算的每口 32 flit，与同一份 HAS ASM-07 的 128 flit 没对齐） |
-| CoreStation HeaderFIFO、OutputBuffer 深度 | 16、60 flit（OutputBuffer 取 DATA_NOC HAS 的 DTE-local 桥接 Router→DTE 60 flits；HeaderFIFO 无出处，16 这个值与 60 flit 装得下的包数不匹配）|
+| 模型CoreStation HeaderFIFO、OutputBuffer深度 | 16、60flit；硬件Router MAS无HeaderFIFO且Header／Payload分离，HAS的60flit位于DTE-local桥接 |
 | DTE已明确资源与剩余参数 | 全局Q16、WR Q4/RD驻留1、每Channel Buffer32×256B、HeaderTable800B；其余保留站深度TBD |
 | VU ISQ 深度 | 8 |
 | Share Mem 四个 master 的仲裁算法 | 轮询 |

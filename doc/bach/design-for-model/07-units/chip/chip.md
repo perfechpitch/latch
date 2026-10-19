@@ -248,7 +248,7 @@
 <text x="1400.0" y="531" font-size="8" fill="#7c2d12" text-anchor="middle">Mmem · Cmem · Smem · DTE xbar</text>
 <rect x="150" y="273.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
 <text x="162" y="294.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
-<text x="162.0" y="311.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="162.0" y="311.0" font-size="8.5" fill="#475569">当前MAS：1×1退化Router</text>
 <text x="162.0" y="324.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
 <text x="162.0" y="338.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
 <text x="162.0" y="351.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
@@ -257,7 +257,7 @@
 <text x="70.0" y="333.5" font-size="9" fill="#374151" text-anchor="middle">c2c[N]</text>
 <rect x="1540" y="273.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
 <text x="1552" y="294.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
-<text x="1552.0" y="311.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="1552.0" y="311.0" font-size="8.5" fill="#475569">当前MAS：1×1退化Router</text>
 <text x="1552.0" y="324.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
 <text x="1552.0" y="338.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
 <text x="1552.0" y="351.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
@@ -266,7 +266,7 @@
 <text x="1770.0" y="333.5" font-size="9" fill="#374151" text-anchor="middle">c2c[E]</text>
 <rect x="150" y="443.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
 <text x="162" y="464.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
-<text x="162.0" y="481.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="162.0" y="481.0" font-size="8.5" fill="#475569">当前MAS：1×1退化Router</text>
 <text x="162.0" y="494.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
 <text x="162.0" y="508.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
 <text x="162.0" y="521.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
@@ -275,7 +275,7 @@
 <text x="70.0" y="503.5" font-size="9" fill="#374151" text-anchor="middle">c2c[W]</text>
 <rect x="1540" y="443.0" width="150" height="114" rx="4" fill="#eef2ff" stroke="#4338ca"/>
 <text x="1552" y="464.0" font-size="11" fill="#111827" font-weight="600">C2C Bridge</text>
-<text x="1552.0" y="481.0" font-size="8.5" fill="#475569">简化 Router（RC/VA/SA）</text>
+<text x="1552.0" y="481.0" font-size="8.5" fill="#475569">当前MAS：1×1退化Router</text>
 <text x="1552.0" y="494.5" font-size="8.5" fill="#475569">TX：4 KB 拆包 + seq_id</text>
 <text x="1552.0" y="508.0" font-size="8.5" fill="#475569">RX：按 seq_id 拼包</text>
 <text x="1552.0" y="521.5" font-size="8.5" fill="#475569">AXI Bridge · credit 透传</text>
@@ -360,7 +360,7 @@
 | F5 | 每行左右两端的 core 各接一个 C2C Bridge，行 0 左端引到 chip 的 N 口、行 0 右端引到 E 口、行 1 左端引到 W 口、行 1 右端引到 S 口，落到编号上是 core0 / core4 / core5 / core9 |
 | F6 | 每 core 构造一个 ctrl_noc 端点，按各单元文档声明的 `cfg` 口接线 |
 | F7 | 角色不存在 chip 与 core 里，由 SCP 在 core 配置阶段逐项写的几项配置体现：TS 的 `SELF_START`（B core、R core 为 1，计算 core 为 0）与 `B_CORE_DIRECTION`（B core 写广播的方向，计算 core 与 R core 为 0）；TS 的任务链与 datain 任务（计算 core 配计算 core 的任务链，B core、R core 配自启动任务链与 datain 任务）；DTE 业务模式下进核那一笔的 `route`（计算 core 落 Core Mem，B core、R core 落 Matrix Mem）、回不回 Ack（计算 core 回，B core、R core 不回）、标志表的基址与一个槽位多大（计算 core 不配，B core 配 token 槽位，R core 配行结果槽位）。不派角色的 core 这几项都不配 |
-| F8 | 路由表按 chip 从编译侧读入，不写死。逻辑上左右相邻的两个计算 core 物理上隔着坏 core 时，坏 core 配一条只转发的表项，方向与这一跳相同；这一跳在归约链上时，坏 core 再配 `RTR_RELEASE_ROUTE`，按静态Mask将Stream release转往上游 |
+| F8 | 路由表按 chip 从编译侧读入，不写死。逻辑上左右相邻的两个计算 core 物理上隔着坏 core 时，坏 core 配一条只转发的表项，方向与这一跳相同；这一跳在归约链上时，坏 core 再配 `RTR_RELEASE_ROUTE`，按静态Mask转发相应业务Release；原始Router设计区分Stream与Reduce，当前模型只实现Stream |
 
 ### SCP 桩
 
@@ -393,10 +393,12 @@
 
 ### C2C Bridge
 
+当前DATA_NOC MAS v0.44明确1KiB拆拼包、1×1退化Router、双AXI channel及异步桥；当前模型仍按Link与分片参数推进，未建完整跨域和双路时序。下表区分目标规则及模型差异。
+
 | 编号 | 功能 |
 | - | - |
-| F28 | 简化 Router：RC / VA / SA 完整流水线，与 core 内 Router 同一套逻辑 |
-| F29 | TX Engine 拆包：按 4 KB 边界拆分，加 4-bit `seq_id` 与 tail 标记；位宽 2048 转 1024 |
+| F28 | 当前DATA_NOC MAS的Bridge采用TX／RX各一份1×1退化Router，共享池SRAM，不复用Core的RC／VA／SA／Crossbar。下文简化流水图及模型分片参数不能作为该物理结构的实现证明。 |
+| F29 | 当前MAS的TX Engine按1KiB拆包、附seq_id及tail、2048→1024位宽转换；旧HAS及现行模型参数中的4KiB分片另作实现差异记录。 |
 | F30 | RX Engine 拼包：按 `seq_id` 缓存，一个 flit 拆出来的段到齐就还原这个 flit 交给 core；位宽 1024 转 2048。攒的是 flit 不是整个包：Flit 仲裁无需整包存储，core 侧的 Router 也按 flit 收发 |
 | F30a | RX Engine 往边界 core 交 flit 按那个口入口的 VC credit 记账：每 VC 一份 private 20，四个 VC 共用一份 shared 20，与 RouterStation 的两级深度一致；没有位置时 flit 压在 RX，边界 core 入口腾出位置时经它的 `up_back` 线还回来。各 VC 分开：按到达先后交第一笔交得出去的，一个 VC 没有位置只压住这个 VC，别的 VC 的 flit 与 release 照交；同一个 VC 内按到达先后交 |
 | F31 | AXI Bridge 做 credit 与 AXI4 的协议转换 |
@@ -418,6 +420,9 @@
 ***
 
 ## 3　接口
+
+原始Router／DATA_NOC设计分别传递VC、Stream及Reduce返回。当前模型LinkEnd只承载VC与Stream返回，下列端口和接线图按模型实现列出；下游Reduce credit／Release尚未接入，不能以两类返回覆盖原始三类资源协议。
+
 
 ```
 port c2c[d] (双向, credit/release, clk)           // d ∈ {N, E, W, S}：chip 对外的四个口，由 LPU 接到相邻 chip 或 PCIe Switch
@@ -622,7 +627,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="78" font-size="10.5" fill="#475569">1. RC：按 path_id 查得出口方向与下一跳 VC</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. VA：查 c2c_credit[方向][VC] &gt; 0</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SA：同向的数据与 credit release 之间仲裁，小包优先</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，VC与Stream两类release 一律透传</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，模型透传VC／Stream；原始设计另有Reduce Release</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">反向按类型 demux 分流</text>
   <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
   <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
@@ -630,7 +635,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
 </svg>
 ```
 
-### M4 · TX Engine 拆包
+### M4 · 当前模型TX分片与MAS差异
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 812 218" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
@@ -655,7 +660,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <rect x="232" y="30" width="340" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="46" font-size="8.5" fill="#6b7280">M4</text>
   <text x="558" y="46" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="250" y="66" font-size="12" fill="#111827">TX Engine · 按 4 KB 边界拆并降位宽</text>
+  <text x="250" y="66" font-size="12" fill="#111827">模型TX：4KiB分片；当前MAS为1KiB</text>
   <text x="250" y="88" font-size="10.5" fill="#475569">1. seg = 按 4 KB 边界切分；seq_id = 段号（4 bit）</text>
   <text x="250" y="108" font-size="10.5" fill="#475569">2. 最后一段置 tail 标记</text>
   <text x="250" y="128" font-size="10.5" fill="#475569">3. 位宽 2048 转 1024，一拍拆成两拍发出</text>
@@ -727,7 +732,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="558" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D300</text>
   <text x="250" y="56" font-size="12" fill="#111827">AXI Bridge · credit 与 AXI4 的协议转换</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 出方向：credit 语义转成 AXI write burst</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. 入方向：AXI read/write 转回 flit 与VC与Stream两类release</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 入方向：模型AXI转flit及VC／Stream；MAS另有Reduce Release</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. release 的粒度是 flit，在 C2C 上压缩包数量后再传</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 出方向 300 拍是 PCIe C2C 的 300 ns，入方向计 0</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Router 到 Router 的 400 T 含这一段与两侧 Bridge</text>

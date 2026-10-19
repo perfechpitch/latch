@@ -309,6 +309,9 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 
 ## 3　接口
 
+原始Router／DATA_NOC设计分别传递VC、Stream及Reduce返回。当前模型LinkEnd只承载VC与Stream返回，下列端口和接线图按模型实现列出；下游Reduce credit／Release尚未接入，不能以两类返回覆盖原始三类资源协议。
+
+
 Core 对外只有 Router 的三个方向与 ctrl_noc；core 内单元之间的端口组在两侧单元文档的“接口”一章里各有一个声明块。
 
 ```

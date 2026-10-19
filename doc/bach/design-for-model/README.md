@@ -19,7 +19,7 @@
 | [系统与部署](02-系统与部署.md) | design | 产品边界、集群与 Node 形态、业务流控与退出的分层职责、模型切到 chip 与 core 的规则、chip 内 2×5 的 core 阵列、坏 core 与 Boot 流程。定阵列规模、core 角色与每 core 权重份额。 |
 | [SCP 的工作流程](02-scp-工作流程.md) | design | SCP 专题：chip 内唯一的配置与控制入口。配置网络怎么把一笔写送到目的模块，上电到能收业务的每一步，装 kernel 与 weights 时 SCP 各做什么，运行期的状态查询、故障处理与调试。每节一张图加短句，是《系统与部署》里 SCP 部分的展开。 |
 | [Core 内硬件](03-core-内硬件.md) | design | Bach Core 顶层与 RV Core，以及 Router、TS 在 core 内的位置。core 内的控制通路，决定多用户如何在三条执行链上流水。 |
-| [Router 片上交换与归约](03-router-片上交换与归约.md) | design | Router 专题：一个包要过的查表、拿资源、抢通路三关，方向许可、VC credit与本级RMEM许可各管一段，按任务类型分的走法与资源与 credit 的管理方式，归约与跳过。第 3 章的展开。 |
+| [Router 片上交换与归约](03-router-片上交换与归约.md) | design | Router专题：路由、准入和仲裁，VC／Stream／下游Reduce credit，Header／Payload边界、重发及用户回收；当前模型与原文分歧分别记录。 |
 | [归约的完整过程](03-reduce-归约的完整过程.md) | design | 归约专题：core 内专家间求和、chip 内切 K 部分和在 ReduceModule 的逐跳累加、每行 chip 的结果逐跳进本行 R core、12 个 R core 串成链逐行累加，三层各自的触发、等待、credit 与完成，以及死锁与派遣。第 3 章的展开。 |
 | [TS 任务调度器](03-ts-任务调度器.md) | design | TS 专题：两张表、四个动作，以及数据乱序到达、下游收不下、用户数超出表项这三处复杂性。第 3 章的展开。 |
 | [执行单元与存储](04-执行单元与存储.md) | design | MU / VU 两个 DSA 的能力、参数与时序约束，三级存储的容量、带宽与仲裁规则，以及 DTE 在 core 内的位置。 |
@@ -32,11 +32,17 @@
 
 软件产物、配置顺序和当前bundle格式在 [软件产物与硬件配置](<../software/软件产物与硬件配置.md>)。
 
+## 原始设计依据
+
+硬件行为以`/home/colin/develop/perfechpitch`当前同步文档为依据。[Router MAS](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router.md>)为revision13205，[DATA_NOC HAS](</home/colin/develop/perfechpitch/Bach项目文档/01_Bach项目文档库/02_Architecture/03_HAS/02_DATA_NOC_DE_HAS.md>)为revision21283，[DATA_NOC MAS](</home/colin/develop/perfechpitch/Bach项目文档/01_Bach项目文档库/03_Design/09_noc_ss/03_DATA_NOC_DE_MAS.md>)为revision377。TS和DTE详设版本列于下节。不同文档的revision不能用来比较先后；正文、接口及场景之间的异文登记在缺口文档。
+
+设计规则、模型实现及尚未统一的原文分别陈述。当前模型的64项RouterTable、HeaderFIFO、reduce_seq旁带和仅VC的归约输出准入不作为硬件设计依据。
+
 ## TS／DTE 文档基线
 
 TS/DTE文档以原始 [Task_Scheduler_详细设计文档模板](</home/colin/develop/perfechpitch/_refs/Task_Scheduler_详细设计文档模板.md>)（revision6452）与 [DTE DSA详细设计文档](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)（revision24200）为设计依据。正文定义模型合同，单元文档记录实现与验证位置；缺口文档集中登记硬件待统一项。
 
-[文档缺口与TBD](08-文档缺口与-TBD.md)逐项登记原文未统一的位域、时序和接口。代码、kernel、四套bundle和测试已按确认的建模基线共同修改。历史回归结果在修订记录中登记；原文尚未统一的协议继续保留TBD。
+[文档缺口与TBD](08-文档缺口与-TBD.md)逐项登记原文未统一的位域、时序和接口。代码、kernel、四套bundle和测试按现行模型配置运行；与原始设计的差异仍须逐项对齐。历史回归结果在修订记录中登记；原文尚未统一的协议继续保留TBD。
 
 ## 小节索引
 
@@ -92,12 +98,12 @@ TS/DTE文档以原始 [Task_Scheduler_详细设计文档模板](</home/colin/dev
 
 [LPU](07-units/lpu.md)　[链路](07-units/link.md)　[PCIe Switch](07-units/pcie-switch.md)　[片外桩](07-units/external-stub.md)　[Chip](07-units/chip/chip.md)　[Core](07-units/chip/core/core.md)　[Router](07-units/chip/core/router.md)　[TS](07-units/chip/core/ts.md)　[RV core](07-units/chip/core/rv-core.md)　[DTE DSA](07-units/chip/core/dte.md)　[MU DSA](07-units/chip/core/mu.md)　[VU DSA](07-units/chip/core/vu.md)　[存储子系统](07-units/chip/core/memory.md)
 
-**先看动画**：浏览器直接打开，系统与Router动画各四个场景：①硬件拓扑、②场景与任务、③逐步执行、④模块运行逻辑；TS动画按六个主题组织。右侧先用有序列表说清这一步做什么，再用统一的“收到 → 输出”列出信息传递：`源→目的　通道名　字段`，模块名与左图一一对应，内部模块写成 `TS.Stream_table`、`Router.ReduceModule` 这样的形式。
+**先看动画**：浏览器直接打开，系统与Router模型动画各四个场景：①硬件拓扑、②场景与任务、③逐步执行、④模块运行逻辑；TS动画按六个主题组织。右侧先用有序列表说清这一步做什么，再用统一的“收到 → 输出”列出信息传递：`源→目的　通道名　字段`，模块名与左图一一对应，内部模块写成 `TS.Stream_table`、`Router.ReduceModule` 这样的形式。
 
 * [`09-system-工作细节.html`](09-system-工作细节.html)：72 步，一个 token 从 GPU 出发再回到 GPU 的完整系统流程：上电装 kernel 与 weights、切业务模式、进 Node、B core 沿第一列下传并向组内广播、64 个 core 算 FFN、三层归约、沿 12 个 R core 的链逐行累加、链尾出核、credit 回收。三张平面并排：12 × 4 的 chip 网格、一颗 chip 的 core 阵列、一个 core 的四层。第 ② 场画三类 core 的任务链形态与TS三种工作模式，第 ④ 场按第 7 章的对象清单逐个模块讲。结构照 `01-完整工作流程.md` 的流程图与 `07-units/` 的单元文档。
-* [`09-ts-工作细节.html`](09-ts-工作细节.html)：6个主题、35步，展示DataIn/Future、方向许可、Reduce与RMEM、特殊模式/ACK、DTE全局退休、包头与端点。状态表和图与当前详设合同一致。
+* [`09-ts-工作细节.html`](09-ts-工作细节.html)：6个主题、35步，展示DataIn/Future、方向许可、Reduce与RMEM、特殊模式/ACK、DTE全局退休、包头与端点。状态表按TS详设及现行模型组织；Router完成与DTE任务粒度分歧另行标明。
 
-Router 一个走法一份，图与逐步执行各自独立，Router模块和TS许可协作的拓扑与运行逻辑五份共用同一套画法：
+Router模型一个走法一份，五份共用模块拓扑。动画按现行实现演示，原始硬件的下游Reduce协议、Core边界和路由表差异在入口说明中列出：
 
 * [`09-router-reduce-工作细节.html`](09-router-reduce-工作细节.html)：39 步。逐级 reduce：六级流水线、建上下文与读改写累加、结果 flit 的操作数加完就回注 Xbar、RMEM Done只按UID归还空间，执行双ACK独立完成任务。
 * [`09-router-broadcast-工作细节.html`](09-router-broadcast-工作细节.html)：38 步。一次搬运逐跳复制：`flow_dir` 多位有效、`path_core_mask` 决定进不进本 core、全有或全无的准入、ST 阶段 1 到 N 复制、阻塞重传。

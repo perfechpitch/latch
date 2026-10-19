@@ -15,17 +15,18 @@
 
 ***
 
-## 已确定的跨模块设计合同
+## 原始设计依据与模型差异
 
-本项目按以下约定统一各模块。原始资料中的不同说法保留在本章；硬件物理位域、时钟边界及异常恢复中尚未定义的部分继续单独登记。
+设计依据为原始文档库当前同步内容：Router MAS revision13205、DATA_NOC HAS revision21283、DATA_NOC MAS revision377、TS详设revision6452及DTE详设revision24200。revision只标识同一份文档的版本，不用于比较不同文档的先后。
 
-| 设计合同 | 项目采用的规定 | 原始资料的分歧 |
+| 范围 | 原始设计规定 | 当前模型与待统一部分 |
 | - | - | - |
-| 下游Reduce准入 | TS管理本级RMEM许可；网络输出逐flit查VC credit，接收端按用户准入、最早未完成Reduce、任务号、PID及物理上下文放行。RMEM输出完成按UID归还本级许可；业务Stream release按用户退休归还 | Router MAS的Downstream Reduce Credit Map、reduceNeedMask及逐任务Reduce release是另一方案，本项目不采用 |
-| TS／Router许可所有权 | TS保存三方向计数、Pending和已用方向，原子授予新增方向；Router保存实体用户表，真实Stream release仅归还TS已持有的方向。重发完成另行通知 | 旧资料的TS注册请求、Router监听并返回SID/TID Grant不接入本项目的业务许可通路 |
-| TS／DTE任务边界 | 一个TS任务可提交多条DTE搬运，每条独立占全局Entry并有序退休；仅最后条目使能ack_ts_en。R Core两Packet属于同一个Reduce任务，Core/DSA双ACK完成任务，RMEM返回独立还空间 | 原文一Task一Packet限制不用于本项目；不能把两个操作数直接拆成相互等待的Reduce任务 |
-| ERROR后的推进 | 停止新的Channel下发及正常SM／Ack推进；保留异常队头、描述符和在途上下文。已下发任务保留原请求／响应归属，已Fire事务继续收集响应；ERROR接收并丢弃新Trigger、清dirty，普通寄存器访问继续 | 原文“已下发任务完成”在本项目中不表示继续正常SM副作用或TS完成。残包终止、恢复及完整Flush协议仍需补齐 |
-| 权重加载启动 | loading置位只切换模式，每加载阶段由一个已接受Trigger发起PC-only请求，身份全零；业务ACK在加载期间忽略。切换业务前由加载控制方确认数据、写响应和DTE队列排空 | 原文将loading置位直接作为请求的说法不用于本项目；整权重分片的加载阶段划分和完成通知仍需定义 |
+| 下游Reduce准入 | [Router MAS](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router.md>)要求按用户、方向和任务维护下游Reduce credit；reduceNeedMask有效时首次发送取得准入，任务结果全部交付后返回Reduce Release | 模型仅实现VC credit和接收端上下文保护；[Core间通信机制](</home/colin/develop/perfechpitch/Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/06_Core间数据流通信机制.md>)另有共用Stream、不增加独立credit的方案。原文分歧保留，模型行为不作为取消Reduce credit的依据 |
+| TS与Router许可 | [TS详设](</home/colin/develop/perfechpitch/_refs/Task_Scheduler_详细设计文档模板.md>)定义三方向计数、Pending及新增方向原子授权；Router MAS定义实体Stream表和分方向Release | 当前接线按真实Release归还TS持有方向。Router侧映射、返回时序及新旧接口的对应仍需统一 |
+| TS与DTE任务粒度 | [DTE详设](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)“软件限制”要求TS与DTE任务粒度一致；ack_ts_en控制Entry退休时是否上报TS | 当前R Core在一个TS任务内提交两条搬运，仅最后条目回ACK；这是现行软件实现，与原文粒度限制的对应尚未统一 |
+| ERROR推进 | DTE详设规定ERROR停止下发及TaskQ指针，已下发任务执行至完成回写，RV访问继续，Trigger接收后不入队并清有效位 | 完成回写与SM／Ack推进分别处理；ERROR恢复、Flush及残包终止的清理协议仍待定义 |
+| 权重加载 | TS详设接口和加载场景规定loading只进入模式，每阶段一个Trigger握手后生成零身份PC-only请求；加载完成由软件外部保证 | TS-FUNC-001仍有置位即发请求的异文。模型采用Trigger路径，整分片阶段划分和完成通知尚未定义 |
+| STOP队满 | DTE详设“软件限制”与RV接口规定RUN／STOP队满均反压全部RV访问；STOP时在队Entry不得超过15 | STOP填满后不能经RV写resume；详设规定复位恢复，不能以未定义的控制网络旁路代替此限制 |
 
 ## 口径冲突
 
@@ -47,7 +48,7 @@
 | 用户号有几位 | Task Scheduler MAS 的画板与旧版接口：10 bit（`user_id[9:0]`）；TS LLD v0.5 的 Stream Map 表项 `UID_W = 10`，而它的对外接口表是 16 位 | RV Core MAS 的自定义 CSR：“有效位宽暂定为 12bit” | 原始文档里只有这两处给了位宽。Router 的包格式那一节把 `user_id` 列在“硬件相关的其余字段”里，没写宽度。10 bit 那一档在接口表与画板上多处一致，12 bit 那一档原文自带“暂定”。**要问设计者**：用户号的值域多大，一个 LPU 里同时在飞的用户上限是多少。建模先按 16 bit 建，装得下这两种取值 |
 | 取指 / 访存不对齐异常的归属 | RV Core MAS decode 优先级表：addr misalign 单列一类 | 同文档 ITCM 与 Exception 两节：不对齐归入 access fault | 按 decode 优先级表 |
 | RV core 的 C / A / F / D 扩展 | RV Core MAS Features：C 支持、**A 考虑支持**、F 与 D 不支持；MAS_TOP：RV32IMC；同文档“标准指令集”小节仍是“是否支持 C？是否支持 AFD？”的问句 | 软件计算流程详细评估：**RV Core 目前支持的指令集为 RV32IMAC**，A 已经算进去 | 按 Features 建，**A 先不建**。这条影响 Share Mem 的多核一致性怎么做：三个 RV core 共享 Share Mem，A 一旦确定支持，task 之间的同步就有原子指令可用 |
-| 逐级归约要不要单独的 credit | Router MAS F-032、F-033：下游 Reduce credit 按 UserID 加目标方向、以一笔 reduce 任务为粒度，表项的 `reduceNeedMask` 置位时头一个 flit 前取得准入，下游交付完结果还一次 Reduce release | 《Core 间数据流通信机制》：“Rmem跟Cmem维护的逻辑一致，也是按照用户数量平均划分，容量的维护机制跟Stream资源的维护保持一致，这样不需要额外的Credit机制”，一项 Stream 资源同时分配下游的 CoreMem 与 ReduceMem | **已定**：网络输出逐flit使用VC credit，业务准入沿用Stream；TS另管本级RMEM许可，接收端按用户、任务及物理上下文放行。代价是同一个用户在同一个 core 上的两笔 reduce 之间没有跨 core 的挡手：上游第二笔的数据早到时，下游那个用户的分区还被第一笔占着，包只能在 VC 上等。Router MAS 那一路是靠下游 Rmem 空项挡的 |
+| 逐级归约要不要单独的 credit | [Router MAS](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router.md>)的Reduce Credit与传输Credit章节：下游按UserID、目标方向及任务准入，reduceNeedMask控制检查，结果全部交付后发Reduce Release | [Core间通信机制](</home/colin/develop/perfechpitch/Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/06_Core间数据流通信机制.md>)提出Rmem和Cmem共用Stream资源，不增加独立credit | 原文方案有分歧，尚未统一。Router详设保留独立Reduce credit；当前模型未实现该机制，只查VC并在接收端检查上下文，不据此判定硬件方案已取消 |
 | B core 查询 ready 的 task 由谁执行 | 软件计算流程详细评估 GLM5 章：VU 做 check flag | 同文档 TS 章的 B core 示例：task0 为 MU | **已定：MU**。查询的 RV core 约定为 MU RV core，由它检查 Share Mem 里的表项判断有没有有效数据 |
 | `SELF_START` 的适用范围 | TS MAS 旧版：仅 B core 才会有 | 软件计算流程详细评估 R core 示例：task0 `self_start=1` | **已消除**。TS MAS 现版的 `SELF_START` 是全局寄存器，描述写“当前场景只有B core\R core会出现这种工作模式” |
 | Router 的 R2R 方向端口 | Router MAS：五方向互连，上、下、左、右及 Core | DATA_NOC HAS：left / right / mid 三个方向端口，加 local 与 reduce_0/1/2，5 入 7 出 Crossbar | 按 HAS 的三方向。两行的拓扑里邻居就是同行左右加另一行对称位，且与第 3 章顶层节的 data_L / data_UD / data_R 三通道一致 |
@@ -55,8 +56,8 @@
 | Router 的仲裁粒度 | Router MAS 有一节“Interleave 和整包的对比”，只列两案优劣、未给结论 | MAS 正文与 DATA_NOC HAS 都是 flit 级（“Packet 在 VC 间按照 Flit 的粒度传输”“矩阵仲裁以 flit 为基本节拍”） | flit 级，整包只作为贪婪仲裁的优先级偏好。原第 3 章写成“整包粒度（选定）”是误读，已更正 |
 | R2R 带宽 | Router MAS：相邻 Router 双向各 256 GB/s @1GHz | DATA_NOC HAS：R2R 210 GB/s、C2C 90 GB/s | 两个都记：256 GB/s 是 256 B/T @1GHz 的接口理论值，210 GB/s 是 HAS 记的有效带宽。是否同一口径待确认 |
 | 重发（reissue）任务在不在主任务链上 | TS MAS 与 core 内调度机制：重发 task 不在主线任务链上，可并行执行、优先级最高（TS MAS 里“重发的 task 任务优先级最高”这句自己划了删除线） | Top 模拟器详设的三条【讨论结果】：插在任务链中实现，同一 stream 下即使无依赖也按任务顺序执行，需等它完成才能执行后面的任务；软件计算流程详细评估的 normal core 示例把 broadcast reissue 排成 task 1' | **已定：在链上**。TS MAS 现版把重发的搬入与搬出配成链上的项（`TASK_TYPE` 1～3），“重发的 task 任务优先级最高”一句与 DTE 优先级的方案 1 都划掉了，DTE 发射全部按最老用户仲裁 |
-| 进 core 的数据缓存在哪 | Router MAS：CoreStation 内的 HeaderFIFO 与 OutputBuffer，只给职责不给深度 | DATA_NOC HAS：Router 内 local 端口不设 buffer（容量栏写“—”，注明“buffer 在 DTE-local 桥接”），缓冲在 Router 外的 DTE-local 桥接模块，Router→DTE 60 flits × 288 B ≈ 16.9 KB | 结构按 MAS（不设独立桥接模块，逻辑拆到 core 与 Router 两侧），**容量按 HAS 的 60 flits** |
-| Router 的 Credit Bypass Route | Router MAS F-018～F-020：20 bit 的 `RTR_RELEASE_ROUTE`，按四个输入方向分四组，每组 5 位，分别表示转到上、下、左、右与 Self（Core）；Stream 与 Reduce 两类 release 只按它转发 | 软件计算流程详细评估 Router 章：删除了该配置小节，软件只配 RouterTable；但同章检查清单与释放表仍引用 Credit Bypass Route | 按 Router MAS。R2R 端口按“Router 的 R2R 方向端口”那一条定成三个方向，所以模型是三个输入方向各 4 位（mid、left、right、本级） |
+| 进 core 的数据缓存在哪 | 当前Router MAS明确Core边界无HeaderFIFO，Header／Payload独立握手 | DATA_NOC HAS另列Router外DTE-local桥接60flit | 当前模型把HeaderFIFO与60flit缓冲放在CoreStation，属于实现差异，不能仍称结构按当前Router MAS |
+| Router 的 Credit Bypass Route | Router MAS按类型区分Stream／Reduce Release，20bit静态路由；DATA_NOC MAS有独立Stream／Reduce 4×3 crossbar | 模型仅有Stream静态Mask和三R2R来向返回 | 保存源接口差异及模型缺口，不能通过改方向数推导Reduce Release已被取消 |
 | Matrix Mem bank 数 | MU MAS：32 个 Mmem Bank 与 32 个物理 Lane 一对一 | Mmem MAS：按 64 个 lane 分成 64 bank | **未解**，直接影响 8KB/T 的组织方式 |
 | MU 计算流水深度 | 参数表：执行拍数 / 流水延时 9T | Matrix exe 章节：单 Lane 内深度 10 级 | 差 1 拍，可能是含 / 不含某一级 |
 | loop_bp 项数 | Key features：最多 4 项 | 参数列表：4/8 | 未定 |
@@ -75,7 +76,7 @@
 | VC Buffer 容量 | 《通信机制（分析过程）》按容量记：reduce 专用 VC3 16 KB、三个共享 VC 各 8 KB、三方向各一套，合计 **120 KB** | DATA_NOC HAS 按 flit 记：private 20 flit/VC × 4 加 shared 20，一个方向 100 flit ≈ **25 KB**，三方向 75 KB | 未解。前者按 reduce 要整包缓冲反推，后者按覆盖 credit 往返反推 |
 | ReduceBuffer 容量的第三种口径 | 《通信机制（分析过程）》另一处：Core 必须一次性整包发进 ReduceBuffer，一个 Token 8192 × 2 B = **16 KB** | 同一份文档前文记 64 KB；Router MAS F-044 记 512 KiB | 三个数在同一条链上：16 KB 是单包下界，64 KB 是正反双份，512 KiB 是 16 用户并发。**已定：按 Router MAS F-044**，16 个用户各一个 32 KiB 分区 |
 | CM 物理带宽 | 《Core Memory 容量带宽需求推导》：**512 B/cycle @1 GHz**，每用户 50 KiB 写 + 50 KiB 读 | 《通信机制（分析过程）》：**256 B/cycle @1 GHz**，每用户 25 KiB 写 + 25 KiB 读；《Cmem MAS》：**(1 KB + 32 B)/T** | 三份不一致。第 5 章按 512 B/cycle 记，Cmem MAS 的 1 KB/T 是 8 bank 全开的峰值，两者不是同一个口径 |
-| Reduce credit 的粒度 | DATA_NOC HAS：core 与 reduce 之间按 user 管，reduce 与 reduce 之间“按照 flit+user 的粒度进行 credit 资源管理”，“reduce 之间 creidt release 粒度为 flit” | Router MAS F-032、F-033 与“Reduce Credit 与传输 Credit”一节：下游 Reduce Credit 以 UserID、目标方向、Reduce 任务为粒度，`reduceNeedMask` 置位时在任务头一次向目标方向提交前取得准入，“后续 Packet 和 flit 复用该准入”；下游做完这笔任务、结果全部交付后还一次 release，“不是逐 flit VC Credit 返还” | Router MAS 的任务级准入与逐 flit VC credit 是两层机制。当前模型采用上表“逐级归约要不要单独的 credit”的选择：输出只查 VC credit，接收端按用户及 RMEM 物理上下文反压；独立下游 Reduce credit 未实现 |
+| Reduce credit 的粒度 | DATA_NOC HAS及MAS概要按user+flit描述Reduce credit | Router MAS区分任务级下游Reduce准入与逐flit VC credit | 两份原文的事件粒度及接口需统一。文档分别记录，模型尚未实现下游Reduce映射及Reduce Release |
 | ReduceMemory 的结果按整包还是按 flit 出 | Router MAS F-013：“ReduceMemory 的各输入流和输出流均以完整 Packet 为单位进行仲裁和传输”，“结果也以整包形式输出” | 同一份 MAS“整包输入输出与结果流水”一节：“当某个结果 flit 所需的操作数均已完成累加，且输出端满足接收条件时，该 flit 即可进入输出流水，无需等待整笔任务或整个 Packet 的全部结果生成” | 读作不矛盾：F-013 管的是包与包之间不交织，后一节管的是一个包内部按 flit 流出。模型按后一节，包发出首 flit 后锁定到尾 flit |
 | `core_type` 还在不在 | TS MAS 功能清单 1(e)：“支持软件配置本core的类型 core_type：B/R core，普通core”；Block Diagram 的 CFG_REG 一行也列着 `core_type` 与 `B_core_direction` | TS MAS 寄存器表：全局 `SELF_START`（`0x214`）；TS LLD 参数表：“0为Normal，1为Special；替代core_type” | 按寄存器表：`SELF_START` 取代 `core_type`。`B_CORE_DIRECTION` 地址映射里没有，按《TS_通信机制》保留 |
 | VU 的 event 送不送 TS | VU MAS F50：“可向 TS 发 Event 同步信号”（`vu_event`） | TS MAS 与 TS LLD 的 `vu2ts_done_ch` 都只有 uid、tid、sid、valid，没有 event | **已定：只有 `EVENT_EN` 才发 `dsa_done`**，同拍拉高 `event`。TS 把这一路当普通 DSA ACK，不另处理 `event` |
@@ -87,30 +88,35 @@
 | 编号 | 原文位置和分歧 | 文档处理与实现边界 |
 | - | - | - |
 | U-DTE-MODE | DTE“复杂配置寄存器说明”写mode[9:7]、seg[6:4]、header[2]、SM[1]、ACK[0]；模板说明/hex例以mode[2:0]、header[7]、SM[8]、ACK[9]，且保留bit3；审查时的旧代码seg[5:3]/保留bit6又不同 | 用户已确认模型采用 mode[2:0]、bit3保留、seg_valid[6:4]、header[7]、SM[8]、ACK[9]。kernel、模板与模型使用这一位序；原文仍需统一 |
-| U-DTE-STOP | AddrDecode、RVCore IF与全局Q段规定RUN/STOP满队列均反压；Status Ctrl段规定STOP恒ready并丢弃满队列Trigger | 用户已确认模型采用STOP队满反压全部RV访问。控制网络可恢复运行；原文的另一种STOP行为仍待统一 |
+| U-DTE-STOP | DTE详设“软件限制”、AddrDecode及RV接口均规定RUN／STOP队满反压全部RV访问 | 按当前详设执行；STOP在队Entry不超过15，写满后RV无法resume，只能复位恢复。控制网络是否有独立恢复能力未定义 |
 | U-TS-CREDIT | Credit Ctrl数据流/时序表/画板E2扣账并READY；场景5.4前后8槽两阶段E3提交 | 用户已确认模型采用E2提交，方向扣账与READY在同一次Map更新中生效。原文E3场景仍待统一 |
 | U-TS-CACHE | Stream Map字段表不保存PC/VCID、Arbiter按winner查LUT；场景与内嵌表要求Map安装时缓存PC/VCID、Arbiter直接取 | 命令必须持有PC/实际PID/VCID；缓存模块和寄存边界待统一，面积与精确时序不能混算 |
-| U-TS-WEIGHT | TS-FUNC-001将loading 0→1描述成发PC请求；后续权重场景规定置位只进模式、仍等Trigger | 本项目loading只切模式，已接受Trigger生成PC-only零身份请求；每加载阶段一次Trigger，切业务须等数据、响应和队列排空 |
+| U-TS-WEIGHT | TS-FUNC-001写loading上升沿发请求；配置接口、Router接口及权重加载场景规定置位只进模式、等待Trigger | 现行详设的完整接口和场景按每阶段一次Trigger生成PC-only请求，模型同此；功能摘要的异文仍需原作者统一 |
 | U-TS-RETIRE | 2.2 valid描述仍写保持到Router接受；功能、顶层接口和生命周期规定无外部Ready、单拍UID/valid | 采用多处一致的valid-only目标合同，内部Retire Hold ready顶层固定1；保留原文陈旧语句的来源分歧 |
 | U-TS-CHECK | LUT-FUNC-010说不再检查旧Reissue组合；配置错误表仍检查ReissueOut credit、P2P wait_wake和partner类型 | 软件继续配置合法组合；硬件保留哪几项检查待统一。Reduce不依赖credit_en是明确规则 |
 | U-DTE-QTABLE | DTE参数同步引用仍称Q只保存尚未dispatch任务；主体结构、状态机及验证规定持有至Ack退休 | 采用多处一致的16项全生命周期Entry；参数引用旧说明不定义另一个派发FIFO |
 | U-TS-RECV | TS ATTR/软件约束/接口/5.2为00 Core、01 DSA、10双ACK；Task Done旧段为01双ACK、10 Router | 采用寄存器及后续场景一致的00/01/10目标；六输入FIFO说明须同步分类，禁止把RMEM返回归为TID完成 |
 | U-TS-RTAB | TS 2.4旧表方向5bit（上下分开）及VCID[6:5]；功能、Credit Ctrl和LUT表方向4bit（南北合并）及VCID[5:4] | 逻辑方向按南北/西/东/Local，物理bit未统一前不提供可执行RouterTable打包例 |
 | U-TS-CREATE | DataIn文字说Create/Skip/claim内部无独立ready；内嵌接口表GzIkmi仍将Create列为valid-ready | 原子分配和Candidate提交一致；具体Create握手及容量返回边界待统一，不能用通用accepted写口替代所有Map更新 |
-| U-TS-LISTEN | 旧Router MAS提出TS注册四身份、Router监听16事件并返回Grant；新TS详设使用三方向Credit Ctrl、每SID Pending和方向返回 | TS提交三方向许可，Router保存实体用户表并按真实release返回已持有方向；旧注册／SID/TID Grant不接入业务通路。旧Router MAS另有“监听功能移到DTE”的表述，均不改变本项目的TS许可所有权 |
+| U-TS-LISTEN | Router MAS早期流程有TS资源监听；TS详设使用三方向Credit Ctrl、每SID Pending和方向返回 | TS按其详设管理许可；Router表项及业务Release按Router／DATA_NOC文档管理。当前接线是模型实现，不能视为所有外部接口已统一 |
 | U-TS-VCID | TS旧接口表将VCID写成Kernel/Transfer/Reduce/ReduceTwice操作码；RouterTable和DTE Channel选择把VCID作为实际0～3通道 | 当前模型按任务实际PID查询路由VCID并随Trigger锁存；旧操作码表与物理VC的对应由Owner统一，不用未冻结操作码改现有Channel选择 |
 | U-DTE-LEN-EXAMPLE | DTE总原则和CFG_DATA_LEN寄存器表规定字节单位、8B为软件对齐；分拍示例仍有data_len_i×8的旧公式 | 模型与配置示例按字节长度计算，内部拍数为ceil((起址mod256+长度)/256)；旧乘8公式需要原Owner同步修正 |
 | U-TS-WINDOW | 通信机制提出超前窗口，旧衍生稿的“阻塞UID≥M+N”与“允许发到M+N”例子边界不同，窗口寄存器位置未定义 | 保留应用场景、推算假设、容量及候选过程；不冻结等号边界，也不据旧模型path_flowctl选择硬件存储 |
-| U-DTE-TASK | DTE“软件限制”要求一TS Task一Packet一个传输任务；其它章节和现有软件用最后一笔ack_ts_en表示一个Task拆多搬运 | 本项目允许一个TS任务包含多个DTE搬运条目，最后条目反馈ACK；R Core两操作数沿用这一方式。原文一Task一Packet条款需同步修订 |
-| U-DTE-ERROR | Status Ctrl ERROR文字允许已下发任务完成；后续控制接口限制ERROR推进，Flush和残包终止仍TBD | ERROR停止新Channel下发及正常SM/Ack，保留Except队头并收集已Fire响应；残包终止、恢复和cancel指针修复仍待定义 |
+| U-DTE-TASK | DTE详设“软件限制”要求TS与DTE任务粒度一致；ack_ts_en另行控制Entry是否反馈TS | 当前R Core单TS任务两条搬运、最后ACK的实现与该限制尚未统一。保留现行软件配置说明，不将它写成原文已放开的通用规则 |
+| U-DTE-ERROR | 当前DTE详设要求ERROR停止TaskQ指针，已下发任务执行至完成回写；SM／Ack停止 | 执行与完成回写继续，正常SM及退休不继续。离开ERROR时TaskQ、Channel及在途事务清理待定义；模型恢复接口不代表硬件清理协议已冻结 |
+| U-RTR-TABLE | Router MAS寄存器窗口和DATA_NOC MAS定义256项、每项64bit；TS详设的路由属性表为64项，模型Router／DTE／RMEM表也为64项 | 256项是Router侧设计，64项是TS及现有模型容量；高PID如何映射或限制、外部副本字段及提交顺序需跨模块统一 |
+| U-RTR-HEADER | [DATA_NOC HAS](</home/colin/develop/perfechpitch/Bach项目文档/01_Bach项目文档库/02_Architecture/03_HAS/02_DATA_NOC_DE_HAS.md>)和DTE包头表定义Byte10 pkt_sideband：bit0精度、bit[2:1]归约流编号、bit3坏包；DTE HeaderTable及验证段又把Byte10～15置0 | Byte10保留为源文档冲突，不能一律列为Reserved。流编号与任务序号分别描述，不能把模型reduce_seq当作已定义线字段 |
+| U-RTR-CORE | Router MAS的Core边界规定Header／Payload分开握手，无HeaderFIFO、不拼拆整包；当前模型CoreStation保存HeaderFIFO及流水缓冲 | 模型hdr_rd／HeaderFIFO及60flit桥接是现行实现。硬件边界、DTE取头与TS通知的对应需统一，不能把模型缓存列为Router硬件必需存储 |
+| U-C2C-BRIDGE | 当前DATA_NOC MAS v0.44为1×1退化Router、1KiB拆包、双channel及异步桥；旧HAS含复用RC／VA／SA及4KiB拆包描述 | 以现行细化MAS记录目标结构；模型分片、缓存、单Link时序和旧HAS分别记录，不能混算时延与面积 |
+| U-RTR-DONE | Router MAS把RMEM Task Done写作推进任务；TS详设规定Core／DSA双ACK完成，RMEM Done仅归还空间 | TS按自身详设处理空间返回；Router／TS事件命名和完成条件需原作者统一，当前模型采用TS语义 |
 
-原文依据：[TS详细设计](</home/colin/develop/perfechpitch/_refs/Task_Scheduler_详细设计文档模板.md>)的配置、Task Done、Credit Ctrl、Stream Map与场景；[DTE详细设计](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)的Config、Status Ctrl、Glb Cfg TaskQ和接口。原始画板部分已经注明旧图，项目图只表达上述一致合同。
+原文依据：[TS详细设计](</home/colin/develop/perfechpitch/_refs/Task_Scheduler_详细设计文档模板.md>)的配置、Task Done、Credit Ctrl、Stream Map与场景；[DTE详细设计](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)的Config、Status Ctrl、Glb Cfg TaskQ和接口。原始画板、正文及接口表有异文时，分别记录来源和当前实现，不将其中一个模型选择称为跨模块一致合同。
 
 ### 关联软件与 Router 接口仍需统一
 
 DTE的32B包头已包含16B sw_aux，Packet长度为32加使能数据段总长。当前kernel／Router模型又在payload前面保存16B软件辅助信息并跳过加法。该兼容前缀是否继续作为业务数据、怎样与sw_aux对应及怎样计算长度，须与软件／Router协议统一；DTE不自动插入这段数据。归约示例的有效元素数与模型前缀占用分别记录。
 
-R Core的两操作数归约算法沿用已选定方案。模型按用户确认的基线，将两Packet放在一个TS任务内，最后一笔开启ack_ts_en。本地Core与DTE双ACK完成该任务，Router返回独立释放RMEM。本项目采用多条搬运、最后ACK的任务边界。控制数据槽复用仍须等待执行完成与RMEM归还两类条件。
+R Core的两操作数归约算法沿用已选定方案。当前软件将两Packet放在一个TS任务内，最后一笔开启ack_ts_en；该任务划分与DTE详设的软件限制仍待统一。本地Core与DTE双ACK完成该任务，Router返回独立释放RMEM。多条搬运、最后ACK描述当前模型的任务边界。控制数据槽复用仍须等待执行完成与RMEM归还两类条件。
 
 ## 当前模型对待统一项的处理
 
@@ -118,8 +124,8 @@ R Core的两操作数归约算法沿用已选定方案。模型按用户确认�
 
 | 待统一范围 | 模型采用的约定 | 后续需要确认的内容 |
 | - | - | - |
-| 配置位序和许可提交 | TRANS_MODE使用已确认的低位mode布局；方向许可在E2提交；STOP队满反压；多搬运任务最后一条ACK | 原文的其它位序、E3场景、STOP丢Trigger说明和一Task一Packet限制 |
-| RMEM本地复用 | 已准入用户可提前接收最早尚未完成的归约分量，本地计算与上游接收可以重叠。RMEM占用期间只接收同一任务与同一路径的分量。SELF_START重生用内部通知清除旧UID的空闲RMEM上下文，不产生对外release | 提前准入与RMEM许可的硬件寄存边界 |
+| 配置位序和许可提交 | 模型TRANS_MODE取低位mode布局，方向许可在E2提交，STOP队满反压，现行R Core最后搬运回ACK | 原文其它位序、E3场景及一Task一Packet限制；STOP不得填满是当前详设的软件约束 |
+| RMEM本地复用 | 模型按UID、reduce_seq及PID保护最早未完成归约，首flit预留；SELF_START重生时回收旧UID空闲上下文 | 原文要求同任务操作数身份及跨流顺序一致，但未定义模型reduce_seq的线编码；提前准入和槽复用通知的接口待统一 |
 | TS许可与返回 | 编译侧按stream_need生成需要许可的方向，数据转发方向仍由RouterTable决定。真实release归还TS已持有的许可；转发流量不产生重复归还 | 方向返回的物理寄存边界和缓存实现位置 |
 | TS寄存边界 | Map保存当前PC；仲裁器按实际PID读取VCID，并保持选中的命令。Create与其它Map更新均提交带分配代次的请求 | PC缓存位置、Create的物理握手和面积统计边界 |
 | 特殊模式与配置检查 | 权重模式等待Trigger，只发PC和零身份；SELF_START在首Trigger激活。Reduce不检查credit_en，Reissue仍检查配对组合 | 整分片加载阶段划分及Reissue检查清单 |
@@ -131,7 +137,7 @@ R Core的两操作数归约算法沿用已选定方案。模型按用户确认�
 
 GPU/token身份和scale/topK格式信息保存在模型诊断上下文中，HeaderTable的800B及CM/MM的32B包头按硬件字段计算容量。归约payload中的16B兼容前缀仍作为软件数据保留，不自动并入sw_aux。
 
-## 已实施的 TS／DTE 基线
+## 当前模型已实现的 TS／DTE 行为
 
 | 范围 | 已实现行为 | 实现位置 |
 | - | - | - |
@@ -144,12 +150,16 @@ GPU/token身份和scale/topK格式信息保存在模型诊断上下文中，Head
 | DTE数据流 | 双128B、8B重对齐、M Top两笔topK、每VC credit/flit交织 | XBar/存储/MU端口、Buffer、OutArb/CoreStation |
 | DTE控制 | 下一拍读、RUN/STOP/ERROR、状态/TaskQ/HT回读及Except有序 | Regfile/Status、软件可观察错误、控制验收 |
 
-DTE PMU/Debug物理偏移、异常mask位序、cfg_noc/RV同目标访问次序、RD完成保留站容量、Flush／残包恢复及方向返回的硬件寄存边界继续保留TBD。已实施功能与验证位置保存在各单元文档；历史回归结果保存在修订记录中。
+本表只记录模型实现。DTE PMU／Debug物理偏移、异常mask位序、cfg_noc与RV同目标访问次序、RD完成保留站容量、Flush／残包恢复及方向返回的硬件寄存边界继续保留TBD。已实施功能与验证位置保存在各单元文档；历史回归结果保存在修订记录中。
 
 ## 当前实现仍有的缺口
 
 | 范围 | 实际状态 | 影响 |
 | - | - | - |
+| Router下游Reduce许可 | 当前仅有VC credit及接收端UID／任务／PID保护，没有下游Reduce credit映射及Reduce Release | 与Router MAS的输出准入和独立回收机制不一致；接收反压不能作为已经实现任务级准入的证明 |
+| Router硬件表与Core边界 | 模型路由表64项，CoreStation有HeaderFIFO和hdr_rd；源Router文档为256项、Header／Payload分离且无HeaderFIFO | 高PID、寄存器提交、取头及通知通路尚未对齐；当前模块图按模型解释 |
+| 归约任务身份 | reduce_seq由模型DTE写入Message并参与Core／RMEM准入；它是功能性仿真旁带 | 原文尚未确定该任务序号的线编码，不能把仿真旁带称为纯诊断或按硬件已有字段验收 |
+| 重发标记与完成 | 模型重发路径有提前清标记及发出尾拍即报告完成的处理 | Router MAS要求Core缓存和DTE搬运保持标记，全部目标交付后解除原始VC保序并报告；现有重发回归不能代替该合同验收 |
 | DTE 波形 | data/scale 位置按 Route 推断，topK 位置按内容类别推断；尚未逐段保存端点 | 多端点任务的轨道位置可能不准确；wr_done 表示请求发完，不能作为物理完成或退休时刻 |
 | DTE PMU | 当前仅有下发及 ACK 等既有观测，新增详设计数不纳入当前建模范围 | 参数文档中的 PMU 逻辑项是目标统计口径 |
 | 权重加载完成 | kernel计数并提交搬运后yield；每阶段由Trigger启动，整分片分阶段及完成通知仍待定义 | 计数增加或 RV 返回不能替代写响应完成；切换业务模式须确认数据与 DTE 均已排空 |
@@ -166,7 +176,7 @@ DTE PMU/Debug物理偏移、异常mask位序、cfg_noc/RV同目标访问次序�
 | 模块 | 缺什么 |
 | - | - |
 | Bach_core_MAS_TOP | 整篇标 `pending`。Glossary 全空；DSA / Cmem / Matrix mem / Share mem 的异常类型全空；“如何上报”未写；地址空间分配只有白板引用没有正文；“软硬件编程契约”章节大量只有标题（Kernel 三段式代码拆分原理、统一偏移地址编程规范、MOE 场景的 Boot / Launch / 动态描述、动态专家调度、Gdb、jtag） |
-| Router MAS | Programming Model 起（Register Map、Interrupts、ISA、Programming Sequence、Locking、Performance、Power、Area）**全部是 eFUSE 模板残留**，与 Bach 无关。Signal List 也是 eFUSE 的 AHB 信号。“业务Credit的路由”引用的《Harvest下业务级Credit的路由机制》已在原始库同步 |
+| Router MAS | 当前同步版本已定义Router／RMEM寄存器、LO／HI原子提交、Header／Payload边界、重发标记及分方向Release。仍需与TS、DTE及DATA_NOC文档统一任务完成、包头sideband、接口和credit粒度 |
 | TS MAS | 标 `编写ing`。Signal List 表格大量字段空白（宽度、方向）；`EXCEPT_CHECK` 一节的 Interface 与 Timing 是 eFUSE 模板残留，`IO_REG` 一节只剩标题；MISC / Application scenarios / Interrupt Handling Sequence / Programming Sequence 的步骤与 Performance / Power / Area 全部是模板 |
 | RV Core MAS | Signal List 空；各子模块的 Interface (LLD) / Timing Diagram 基本空；CSR 具体实现哪些“待讨论”；B core 软件流程标题重复且内容为空；Performance / Power / Area 只有标题 |
 | Cmem MAS | Function Description 整章只有标题（regfile / agu / acu / ldq / stq / Matrix exe，且这些标题明显是从 MU 文档复制的，与 Cmem 无关）；Performance Targets 表格空；Memory List 是 eFUSE 模板残留 |

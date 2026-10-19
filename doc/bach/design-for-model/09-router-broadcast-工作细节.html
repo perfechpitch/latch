@@ -284,12 +284,12 @@ const SCENES=[
       {"id":"cm","x":532,"y":206,"w":128,"h":40,"fs":10.5,"t":"Core Mem"},
       {"id":"cmcm","x":40,"y":262,"w":190,"h":88,"fs":10,"t":"TS.CreditCtrl","s":["三方向计数 · 每SID Pending · 原子许可"]},
       {"id":"cs","x":300,"y":262,"w":320,"h":88,"fs":11,"t":"CoreStation","s":["Header FIFO · in_core_fifo · Arbiter","Header 就绪 → trigger TS","Packet Join / Split：进核拼包，出核拆包"]},
-      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["64 条，索引 path_id，内部多副本","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
+      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["模型64项；硬件Router为256项","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
       {"id":"rs_l","x":40,"y":368,"w":240,"h":102,"fs":11,"t":"RouterStation[left]","s":["Header Check + RouterTable 副本","allocate → VC0～3 → Arbiter","VC Credit · Stream 映射 · Credit Release","output buffer + Packet Shifter"]},
       {"id":"xb","x":380,"y":368,"w":180,"h":72,"fs":11,"t":"Xbar","s":["MAS 记作 CrossBar / Interconnect Matrix","5 入 7 出，按输出独立仲裁","无冲突同拍并行，多播全有或全无"]},
       {"id":"rs_r","x":660,"y":368,"w":200,"h":72,"fs":11,"t":"RouterStation[right]","s":["结构同 left","行两端这一侧接 C2C Bridge"]},
       {"id":"rs_m","x":320,"y":462,"w":240,"h":66,"fs":11,"t":"RouterStation[mid]","s":["结构同 left","接另一行对称位的 Router"]},
-      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","UID／任务号／PID · 物理上下文预留"]},
+      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","模型UID／reduce_seq／PID · 上下文预留"]},
       {"id":"reis","x":40,"y":496,"w":240,"h":76,"fs":10.5,"t":"CoreMem 重发","s":["stall_way 转存时走这里","Bypass 拆成进 core 加出 core","同 VC 保序，不许超车"]},
       {"id":"ret","x":320,"y":544,"w":240,"h":56,"fs":10.5,"t":"Retire","s":["清本级用户项 · 下游项独立归还","credit 经 crossbar 逐跳回上游"]}
     ],
@@ -324,15 +324,17 @@ const SCENES=[
       {"id":"e_ts_ret","pts":[[40,240],[12,240],[12,578],[320,578]],"label":"user_retire_ch","lx":180,"ly":592},
       {"id":"e_reis","pts":[[280,534],[292,534],[292,252],[532,252],[532,246]],"label":"暂存 / 取出","lx":250,"ly":586}
     ],
-    "table":{"label":"Router模块与TS许可协作","cols":["模块","做什么"],"rows":[["RouterStation ×3","每方向一个：Header Parser 查表、VC Buffer、资源检查、输出移位拼接"],["Xbar","5 入 7 出，per-output RoundRobin，贪婪整包，多播同拍 1→N 复制"],["CoreStation","收 Xbar 准入过的包、HeaderFIFO、Header 就绪通知 TS、出 core 拆包"],["ReduceModule","三路输入仲裁、16 用户上下文、读改写累加、输出重进 Xbar"],["RouterTable / CSR","64 条按 path_id 索引，多副本，全写完才提交"],["CoreMem 重发","stall_way 选转存时把整包放进 Core Mem，同 VC 保序"],["Retire","只清本级用户项，Stream release按静态Mask回上游"],["TS.CreditCtrl","每SID Pending和三方向计数，新增方向原子授权"]]},
+    "table":{"label":"Router模块与TS许可协作","cols":["模块","做什么"],"rows":[["RouterStation ×3","每方向一个：Header Parser 查表、VC Buffer、资源检查、输出移位拼接"],["Xbar","5 入 7 出，per-output RoundRobin，贪婪整包，多播同拍 1→N 复制"],["CoreStation","收 Xbar 准入过的包、HeaderFIFO、Header 就绪通知 TS、出 core 拆包"],["ReduceModule","三路输入仲裁、16 用户上下文、读改写累加、输出重进 Xbar"],["RouterTable / CSR","模型64项；硬件Router窗口256项×64bit，映射待统一"],["CoreMem 重发","stall_way 选转存时把整包放进 Core Mem，同 VC 保序"],["Retire","只清本级用户项，Stream release按静态Mask回上游"],["TS.CreditCtrl","每SID Pending和三方向计数，新增方向原子授权"]]},
     "steps":[
       {
         "t":"Router 是 core 与片上网络之间的交换点",
         "d":[
-          "每个 core 一个，坏 core 上也有，而且只有它在工作。同时承担三件事：包的路由转发、三层流控、Reduce 计算。",
-          "对外三组连接：三个 R2R 方向端口，进 core 与出 core 各一条通路，控制信号接 TS。",
-          "<code>left</code> 与 <code>right</code> 连同行相邻的 Router，<code>mid</code> 连另一行对称位置的那一个，各 256 B/T 双向。"
-        ],
+  "每个 core 一个，坏 core 上也有，而且只有它在工作。同时承担三件事：包的路由转发、三层流控、Reduce 计算。",
+  "对外三组连接：三个 R2R 方向端口，进 core 与出 core 各一条通路，控制信号接 TS。",
+  "<code>left</code> 与 <code>right</code> 连同行相邻的 Router，<code>mid</code> 连另一行对称位置的那一个，各 256 B/T 双向。",
+  "本图按当前模型演示：64项表、HeaderFIFO及VC／Stream返回。原始Router／DATA_NOC设计为256项表，Core边界Header／Payload独立且无HeaderFIFO。",
+  "Router MAS保留下游Reduce credit及Reduce Release；模型未实现该通路。reduce_seq仅是模型功能性旁带，不代表硬件已有任务序号字段。"
+],
         "act":["rs_l","rs_r","rs_m"],
         "eact":["e_in_l","e_in_r","e_in_m","e_out_l","e_out_r","e_out_m"],
         "ref":"router.md 定位与边界",
@@ -414,7 +416,7 @@ const SCENES=[
         "set":{}
       },
       {
-        "t":"TS方向许可与Router归还",
+        "t":"当前模型的TS方向许可与Router归还",
         "d":[
           "TS在内部Credit Ctrl登记新增方向，三个方向初N，原子许可并READY；没有外部请求/Grant。",
           "Router输入每方向valid归还；RMEM独立UID返回；普通退休UID/单拍valid无Ready。",
@@ -471,12 +473,12 @@ const SCENES=[
       {"id":"cm","x":532,"y":206,"w":128,"h":40,"fs":10.5,"t":"Core Mem"},
       {"id":"cmcm","x":40,"y":262,"w":190,"h":88,"fs":10,"t":"TS.CreditCtrl","s":["三方向计数 · 每SID Pending · 原子许可"]},
       {"id":"cs","x":300,"y":262,"w":320,"h":88,"fs":11,"t":"CoreStation","s":["Header FIFO · in_core_fifo · Arbiter","Header 就绪 → trigger TS","Packet Join / Split：进核拼包，出核拆包"]},
-      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["64 条，索引 path_id，内部多副本","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
+      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["模型64项；硬件Router为256项","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
       {"id":"rs_l","x":40,"y":368,"w":240,"h":102,"fs":11,"t":"RouterStation[left]","s":["Header Check + RouterTable 副本","allocate → VC0～3 → Arbiter","VC Credit · Stream 映射 · Credit Release","output buffer + Packet Shifter"]},
       {"id":"xb","x":380,"y":368,"w":180,"h":72,"fs":11,"t":"Xbar","s":["MAS 记作 CrossBar / Interconnect Matrix","5 入 7 出，按输出独立仲裁","无冲突同拍并行，多播全有或全无"]},
       {"id":"rs_r","x":660,"y":368,"w":200,"h":72,"fs":11,"t":"RouterStation[right]","s":["结构同 left","行两端这一侧接 C2C Bridge"]},
       {"id":"rs_m","x":320,"y":462,"w":240,"h":66,"fs":11,"t":"RouterStation[mid]","s":["结构同 left","接另一行对称位的 Router"]},
-      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","UID／任务号／PID · 物理上下文预留"]},
+      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","模型UID／reduce_seq／PID · 上下文预留"]},
       {"id":"reis","x":40,"y":496,"w":240,"h":76,"fs":10.5,"t":"CoreMem 重发","s":["stall_way 转存时走这里","Bypass 拆成进 core 加出 core","同 VC 保序，不许超车"]},
       {"id":"ret","x":320,"y":544,"w":240,"h":56,"fs":10.5,"t":"Retire","s":["清本级用户项 · 下游项独立归还","credit 经 crossbar 逐跳回上游"]}
     ],
@@ -585,12 +587,12 @@ const SCENES=[
       {"id":"cm","x":532,"y":206,"w":128,"h":40,"fs":10.5,"t":"Core Mem"},
       {"id":"cmcm","x":40,"y":262,"w":190,"h":88,"fs":10,"t":"TS.CreditCtrl","s":["三方向计数 · 每SID Pending · 原子许可"]},
       {"id":"cs","x":300,"y":262,"w":320,"h":88,"fs":11,"t":"CoreStation","s":["Header FIFO · in_core_fifo · Arbiter","Header 就绪 → trigger TS","Packet Join / Split：进核拼包，出核拆包"]},
-      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["64 条，索引 path_id，内部多副本","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
+      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["模型64项；硬件Router为256项","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
       {"id":"rs_l","x":40,"y":368,"w":240,"h":102,"fs":11,"t":"RouterStation[left]","s":["Header Check + RouterTable 副本","allocate → VC0～3 → Arbiter","VC Credit · Stream 映射 · Credit Release","output buffer + Packet Shifter"]},
       {"id":"xb","x":380,"y":368,"w":180,"h":72,"fs":11,"t":"Xbar","s":["MAS 记作 CrossBar / Interconnect Matrix","5 入 7 出，按输出独立仲裁","无冲突同拍并行，多播全有或全无"]},
       {"id":"rs_r","x":660,"y":368,"w":200,"h":72,"fs":11,"t":"RouterStation[right]","s":["结构同 left","行两端这一侧接 C2C Bridge"]},
       {"id":"rs_m","x":320,"y":462,"w":240,"h":66,"fs":11,"t":"RouterStation[mid]","s":["结构同 left","接另一行对称位的 Router"]},
-      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","UID／任务号／PID · 物理上下文预留"]},
+      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","模型UID／reduce_seq／PID · 上下文预留"]},
       {"id":"reis","x":40,"y":496,"w":240,"h":76,"fs":10.5,"t":"CoreMem 重发","s":["stall_way 转存时走这里","Bypass 拆成进 core 加出 core","同 VC 保序，不许超车"]},
       {"id":"ret","x":320,"y":544,"w":240,"h":56,"fs":10.5,"t":"Retire","s":["清本级用户项 · 下游项独立归还","credit 经 crossbar 逐跳回上游"]}
     ],
@@ -906,12 +908,12 @@ const SCENES=[
       {"id":"cm","x":532,"y":206,"w":128,"h":40,"fs":10.5,"t":"Core Mem"},
       {"id":"cmcm","x":40,"y":262,"w":190,"h":88,"fs":10,"t":"TS.CreditCtrl","s":["三方向计数 · 每SID Pending · 原子许可"]},
       {"id":"cs","x":300,"y":262,"w":320,"h":88,"fs":11,"t":"CoreStation","s":["Header FIFO · in_core_fifo · Arbiter","Header 就绪 → trigger TS","Packet Join / Split：进核拼包，出核拆包"]},
-      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["64 条，索引 path_id，内部多副本","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
+      {"id":"rtab","x":690,"y":262,"w":310,"h":88,"fs":11,"t":"CSR / RouterTable","s":["模型64项；硬件Router为256项","Credit 静态 Mask · perf & debug","只描述静态路由与资源需求"]},
       {"id":"rs_l","x":40,"y":368,"w":240,"h":102,"fs":11,"t":"RouterStation[left]","s":["Header Check + RouterTable 副本","allocate → VC0～3 → Arbiter","VC Credit · Stream 映射 · Credit Release","output buffer + Packet Shifter"]},
       {"id":"xb","x":380,"y":368,"w":180,"h":72,"fs":11,"t":"Xbar","s":["MAS 记作 CrossBar / Interconnect Matrix","5 入 7 出，按输出独立仲裁","无冲突同拍并行，多播全有或全无"]},
       {"id":"rs_r","x":660,"y":368,"w":200,"h":72,"fs":11,"t":"RouterStation[right]","s":["结构同 left","行两端这一侧接 C2C Bridge"]},
       {"id":"rs_m","x":320,"y":462,"w":240,"h":66,"fs":11,"t":"RouterStation[mid]","s":["结构同 left","接另一行对称位的 Router"]},
-      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","UID／任务号／PID · 物理上下文预留"]},
+      {"id":"rmod","x":660,"y":462,"w":340,"h":110,"fs":11,"t":"ReduceModule","s":["ReduceMemory 32 KiB × 16 用户 · Adder + Convert","RMW 原位累加，中间 FP32","模型UID／reduce_seq／PID · 上下文预留"]},
       {"id":"reis","x":40,"y":496,"w":240,"h":76,"fs":10.5,"t":"CoreMem 重发","s":["stall_way 转存时走这里","Bypass 拆成进 core 加出 core","同 VC 保序，不许超车"]},
       {"id":"ret","x":320,"y":544,"w":240,"h":56,"fs":10.5,"t":"Retire","s":["清本级用户项 · 下游项独立归还","credit 经 crossbar 逐跳回上游"]}
     ],
@@ -956,7 +958,7 @@ const SCENES=[
         "act":["rs_l","rs_r","rs_m"],
         "eact":["e_in_l","e_in_r","e_in_m","e_out_l","e_out_r","e_out_m","e_l_xb"],
         "lt":"收到 → 输出",
-        "logic":[["上游 core→Router.RouterStation","","link[d] 的 flit与VC/Stream两类release"],["Router.RouterTable→Router.RouterStation","","按 path_id 查出的字段"],["Router.RouterStation→Router.Xbar","","方向 Mask · flit · 下一跳 VC"],["Router.RouterStation→下游 core","","出口 Packet Shifter 拼接后发出"],["Router.RouterStation→上游 core","","credit_return 走共享总线"]],
+        "logic":[["上游 core→Router.RouterStation","","模型link[d]：flit及VC／Stream返回；原始设计另有Reduce Release"],["Router.RouterTable→Router.RouterStation","","按 path_id 查出的字段"],["Router.RouterStation→Router.Xbar","","方向 Mask · flit · 下一跳 VC"],["Router.RouterStation→下游 core","","出口 Packet Shifter 拼接后发出"],["Router.RouterStation→上游 core","","credit_return 走共享总线"]],
         "rows":[[0,["VC Buffer","每 VC private 20 + 每方向 shared 20","合计 100flit的payload为25KiB，含头28.125KiB = 下游容量"]],[1,["VC credit","private[o][v] 与 shared[o]","发先扣 private，还先补 private"]],[2,["Stream Resource Table","所有下游方向的 UserID 占用","所有需求方向满足才放行"]],[3,["RouterTable 副本","本地一份","并行查询用"]]],
         "ref":"router.md F1～F16",
         "set":{},
@@ -983,7 +985,7 @@ const SCENES=[
         "t":"CoreStation　进 core 与出 core 各一条，完全并行",
         "d":[
           "进 core 三态准入在 Xbar；已通过 Stream 检查后不再查 Core 方向的 VC credit。",
-          "Header 与 Payload 分别进 HeaderFIFO 与 in_core_fifo，保持同一包顺序与边界。",
+          "Header 与 Payload 分别进 模型HeaderFIFO与in_core_fifo，保持同一包顺序与边界。",
           "按接收包头的顺序通知 TS，Header 就绪即通知，<b>请求不允许丢弃</b>。",
           "出core：TS先取得业务许可；DTE dispatch不查VC credit，TX逐VC、逐flit查信用，跨VC可交织。"
         ],
@@ -1008,7 +1010,7 @@ const SCENES=[
         "eact":["e_xb_rm","e_rm_xb","e_rm_ts"],
         "lt":"收到 → 输出",
         "logic":[["Router.Xbar→Router.ReduceModule","","三路输入，进入后锁定到尾 flit"],["Router.ReduceModule→Router.Xbar","","结果按 flit 回注，第五路，包锁定到尾 flit"],["RMEM→TS","UID／valid","只还空间，不完成TID"],["","","op_type 2 reduce  第一次收到就写入上下文"],["","","op_type 3 reduce_twice  第二次或第三次收到才与上下文里的值相加"]],
-        "rows":[[0,["rdc_user_tab","16 用户 × 32 KiB","第一笔任务进来时分配，Retire 时放"]],[1,["in_done_mask","每用户一份","与 reduce_in_mask 比对，定哪些元素已加完"]],[2,["RMEM任务预留","UID／任务号／PID／reserved","首flit准入预留，当前结果交付后清占用"]],[3,["结果流水","在做的任务 ≤ 16","每 flit 查 VC credit"]]],
+        "rows":[[0,["rdc_user_tab","16 用户 × 32 KiB","第一笔任务进来时分配，Retire 时放"]],[1,["in_done_mask","每用户一份","与 reduce_in_mask 比对，定哪些元素已加完"]],[2,["RMEM任务预留","UID／模型reduce_seq／PID／reserved","首flit准入预留，当前结果交付后清占用"]],[3,["结果流水","在做的任务 ≤ 16","每 flit 查 VC credit"]]],
         "ref":"router.md F36～F52",
         "set":{},
         "tok":[]
@@ -1035,7 +1037,7 @@ const SCENES=[
         "d":[
           "把整包重定向到本地 Core Mem，Router 上的 Bypass 被映射成“进 core 加出 core”两段。",
           "Core Mem 中<b>只保存包</b>，重发时用 PathID 重新查表，不重复保存 VC 和路由信息。",
-          "包进 core 暂存时改写 <code>overflow_reinject = 1</code>，出 core 重发时改回 0，Output Port 识别到才扣 credit。",
+          "模型进Core置重发标记、重发时提前清0；原始Router要求Core缓存和DTE搬运保持标记，全部目标尾拍交付后解除原始VC保序，此处尚未对齐。",
           "<b>坏 core 不接收溢流</b>：坏 core 的 Router 在透传档不发起进 core 缓存，只查、只扣下一跳链路的 VC credit，不查、不占 stream 与 Core Mem credit。"
         ],
         "act":["reis","rs_l","cm"],
@@ -1065,7 +1067,7 @@ const SCENES=[
         "tok":[]
       },
       {
-        "t":"TS方向许可与Router归还",
+        "t":"当前模型的TS方向许可与Router归还",
         "d":[
           "TS在内部Credit Ctrl登记新增方向，三个方向初N，原子许可并READY；没有外部请求/Grant。",
           "Router输入每方向valid归还；RMEM独立UID返回；普通退休UID/单拍valid无Ready。",

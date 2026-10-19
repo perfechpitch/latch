@@ -569,12 +569,13 @@ MM→CM和CM→HeaderTable均走OutCh3 Core内写路径；源使用软件物理�
 
 ### MSG 包在 Router 线上的样子
 
-包头Byte0是最高字节，字段位置与Router一致。
+包头Byte0是最高字节。下表按DTE及DATA_NOC包头表列出字段，Byte10与DTE HeaderTable生成规则的原文异文单独标明。
 
 | 字节／位 | 内容 | 出Core操作 |
 | - | - | - |
 | Byte0，[255:248] | path_id | 改为任务PID |
-| Byte1，Byte4，Byte10～15 | 保留 | HT来源为0，CM/MM来源保持 |
+| Byte1、Byte4、Byte11～15 | 保留 | HT来源为0，CM/MM来源保持 |
+| Byte10，[175:168] | pkt_sideband | 包头表定义bit0精度、bit[2:1]逻辑归约流编号、bit3坏包；HeaderTable生成段又要求置0，规则待统一 |
 | Byte2～3，[239:224] | core_mask | 保持所读值 |
 | Byte5，[215:208] | loopback／Hardware Used | 仅[3:2]改为任务VCID |
 | Byte6～7，[207:192] | pkt_length | 改为32+使能数据段总长 |
@@ -606,7 +607,7 @@ HeaderTable每组共享core_mask 2B和sw_aux 16B，有32个各1B Hardware Used�
 | B Core token | 头到CM；6144B data、192B scale、256B topK连续到MM | 从相同三段读出；广播与组间转发各一条Entry |
 | 计算Core广播 | 头到HeaderTable；data到CM；scale到CM scale；topK到MU表 | 软件按需要使能各段，硬件重写路由字段 |
 | 计算Core归约/concat | 头可存配对HT项；BF16数据到CM，不自动产生scale | 读配对头和计算结果，包长由各段总长产生 |
-| R Core | 头到CM；两输入半槽落MM、完成分别写flag | 一TS Task提交两Packet操作数到本级RMEM，仅最后Entry带ACK |
+| R Core | 头到CM；两输入半槽落MM、完成分别写flag | 当前模型一TS任务提交两Packet操作数到RMEM，最后Entry带ACK；与详设任务粒度限制待统一 |
 | 纯包头 | 段0长度32B，seg_valid=000 | 必须消费或发送一个head/tail Packet |
 
 B Core逻辑有效载荷6592B，软件槽跨度6656B；跨度不是CFG_STRIDE，MM段仍配stride=0。R Core每半槽0x3080B，兼容归约数据段含16B前缀与12288B BF16数据，剩余槽空间是软件padding。
@@ -652,7 +653,7 @@ DTE 只有一个任务入口：所有任务（进核 + 出核）都由 RV core �
 | rvcore2dte_sid / tid / uid / pid / vcid | 输入 | 4/6/16/8/2 | 与请求一起保持，Trigger Fire快照 |
 | dte2rvcore_rd_rsp / rd_data | 输出 | 1/32 | 下一拍返回，无Ready、无ID |
 
-valid且未ready时全部请求字段保持。Fire后不可撤销；RV kill只影响未接受请求。ready由Status和TaskQ满状态寄存产生，不组合依赖地址、读写、数据或已有未返回读。RUN满队列反压所有访问；ERROR恒ready=1，Trigger不入队而清dirty。STOP队满按用户确认的建模基线反压全部RV访问；原文另一种行为继续登记TBD。
+valid且未ready时全部请求字段保持。Fire后不可撤销；RV kill只影响未接受请求。ready由Status和TaskQ满状态寄存产生，不组合依赖地址、读写、数据或已有未返回读。RUN／STOP队满均反压全部RV访问。STOP时软件须保持在队Entry不超过15；填满后RV读写及resume均不能被接收，原文规定复位恢复。ERROR恒ready，Trigger被接收但不入队并清有效位。
 
 各目标Fire当拍采样读值到自己的读寄存器，AddrDecode保存目标选择，下一拍直接选择并输出，不额外寄存、不限制在途读。连续读可每拍接收、每拍返回；之后写不改变之前读值。非法地址写无状态变化，读下一拍返回0。
 
@@ -662,7 +663,7 @@ valid且未ready时全部请求字段保持。Fire后不可撤销；RV kill只�
 
 已接受任务不受后续Config/模板/CSR写入影响。无效段字段可保留旧值，但不参与执行；软件优先将无关字段写0。FastLUT已取消，PID由请求旁带给出，长度由各段DATA_LEN给出。
 
-一个TS任务可包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q对各条搬运独立保存、执行与有序退休。
+当前R Core软件在一个TS任务内提交多条DTE搬运，仅最后一条开启ack_ts_en；每条搬运独立占全局Entry并有序退休。DTE详设“软件限制”仍要求TS与DTE任务粒度一致，该软件实现与原文限制尚未统一，不能据ack_ts_en推导硬件已取消该限制。
 
 ### 一次配置要写的参数
 
@@ -881,7 +882,7 @@ static void example_cm_to_header_table(void) {
 
 TS只向DTE RV Core下发task PC和身份，RV执行配置指令后Trigger才建立搬运Entry。当前没有另一个TS→DTE Descriptor入口；所有普通、Special、权重和Core内搬运都走同一RVCore IF快照合同。
 
-多条搬运可属于同一TS Task，但条目各占全局Q容量、各自具有段位和真实完成；只有最后带ack_ts_en的条目回TS。
+当前模型允许同一TS任务内多条搬运，各自占全局Q容量并独立完成，最后使能ack_ts_en的条目回TS。原始DTE详设仍要求TS／DTE任务粒度一致，此例说明模型行为。
 
 ### 双 Bank 与优先级
 
@@ -895,7 +896,7 @@ MM遇到MU同bank访问时遵循M Top/存储仲裁与反压，DTE保持请求；
 | - | - |
 | RV配置入口 | ready恒高，普通寄存器读写继续接受；Trigger接收后丢弃并清dirty |
 | Commit／全局Entry | 停止新的Channel下发，保留异常队头及原描述符 |
-| 已下发Channel | 保留任务上下文和请求／响应归属，按原接口握手继续处理在途事务；已Fire响应必须收集 |
+| 已下发Channel | 按DTE详设继续执行至完成回写，保留任务及请求／响应归属，收集已Fire事务的响应 |
 | SM／Ack | 停止正常SM写与Ack退休，已经Fire的SM响应继续收集；错误条目不产生正常TS完成 |
 | 恢复 | 清首错不等于取消条目或完成排空；残包终止、恢复和完整Flush协议保留待定 |
 
@@ -912,7 +913,7 @@ RX不在DTE内重新构造48B C++头；32B hflit与payload分别按硬件边界�
 
 模型CoreStation连接Router与DTE，承担接口适配与Packet上下文，不扩大DTE容量。RX按native ready接入，TX按每VC native信用真正发出；排入内部CoreData队列不代表尾flit已交付。
 
-诊断上下文可保留GPU/token、reduce_seq和远端落点，便于数值回归；这些字段不扩展32B硬件包头或800B HT容量。LogicalPayload移除scale补齐等线上padding供主机比较，wire字节数仍单独校验。
+模型旁带保存GPU/token及远端落点；reduce_seq另参与Core／RMEM任务准入，是功能性仿真字段。原文未定义reduce_seq的线编码，不能把它作为硬件已有字段或扩展32B包头及800B HT容量。LogicalPayload移除scale补齐等线上padding供主机比较，wire字节数仍单独校验。
 
 ## 参数
 

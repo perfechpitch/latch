@@ -236,9 +236,9 @@ InStub按注入表顺序尝试队头，GPU本地额度、全局池及全部dispa
 
 ## 8　取舍
 
-* **桩为什么自带路由器，不直接接 PCIe Switch**
-  * 让桩的包与 core 的包走同一套 flit 与链路模型
-  * 出口桩的落地重组因此与 CoreStation 的进 core 通路同构
+* **桩如何承载片外传输**
+  * 当前InStub与OutStub直接接LinkEnd，由Link计算带宽和延迟
+  * 出口按完整Message重组及比较，不以复用RouterStation或CoreStation作为已实现条件
 * **两层 credit 为什么全记在桩里，不分到 Switch**
   * 《软件栈》把两道闸门都定义在 GPU 侧
 * **CPU、SmartNIC、ETH 交换机为什么不各建一个模块**

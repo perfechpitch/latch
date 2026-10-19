@@ -1493,6 +1493,12 @@ Map提供有效等待SID、Current TID、新方向与Head。Credit Ctrl登记后
 
 APB访问检查地址、完整字写入和提交完整性；配置错误阻止普通模式及SELF_START启动。ATTR写入分别过滤send、recv和type的保留编码，保留对应旧字段，其余合法字段照常更新；boot辅助接口使用相同规则。原文尚未统一的寄存边界、整分片加载阶段划分和检查清单保存在TBD。
 
+### 与Router及DTE原文的对应
+
+TS详设明确把Core／DSA ACK作为任务完成，把RMEM UID返回作为空间归还。Router MAS另有RMEM Task Done推进任务的表述，二者的事件分类尚未统一；TS三方向许可也不替代Router MAS的下游Reduce credit。
+
+当前R Core软件同一TS任务内提交两个操作数搬运、最后条目反馈ACK。DTE详设“软件限制”仍要求TS与DTE任务粒度一致，现行软件做法只记录为模型实现。
+
 ## 9　取舍
 
 ### DataIn与Current分别记录

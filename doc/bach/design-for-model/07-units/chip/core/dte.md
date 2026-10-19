@@ -2,7 +2,7 @@
 
 模式：design。层次：Core 内搬运单元接口与逐拍状态。本文供 DTE、存储端口和 RV Core 配置通路的实现与验证人员确定条目、字节和响应的归属。
 
-原始依据：[DTE DSA详细设计文档](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)，revision 24200。正文定义模型合同；实现状态与硬件待统一项分别记录。CFG_TRANS_MODE位域、STOP队满行为及未冻结控制字段集中登记于 [文档缺口与 TBD](../../../08-文档缺口与-TBD.md)。
+原始依据：[DTE DSA详细设计文档](</home/colin/develop/perfechpitch/Bach/05_五、详细设计/02_DTE DSA详细设计文档.md>)，revision24200。原始设计、模型实现及待统一项分别记录。RUN／STOP队满反压及STOP在队Entry不超过15按当前详设执行；CFG_TRANS_MODE异文、Byte10、任务粒度及未冻结控制字段集中登记于[文档缺口与TBD](../../../08-文档缺口与-TBD.md)。
 
 ## 1　定位与边界
 
@@ -347,7 +347,7 @@ Route 确定整体形态和 Channel。每段的 CM、MM、topK 或 HeaderTable �
 
 | 编号 | 功能 |
 | - | - |
-| F15 | Status控制RUN/STOP/ERROR以及step/cancel；Q满时RUN/STOP都按确认基线反压全部RV访问。ERROR接收Trigger不入队，恢复协议另冻结。 |
+| F15 | Status控制RUN／STOP／ERROR及step／cancel；RUN／STOP队满均反压全部RV访问，STOP在队Entry不得超过15。ERROR接收Trigger不入队并清有效位，恢复清理协议待定义。 |
 | F16 | Core内搬运固定OutCh3，目的写路径支持CM和HeaderTable，不到MM；源/目的分别译码。 |
 | F17 | 五Channel各自RD/WR独立，可跨Channel乱序激活和物理完成；共享端口由XBar/M Top保持归属。 |
 | F18 | 同Channel各侧激活保序；全局SM与Ack必须按Trigger接纳次序推进，不能仅保证同Channel ACK顺序。 |
@@ -374,7 +374,7 @@ Route 确定整体形态和 Channel。每段的 CM、MM、topK 或 HeaderTable �
 | F28 | 五WR同拍完成不同Entry均要保存；不是固定优先丢其他finish，也不建立独立无界Done Pending容量。 |
 | F29 | 每Entry最多一次lane_finish及一次有序退休；ack_ts_en=1时最多一拍TS UID/SID/TID valid。 |
 | F30 | 完成层级为queued、active、issue_done、drained、lane_finish、Ack退休。SM响应与队头等待属于退休条件，不是valid/ready TS握手。 |
-| F31 | 按确认基线，一TS Task可拆多搬运Entry，仅最后Entry使能ack_ts_en；无ACK Entry仍执行SM副作用并正常按序退休。 |
+| F31 | 当前R Core模型一TS任务提交多个操作数搬运，仅最后Entry使能ack_ts_en；无ACK Entry仍执行可选SM并按序退休。此任务划分与DTE原文的TS／DTE粒度一致限制尚未统一。 |
 
 ### 三条数据流
 
@@ -400,7 +400,7 @@ Route 确定整体形态和 Channel。每段的 CM、MM、topK 或 HeaderTable �
 | F43 | Router源hw_header_op=0保存32B头、=1丢弃头。Core源仍搬32B段0；是否新SID不自动决定此位。 |
 | F44 | 出Core重写固定字段，包长=32+有效数据段长度；core_mask/sw_aux保持，计算结果是否带topK由seg_valid配置。 |
 | F44a | 模型可先建立诊断Message，但真正hflit来自段0读取，TX按真实payload推进；不能以建好C++对象算物理完成。 |
-| F44c | 远端dst_addr为模型诊断/软件兼容上下文，未列入冻结32B硬件头；Memory配置中的DST只对有效写端使用。 |
+| F44c | 远端dst_addr是模型软件兼容旁带，尚无线包编码；Memory配置的DST只对有效写端使用，不能从旁带反推硬件字段。 |
 | F44b | GPU/token可随模型诊断上下文保存，不能据此扩大硬件头、HeaderTable或回读容量。 |
 | F45 | seg_valid=000仍有固定32B段0；纯头任务发送一个head/tail Packet，丢头空接收仍消费对应Packet。 |
 | F46 | 一般存储起址=CFG_ADDRi+SID×CFG_STRIDEi；只对有效端算址，stride=0为软件物理地址。 |
@@ -1320,7 +1320,7 @@ Tail为逻辑队尾，Ack为逻辑队头，满状态用occupancy/环回状态区
 
 Entry保存FullTaskDesc、ExExceptDesc、ExceptType4、SM Resp Flag1、Channel Sel5和QueueEntry Status3。Channel Sel独热bit0 In、bit1～4 Out0～3。Router源强制In；Core内强制Out3；其它按VCID选Out。状态编码本身由实现选择，不能从某张旧图推导额外正常状态。
 
-复位STOP；RV写resume后才允许下发。stop停止新dispatch，已有任务、SM/Ack继续；step_en每resume仅下发一Entry后STOP。cancel只回收未被任一Ch Ptr下发的Ready Entry，已下发不受影响；环形指针对回收空项的跳过和Flush资源恢复须保持Entry归属。
+复位STOP；STOP在队Entry不超过15，写满后RV不能resume，只能复位恢复。RV写resume后才允许下发。stop停止新dispatch，已有任务、SM/Ack继续；step_en每resume仅下发一Entry后STOP。cancel只回收未被任一Ch Ptr下发的Ready Entry，已下发不受影响；环形指针对回收空项的跳过和Flush资源恢复须保持Entry归属。
 
 ERROR由Ack扫到Except进入；全局指针停止推进、首错现场保存，Trigger被接收但不入队。原文Status Ctrl“继续完成已下发”与后续执行门控的细节需结合Flush规则冻结，不把ERROR当作清空所有容器。
 
@@ -1411,7 +1411,7 @@ MM地址只要求8B合法，6592B槽合法但多数槽跨256B边界增加请求�
 
 `lane.h`按段译码端点，CM/MM在256B边界执行双128B事务，保留跨拍余量；M Top的MM与topK请求共用仲裁，topK每256B分两笔128B。HeaderTable采用16组、每组32项，包头按32B硬件位序读写。Regfile、控制网络、kernel和生成产物使用同一建模基线。
 
-ERROR保留异常队头及原描述符，停止SM与退休推进，继续收集已Fire响应。Regfile在ERROR中保持ready并丢弃Trigger、清dirty。HeaderParser按显式head/tail和有效长度检查Packet边界。HeaderTable每拍最多一读、一写；各Channel的Buffer每拍最多写入一份响应或RX数据，尚未写入的响应仍占原预留槽及Outstanding。OutCh3出Router经过额外一拍输出级，反压时保持flit，尾拍交付后才转Hold。
+ERROR保留异常队头及原描述符，停止新下发与SM／Ack推进，已下发任务继续执行至完成回写；已Fire请求的响应必须收集。Regfile在ERROR中保持ready并丢弃Trigger、清dirty。HeaderParser按显式head/tail和有效长度检查Packet边界。HeaderTable每拍最多一读、一写；各Channel的Buffer每拍最多写入一份响应或RX数据，尚未写入的响应仍占原预留槽及Outstanding。OutCh3出Router经过额外一拍输出级，反压时保持flit，尾拍交付后才转Hold。
 
 波形的data/scale位置仍按Route推断，尚未按每段端点记录；Route与段端点不同或多段使用不同存储时，位置参数不能准确表示实际访问。模型观测沿用下发和ACK报告两个计数，新增PMU统计不纳入当前建模范围。
 
@@ -1424,7 +1424,7 @@ ERROR保留异常队头及原描述符，停止SM与退休推进，继续收集�
 | - | - |
 | RV配置入口 | ready恒高，普通寄存器读写继续接受；Trigger接收后丢弃并清dirty |
 | Commit／全局Entry | 停止新的Channel下发，保留异常队头及原描述符 |
-| 已下发Channel | 保留任务上下文和请求／响应归属，按原接口握手继续处理在途事务；已Fire响应必须收集 |
+| 已下发Channel | 按DTE详设继续执行至完成回写，保留任务及请求／响应归属，收集已Fire事务的响应 |
 | SM／Ack | 停止正常SM写与Ack退休，已经Fire的SM响应继续收集；错误条目不产生正常TS完成 |
 | 恢复 | 清首错不等于取消条目或完成排空；残包终止、恢复和完整Flush协议保留待定 |
 
@@ -1479,16 +1479,17 @@ rst_n低时rx_rdy、tx_vld、所有Memory请求、RV读返回、TS完成和SM写
 
 已接受任务不受后续Config/模板/CSR写入影响。无效段字段可保留旧值，但不参与执行；软件优先将无关字段写0。FastLUT已取消，PID由请求旁带给出，长度由各段DATA_LEN给出。
 
-一个TS任务可包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q对各条搬运独立保存、执行与有序退休。
+当前R Core软件在一个TS任务内提交多条DTE搬运，仅最后一条开启ack_ts_en；每条搬运独立占全局Entry并有序退休。DTE详设“软件限制”仍要求TS与DTE任务粒度一致，该软件实现与原文限制尚未统一，不能据ack_ts_en推导硬件已取消该限制。
 
 ### 32B包头位布局
 
-包头Byte0是最高字节，字段位置与Router一致。
+包头Byte0是最高字节。下表按DTE及DATA_NOC包头表列出字段，Byte10与DTE HeaderTable生成规则的原文异文单独标明。
 
 | 字节／位 | 内容 | 出Core操作 |
 | - | - | - |
 | Byte0，[255:248] | path_id | 改为任务PID |
-| Byte1，Byte4，Byte10～15 | 保留 | HT来源为0，CM/MM来源保持 |
+| Byte1、Byte4、Byte11～15 | 保留 | HT来源为0，CM/MM来源保持 |
+| Byte10，[175:168] | pkt_sideband | 包头表定义bit0精度、bit[2:1]逻辑归约流编号、bit3坏包；HeaderTable生成段又要求置0，规则待统一 |
 | Byte2～3，[239:224] | core_mask | 保持所读值 |
 | Byte5，[215:208] | loopback／Hardware Used | 仅[3:2]改为任务VCID |
 | Byte6～7，[207:192] | pkt_length | 改为32+使能数据段总长 |

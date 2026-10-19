@@ -61,7 +61,9 @@
 
 ***
 
-## 2　接口
+## 2　接口（当前模型）
+
+原始Router／DATA_NOC设计分别传递VC、Stream及Reduce返回。当前模型LinkEnd只承载VC与Stream返回，下列端口和接线图按模型实现列出；下游Reduce credit／Release尚未接入，不能以两类返回覆盖原始三类资源协议。
 
 ```
 port link.in (slave, credit/release, clk)         // 发送侧端口的镜像：Router link[d].out、片外桩的 tx、Switch 的 port[p].out
