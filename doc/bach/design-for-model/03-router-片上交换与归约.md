@@ -16,6 +16,10 @@
 
 ***
 
+## 资源与完成协议
+
+TS管理三方向业务许可和每SID的本级RMEM许可。Router维护实体用户表，按真实Stream release归还用户已持有方向；本级退休与各下游方向授权分别释放。Reduce输出逐flit使用VC credit，接收端检查用户准入、任务号、PID及物理上下文。
+
 ## Router 解决的问题
 
 * 一个 chip 上是两行 Bach core，每行 5 个共 10 个，按 `0 1 2 3 4 / 5 6 7 8 9` 行优先编号
@@ -62,281 +66,24 @@
 
 模块组成与对外通道如下，布局与通道名照 MAS 的 Block Diagram。
 
-```svg
-<svg viewBox="-150 0 1350 990" width="1350" height="990" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Router 的模块组成与对外通道">
-<title>Router 的模块组成与对外通道</title>
-<rect x="-150" width="1350" height="990" fill="#ffffff"/>
-<defs><marker id="kga" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="kgas" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="kgai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="kgais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="kgab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="kgabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="kgar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="kgars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="kgac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="kgacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="kgap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="kgaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
-<text x="30" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="start">Router 的模块组成与对外通道</text>
-<text x="30" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">布局照 MAS 的 Block Diagram：5×7 CrossBar 居中，三个 RouterStation 各接一个方向（left 展开画，right / mid 同构），CoreStation 在上，ReduceModule 在右下；粗蓝线是 Packet，细橙线是 credit / release，灰虚线是配置与调试</text>
-<rect x="290" y="62" width="130" height="40" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
-<text x="355.0" y="86.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#2563eb" font-weight="700" text-anchor="middle">TaskScheduler</text>
-<rect x="440" y="62" width="120" height="40" rx="5" fill="#fffbeb" stroke="#d97706" stroke-width="1.3"/>
-<text x="500.0" y="86.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#16181d" font-weight="700" text-anchor="middle">DTE Core</text>
-<rect x="590" y="62" width="220" height="40" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
-<text x="700.0" y="86.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#0d9488" font-weight="700" text-anchor="middle">DTE（DataIn / DataOut）</text>
-<rect x="840" y="62" width="110" height="40" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
-<text x="895.0" y="86.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#d97706" font-weight="700" text-anchor="middle">Core Mem</text>
-<path d="M810.7 82 L839.3 82" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kgars)" marker-end="url(#kgar)"/>
-<rect x="985" y="62" width="90" height="40" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
-<text x="1030.0" y="86.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#6b7280" font-weight="700" text-anchor="middle">ctrl_bus</text>
-<rect x="1085" y="62" width="95" height="40" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
-<text x="1132.5" y="86.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#6b7280" font-weight="700" text-anchor="middle">debug module</text>
-<rect x="40" y="130" width="1140" height="720" rx="12" fill="#fbfcfd" stroke="#3f4451" stroke-width="1.6"/>
-<text x="56" y="150" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#16181d" font-weight="700" text-anchor="start">Router</text>
-<rect x="440" y="165" width="400" height="190" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="830" y="181" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#2563eb" font-weight="700" text-anchor="end">CoreStation</text>
-<rect x="460" y="210" width="90" height="34" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="505.0" y="231.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="700" text-anchor="middle">Header FIFO</text>
-<rect x="460" y="256" width="90" height="34" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="468" y="271" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="700" text-anchor="start">in_core_fifo</text>
-<text x="468" y="285" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="start">OutputBuffer</text>
-<text x="452" y="322" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Packet Join：Header + Payload 拼成 core 可见的整包，不交织</text>
-<rect x="700" y="178" width="70" height="20" rx="5" fill="#fee2e2" stroke="#dc2626" stroke-width="1.3"/>
-<text x="735.0" y="192.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">allocate</text>
-<rect x="688" y="206" width="94" height="11" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<rect x="688" y="220" width="94" height="11" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<rect x="688" y="234" width="94" height="11" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<rect x="688" y="248" width="94" height="11" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<text x="735" y="236" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="600" text-anchor="middle">Virtual Channel ×4</text>
-<rect x="700" y="270" width="70" height="20" rx="5" fill="#fee2e2" stroke="#dc2626" stroke-width="1.3"/>
-<text x="735.0" y="284.0" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="middle">Arbiter</text>
-<rect x="790" y="200" width="44" height="62" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="798" y="215" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#16181d" font-weight="700" text-anchor="start">Header</text>
-<text x="798" y="229" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Check</text>
-<text x="798" y="241" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Router</text>
-<text x="798" y="253" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Table</text>
-<rect x="625" y="200" width="55" height="62" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="633" y="215" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">Credit</text>
-<text x="633" y="229" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Release</text>
-<text x="725" y="335" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="end">出 core：按 Header 的 VC 号入 VC，VC 有空才准 DTE 发；再查表参与仲裁</text>
-<text x="450" y="347" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Packet Split：出 core 时拆 Header / Payload</text>
-<path d="M735 198 L735 205.3" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgai)"/>
-<path d="M735 262 L735 269.3" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgai)"/>
-<path d="M770 188 L812 188 L812 199.3" stroke="#dc2626" stroke-width="1.0" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<path d="M812 262 L812 280 L770.7 280" stroke="#dc2626" stroke-width="1.0" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<path d="M735 102 L735 177.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text transform="translate(745 140) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" text-anchor="middle">out_core_data_ch</text>
-<path d="M652 200 L652 102.7" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text transform="translate(662 150) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" text-anchor="middle">router2DTE_release</text>
-<path d="M500 210 L500 102.7" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text transform="translate(510 150) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" text-anchor="middle">Header 读取 / 弹出（AXI-Full 类）</text>
-<path d="M550 273 L600 273 L600 102.7" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text transform="translate(610 165) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" text-anchor="middle">in_core_data_ch（AXI-Stream-Like）</text>
-<path d="M460 227 L430 227 L430 82 L420.7 82" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text transform="translate(422 150) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" text-anchor="middle">notify_ch：包头就绪 → TS</text>
-<rect x="70" y="165" width="200" height="78" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="78" y="180" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#7c3aed" font-weight="700" text-anchor="start">Stream Resource Map</text>
-<text x="78" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 stream credit 表：按 UserID 分配 / 占用 / 释放</text>
-<text x="78" y="206" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 是唯一有效状态，DTE 只持 cache</text>
-<text x="78" y="218" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">决定哪些 VC 可以进 core、可以通知 TS</text>
-<path d="M40 195 L69.3 195" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="34" y="191" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="end">coremem credit release ×4（入）</text>
-<path d="M70 225 L40 225" stroke="#d97706" stroke-width="1.3" fill="none" marker-end="url(#kgar)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="34" y="221" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="end">coremem credit release ×3（出）</text>
-<path d="M170 165 L170 120 L300 120 L300 102.7" stroke="#d97706" stroke-width="1.3" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="235" y="116" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="middle">notify_ch：资源就绪 → TS</text>
-<path d="M270 204 L440 204" stroke="#7c3aed" stroke-width="1.0" fill="none" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="305" y="200" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#7c3aed" font-weight="400" text-anchor="middle">准入查表</text>
-<rect x="70" y="262" width="200" height="92" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="78" y="277" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#7c3aed" font-weight="700" text-anchor="start">CoreMemCreditMonitor</text>
-<text x="78" y="291" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">出核前的资源监听：队列 16 项全相连</text>
-<text x="78" y="303" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">TS 注册（UserID · StreamID · TaskID · PathID）</text>
-<text x="78" y="315" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">→ 按 PathID 查下游方向的 VC 与 Stream 需求</text>
-<text x="78" y="327" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">→ 申请到就通知 TS 调度搬运，否则挂队列监听</text>
-<text x="78" y="339" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">各方向 credit 信息在 Router 内广播参与仲裁</text>
-<path d="M355 102.7 L355 300 L270.7 300" stroke="#d97706" stroke-width="1.3" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kgars)" marker-end="url(#kgar)"/>
-<text transform="translate(365 200) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" text-anchor="middle">注册事件 / 通知（资源就绪 → TS）</text>
-<path d="M170 262 L170 243.7" stroke="#7c3aed" stroke-width="1.0" fill="none" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgap)"/>
-<text x="178" y="256" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#7c3aed" font-weight="400" text-anchor="start">查 Stream 表</text>
-<path d="M170 354 L170 399.3" stroke="#7c3aed" stroke-width="1.0" fill="none" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgap)"/>
-<text x="178" y="380" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#7c3aed" font-weight="400" text-anchor="start">查各方向 VC credit</text>
-<rect x="985" y="165" width="90" height="78" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
-<text x="993" y="180" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#6b7280" font-weight="700" text-anchor="start">CSR &amp;</text>
-<text x="993" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">perf &amp; debug</text>
-<text x="993" y="206" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">RouterTable 更新</text>
-<text x="993" y="218" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Credit 静态 Mask</text>
-<rect x="1085" y="165" width="95" height="78" rx="5" fill="#eceef1" stroke="#6b7280" stroke-width="1.3"/>
-<text x="1093" y="180" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#6b7280" font-weight="700" text-anchor="start">debug</text>
-<text x="1093" y="194" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">dm 访问</text>
-<text x="1093" y="206" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Router 内状态</text>
-<path d="M1015 102 L1015 164.3" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kga)"/>
-<path d="M1045 165 L1045 102.7" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kga)"/>
-<text transform="translate(1008 134) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#6b7280" text-anchor="middle">ctrl_bus_req_ch</text>
-<text transform="translate(1054 134) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#6b7280" text-anchor="middle">ctrl_bus_resp_ch</text>
-<path d="M1112 102 L1112 164.3" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kga)"/>
-<path d="M1150 165 L1150 102.7" stroke="#6b7280" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kga)"/>
-<text transform="translate(1105 134) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#6b7280" text-anchor="middle">dm_req_ch</text>
-<text transform="translate(1159 134) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#6b7280" text-anchor="middle">dm_resp_ch</text>
-<rect x="500" y="400" width="280" height="120" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-<text x="640" y="422" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="600" text-anchor="middle">Interconnect Matrix</text>
-<text x="640" y="446" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="16" fill="#2563eb" font-weight="700" text-anchor="middle">5×7 CrossBar</text>
-<text x="640" y="466" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">5 入：left / right / mid / Core / Reduce</text>
-<text x="640" y="479" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">7 出：left / right / mid / Core（Header + Payload）/ Reduce Data ×3</text>
-<text x="640" y="492" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">按输出独立仲裁，无冲突的输出同拍并行；多播全有或全无</text>
-<text x="640" y="505" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">维护下游各方向的 credit；输出侧不设 VC Buffer</text>
-<path d="M735 290 L735 399.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M540 400 L540 290.7" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M505 400 L505 290" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M505 256 L505 244.7" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text x="560" y="365" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">进 core 出口</text>
-<text x="560" y="377" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">Header / Payload</text>
-<text x="745" y="365" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">Core 方向输入</text>
-<rect x="70" y="400" width="380" height="340" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="80" y="416" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12" fill="#2563eb" font-weight="700" text-anchor="start">RouterStation[left]</text>
-<text x="440" y="416" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="end">MAS 图里记作 E</text>
-<rect x="150" y="428" width="62" height="30" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="158" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">Header</text>
-<text x="158" y="457" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Check</text>
-<rect x="220" y="428" width="62" height="30" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="228" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">Router</text>
-<text x="228" y="457" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Table 副本</text>
-<text x="216" y="476" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="middle">Header Parser：PathID · UserID · size · operation · 方向 Mask · VC</text>
-<rect x="92" y="490" width="52" height="60" rx="5" fill="#fee2e2" stroke="#dc2626" stroke-width="1.3"/>
-<text x="100" y="505" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="start">allo-</text>
-<text x="100" y="519" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="start">cate</text>
-<rect x="160" y="490" width="150" height="12" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<text x="235" y="499" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#16181d" font-weight="400" text-anchor="middle">VC0</text>
-<rect x="160" y="505" width="150" height="12" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<text x="235" y="514" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#16181d" font-weight="400" text-anchor="middle">VC1</text>
-<rect x="160" y="520" width="150" height="12" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<text x="235" y="529" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#16181d" font-weight="400" text-anchor="middle">VC2</text>
-<rect x="160" y="535" width="150" height="12" rx="2" fill="#fef3c7" stroke="#d97706" stroke-width="0.9"/>
-<text x="235" y="544" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#16181d" font-weight="400" text-anchor="middle">VC3</text>
-<text x="235" y="562" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="middle">Virtual Channel ×4，各自独立 credit</text>
-<rect x="326" y="490" width="52" height="60" rx="5" fill="#fee2e2" stroke="#dc2626" stroke-width="1.3"/>
-<text x="334" y="505" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="start">Arbi-</text>
-<text x="334" y="519" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#5c6370" font-weight="400" text-anchor="start">ter</text>
-<path d="M144 520 L159.3 520" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgai)"/>
-<path d="M310 520 L325.3 520" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgai)"/>
-<path d="M378 520 L440 520 L440 480 L499.3 480" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text x="470" y="474" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">请求：方向 Mask · 下一跳 VC</text>
-<path d="M118 490 L118 443 L149.3 443" stroke="#dc2626" stroke-width="1.0" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<path d="M282 443 L352 443 L352 489.3" stroke="#dc2626" stroke-width="1.0" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<rect x="300" y="575" width="100" height="34" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="308" y="590" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">Credit Release</text>
-<text x="308" y="604" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">flit 离开 VC 即还</text>
-<rect x="92" y="575" width="90" height="34" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="100" y="590" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">VC Credit</text>
-<text x="100" y="604" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">下游各 VC 计数</text>
-<rect x="92" y="630" width="100" height="34" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="100" y="645" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">Packet Shifter</text>
-<text x="100" y="659" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">按总线宽度移位拼接</text>
-<rect x="220" y="630" width="110" height="34" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="228" y="645" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="start">output buffer</text>
-<text x="275" y="655" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="middle">R2R 允许 flit 交织</text>
-<path d="M500 505 L480 505 L480 647 L330.7 647" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M220 647 L192.7 647" stroke="#16181d" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgai)"/>
-<text x="240" y="690" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">资源不足时按 stall_way：留在 VC 等，或转入 CoreMem 由 DTE 重发</text>
-<text x="240" y="704" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">多播原子准入：所有目标方向的 VC / Stream / Reduce 资源同时到手才发</text>
-<text x="240" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">Stream / Reduce release 按 CSR 静态 Mask 旁路转发（不查 RouterTable）</text>
-<path d="M40 520 L91.3 520" stroke="#2563eb" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text x="34" y="516" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="end">left_data_in_ch</text>
-<path d="M92 647 L40 647" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#kgab)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="34" y="643" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="end">left_data_out_ch</text>
-<path d="M350 609 L350 620 L291 620" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M195 620 L184 620" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M92 620 L60 620 L60 608 L40 608" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="34" y="608" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">left_credit_release_ch_out</text>
-<path d="M40 575 L70 575 L70 592 L91.3 592" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="34" y="571" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">left_credit_release_ch_in</text>
-<rect x="860" y="400" width="200" height="120" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="868" y="415" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#2563eb" font-weight="700" text-anchor="start">RouterStation[right]</text>
-<text x="868" y="429" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">结构同 left：allocate → VC ×4 → Arbiter，</text>
-<text x="868" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Header Check + RouterTable 副本，</text>
-<text x="868" y="453" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">Credit Release / VC Credit，</text>
-<text x="868" y="465" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">output buffer → Packet Shifter</text>
-<text x="868" y="477" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">行两端的 Router 这一侧接 C2C Bridge</text>
-<text x="868" y="489" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">MAS 图里记作 W</text>
-<path d="M780 440 L859.3 440" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M860 470 L780.7 470" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M1060 430 L1180 430" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#kgab)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="1178" y="424" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="end">right_data_out_ch</text>
-<path d="M1180 460 L1060.7 460" stroke="#2563eb" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text x="1178" y="454" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="end">right_data_in_ch</text>
-<path d="M1060 490 L1180 490" stroke="#d97706" stroke-width="1.3" fill="none" marker-end="url(#kgar)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="1178" y="485" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">right_credit_release_ch_out</text>
-<path d="M1180 510 L1060.7 510" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="1178" y="505" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">right_credit_release_ch_in</text>
-<rect x="500" y="600" width="220" height="90" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="508" y="615" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11.5" fill="#2563eb" font-weight="700" text-anchor="start">RouterStation[mid]</text>
-<text x="508" y="629" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">结构同 left；接另一行对称位的 Router（mid-to-mid 直连）</text>
-<text x="508" y="641" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">MAS 图里记作 S/N，是一个端口</text>
-<text x="508" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">边沿 Router 不存在的端口由配置禁用</text>
-<path d="M600 520 L600 599.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M660 600 L660 520.7" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<path d="M560 690 L560 850" stroke="#2563eb" stroke-width="2.6" fill="none" marker-end="url(#kgab)" stroke-linejoin="round" stroke-linecap="round"/>
-<text transform="translate(550 770) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" text-anchor="middle">mid_data_out_ch</text>
-<path d="M620 850 L620 690.7" stroke="#2563eb" stroke-width="2.6" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text transform="translate(630 770) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" text-anchor="middle">mid_data_in_ch</text>
-<path d="M680 690 L680 850" stroke="#d97706" stroke-width="1.3" fill="none" marker-end="url(#kgar)" stroke-linejoin="round" stroke-linecap="round"/>
-<text transform="translate(690 770) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" text-anchor="middle">mid_credit_release_ch_out</text>
-<path d="M740 850 L740 690" stroke="#d97706" stroke-width="1.3" fill="none" marker-end="url(#kgar)" stroke-linejoin="round" stroke-linecap="round"/>
-<text transform="translate(750 770) rotate(-90)" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" text-anchor="middle">mid_credit_release_ch_in</text>
-<rect x="820" y="560" width="340" height="260" rx="8" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="990.0" y="578" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#2563eb" font-weight="700" text-anchor="middle">ReduceModule</text>
-<rect x="835" y="590" width="150" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="843" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">ReduceMemory</text>
-<text x="843" y="619" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">32 KiB × 16 entry（用户上下文）</text>
-<text x="843" y="631" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">FP32 中间累加结果</text>
-<rect x="995" y="590" width="150" height="48" rx="5" fill="#fed7aa" stroke="#d97706" stroke-width="1.3"/>
-<text x="1003" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Adder + Convert</text>
-<text x="1003" y="619" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">RMW 原位累加</text>
-<text x="1003" y="631" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">BF16 → FP32；输出 FP32 / BF16</text>
-<rect x="835" y="650" width="150" height="48" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="843" y="665" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">CreditBypass XBar</text>
-<text x="843" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Stream / Reduce release</text>
-<text x="843" y="691" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">按静态 Mask 旁路</text>
-<rect x="995" y="650" width="150" height="48" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="1003" y="665" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">ResourceMap</text>
-<text x="1003" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">按 UserID + 方向维护</text>
-<text x="1003" y="691" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">相邻下游 Reduce Credit</text>
-<text x="990.0" y="730" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">三路输入 3 × 160 GB/s，输出 160 GB/s，80 GFLOPS；输入后锁定到尾 flit</text>
-<text x="990.0" y="744" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">资源不可用时反压输入，不允许绕过 Reduce 降级为转发</text>
-<text x="990.0" y="758" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">结果全部交付后返回UID，归还RMEM许可；收到 Retire 后待下游 credit 全部恢复才删表项</text>
-<path d="M735 520 L735 600 L819.3 600" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgab)"/>
-<text x="768" y="594" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="middle">Data ×3</text>
-<path d="M820 632 L800 632 L800 520" stroke="#2563eb" stroke-width="1.8" fill="none" marker-end="url(#kgab)" stroke-dasharray="6 3" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="768" y="647" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">结果回注</text>
-<text x="768" y="658" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">（第 5 路输入）</text>
-<path d="M1180 780 L1160.7 780" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="1178" y="774" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">ts_router_user_retire_ch</text>
-<path d="M1180 800 L1160.7 800" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kgar)"/>
-<text x="1178" y="794" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">reduce credit release ×3（入）</text>
-<path d="M1160 815 L1180 815" stroke="#d97706" stroke-width="1.3" fill="none" marker-end="url(#kgar)" stroke-linejoin="round" stroke-linecap="round"/>
-<text x="1178" y="828" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="end">reduce credit release ×4（出）</text>
-<rect x="92" y="613" width="92" height="13" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="138.0" y="623" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="700" text-anchor="middle">VC credit 计数实体</text>
-<rect x="950" y="504" width="92" height="13" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="996.0" y="514" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="700" text-anchor="middle">VC credit 计数实体</text>
-<rect x="610" y="674" width="92" height="13" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.2"/>
-<text x="656.0" y="684" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="700" text-anchor="middle">VC credit 计数实体</text>
-<rect x="404" y="596" width="72" height="13" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="0.9" stroke-dasharray="2 2"/>
-<text x="440.0" y="606" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">只还，无计数</text>
-<rect x="560" y="296" width="160" height="13" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="0.9" stroke-dasharray="2 2"/>
-<text x="640.0" y="306" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#2563eb" font-weight="400" text-anchor="middle">只还 VC credit，计数在 DataOut DTE</text>
-<rect x="110" y="226" width="150" height="13" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.2"/>
-<text x="185.0" y="236" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#7c3aed" font-weight="700" text-anchor="middle">stream credit 计数实体（唯一有效）</text>
-<rect x="195" y="575" width="96" height="48" rx="5" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="203" y="590" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#7c3aed" font-weight="700" text-anchor="start">Stream 映射</text>
-<text x="203" y="604" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">下游各方向的授权</text>
-<rect x="200" y="607" width="86" height="13" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="0.9" stroke-dasharray="2 2"/>
-<text x="243.0" y="617" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#7c3aed" font-weight="400" text-anchor="middle">查询副本，不计数</text>
-<rect x="1046" y="702" width="150" height="13" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.2"/>
-<text x="1121.0" y="712" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#0d9488" font-weight="700" text-anchor="middle">Reduce credit 计数实体（相邻下游）</text>
-<rect x="835" y="702" width="112" height="13" rx="6" fill="#ffffff" stroke="#0d9488" stroke-width="0.9" stroke-dasharray="2 2"/>
-<text x="891.0" y="712" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#0d9488" font-weight="400" text-anchor="middle">只转发 release，不计数</text>
-<rect x="590" y="49" width="236" height="13" rx="6" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.2"/>
-<text x="708.0" y="59" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#0d9488" font-weight="700" text-anchor="middle">stream credit cache</text>
-<rect x="30" y="866" width="1140" height="110" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
-<text x="46" y="883" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">口径：三个 R2R 方向本文档记 left / right / mid，MAS Block Diagram 记 E / W / S/N，S/N 是一个端口；通道名照 MAS 的写法 &lt;方向&gt;_data_in_ch / _data_out_ch / _credit_release_ch_in / _out。</text>
-<text x="46" y="899" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">带宽：每方向 256 B 宽，相邻 Router 双向各 256 GB/s @1GHz；进 core 与出 core 各 256 GB/s，完全并行。Header 与 Payload 走两根独立总线（hflit 256-bit，pflit 2048-bit）。</text>
-<text x="46" y="915" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">CoreMemCreditMonitor 在 MAS 的模块说明里列为独立模块，Block Diagram 里没有单独画，本图按模块说明补画在 Stream Resource Map 下方，细节见“出核前的资源监听”。</text>
-<text x="46" y="931" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">credit 的计数实体（实心标签）：VC credit 在发送侧各 RouterStation 的计数器（每个下游方向 × VC 一个）；stream credit在 Stream Resource Map 的表（唯一有效状态，DTE 另持一份 cache）；</text>
-<text x="46" y="947" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">Reduce credit 在 ReduceModule 的 ResourceMap（相邻下游）；本级那一段由 TS 按用户记。</text>
-<text x="46" y="963" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">虚线标签的位置只做加减或转发，本地没有计数：接收侧的 Credit Release 只归还，RouterStation 的 Stream 映射只查询，CreditBypass XBar 只按静态 Mask 转发 release。</text>
-</svg>
+```mermaid
+flowchart TD
+  T[TS三方向计数与Pending] --> A[新增方向原子授权并READY]
+  A --> RV[RV配置与DTE Trigger]
+  RV --> D[DTE逐VC发送]
+  N[网络输入] --> R[RouterStation与Xbar]
+  D --> R
+  R --> S[实体Stream用户表与入口缓冲]
+  S --> C[CoreStation与DTE RX]
+  R --> G[用户与任务准入检查]
+  G --> M[RMEM用户上下文与RMW]
+  M --> V[按VC credit输出结果]
+  V --> U[结果尾拍交付后按UID还本级RMEM许可]
+  M --> E[空闲且用户退休后回收上下文]
+  L[下游Stream release] --> X[按来向删除用户项并校验持有方向]
+  X --> T
 ```
+
 
 ***
 
@@ -422,7 +169,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 <rect x="720" y="400" width="300" height="100" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="728" y="415" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="11" fill="#2563eb" font-weight="700" text-anchor="start">ReduceModule</text>
 <text x="728" y="429" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">首份输入建上下文，后续 RMW 原位累加</text>
-<text x="728" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">输出前查目标 VC credit + 下游 Reduce credit</text>
+<text x="728" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">输出逐flit查目标VC credit</text>
 <text x="728" y="453" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">完成回 UserID；Retire 后待 credit 恢复再删表项</text>
 <path d="M120 280 L175 280" stroke="#2563eb" stroke-width="2.4" fill="none" marker-end="url(#khab)" stroke-linejoin="round" stroke-linecap="round"/>
 <rect x="131" y="253" width="18" height="18" rx="9" fill="#ffffff" stroke="#2563eb" stroke-width="1.4"/>
@@ -472,20 +219,20 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 <text x="75" y="330" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">VC credit 回程：flit 离开</text>
 <text x="75" y="342" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">VC Buffer 就还上游一个</text>
 <path d="M1000 250 L1000 108 L210 108 L210 119.3" stroke="#d97706" stroke-width="1.4" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#khar)"/>
-<text x="600" y="104" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">下游 release 回来按 UserID 恢复 Stream / Reduce credit；包发完（直发或经 CM 重发）把完成信息（UserID + PathID）回 TS</text>
+<text x="600" y="104" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">Stream release按来向归还用户授权；RMEM结果交付按UID只还本级空间</text>
 <path d="M470 160 L470 187" stroke="#d97706" stroke-width="1.4" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M470 205 L470 450 L330.7 450" stroke="#d97706" stroke-width="1.4" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#khar)"/>
 <text x="340" y="441" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="start">core 用完 CM → release（UserID）→ 删本级 Stream 表项</text>
 <path d="M245 420 L245 380.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#khar)"/>
 <text x="255" y="402" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="start">授权给 ③ 的准入</text>
 <path d="M720 490 L245 490 L245 480.7" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#khar)"/>
-<text x="500" y="504" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">Stream / Reduce release 按 CSR 静态 Mask 旁路，不查 RouterTable</text>
+<text x="500" y="504" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="middle">Stream release 按 CSR 静态 Mask 旁路，不查 RouterTable</text>
 <path d="M1060 430 L1020.7 430" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#khar)"/>
 <text x="1064" y="426" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="start">Retire</text>
 <rect x="30" y="534" width="1140" height="62" rx="5" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.2"/>
 <text x="46" y="551" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">阻塞时的两条岔路：③ 拿不到资源，按 RouterTable 的 stall_way 留在 VC 等，或把包转进 Core Mem（Bypass 变成“进 core + 出 core”），资源就绪后由 DTE 重发，同 VC 内不许越过；</text>
 <text x="46" y="567" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">⑥ 本级 Stream 表无空项时，该 VC 不能向 core 发（VC 有空项仍可收）。进 core 与出 core 两条路完全并行，互不共享仲裁状态。</text>
-<text x="46" y="583" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">这是进本 core 的主线；直通、多播、Reduce、CoreMem 重发、credit 旁路各自的走法见“按任务类型分的走法”，三类 credit 谁维护、何时扣还见“三类 credit 的管理方式”。</text>
+<text x="46" y="583" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">这是进本 core 的主线；直通、多播、Reduce、CoreMem 重发、credit 旁路各自的走法见“按任务类型分的走法”，各类许可的所有者与扣还条件见“资源与 credit 的管理方式”。</text>
 </svg>
 ```
 
@@ -509,7 +256,7 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 
 **Reduce**
 
-10. operation 是 Reduce 的包由 CrossBar 导向 ReduceModule（Data ×3）。同一 User 同一包的第一份输入写进这个用户的分区（用户第一笔任务进来时分配），后续方向的输入读出当前值、累加、写回；某个结果 flit 所需的操作数都加完就发，不等整包，发送前查目标 VC credit，一笔任务头一个 flit 还查该方向的下游 Reduce credit，结果作为 CrossBar 的第五路输入参与仲裁，包发出首 flit 后锁定到尾 flit。整包发出后向 Core 返回 UserID 作为完成信息。
+10. operation 是 Reduce 的包由 CrossBar 导向 ReduceModule（Data ×3）。同一 User 同一包的第一份输入写进这个用户的分区（用户第一笔任务进来时分配），后续方向的输入读出当前值、累加、写回；某个结果 flit 所需的操作数都加完就发，不等整包，发送前检查目标VC credit，输入侧的任务与上下文准入由接收端维护，结果作为 CrossBar 的第五路输入参与仲裁，包发出首 flit 后锁定到尾 flit。整包发出后向 Core 返回 UserID 作为完成信息。
 
 ### 按任务类型分的走法
 
@@ -519,9 +266,9 @@ Router 上跑的不止一种包：进本 core 的、直通到下一个 Router �
 | 多播 | 同上，flow_dir 多位有效 | 同上，CrossBar 同拍复制到全部目标 | 全部目标方向的 VC credit 与 Stream 授权同时到手 | 各目标方向；任一方向没握手则整体不推进 |
 | 进 core | 上游 Router | RouterStation → CrossBar → CoreStation 的 Header FIFO 与 in_core_fifo | 本级 stream credit 表准入（不查 Core 方向 VC credit） | Core Mem；CoreStation 经 `notify_ch` 通知 TS，DTE 搬完后 TS 收完成信息 |
 | 出 core | DTE TX hflit/pflit | Core方向输入VC → CrossBar → RouterStation | DTE按本地目标VC credit发送，TS管理方向/RMEM许可 | Router返回链路credit；RMEM归还只恢复空间，DTE按全局Ack Ptr另报任务完成 |
-| Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级 Rmem 资源由 TS 在下发前申请；输出时查目标 VC credit，`reduceNeedMask` 置位的方向还查下游 Reduce credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
+| Reduce | 本 core 的 DataOut DTE，或上游 Router 的 Reduce 包 | CrossBar → ReduceModule（Data ×3）→ 结果回注 CrossBar | 本级RMEM许可由TS取得；接收端检查任务与上下文，输出逐flit查VC credit | 下游 Router 或本 core；整包发出后向 core 返回 UserID |
 | 进 CoreMem 暂存与重发 | 直通或多播的包在本级拿不到资源，stall_way 选了转存 | 走一遍进 core，再由 DTE 走一遍出 core | 重发时按 PathID 重查 RouterTable，同 VC 内不许越过未重发的包 | 原目标；完成后同样向 TS 返回 UserID + PathID |
-| 业务 credit 的旁路 | 下游或本 core 的 Stream / Reduce release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
+| 业务 credit 的旁路 | 下游或本 core 的 Stream release | RouterStation 的 Credit Release，CrossBar 不参与仲裁 | 不查 RouterTable，只看 CSR 里该输入端口的静态方向 Mask | Mask 指定的一个或多个方向 |
 
 坏 core 上的 Router 处在透传档，只走直通：数据走完整流水线但不投递本 core，stream credit 与 release 也跨过它，直接连到两侧落地的 core，见“坏 core 的透传档”。
 
@@ -586,16 +333,11 @@ DTE 取数这一步分三段，只有两头带地址：
 
 #### Reduce
 
-Reduce 包从 core 出发这一段的本级资源由 TS 管，进了 ReduceModule 之后往下游那一段由 ReduceModule 管：
+TS在REDUCE_WAIT取得本SID的RMEM许可并置READY。执行Core／DSA双ACK完成任务，RMEM结果尾拍交付后另按UID归还空间；下一Reduce及用户退休等待空间空闲。
 
-* TS 为每个用户记一份本级 Rmem 的 credit，不向 Router 申请：Reduce在REDUCE_WAIT取得许可时就占掉，ReduceModule 做完这一笔报回来才还；一笔 reduce 拆成链上几项时，一项做完再下发下一项
-* DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC
-* DTE 搬 Reduce 包与其他出核包一样 dispatch 时不查 VC credit，TX按VC信用计数逐flit发送
-* ReduceModule 做完一笔任务、结果全部交付后经 `rmem2ts_done_ch` 向 TS 报完成，TS 据此推进这个用户的下一笔 reduce 任务
-* ReduceModule 之间按用户、按任务走：`reduceNeedMask` 置位时，一笔任务头一次向某个方向发之前要取得那个方向这个用户的准入，这笔任务后面的 Packet 与 flit 复用这次准入，逐 flit 只受 VC credit 约束；下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，上游据此放开这个用户在那个方向的资源
-* 表项的删除：收到本级 core 某个 UserID 的 Retire 后本地分区回收；相邻下游各方向在途任务的 release 都回来之后，才删掉这个用户的映射给其他用户用
+网络分量进入本级RMEM前，检查用户已准入、任务是最早未完成的Reduce、PID匹配和物理上下文可用。首flit获准时预留上下文，忙或已预留时只接收同任务、同PID的分量。一个结果flit的操作数齐备后即可参与Xbar仲裁，逐flit消耗目标VC credit。
 
-累加本身怎么做、上下文怎么保护、精度怎么定，在“归约”一节。
+ReduceModule保存每UID的任务号、PID、输入完成及输出状态。用户退休时，空闲上下文立即回收；busy或reserved时记退休标志，待结果交付后回收。
 
 #### 进 CoreMem 暂存与重发
 
@@ -640,195 +382,28 @@ if need_buffer && !core_bad_mask[本 core] &&
 
 #### 业务 credit 的旁路
 
-Stream 与 Reduce 两类 release 不是数据包，但也经 Router 转发，走的是另一条规则：
+Stream release是独立控制通路，但也经 Router 转发，走的是另一条规则：
 
 * 软件通过 CSR `RTR_RELEASE_ROUTE` 为每个业务 credit 输入端口配置**静态输出方向 Mask**，可指定一个或多个 R2R 方向与 Core 方向
 * 转发时不查 RouterTable，也不做动态路径选择，不进 CrossBar 的仲裁
 * Mask 含多个方向时，同一笔 release 复制到所有指定方向，UserID 与 credit 类型保持不变
 * 跨过不落地的 core 时切换 credit 路径，靠的就是改这组静态配置
 
-### 三类 credit 的管理方式
+### 资源与 credit 的管理方式
 
-下游收不下有三种不同的原因，对应三类互不复用的 credit。它们管的东西、粒度、维护方、扣还时机都不同：
-
-```svg
-<svg viewBox="0 0 1200 790" width="1200" height="790" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三类 credit 的管理方式">
-<title>三类 credit 的管理方式</title>
-<rect width="1200" height="790" fill="#ffffff"/>
-<defs><marker id="kia" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#9aa1ad"/></marker><marker id="kias" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#9aa1ad"/></marker><marker id="kiai" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#3f4451"/></marker><marker id="kiais" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#3f4451"/></marker><marker id="kiab" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#2563eb"/></marker><marker id="kiabs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#2563eb"/></marker><marker id="kiar" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#d97706"/></marker><marker id="kiars" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#d97706"/></marker><marker id="kiac" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#0d9488"/></marker><marker id="kiacs" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#0d9488"/></marker><marker id="kiap" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M0 0 L10 4 L0 8 z" fill="#7c3aed"/></marker><marker id="kiaps" viewBox="0 0 10 8" refX="1" refY="4" markerWidth="7" markerHeight="6" orient="auto"><path d="M10 0 L0 4 L10 8 z" fill="#7c3aed"/></marker></defs>
-<text x="30" y="26" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="15" fill="#16181d" font-weight="700" text-anchor="start">三类 credit 的管理方式</text>
-<text x="30" y="46" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#5c6370" font-weight="400" text-anchor="start">每一行一类 credit：蓝色是数据的正向路和扣 credit 的时点，橙色是 release 的回程和走法，右侧是表项归谁、怎么建怎么删</text>
-<rect x="30" y="70" width="1140" height="226" rx="8" fill="#fbfcfd" stroke="#9aa1ad" stroke-width="1.0"/>
-<rect x="30" y="70" width="150" height="226" rx="8" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.0"/>
-<text x="105" y="100" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#2563eb" font-weight="700" text-anchor="middle">VC credit</text>
-<text x="105" y="122" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">下游 VC Buffer 有没有空槽</text>
-<text x="105" y="136" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">按下游方向 + VC，flit 粒度</text>
-<text x="105" y="162" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="600" text-anchor="middle">快：flit 一进一出就还</text>
-<rect x="30" y="306" width="1140" height="226" rx="8" fill="#fbfcfd" stroke="#9aa1ad" stroke-width="1.0"/>
-<rect x="30" y="306" width="150" height="226" rx="8" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.0"/>
-<text x="105" y="336" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#7c3aed" font-weight="700" text-anchor="middle">stream credit</text>
-<text x="105" y="358" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">（CoreMem credit）目标 core 的</text>
-<text x="105" y="372" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">Core Mem 有没有空间容纳这个用户</text>
-<text x="105" y="398" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#7c3aed" font-weight="600" text-anchor="middle">慢：等用户跑完整条任务链</text>
-<rect x="30" y="542" width="1140" height="226" rx="8" fill="#fbfcfd" stroke="#9aa1ad" stroke-width="1.0"/>
-<rect x="30" y="542" width="150" height="226" rx="8" fill="#f5f6f8" stroke="#9aa1ad" stroke-width="1.0"/>
-<text x="105" y="572" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="13" fill="#0d9488" font-weight="700" text-anchor="middle">Reduce credit</text>
-<text x="105" y="594" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">下游 ReduceModule 有没有上下文空间</text>
-<text x="105" y="608" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="middle">按 UserID 加方向，一笔任务</text>
-<text x="105" y="634" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#0d9488" font-weight="600" text-anchor="middle">中：按任务还，要等下游这一笔做完</text>
-<rect x="210" y="100" width="150" height="60" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="218" y="115" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" font-weight="700" text-anchor="start">本级 Router</text>
-<text x="218" y="129" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation[方向]</text>
-<text x="218" y="141" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">VC Credit 计数器</text>
-<rect x="220" y="170" width="130" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="228" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="start">计数器</text>
-<text x="228" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">每个下游方向 × 每个 VC 一个</text>
-<text x="228" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">上电 = 下游 buffer 深度</text>
-<rect x="520" y="100" width="170" height="60" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="528" y="115" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" font-weight="700" text-anchor="start">下游 Router</text>
-<text x="528" y="129" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation 的 VC Buffer ×4</text>
-<text x="528" y="141" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">flit 按 Header 的 VC 号入槽</text>
-<rect x="520" y="170" width="170" height="48" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="528" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#16181d" font-weight="700" text-anchor="start">读出</text>
-<text x="528" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">VC 头部 flit 经 VA / SA / ST 发走</text>
-<text x="528" y="211" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">同拍每个 input port 最多读一个 VC</text>
-<path d="M360 125 L519.3 125" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiab)"/>
-<rect x="370" y="107" width="16" height="16" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="378" y="118.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">扣</text>
-<text x="392" y="118" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">发一个 flit，该方向该 VC 减 1</text>
-<text x="392" y="140" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">多播：所有目标方向都 &gt; 0 才发</text>
-<path d="M520 194 L460 194 L460 214" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M460 230 L460 246 L300 246 L300 218.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<rect x="452" y="214" width="16" height="16" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.2"/>
-<text x="460" y="225.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">还</text>
-<text x="200" y="262" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">还：flit 离开下游 VC Buffer 就经共享总线 credit_return_vld + credit_return_vc_id 归还一个，逐 flit、不经 CrossBar</text>
-<text x="200" y="276" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">重注入的包：Output Port 识别到 overflow_reinject 标记才扣　进 core 这一段不查 VC credit（Stream 已保证 CM 空间）</text>
-<rect x="740" y="100" width="420" height="60" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="748" y="115" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">谁维护 · 表项</text>
-<text x="748" y="129" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation 硬件自动维护，没有表项，只有计数器</text>
-<text x="748" y="141" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#5c6370" font-weight="400" text-anchor="start">上游只看自己的计数器，不知道下游用哪一格</text>
-<rect x="740" y="170" width="420" height="48" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="748" y="185" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">跨 chip</text>
-<text x="748" y="199" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">经 C2C Bridge 时同向数据与 credit release 仲裁（小包优先），反向 demux 分流</text>
-<rect x="195" y="328" width="120" height="66" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
-<text x="203" y="343" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">源 core</text>
-<text x="203" y="357" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">DataOut DTE 要出核</text>
-<text x="203" y="369" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">先向 Router 申请授权</text>
-<rect x="195" y="402" width="120" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="203" y="417" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">DTE cache</text>
-<text x="203" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">User Resource</text>
-<text x="203" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Cache Table</text>
-<rect x="345" y="328" width="170" height="66" rx="5" fill="#f5f0ff" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="353" y="343" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#7c3aed" font-weight="700" text-anchor="start">本级 Router</text>
-<text x="353" y="357" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Stream Resource Map</text>
-<text x="353" y="369" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">User Resource Allocation Table</text>
-<text x="353" y="381" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">按 UserID + 目标方向一项</text>
-<rect x="345" y="402" width="170" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="353" y="417" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">唯一有效状态</text>
-<text x="353" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router维护实体Stream表项</text>
-<text x="353" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">禁止超额分配或重复授权</text>
-<rect x="545" y="328" width="170" height="66" rx="5" fill="#f5f0ff" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="553" y="343" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#7c3aed" font-weight="700" text-anchor="start">目标 core 的 Router</text>
-<text x="553" y="357" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">进 core 表准入：命中直接收，</text>
-<text x="553" y="369" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">有空项则分配，无空项该 VC 停发</text>
-<text x="553" y="381" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">TS 内另一份表，同逻辑分配</text>
-<rect x="545" y="402" width="170" height="48" rx="5" fill="#fdeed8" stroke="#d97706" stroke-width="1.3"/>
-<text x="553" y="417" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="start">目标 core</text>
-<text x="553" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Core Mem 收整包；用户跑完任务链、</text>
-<text x="553" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">用完 CM 后发 release（UserID）</text>
-<path d="M315.7 351 L344.3 351" stroke="#d97706" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#kiars)" marker-end="url(#kiar)"/>
-<text x="330" y="344" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="middle">授权</text>
-<path d="M515 361 L544.3 361" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiab)"/>
-<rect x="522" y="370" width="16" height="16" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="530" y="381.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">扣</text>
-<text x="200" y="466" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">扣：新 UserID 的包在本级占一个表项；出核由 DTE 拿到授权才发；进 core 由本级表准入，之后不查 VC credit</text>
-<path d="M700 450 L700 458" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M700 474 L700 482 L430 482" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<rect x="692" y="458" width="16" height="16" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.2"/>
-<text x="700" y="469.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">还</text>
-<text x="200" y="498" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">还：release 是脉冲加 user：每个 Router 一个组合逻辑的 core credit crossbar，汇总本级 core 与所有下级出口的 pulse + user，</text>
-<text x="200" y="512" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">发往除来向外的另两个 R2R port 逐跳上传（left 来就发 right 和 mid），跨 chip 经 C2C Bridge 透传；转发路径由寄存器静态配置</text>
-<path d="M430 482 L400 482 L400 450.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<path d="M400 482 L255 482 L255 450.7" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<text x="328" y="478" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="middle">上游删表项 / DTE cache 同步</text>
-<rect x="740" y="328" width="420" height="66" rx="5" fill="#ffffff" stroke="#7c3aed" stroke-width="1.3"/>
-<text x="748" y="343" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#7c3aed" font-weight="700" text-anchor="start">三份表的关系</text>
-<text x="748" y="357" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Router 的表是唯一有效状态；DTE 持 cache，发数据前必须从 Router 拿授权</text>
-<text x="748" y="369" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">TS 内的本级 Stream 表与 Router 的进 core 表按完全一致的逻辑申请空项，</text>
-<text x="748" y="381" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">所以“Router 通知 TS 的包一定能被 TS 接收”</text>
-<rect x="740" y="402" width="420" height="48" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="748" y="417" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">建与删</text>
-<text x="748" y="431" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：新 UserID 首次到达　删：收到 release；或收到 User Retire 后删该用户全部授权表项</text>
-<text x="748" y="443" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 另输出 per-port 的 stream_credit 同步信息给 core 与 DTE，用于判断重注入</text>
-<rect x="195" y="564" width="120" height="66" rx="5" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.3"/>
-<text x="203" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">本 core 的 DTE</text>
-<text x="203" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 credit 由 TS 按用户记</text>
-<text x="203" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">DTE 不查 VC credit</text>
-<rect x="195" y="638" width="120" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="203" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">本级由 TS 申请</text>
-<text x="203" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">链上逐项顺序申请</text>
-<text x="203" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">做完经 rmem2ts_done_ch 报 TS</text>
-<rect x="345" y="564" width="170" height="66" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="353" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">本级 ReduceModule</text>
-<text x="353" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">首份输入建上下文，后续 RMW</text>
-<text x="353" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">输出前查目标 VC credit</text>
-<text x="353" y="617" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">和该方向的下游 Reduce credit</text>
-<rect x="345" y="638" width="170" height="48" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.3"/>
-<text x="353" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#16181d" font-weight="700" text-anchor="start">ResourceMap</text>
-<text x="353" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">按 UserID + 方向维护相邻下游 credit</text>
-<text x="353" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">Router 不维护 Reduce credit</text>
-<rect x="545" y="564" width="170" height="66" rx="5" fill="#eef4ff" stroke="#2563eb" stroke-width="1.3"/>
-<text x="553" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">下游 ReduceModule</text>
-<text x="553" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">每收一个 flit 累加一次</text>
-<text x="553" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">做完一笔任务就 release 一次</text>
-<path d="M315 597 L344.3 597" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiab)"/>
-<rect x="322" y="606" width="16" height="16" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="330" y="617.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">扣</text>
-<path d="M515 597 L544.3 597" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiab)"/>
-<rect x="522" y="606" width="16" height="16" rx="8" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
-<text x="530" y="617.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#2563eb" font-weight="700" text-anchor="middle">扣</text>
-<text x="200" y="702" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#2563eb" font-weight="400" text-anchor="start">扣：一笔任务每个方向准入一次。本级由 TS 按用户记，下发即占；ReduceModule 发往下游占 ResourceMap 里该 UserID 该方向的</text>
-<path d="M700 630 L700 664" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
-<path d="M700 680 L700 718 L430 718" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<rect x="692" y="664" width="16" height="16" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.2"/>
-<text x="700" y="675.5" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8.5" fill="#d97706" font-weight="700" text-anchor="middle">还</text>
-<path d="M430 718 L400 718 L400 686.7" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<path d="M400 718 L255 718 L255 686.7" stroke="#d97706" stroke-width="1.2" fill="none" stroke-dasharray="4 2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#kiar)"/>
-<text x="328" y="714" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#d97706" font-weight="400" text-anchor="middle">做完一笔，Reduce Done 报 TS</text>
-<text x="200" y="734" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">还：release 携带 UserID，走业务 credit 的静态旁路：按 CSR 配的方向 Mask 转发，不查 RouterTable，可多播</text>
-<text x="200" y="748" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#d97706" font-weight="400" text-anchor="start">上游按 UserID 放开这个用户在那个方向的资源；收到 Retire 且在途任务的 release 都回来后才删该用户的表项</text>
-<rect x="740" y="564" width="420" height="66" rx="5" fill="#ffffff" stroke="#0d9488" stroke-width="1.3"/>
-<text x="748" y="579" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#0d9488" font-weight="700" text-anchor="start">谁维护 · 表项</text>
-<text x="748" y="593" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">本级由 TS 按用户记（rmem_busy）</text>
-<text x="748" y="605" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">ReduceModule 维护相邻下游各方向的 credit 映射（UserID + 方向）</text>
-<text x="748" y="617" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="8" fill="#5c6370" font-weight="400" text-anchor="start">Router 只负责把 release 按静态 Mask 转发</text>
-<rect x="740" y="638" width="420" height="48" rx="5" fill="#ffffff" stroke="#c9ced6" stroke-width="1.3"/>
-<text x="748" y="653" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">建与删</text>
-<text x="748" y="667" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">建：与用户的 ReduceModule 上下文一起建</text>
-<text x="748" y="679" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">删：延迟回收，收到 Retire 后待相邻下游各方向在途任务的 release 都回来</text>
-</svg>
-```
-
-| | VC credit | stream credit（CoreMem credit） | Reduce credit |
+| 资源 | 所有者与粒度 | 取得条件 | 归还条件 |
 | - | - | - | - |
-| 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 的 Core Mem 有没有空间容纳这个用户的数据 | 下游 ReduceModule 的上下文有没有空间 |
-| 粒度 | 按下游方向加 VC，flit | 按 UserID 加目标方向，一个表项 | 按 UserID 加目标方向，一笔 Reduce 任务 |
-| 谁维护 | 每个下游方向的每个 VC 一个独立计数器，RouterStation 硬件自动维护 | Router维护实体Stream分配表；TS维护南北/西/东计数、SID请求及drct_used；DTE旧cache接口的衔接待统一 | 本级由TS按SID记，REDUCE_WAIT取得许可时占掉、Rmem 做完才还；ReduceModule 维护相邻下游各方向的；Router 不维护 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新UserID在Router实体表占项；TS Grant按新增方向同沿扣账并READY | `reduceNeedMask` 置位时，一笔任务头一次向目标方向提交前取得准入，后面的 Packet 与 flit 不再扣 |
-| 何时还，走哪条路 | flit 离开下游 VC Buffer 就归还，走共享总线（`credit_return_vld` 加 `credit_return_vc_id`），每个 input port 一拍最多一个 VC 被读出，无冲突 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release；每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 | 下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，经业务 credit 的静态旁路返回上游 |
-| 表项的建与删 | 没有表项，计数器上电等于下游 buffer 深度 | 建：新 UserID 首次到达；删：收到Release删除对应方向表项；本地Retire只释放进Core方向 | 建：与用户的 ReduceModule 上下文一起建；删：收到 Retire 且相邻下游各方向在途任务的 release 都回来 |
-| 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 | 介于两者之间，按任务还，要等下游这一笔做完 |
+| VC credit | 各输出方向、各VC的private计数及该方向shared池 | 每flit发送前有额度 | flit离开对端VC缓冲后归还 |
+| TS方向许可 | TS，每SID记录已用方向，三方向初值各N | 只申请新增方向，全部需求原子满足后扣账并READY | 真实Stream release归还该用户实际持有的方向，下一拍可用 |
+| Stream实体用户项 | Router，按用户及目标方向保存 | 首次投递用户取得空项，后续Packet复用 | 对应下游用户退休的Stream release按来向释放；本级Retire只清进Core项 |
+| 本级RMEM许可 | TS，每SID一份 | REDUCE_WAIT且许可可用时占用并READY | RMEM结果尾拍交付后按UID归还，任务ACK独立更新完成位 |
+| RMEM物理上下文 | ReduceModule，16个32KiB用户分区 | 用户、任务、PID及上下文检查通过，首flit预留 | 当前任务交付后清忙状态，用户退休或SELF_START槽复用时回收空闲上下文 |
 
-stream credit的两条硬规则：
+Router进Core用户表和TS Stream槽分别控制入口容量，Trigger遵循TS入口ready。Router的兼容容量计数与TS方向许可分别记账。
 
-* **Router维护实体Stream表项**，TS独立管理三方向许可计数和已使用方向。TS在READY前原子取得全部新增方向许可，DTE实际发送时仍逐flit检查VC信用。两边按相同UID生命周期协同，不能重复申请或虚构归还。
-* **Router 的进 core 表和 TS 内部的 stream credit 表按完全一致的逻辑申请空项**。分配因此不会多于实际资源数，这保证了“Router 通知 TS 的包一定能被 TS 接收”
+#### Router 兼容容量计数与 path 需求
 
-Router 另外输出 per-port 的 `stream_credit` 同步信息给 core 与 DTE，用于判断重注入。进 core 这一段不查 VC credit，因为 Stream 已经保证了 Core Mem 有空间。
-
-#### 哪些 path 要申请 stream credit，各申请多少
-
-stream credit这一类 credit 的单位是 **1 KB**。每条 path 下一跳需要的 credit 类型与资源量记在 RouterTable 里，按 path 的性质分五类：
+Router兼容容量计数按1KB，`credit_require`指定首次占用需扣的量；TS方向许可按用户与新增方向计数。下面容量例子来自通信资料，不能用其数值初始化TS方向N计数。
 
 | path | 申请多少 |
 | - | - |
@@ -890,7 +465,6 @@ RouterTable 是路径解析与资源判定的唯一依据，**只描述静态路
 | `reduce_data_type` / `reduce_outdata_type` | 3 / 1 bit：Reduce 的输入精度与输出精度，各取 BF16 或 FP32，**中间累加固定 FP32** | ReduceModule |
 | `reduce_in_mask` | 3 bit：这条 path 在本级会有哪几个相邻方向送来分量 | ReduceModule 收齐判据 |
 | `operation` | 2 bit：0 普通转发、1 reduce0 单流（经 Rmem 不计算）、2 reduce1 两流、3 reduce2 三流 | 路径选择、ReduceModule |
-| `reduceNeedMask` | 1 bit：结果往下游发之前查不查下游 ReduceModule 这个用户空不空 | ReduceModule |
 | `stall_way` | 资源不足时留在当前 VC 等待，还是转入 CoreMem 暂存由 DTE 重发 | 阻塞处理 |
 
 字段照 DATA_NOC HAS 的 `Routing table field`，VC 与阻塞那几项照 Router MAS 的 `Table Entry`，两个 credit require 照《Top 模拟器详设》。`reduce_in_mask` 与 `operation` 的三档 reduce 取值这三份都没有（**待确认**）。
@@ -934,11 +508,11 @@ VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC �
 
 目标端口的那个 VC 上有本 core 未发完的溢流缓存时，该 VC 同样被 VA 跳过，同 input 的其他 VC 不受影响。
 
-**三层 credit 各管一段**，互不复用：
+**方向许可、VC credit与本级RMEM许可各管一段**，互不复用：
 
 ```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 690" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Router 的三层 credit 各管一段">
-<title>三层 credit 各管一段</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 690" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Router 的方向许可、VC credit与本级RMEM许可各管一段">
+<title>方向许可、VC credit与本级RMEM许可各管一段</title>
 <defs>
 <marker id="av" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
 <marker id="avs" markerWidth="9" markerHeight="9" refX="0.5" refY="4" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#2563eb"/></marker>
@@ -949,7 +523,7 @@ VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC �
 <marker id="ag" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#6b7280"/></marker>
 </defs>
 <rect width="1340" height="690" fill="#ffffff"/>
-<text x="24" y="30" font-size="15" fill="#111827" font-weight="600">三层 credit 各管一段</text>
+<text x="24" y="30" font-size="15" fill="#111827" font-weight="600">方向许可、VC credit与本级RMEM许可各管一段</text>
 <text x="24" y="50" font-size="10.5" fill="#475569">下游收不下有三种不同的原因，Router 用三层互不复用的 credit 分别管，各自的粒度、维护方和释放时机都不同</text>
 <rect x="40" y="92" width="180" height="74" rx="4" fill="#eef2f7" stroke="#374151" stroke-width="1.25"/>
 <text x="130.0" y="113" font-size="12" fill="#111827" font-weight="600" text-anchor="middle">源 core</text>
@@ -1008,7 +582,7 @@ VA 阶段做两件事：检查资源，然后在本 input port 内的多个 VC �
 <text x="40" y="598" font-size="9.5" fill="#475569">谁维护：ReduceModule 维护相邻下游各方向，Router 不维护</text>
 <text x="40" y="611" font-size="9.5" fill="#475569">怎么释放：下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release</text>
 <text x="40" y="624" font-size="9.5" fill="#475569">用户退休时延迟回收：等相邻下游各方向在途任务的 release 都回来，才删对应用户映射</text>
-<text x="24" y="672" font-size="10.5" fill="#475569">三者互不复用。业务层的 Stream 与 Reduce credit 的 release 走静态 Bypass：软件为每个输入端口配好输出方向 Mask，转发时不查 RouterTable，也不做动态路径选择</text>
+<text x="24" y="672" font-size="10.5" fill="#475569">VC按flit归还，Stream按用户退休经静态Mask归还，本级RMEM许可按UID独立归还</text>
 </svg>
 ```
 
@@ -1066,9 +640,11 @@ Data_NOC 的死锁面全部落在 VC 上，Router 硬件不做检查，靠软件
 
 Broadcast 是单向传播树，物理上天然无环：同 Router 内是 input 到多个 output，output 之间无依赖；跨 Router 逐跳发散，credit 沿反向归还。整条广播链用同一个 VC 也不成环。组播的阻塞是性能问题（等所有目标 output 空闲），不是死锁。
 
-### 归约不会在网络上堵死
+### 归约的前进条件
 
-因为有业务层 reduce 的单独 credit 网络，R2R 之间所有请求都能被下游接收（跨 chip 除外），所以 R2R 之间以及 R2Reduce 之间不会形成死锁。
+接收方在用户未准入、前次RMEM仍占用或任务身份不匹配时反压，上游保持当前包上下文。路由与任务链须保持同UID的归约顺序，将相互等待的数据流分配到可前进的VC，并保证上下文最终收到退休或槽复用通知。
+
+全局前进性按具体路径、VC分配及任务依赖验证；本地准入检查不代替循环等待论证。
 
 ### VC 怎么分才不死锁
 
@@ -1084,10 +660,10 @@ Broadcast 是单向传播树，物理上天然无环：同 Router 内是 input �
 
 | VC | 承载 | 容量 |
 | - | - | - |
-| VC3 | 只做逐级 reduce | 16 KB |
-| VC0 / VC1 / VC2 | 除 reduce 外的全部操作类型，软件按数据流分配 | 各 8 KB |
+| VC3 | 逐级Reduce | 默认private20flit，与该方向其它VC共用20flit shared池 |
+| VC0／VC1／VC2 | 其它操作类型，软件按数据流分配 | 各private20flit，共用该方向shared池 |
 
-VC 数取 4，是因为目前最复杂的场景里一个 Router 最多同时经过 4 条同向数据流。逐级 reduce 单独占一个 VC 有三条理由：这类数据基本不进 core，在 Router 里直接与 core 内的数据求和；绝大多数场景都存在逐级 reduce；reduce 要求整包缓冲，每个 VC 都支持 reduce 的话 buffer 尺寸过大。三个传输方向各一套，VC Buffer 合计 (16 + 8 × 3) × 3 = 120 KB。
+VC数取4，VC3承载归约，VC0～2由软件分配其它流量。每方向默认4×20+20=100flit，payload为25KiB，含32B头为28.125KiB。RMEM的用户上下文与网络VC缓冲分别计算容量。
 
 软件分配 VC 时两条原则的力度不同：可能互相阻塞导致**死锁**的数据流必须分到不同 VC，可能互相阻塞导致**性能下降**的数据流尽量分到不同 VC。
 
@@ -1149,12 +725,12 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | Reduce Context SRAM | 16 用户 × 32 KiB，保存当前包的 FP32 中间累加结果 |
 | RMW Pipeline | 首份输入建立上下文，后续方向输入执行 Read-Modify-Write **原位**累加 |
 | Precision Convert | BF16 输入扩展为 FP32；输出按 RouterTable 配置转 FP32 或 BF16 |
-| Downstream Reduce Credit Map | 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：一笔任务每个方向准入一次，按 release 放开 |
+| RMEM任务预留 | 每UID保存任务号、PID及reserved/busy状态，首flit准入时预留；当前任务交付后释放占用 |
 | 循环队列 | ReduceBuffer 本质是一个循环队列：算完的数据从队头搬走，待算的从队尾进；多个用户的数据可以在传输与计算过程中同时存在 |
 | 两种 action | ReduceBuffer ⇒ ReduceBuffer，以及 Core ⇒ 本级 ReduceBuffer |
 | Core 多操作数 | 一笔任务的几份操作数都从本 core 送来时，core 方向按先后把它们分到几路输入，RouterTable 要配这一档特殊模式（线上版《Router》：“Rmem支持一个方向来的多个操作数（需要配置特殊模式），但是不支持操作数精度不一致”）。R core 把在 Matrix Mem 里等齐的两笔送进本级 ReduceModule 相加就走这一档 |
 | 分段传输 | ReduceBuffer 之间把 packet 拆成更小的 segment，一个 segment 下一跳 VC 收得下就能发，用来掩盖 R2R 延迟。**Core 到 ReduceBuffer 相反，要等整包备齐再发**，因为这一段延迟本来就小 |
-| release 时机 | ReduceBuffer 发出一笔就向上游返回一笔 credit release |
+| 完成返回 | RMEM结果尾拍交付后向本级TS返回UID，恢复本级RMEM许可 |
 | 输出 VC | Rmem 允许改写输出的 `vc_id`。改写的落点是包头里那个“下一跳 VC”字段，下一跳 Router 解包直接取，不再查表 |
 | 边缘压缩 | 跨 chip 的边缘 Rmem 自己做精度压缩，减少 PCIe 带宽 |
 | Input/Output Arbiter | 仲裁最多三路输入的 SRAM、Bank 与计算资源 |
@@ -1171,7 +747,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 再加两条来自《通信机制（分析过程）》的边界：
 
 * **整包不分段的那一段决定了容量下界**。Core 必须一次性把 Reduce Token 完整发进 Router 的 ReduceBuffer，不能分段传输，否则效率严重下降。按 8192 × 2 B 算，一个 Token 就是 16 KB，ReduceBuffer 至少要装得下这一个整包。
-* **ReduceBuffer 不得用作流量控制的缓存**。“Reduce 完成后不切 `path_id`，直接从 ReduceBuffer 发起 P2P”这种把两条 path 合并的做法能省一次进出 core，但只在后续 P2P 能立即发出时才允许：发不出去就得把数据压在 ReduceBuffer 里，而 ReduceBuffer 只有一项，一压就挡住后续的 Reduce 事务。发不出去的正确做法是让 Reduce 结果先进本 core 的 Core Memory，用 Core Memory 做流控缓冲。
+* **ReduceBuffer 不得用作流量控制的缓存**。“Reduce 完成后不切 `path_id`，直接从 ReduceBuffer 发起 P2P”这种把两条 path 合并的做法能省一次进出 core，但只在后续 P2P 能立即发出时才允许：发不出去就得把数据压在 ReduceBuffer 里，而 ReduceBuffer 每用户只有一份上下文，该用户的结果阻塞会挡住其后续Reduce任务。发不出去的正确做法是让 Reduce 结果先进本 core 的 Core Memory，用 Core Memory 做流控缓冲。
 
 ### 逐级与非逐级的分界
 
@@ -1182,7 +758,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | 在哪等齐 | 不等，流经就加 | 必须进 core，在 Core Mem 或 Matrix Mem 里等其他来源到齐 |
 | 在哪算 | Router 里 | 等齐之后在 core 内算，或由 DTE 送进本级 ReduceModule 算（R core 走后者） |
 | 次序 | 按序执行 | 允许不同用户之间乱序到达 |
-| 缓冲 | 只缓存最老那个用户的数据 | 每个用户在 core 内等其他来源到齐 |
+| 缓冲 | 16个用户各有上下文，同一用户任务保序 | 每个用户在 core 内等其他来源到齐 |
 | 源的数量 | 最多 3 个：两个上游 core 的分量加一个本 core 的分量 | 不限于 3 个 |
 
 非逐级必须先进 core 等齐，原因是汇聚过程中用户之间会乱序：chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到两个 chip 的汇聚点。Router 里只有一个最老用户的上下文，接不住这种乱序。
@@ -1195,9 +771,8 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 2. Core 判定任务链结束后**向 Router 和 ReduceModule 广播 User Retire**
 3. **Core 的保证**：仅可在该 UserID 的全部进 core、出 core 数据搬运完成、
    且不会再发起新搬运后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包
-4. **Router 的动作**：停止该 UserID 的新发送，删除其全部 stream credit 授权表项
-5. **ReduceModule 的动作**：本地分区当场放，这个用户还有在做的任务就等结果交付完再放；
-   相邻下游映射等在途任务的 Reduce Release 都回来后才清
+4. **Router 的动作**：本级退休只释放进Core用户项，并往三个R2R方向发Stream release。各下游方向授权等待对应下游的release，按来向单独释放
+5. **ReduceModule 的动作**：空闲上下文立即回收，busy或reserved时保留退休标记，待结果交付后回收
 
 ***
 
@@ -1215,14 +790,14 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
   * local 侧禁用，不接收溢流，`stall_way` 只能是留在 VC 等待；credit pulse 无效，`stream_credit` 上电默认 0
 * credit 跨过它走：
   * 上游要检查的 stream credit 对应的是它之后那个落地的 core
-  * 下游还回来的 Stream release 与 Reduce release 按 `RTR_RELEASE_ROUTE` 静态转发，跨过它直接给上游
+  * 下游还回来的 Stream release 按 `RTR_RELEASE_ROUTE` 静态转发，跨过它直接给上游
 * 坏 core 上只配 RouterTable 与 `RTR_RELEASE_ROUTE`。表项一律不进 core（`path_core_bypass = 1`），`op_type` 为 transfer，`stream_table_enable` 与 `stall_way` 为 0
 * 不派角色的好 core 没配任务链、只转发，它的 Router 走正常档，转发与否由表项决定
 
 软件把每颗 chip 的 8 个计算 core 当逻辑 2×4 用，坏 core 改变了物理相邻关系：
 
 * 逻辑上左右相邻的两个 core 物理上隔着坏 core 时，这一跳沿物理 Router 逐跳转发，隔着的坏 core 配一条方向相同、只转发的表项
-* 这一跳在归约链上时，隔着的坏 core 还要配 `RTR_RELEASE_ROUTE`，把从下游一侧进来的 Reduce release 转往上游一侧
+* 这一跳在归约链上时，隔着的坏 core 还要配 `RTR_RELEASE_ROUTE`，按静态Mask将Stream release转往上游
 * 路由表随坏 core 布局铺，**路由表必须作为建模输入参数，不能写死**
 
 ### C2C Bridge
@@ -1236,7 +811,7 @@ Reduce 在 Router 内部完成，不占用 core 的计算单元。
 | RX Engine | 拼包：按 `seq_id` 缓存，一个 flit 拆出来的段到齐就还原这个 flit 交给 core；位宽 1024 转 2048 |
 | AXI Bridge | Credit 与 AXI4 协议转换；同向数据与 credit release 仲裁（小包优先）；反向 demux 分流 |
 
-VC Buffer 规格，合计约 138.7 KB：
+VC Buffer 规格，合计135KiB（按288B/flit）：
 
 * TX 方向：Private 20 flits/VC × 4，加 Shared 约 20 flits，覆盖本级 R2R 往返约 20 cycles
 * RX 方向：Private 80 flits，加 Shared 约 300 flits，覆盖 PCIe 往返 600 ns @1024-bit
@@ -1266,23 +841,11 @@ AXI 侧的两处特殊处理：
 * **由软件负责写入相同配置并保证三方一致，Router 硬件不同步外部副本**
 * 软件只能在 Router 提交完成后再写 DTE 和 ReduceModule
 
-### 出核前的资源监听（旧资料接口，待统一）
+### TS方向许可与Router返回
 
-旧Router MAS将事件监听放在Router；当前TS详设采用本地三方向Credit Ctrl，不向Router发送资源注册。本节完整保留旧事件队列的字段与过程，供Owner统一接口；它不定义当前TS的外部协议。旧监听走三步：
+TS按Head相对年龄登记每SID的Current TID与新增方向，所有需求方向原子满足后扣账、置已用方向并READY。Fire Hold保存完整命令直到RV接受。
 
-1. TS 发送注册事件
-2. Router 查资源
-3. 满足后通知 TS 调度搬运任务
-
-* 监听事件队列：**16 项全相连**，可同时监听多笔多方向的资源申请
-* TS 注册时带 UserID、StreamID、TaskID、PathID；Router 按 PathID 查到需要发送的下游方向、
-  VC 需求与 stream 需求，申请到就通过反向控制通路通知 TS（回 StreamID、TaskID、PathID）
-* 申请不到就把需求记进队列监听，资源满足再通知
-* 多个事件同时满足时按 StreamID 仲裁，选最老的任务通知 TS
-* 进 core 重发的任务也注册到该队列，数据进 Core、资源就绪后通知 TS 重发
-* 同一 VC 的数据包要保序，当前 VC 有未重发完的数据时后续包不能提前发送
-
-> **取舍**：旧方案把事件监听放Router以减少TS通信状态；新TS方案用三方向计数和Pending请求在本地授权。实体Stream表、旧事件监听与DTE cache如何衔接仍待Owner统一，不能把两套Grant协议同时接入。
+Router按用户和方向保存实体授权。收到Stream release时，先删除来向用户项，再按TS公布的持有方向生成对应的valid-only返回；未持有方向及纯转发流量不产生额外返回。同VC重发的待处理计数与重发完成通知独立维护。
 
 ***
 
@@ -1296,7 +859,7 @@ AXI 侧的两处特殊处理：
 | 单跳延迟 | ≤6 cycles（六级流水线），优化后 4～5 |
 | RouterTable | 64 条表项 |
 | VC | 每输入方向 4 类（VC0～3），输出方向不设 VC Buffer |
-| VC Buffer | Private 每 VC 20 flits（覆盖 RTT，软件可配，防死锁下限 2）加每方向 Shared Pool 约 20 flits，合计 100 flits/port ≈ 25 KB；SRAM 实现 |
+| VC Buffer | Private 每 VC 20 flits（覆盖 RTT，软件可配，防死锁下限 2）加每方向 Shared Pool 约 20 flits，合计 100flit/port，payload25KiB、含头28.125KiB；SRAM 实现 |
 | flit 存储位宽 | 2048 bit payload + 256 bit header = 2304 bit = 288 B |
 | R2R 往返 | ≤ 20 cycle（shared pool 深度的依据） |
 | Crossbar | 5 入 7 出，每 cycle 最多 7 组 input → output 交换 |
@@ -1307,40 +870,30 @@ AXI 侧的两处特殊处理：
 | Rmem per-port buffer | ASM-07 记 128 flits，Area 预算记 3 port × 32 flits，**未解** |
 | ReduceBuffer 容量 | 通信机制记 8K × FP32 = 32 KB，正反双份 64 KB；Router MAS F-044 记 16 用户 × 32 KiB，按 FP32 驻留算，一个分区最多 8192 个 FP32。按 MAS |
 | Reduce 加法器 | 256 B × 1 GHz × 2 输入 = 512 GB/s |
-| 进核数据缓冲（in_core_fifo / OutputBuffer） | Router → DTE 方向 60 flits ≈ 16.9 KB；HAS 把它记在 Router 外的 DTE-local 桥接，本套文档放在 CoreStation |
+| 进核数据缓冲（in_core_fifo / OutputBuffer） | Router → DTE 方向 60 flits ≈16.9KiB；HAS 把它记在 Router 外的 DTE-local 桥接，本套文档放在 CoreStation |
 | CTRL_NOC 配置时钟 | 800 MHz（R2CU 接口，APB / AXI-lite，32 bit） |
 | 错误四类 | Link 错误、包长度不匹配（VA 阶段查 pkt_length 是否超过目标端口 buffer 能力）、Credit Overflow、Credit Underflow；后两类硬件自动把该 VC 的 credit 复位到固定初值 |
 | Reduce 输入 | 三路各 160 GB/s |
 | Reduce 输出 | 160 GB/s |
 | Reduce 算力 | 80 GFLOPS（FP32 / BF16） |
 | ReduceModule 上下文 | 16 用户 × 32 KiB |
-| 监听事件队列 | 16 项全相连 |
-| C2C Bridge | 全 chip 4 个，VC Buffer 合计约 138.7 KB |
+| TS方向Pending | 每SID一项，保存Current TID与新增方向 |
+| C2C Bridge | 全 chip 4 个，VC Buffer 合计135KiB（按288B/flit） |
 | 坏 core | 中间两列 chip 每颗 2 个（core2、core7），第一列与最后一列 chip 没有 |
 
-包结构。硬件包头 16 B、软件包头 16 B，合计 32 B：
+包头固定32B，字段按DTE与Router共同使用的位布局编解码：
 
-| 字段 | 宽度 | 说明 |
+| 字节／位 | 字段 | 用途 |
 | - | - | - |
-| Reserved | 7 B | 保留 |
-| Hardware Used | 1 B | `Bypass` 1 bit：Router 为 reissue 做保序；`Bad packet` 1 bit：计算途中发现 ECC 之类的问题。**软件不可改** |
-| `UserID` | 2 B | 这个包属于哪个用户 |
-| Reserved | 1 B | 保留 |
-| `PathID` | 1 B | 每级 RouterTable 按它查路由信息，有效 6 bit |
-| `CoreMask` | 2 B | Router 按它决定进不进本 core |
-| `size` | 2 B | 包的大小，**含包头** |
-| 软件包头 | 16 B | 软件自己读写，硬件不解析也不修改 |
-| 业务数据 payload | 0 B～(64 KB − 32 B) | |
+| Byte0，[255:248] | path_id | 8bit字段；当前RouterTable有64项，使用0～63 |
+| Byte2～3，[239:224] | core_mask | 按路由表决定是否投递本Core |
+| Byte5，[215:208] | loopback／Hardware Used | 其中[3:2]保存VCID，转发按nxt_vc改写 |
+| Byte6～7，[207:192] | pkt_length | 含32B头的总长度 |
+| Byte8～9，[191:176] | user_id | 用户身份 |
+| Byte16～31，[127:0] | sw_aux | 软件辅助信息，保持、不参与加法 |
+| 其它字节 | Reserved | 按包头来源保持或置0 |
 
-包里没有 `task_id`，也没有 `vc_id`：
-
-* `task_id` 是 core 内的东西。出核时 `path_id` 由 RV 随配置写给 DTE、`size` 由 RV core 配寄存器，DTE 拿这两样改写包头；入核时异步 datain 任务由软件识别包头后把 `task_id` 写进 CSR
-* **每一级用哪个 VC 记在 RouterTable 里**，包按 `PathID` 索引到表项，从表项拿 VC，不靠包头带
-
-本文其余各节用到的两个包头位，落在上表的哪里：
-
-* `overflow_reinject` 就是 `Hardware Used` 里的 `Bypass` 位。包进 core 暂存时置 1，出 core 重发时改回 0，Router 靠它给 reissue 保序
-* 当前仿真携带reduce_seq辅助归约任务归属；DTE详设32B包头没有冻结该字段的位置，不将它写入Reserved位的用法当作硬件编码。
+Packet最短32B；16bit含头长度限制下，8B对齐最大65528B。head/tail显式传递，长度另作校验。task_id属于Core内任务身份；当前模型的reduce_seq及远端落点属于诊断／软件兼容上下文，硬件头中没有冻结其位置。DataIn TID由TS入口匹配，不由kernel改写包头推断。
 
 Header 与 Payload 走**两根独立并行总线**：
 
@@ -1355,9 +908,7 @@ Header 与 Payload 走**两根独立并行总线**：
 | - | - | - |
 | R2R 方向端口 | 三个：left / right / mid（HAS） | MAS 写“上、下、左、右及 Core 五个方向” |
 | Reduce 做在哪 | Router 内的 ReduceModule（MAS） | HAS 写 Router 内不设 Reduce Buffer，累加由独立的 Rmem 子系统完成，经 reduce_0/1/2 三端口接入 |
-| Reduce credit 谁维护、什么粒度 | 本级由 TS 按用户记，ReduceModule 按 UserID 加方向、按任务维护相邻下游，Router 不维护（MAS） | HAS 写 reduce credit 是单独的流控网络，core 与 reduce 之间按 user 粒度、reduce 之间按 flit 加 user 双粒度 |
 | stream credit 表 | Router 是唯一有效状态，DTE 持 cache（MAS） | HAS 写 Router 输出单元与 core 内各持一份 credit table，靠 credit release 接口同步 |
-| 资源监听队列 | 在 Router，16 项全相连（MAS） | 同一份 MAS 另一处写“功能已转移到 DTE 中” |
 | 仲裁粒度 | flit 级，整包只作为贪婪仲裁的优先级偏好 | MAS 有一节“Interleave 和整包的对比”只列两案优劣、未给结论；MAS 正文与 HAS 都是 flit 级 |
 | R2R 带宽 | 256 GB/s（接口理论值）与 210 GB/s（HAS 的有效带宽）两个都记 | 两份分别只给其中一个 |
 | `vc_id` 位宽 | 按 VC0～3 | HAS 的包格式表里 `vc_id 5-bit（V≤24）` 是 2026/08/19 缩减 VC 之前的残留 |
@@ -1381,9 +932,6 @@ Header 与 Payload 走**两根独立并行总线**：
 * **为什么 Reduce 不允许降级**
   * 若允许绕过 Reduce 直接存储或转发，下游收到的是未归约的原始数据
   * 下游并不知道这件事，也没有补做归约的机会。宁可反压
-* **为什么退休时 ReduceModule 的下游映射要等 Release 回来才清**
-  * Retire 只说明 core 侧的搬运结束了，而 ReduceModule 发往相邻下游的任务可能还没做完
-  * 本地分区当场放，只留下游映射；等下游各方向在途任务的 Reduce Release 都回来才清，旧 Release 才不会落到复用这个 UserID 的新用户上
 * **为什么结果按 flit 出，不等整包**
   * 逐级 reduce 的每一跳不必等整包收齐，各路首 flit 到了结果首 flit 就能往下一跳走，每跳省掉一整包的收包时间
   * 代价是包发出首 flit 后要占着出口等后面的结果

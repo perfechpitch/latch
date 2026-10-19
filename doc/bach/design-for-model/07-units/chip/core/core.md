@@ -125,9 +125,9 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1422" y="461" font-size="8.5" fill="#9ca3af" text-anchor="end">src/rv32 逐条执行，一拍最多两条</text>
 <rect x="1104" y="530" width="330" height="150" rx="4" fill="#f8fafc" stroke="#374151"/>
 <text x="1116" y="551" font-size="11" fill="#111827" font-weight="600">DTE DSA（五Channel十lane）</text>
-<text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（非法头断言）· Commit（双 Bank，Bank0 优先）</text>
+<text x="1116.0" y="568.0" font-size="8.5" fill="#475569">Header Parser（结构化Packet错误）· Commit（全局16Entry）</text>
 <text x="1116.0" y="581.5" font-size="8.5" fill="#475569">5通道 · RD驻留1项 · WR TaskQ4项 · 每通道Buffer8KB</text>
-<text x="1116.0" y="595.0" font-size="8.5" fill="#475569">中间 Buffer 约 8 KB（read-ahead credit）</text>
+<text x="1116.0" y="595.0" font-size="8.5" fill="#475569">每通道8KB，共40KB；读请求预留响应槽</text>
 <text x="1116.0" y="608.5" font-size="8.5" fill="#475569">WR Finish回写Entry · SM/Ack全局顺序退休</text>
 <text x="1116.0" y="622.0" font-size="8.5" fill="#475569">HeaderTable800B · 每Stream32项Hardware Used</text>
 <text x="1116.0" y="635.5" font-size="8.5" fill="#475569">全局TaskQ16条持有至退休 · 模板8×128B</text>
@@ -162,7 +162,7 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1029.0" y="1078.0" font-size="8.5" fill="#475569">CoreStation：HeaderFIFO · OutputBuffer · 三态准入 · 进出 core 并行</text>
 <text x="1029.0" y="1091.5" font-size="8.5" fill="#475569">ReduceModule：16 用户 × 32 KiB · RMW FP32 累加</text>
 <text x="1029.0" y="1105.0" font-size="8.5" fill="#475569">RouterTable / CSR（64 项，多副本提交）· CoreMem 重发</text>
-<text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · CoreMemCreditMonitor（监听事件队列 16 项全相连）</text>
+<text x="1029.0" y="1118.5" font-size="8.5" fill="#475569">Retire · 实体用户表 · TS方向归还</text>
 <text x="1812" y="1145" font-size="8.5" fill="#9ca3af" text-anchor="end">每 Core 一份；坏 core 上只有它步进，处在透传档</text>
 <polygon points="125.0,44 228.0,44 219.0,74 116.0,74" fill="#f8fafc" stroke="#374151"/>
 <text x="172.0" y="58.0" font-size="9" fill="#374151" text-anchor="middle">async_int → SCP</text>
@@ -256,14 +256,14 @@ core MAS 的模块表还列了四个不单独成文档的模块：
 <text x="1524" y="573.0" font-size="8.5" fill="#4b5563" text-anchor="start">　user_id · task_id）/ task_ack；rv_done（stream_id ·</text>
 <text x="1524" y="586.5" font-size="8.5" fill="#4b5563" text-anchor="start">　user_id · task_id）</text>
 <text x="1524" y="600.0" font-size="8.5" fill="#4b5563" text-anchor="start">RV core ↔ DSA：dsa_cfg：dsaw / dsawi 写寄存器 +</text>
-<text x="1524" y="613.5" font-size="8.5" fill="#4b5563" text-anchor="start">　写 trigger 启动；dsar / dsari 读不阻塞，按 dsa_rq</text>
+<text x="1524" y="613.5" font-size="8.5" fill="#4b5563" text-anchor="start">　写 trigger 启动；dsar/dsari请求受ready限制，返回按dsa_rq</text>
 <text x="1524" y="627.0" font-size="8.5" fill="#4b5563" text-anchor="start">　顺序写回 gpr</text>
 <text x="1524" y="640.5" font-size="8.5" fill="#4b5563" text-anchor="start">DTE RV core ↔ Core Mem：cm_lsq（固定读回 1056 bit，</text>
 <text x="1524" y="654.0" font-size="8.5" fill="#4b5563" text-anchor="start">　32 bit / 拍）；DTE RV core ↔ Router：Router I/O reg。</text>
 <text x="1524" y="667.5" font-size="8.5" fill="#4b5563" text-anchor="start">　这两条只有 DTE 列有，图中不单画</text>
 <text x="1524" y="681.0" font-size="8.5" fill="#4b5563" text-anchor="start">三个 R2R 方向各 256 B/T 双向，接相邻 core 的 Router</text>
 <text x="1524" y="694.5" font-size="8.5" fill="#4b5563" text-anchor="start">　或 chip 边界的 C2C Bridge；线上跑 flit，另有</text>
-<text x="1524" y="708.0" font-size="8.5" fill="#4b5563" text-anchor="start">　vc_release / stream_release / reduce_release 回程</text>
+<text x="1524" y="708.0" font-size="8.5" fill="#4b5563" text-anchor="start">　vc_release / stream_release 回程</text>
 <text x="20" y="1298" font-size="10.5" fill="#374151" text-anchor="start">Core 不打拍，是装配容器：构造上面全部模块，按各单元文档声明的端口组对接，坏 core 也一样构造，只是只有 Router 步进。Router 贴底边朝 chip 中部：data_L / data_R 走左右，data_UD 走底边。</text>
 </svg>
 ```
@@ -315,7 +315,6 @@ Core 对外只有 Router 的三个方向与 ctrl_noc；core 内单元之间的�
 port data[d] (双向, credit/release, clk)         // d ∈ {L, UD, R}：Router 的一个 R2R 方向，由 chip 接线
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
   in  stream_release_valid · stream_release_user[15:0]
-  in  reduce_release_valid · reduce_release_user[15:0]
   in  vc_release_valid · vc_release_vc[1:0]
   out 同字段
 port cfg (slave, ctrl_noc 写事务, clk)           // ctrl_noc 端点 → core 内各模块的 cfg 口

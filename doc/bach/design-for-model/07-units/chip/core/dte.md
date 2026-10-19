@@ -729,15 +729,11 @@ stall_cycles = count(valid && !ready)
 
 ### 波形观测（Perfetto 十条轨道）
 
-DTE 在波形里另留了逐拍事件，供 trace2perfetto 把每个任务的读/写两半画成十条轨道：
+Regfile 在写 CFG_TRIGGER 时产生 dsa_trigger，携 Trigger 快照身份；dsa_trigger_cfg_count 记录此前 Config 区19个字段的写入次数，Trigger 和 Template 写不计入。该计数供 DTE-Core 的 cfg_count 参数使用。
 
-- **Regfile** 每笔任务发一个触发脉冲：`dsa_trigger`（写 `CFG_TRIGGER` 那一拍，F65），带这一笔配置写送进来的 STUPV 身份；同一拍再发标量 `dsa_trigger_cfg_count`，是这笔任务写 trigger 前 Config 区任务配置寄存器（`0x004`~`0x04C`，即 19 项）被写了几次（`cfg_write_cnt` 每写一次 +1，写 trigger 那一刻锁进 `trig_cfg_count` 再清零，好让下一笔任务重新数；`CFG_TRIGGER` 是提交位不算、Template 区 `0x1000+` 是持久配置不计）。它让 `trace2perfetto.py` 的 `DTE-Core` 段 args 能带上一笔任务配置了多少个寄存器。旧的 `dsa_cfg_start`（第一次写 Config 区那一拍）信号 C++ 里仍照发，但原来那条「配置 → 触发」的 `dte_rvcore` 轨道已删，Python 侧不再读它。
-- **五条 Lane** 各发四个脉冲，把这一半的读/写拆成两条轨道：读侧 `rd_start`（RD 半在 Activate 里激活这个任务那一拍）→ `rd_done`（RD Hold 的响应全部返回后，在 Report 中报告完成那一拍），写侧 `wr_start`（WR 半激活）→ `wr_done`（最后一拍 wreq 发完、在 Finish 中转入 Hold 并调用 MarkWreq 那一拍）。四个脉冲的身份统一取 desc 的 `task_id` / `user_id`——读写两半各自从激活到做完带的是同一份 desc，进核/出核两侧都配对得上（旧版只用 rresp/wreq 两脉冲，进核 rresp 走包头 Message 身份对不上 desc，才换成这套激活→做完）。
-- **四份内容与位置**：`rd_start` / `wr_start` 那一拍另发四份内容（head/data/scale/topk）的字节数——head 是固定 32 B 的包头上下文（进核丢头时写侧记 0），data/scale/topk 是这笔任务按 `ByteProfile` 拆出的字节数（段长统一按字节，scale/topK 看任一端 tag）。同一拍再发各份内容从哪里读 / 写到哪的位置编码 `rd_start_head_loc`~`rd_start_topk_loc` 与写侧 `wr_start_*_loc`：0 = none（这一半不搬这份内容，长度 0）、1 = Hmem（包头上下文表）、2 = Core Mem、3 = Matrix Mem、4 = Router（进核的源端 / 出核的目的端）、5 = MU（topK_ep_table）。读侧按 route 与段端点译码定源端：data/scale 进核从 Router、出核落 Core Mem（CmToRouter）或 Matrix Mem（其余）；topK 进核从 Router、出核从 MU 的表；head 进核从 Router、出核从段 0 的源端读回。写侧同理定目的端：data/scale 进核按 route 落 Core Mem/Matrix Mem、出核发 Router（MM→CM 落 Core Mem）；topK 进核与 MM→CM 写进 MU 的表、发 Router 的出核随包发出去；head 进核按 `hw_header_op` 保存到段 0 的目的端或丢弃（丢弃时记 none），出核发 Router 作包头拍，core 内搬运写到段 0 的目的端。
+五个 Channel 各有 lanN_rd、lanN_wr 两条轨道。rd_start／wr_start 标记对应半通路激活，身份取描述符 UID/TID；rd_done 标记读侧响应排空，wr_done 标记写侧最后请求发出。WR 物理完成还须等写响应与同任务 RD drain_done，全局退休还须等队头和 SM 响应。
 
-trace2perfetto 据此为每个有 DTE 活动的 core 在它进程下挂十条线程：`lan0_rd`/`lan0_wr`~`lan4_rd`/`lan4_wr`（读 = `rd_start` → `rd_done`，写 = `wr_start` → `wr_done`）。段按 (user, task) 配对，身份缺失填 -1。每条 lane 轨道的段 args 再带上四份内容的字节数与位置：`bytes` = data+scale+topk 一共搬的 payload 字节（不含 32 B 包头上下文），`head` / `data` / `scale` / `topk` 各多少字节，读轨道的 `head_rd` / `data_rd` / `scale_rd` / `topk_rd` 与写轨道的 `head_wr` / `data_wr` / `scale_wr` / `topk_wr` 是各份内容从哪读/写到哪（`hmem` / `cmem` / `mmem` / `router` / `mu`，这一半不搬的内容长度 0、位置 `none`）。`dsa_trigger_cfg_count` 按 (user, task) 挂到 `DTE-Core` 那一行的 args（`cfg_count`），不画成轨道。
-
-***
+轨道参数 head/data/scale/topk 记录按内容类别累计的字节数，bytes 不含32B包头。当前位置参数中，包头按段0端点记录；data/scale按Route推断，topK按内容类别推断。多段使用不同端点时，这些参数不能完整表达实际位置，逐段端点观测仍待实现。
 
 ## 6　逐级行为
 
@@ -854,21 +850,6 @@ current/retiring最多两个任务上下文。tail完成current→retiring，RD�
 </g>
 </svg>
 ```
-
-| 当前状态 | 条件 | 更新 |
-| - | - | - |
-| Idle | Tail接纳合法Trigger快照 | Ready；保留FullTaskDesc |
-| Ready | 接纳检查失败 | Except；不占Channel、不发外部请求 |
-| Ready | 命中Channel且RD驻留空闲、WR Q有位、允许下发 | 两侧同拍接纳，置RS并推进对应Ch Ptr |
-| RS | 对应WR lane_finish成功 | Done |
-| RS | 带错误lane_finish | Except，保留首错与原描述符 |
-| Done | SM Ptr且无需SM写 | Waiting Ack，推进SM Ptr |
-| Done | SM Ptr且SM写Fire | SM Outstanding，推进SM Ptr |
-| SM Outstanding | 对应SM bresp | Waiting Ack，置响应标记 |
-| Waiting Ack | Ack Ptr | 退休回Idle；可选TS完成；推进Ack Ptr |
-| Except | Ack Ptr | 迁移首错至Status，停机，Entry保持Except |
-
-Tail为逻辑队尾，Ack为逻辑队头，满状态用occupancy/环回状态区分，不能仅比较4bit指针是否相等。按循环序`Ack≤SM≤每个Ch Ptr≤Tail`。16项是全部已接纳未退休任务的容量，已dispatch任务仍计入。
 
 各Ch Ptr跳过不命中Channel或Except的条目，命中Ready才认领；不同Channel独立前进，同Channel保序。下发Fire、Ready→RS和指针前进必须原子成立；禁止RD成功而WR失败的半下发。
 
@@ -1437,6 +1418,16 @@ ERROR保留异常队头及原描述符，停止SM与退休推进，继续收集�
 控制、异常及观测的模型地址、ERROR和Flush恢复边界保存在TBD。复位及残包终止的硬件协议仍需统一；运行模型使用已确认的位序、STOP反压、多搬运任务最后一条ACK及E2许可提交。
 
 
+### ERROR状态的推进边界
+
+| 范围 | ERROR中的行为 |
+| - | - |
+| RV配置入口 | ready恒高，普通寄存器读写继续接受；Trigger接收后丢弃并清dirty |
+| Commit／全局Entry | 停止新的Channel下发，保留异常队头及原描述符 |
+| 已下发Channel | 保留任务上下文和请求／响应归属，按原接口握手继续处理在途事务；已Fire响应必须收集 |
+| SM／Ack | 停止正常SM写与Ack退休，已经Fire的SM响应继续收集；错误条目不产生正常TS完成 |
+| 恢复 | 清首错不等于取消条目或完成排空；残包终止、恢复和完整Flush协议保留待定 |
+
 ## 控制、异常与配置检查的详细合同
 
 | 错误阶段 | 检查／现场 | 行为 |
@@ -1488,7 +1479,7 @@ rst_n低时rx_rdy、tx_vld、所有Memory请求、RV读返回、TS完成和SM写
 
 已接受任务不受后续Config/模板/CSR写入影响。无效段字段可保留旧值，但不参与执行；软件优先将无关字段写0。FastLUT已取消，PID由请求旁带给出，长度由各段DATA_LEN给出。
 
-用户确认模型允许一个TS任务包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q仍对每条搬运独立保存、执行与退休；原文一Task一Packet限制继续登记TBD。
+一个TS任务可包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q对各条搬运独立保存、执行与有序退休。
 
 ### 32B包头位布局
 
@@ -1504,7 +1495,7 @@ rst_n低时rx_rdy、tx_vld、所有Memory请求、RV读返回、TS完成和SM写
 | Byte8～9，[191:176] | user_id | 改为任务UID |
 | Byte16～31，[127:0] | sw_aux | 保持所读16B |
 
-CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，不沿用当前32B C++字段序列化。
+CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，按固定 32B 位布局序列化。
 
 ### 六种配置场景
 

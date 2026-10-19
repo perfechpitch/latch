@@ -581,7 +581,7 @@ MM→CM和CM→HeaderTable均走OutCh3 Core内写路径；源使用软件物理�
 | Byte8～9，[191:176] | user_id | 改为任务UID |
 | Byte16～31，[127:0] | sw_aux | 保持所读16B |
 
-CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，不沿用当前48B C++字段序列化。
+CM/MM地址A+4k的32bit字等于header[32k+31:32k]，k=0～7，不按字段作字节翻转。故path_id在A+31，sw_aux在A+0～15。16bit字段的多字节含义按上表bit位置编解码，按固定 32B 位布局序列化。
 Packet总长度为32B硬件头加各使能数据段长度。地址与长度按8B软件约束，16bit总长度最大65535，可编码的8B对齐总长度最大65528。大于32KiB的数据可流式经过Buffer；32KiB是每用户RMEM归约上下文容量，不是通用DTE搬运上限。
 
 归约模型payload另有16B兼容前缀，Router加法跳过它；该前缀与32B头内sw_aux分别计算，硬件是否继续保留前缀尚未统一。
@@ -662,7 +662,7 @@ valid且未ready时全部请求字段保持。Fire后不可撤销；RV kill只�
 
 已接受任务不受后续Config/模板/CSR写入影响。无效段字段可保留旧值，但不参与执行；软件优先将无关字段写0。FastLUT已取消，PID由请求旁带给出，长度由各段DATA_LEN给出。
 
-用户确认模型允许一个TS任务包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q仍对每条搬运独立保存、执行与退休；原文一Task一Packet限制继续登记TBD。
+一个TS任务可包含多个DTE搬运条目，仅最后一条开启ack_ts_en。全局Q对各条搬运独立保存、执行与有序退休。
 
 ### 一次配置要写的参数
 
@@ -889,11 +889,19 @@ CM/MM逻辑256B请求由两个连续128B地址组成，两路ready都满足才Fi
 
 MM遇到MU同bank访问时遵循M Top/存储仲裁与反压，DTE保持请求；不同端口的迟到响应不得串给下一Entry。topK与MM共用M Top端口，sel区分，topK仅[0]路连续两笔128B。MM mask写需计入RMW路径，不将256B写mask当作两块独立随意写入。
 
+### ERROR状态的推进边界
+
+| 范围 | ERROR中的行为 |
+| - | - |
+| RV配置入口 | ready恒高，普通寄存器读写继续接受；Trigger接收后丢弃并清dirty |
+| Commit／全局Entry | 停止新的Channel下发，保留异常队头及原描述符 |
+| 已下发Channel | 保留任务上下文和请求／响应归属，按原接口握手继续处理在途事务；已Fire响应必须收集 |
+| SM／Ack | 停止正常SM写与Ack退休，已经Fire的SM响应继续收集；错误条目不产生正常TS完成 |
+| 恢复 | 清首错不等于取消条目或完成排空；残包终止、恢复和完整Flush协议保留待定 |
+
 ## 与 Router 的边界
 
 ### 入站帧格式
-
-RV Core 配好各段的目的地址和长度并提交任务。RD 侧驻留任务后接收 Packet。RX 是单通道 valid/ready，首 flit 的 32B hflit 与 256B pflit 并行。保存包头时先停一拍，将包头写入 Buffer，再接收首拍 payload；丢弃包头时直接接收 payload。
 
 WR 侧按四段的目的端拆分数据，以 8B 粒度重对齐并形成字节 mask。包头可以写 HeaderTable、CM 或 MM。topK 与其他数据段使用同一段位机制，经 M Top 写入对应端点。
 

@@ -626,8 +626,8 @@ mem 延迟线           FF 阵列   每个 master 端口一条，按各自的固
   <text x="627" y="46" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="250" y="66" font-size="12" fill="#111827">bank_arbiter · 每 bank 每拍授一个</text>
   <text x="250" y="88" font-size="10.5" fill="#475569">1. Core Mem 同组内：DTE 端口先判读写各自的 bank 冲突，再判读写之间</text>
-  <text x="250" y="108" font-size="10.5" fill="#475569">2. Core Mem 非同组：MU &gt; VU = DTE &gt; 重发 &gt; DTE RV core &gt; ctrl_noc</text>
-  <text x="250" y="128" font-size="10.5" fill="#475569">3. Matrix Mem：同 bank 有两个 master → 只授 MU，mmem_err_cnt += 1</text>
+  <text x="250" y="108" font-size="10.5" fill="#475569">2. Core Mem 非同组：MU &gt; VU = DTE &gt; {重发、DTE RV core、ctrl_noc}</text>
+  <text x="250" y="128" font-size="10.5" fill="#475569">3. Matrix Mem：不同party同bank冲突计数并断言；DTE读写同party冲突排队</text>
   <text x="250" y="148" font-size="10.5" fill="#475569">4. 未获授权 → 该 master 的 req_ready = 0，请求原地保持下拍重试</text>
   <text x="250" y="172" font-size="10" fill="#9ca3af">同优先级按先到先得排队，不允许长期饿死</text>
   <path d="M188 55 L231 55" stroke="#475569" marker-end="url(#ars2)" fill="none"/>

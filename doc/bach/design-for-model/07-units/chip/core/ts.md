@@ -2,7 +2,7 @@
 
 模式：design。层次：Core 内单元接口与逐拍状态。本文供 TS 实现及验证人员确定配置、运行状态、资源许可和多源更新的设计合同。
 
-原始依据：[Task_Scheduler_详细设计文档模板](</home/colin/develop/perfechpitch/_refs/Task_Scheduler_详细设计文档模板.md>)，revision 6452；对应 TS-FUNC-001～018。原文的 ACK 编码、RouterTable 物理位域、credit 流水、PC／VCID 缓存、权重触发和部分配置检查尚有分歧，集中在 [文档缺口与 TBD](../../../08-文档缺口与-TBD.md)。本设计陈述目标行为，代码实现状态独立记录在文末。
+原始依据：[Task_Scheduler_详细设计文档模板](</home/colin/develop/perfechpitch/_refs/Task_Scheduler_详细设计文档模板.md>)，revision 6452；对应 TS-FUNC-001～018。原文的 ACK 编码、RouterTable 物理位域、credit 流水、PC／VCID 缓存、整分片加载阶段划分和部分配置检查尚有分歧，集中在 [文档缺口与 TBD](../../../08-文档缺口与-TBD.md)。本设计陈述目标行为，代码实现状态独立记录在文末。
 
 ## 1　定位与边界
 
@@ -295,7 +295,7 @@ flowchart TB
 | SELF_START | 配置保存 Task0 模板；首个已接受 Trigger 同时生成 Bypass 并激活所有启用槽 | Task0 Core ACK 绑定 UID；后续 Trigger 只生成 Bypass；用户完成后本地重生 |
 | 权重加载 | 独立 DataIn PC 有效，weights_loading 标记加载阶段；PC-only DTE 请求其余身份字段为 0 | 丢弃新 ACK/RMEM 返回并暂停已有 FIFO 配对；软件用外部完成保证清 loading，再提交业务配置 |
 
-SELF_START Bypass 使用 SID15/TID63，ACK 被过滤。它与普通计算 Stream 分别持有执行状态。权重请求的生成时点在原文中有分歧；禁止把 WEIGHTS_MODE 置位本身当成搬运完成。
+SELF_START Bypass 使用 SID15/TID63，ACK 被过滤。它与普通计算 Stream 分别持有执行状态。WEIGHTS_MODE置位只进入加载模式；每加载阶段由一个已接受Trigger生成独立PC-only请求。加载完成由数据、写响应和队列排空共同确认。
 
 ## 2　功能清单
 
@@ -851,18 +851,6 @@ SELF_START首Trigger启动匿名槽；独立bc_datain收32B头及6592B逻辑载�
 </svg>
 ```
 
-| 结构 | 基线 |
-| - | - |
-| Task LUT／RouterTable | 各64行 |
-| Stream Map | 16物理槽，启用N=1～16 |
-| Lookup／Prepare／Candidate | 入口各自保留事务；Candidate1项 |
-| TG | 16路，各自搜索token |
-| 双ACK FIFO | 三组×两侧×16条，每条26bit身份 |
-| 方向计数／请求 | 三个5bit计数，16个Pending |
-| RMEM许可 | 每SID一位 |
-| Fire Hold | DTE/MU/VU各1项 |
-| 普通退休Hold | 1项UID/SID/valid |
-
 普通DataIn无反压最短示例为E0保存入口、E1Prepare、E2提交Candidate、E3Fire Hold、E4Core接受。Reduce许可示例为E0进入REDUCE_WAIT、E1占RMEM且READY、E2Fire Hold、E3接受。特殊Bypass最快E0Candidate、E1Fire Hold、E2接受。实际延迟还受对应Hold、执行单元和资源反压限制。
 E表示相邻上升沿，不是模型内部通用accepted端口的往返数。Lookup、Prepare、Candidate、Fire Hold和Core接受分别记录时间；Return先写计数，下一周期参与Grant。
 
@@ -926,10 +914,6 @@ Trigger输入为UID16、PID8、reissue1和valid/ready。保留的dataout_tid6不
 UID查询只匹配entry_valid且uid_valid的行。响应包含hit、SID、`completion_bitmap | datain_claimed_mask`与捕获资格。hit固定当前分配，miss在提交时才获得SID；捕获资格不代表Create已成功。
 
 Prepare使用保存的PID、SID和排除位图查LUT，选择完整有效、同PID且未被排除的最低TID，保存PC、task_type和partner_tid。用户完成或claim使排除信息变化时，先寄存新快照，再重查。Pending/Prepare正在使用的SID与UID查询结果受到退休保护；miss事务也须保留分配空间的使用资格。
-
-Broadcast/reissue0提交搬入Candidate和配对搬出Skip；P2P/reissue0提交双Skip；reissue1提交搬入Candidate，无Skip。普通miss无论是否需要Candidate均创建用户，Current从Task0起，不能从触发的Future TID起步。
-
-Create、Skip、Candidate和claim原子提交，SID一致。Skip送Task Done直接转发，credit_skip只取消已有行的credit wait，不能替代64位完成Skip。Candidate置claim不置completion。Skip-only无需Candidate空位，但仍受Lookup/Prepare和生命周期限制。
 
 Candidate Hold只有1项，字段为bypass、UID、SID、TID、PID、PC。DTE Arbiter接入Fire Hold即交接所有权，允许同拍旧候选移出、新候选写入。候选valid/字段在等待中保持。
 | 事件 | 更新 | 未满足时 |
@@ -1050,14 +1034,6 @@ Create、Skip、claim和Candidate使用同SID，miss建立Task0。skip-only释�
 </g>
 </svg>
 ```
-
-Credit Ctrl有initialized1、Pending valid16、Pending TID6×16、Pending need3×16、credit_count5×3。每SID最多一个Pending，方向返回bit0南北、bit1西、bit2东。
-
-Map提供有效等待SID、Current TID、新方向与Head。Credit Ctrl登记后按年龄试算，每用户所需方向全部足够才获准；试算可以放行多个SID。更老用户刚产生或改变请求、尚未登记时，保护其年龄，暂挡年轻用户提交。
-
-提交前再次匹配等待资格、TID和需求。无效请求清除，试占的预算本拍不再转给后来用户。最终有效Grant无Ready，同沿扣各方向计数、将drct_used按OR置位并将任务READY。实际扣账不等待Core接受或ACK。
-
-归还在沿写计数，下一拍才试分配；归还不清用户drct_used。三个方向初值各为N。计数没有饱和或重复UID检查，外部不得重复／超额归还。Pending/分配最终采用E2还是E3提交，保留为待统一的时序项。
 
 每槽rmem_credit复位／新生命周期为1。REDUCE_WAIT且空间可用时同沿清为0并READY，16槽独立判断；credit_en不改变Reduce资源种类。执行ACK完成可推进链，空间仍0。下一Reduce和用户退休等待归还；不借方向Credit或Fire Hold代替RMEM额度。
 | 同拍事件 | 处理 |
@@ -1432,7 +1408,7 @@ Map提供有效等待SID、Current TID、新方向与Head。Credit Ctrl登记后
 
 提交前再次匹配等待资格、TID和需求。无效请求清除，试占的预算本拍不再转给后来用户。最终有效Grant无Ready，同沿扣各方向计数、将drct_used按OR置位并将任务READY。实际扣账不等待Core接受或ACK。
 
-归还在沿写计数，下一拍才试分配；归还不清用户drct_used。三个方向初值各为N。计数没有饱和或重复UID检查，外部不得重复／超额归还。Pending/分配最终采用E2还是E3提交，保留为待统一的时序项。
+归还在沿写计数，下一拍才试分配；归还不清用户drct_used。三个方向初值各为N。计数没有饱和或重复UID检查，外部不得重复／超额归还。模型按已确认的E2提交；原文E3场景仍待硬件统一。
 ### 已用方向与fork
 用户已持West，本次需求West+East，新增只为East。East不足则整笔等待，但不得再次扣West；下一任务仍向West发时不新申请。VC信用仍每flit检查，TS许可不能保证数据链路当拍可发。
 
@@ -1515,7 +1491,7 @@ Map提供有效等待SID、Current TID、新方向与Head。Credit Ctrl登记后
 
 软件将需要业务资源的方向写入TS RouterTable。Core连接按真实release归还TS已取得的方向许可，Data NOC转发方向由独立RouterTable配置。Reduce使用Core与DTE双ACK，RMEM返回独立处理。
 
-APB访问检查地址、完整字写入和提交完整性；配置错误阻止普通模式及SELF_START启动。ATTR写入分别过滤send、recv和type的保留编码，保留对应旧字段，其余合法字段照常更新；boot辅助接口使用相同规则。原文尚未统一的寄存边界、权重触发时点和检查清单保存在TBD。
+APB访问检查地址、完整字写入和提交完整性；配置错误阻止普通模式及SELF_START启动。ATTR写入分别过滤send、recv和type的保留编码，保留对应旧字段，其余合法字段照常更新；boot辅助接口使用相同规则。原文尚未统一的寄存边界、整分片加载阶段划分和检查清单保存在TBD。
 
 ## 9　取舍
 

@@ -161,7 +161,7 @@
 
 * Host CPU、Node CPU、tray CPU（源文档叫 Board CPU）的业务流控与退出、动态专家调度（第 2 章“业务流控与退出”）。LPU Dispatch 的派遣规则（所有 R core 有余量才派遣）放在入口桩里。
 * Debug Module、DTM、GDB。
-* 异常、ECC、看门狗、功耗类机制（RV core 九类异常、MU Drain & Trap、VU error_code、TS Except_Check、DTE 首错保留、DIDT 分级、零输入门控、MU 与 VU 错峰）。各单元给这些机制留出状态位与接口名，本轮不实现其行为。
+* RV core完整异常、MU Drain & Trap、看门狗、DIDT分级、零输入门控及MU/VU错峰仍属简化范围。TS配置检查、DTE首错/状态控制和VU错误状态已有实现，具体支持范围由各单元定义。
 * RV core 的流水线细节：pc_gen、loop_bp、decode、dispatch、gpr 端口、SEU 的乘除多拍、DTCM 的 bank 冲突。它们折算进发射那一拍，一拍最多双发射两条。
 
 ***
@@ -209,7 +209,7 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 | 硬件里的资源 | 排队怎么排 |
 | - | - |
 | 独占且先到先得（bank 端口、Lane、Xbar 出口） | 独占仲裁器，等待队列先进先出 |
-| 按年龄或固定优先级（TS 三条发射通路、Cmem 的 MU > VU = DTE、DTE Commit 的 Bank0 > Bank1） | 优先级仲裁器，等待队列按优先级、请求拍、插入序排 |
+| 按年龄或固定优先级（TS 三条发射通路、Cmem 的 MU > VU = DTE、DTE 共享端点读写仲裁） | 优先级仲裁器，等待队列按优先级、请求拍、插入序排 |
 | 计数额度（Stream 坑、VC credit、Reduce credit、TaskQueue 项数、DTE Buffer credit、CH1 outstanding） | 计数信号量，get 队列队首阻塞 |
 | 多方向一次性扣减（多播原子准入、广播任务一次扣掉全部目的数、Commit 的三项配对接纳） | 全部方向都够才一起扣，任一不足整体不发 |
 
@@ -251,7 +251,7 @@ src/bach/
   ip/
     module_base.h                  模块基类：Cycle() = DelayCycle(1) + Step()，Step() 内不让出
     node_context.h                 每个节点都有的编号、参数表与记录器
-    wiring.h                       接一条双向物理链路（数据端口对 + 三种 release 端口）
+    wiring.h                       接双向物理链路（数据端口对及VC/Stream两类归还）
     lpu.h                          LPU 装配：构造 48 个 Chip、按 12 × 4 网格接 C2C、接 PCIe Switch 与片外桩
     lpu_grid.h                     全局坐标换算：(tray, 层, 列) ↔ (gx, gy)，片外节点与跨 chip 网关的坐标，按列给 core_bad_mask，按角色分配表生成 logical_map
     bundle_load.h                  读 bundle 里那份 .bachir，按记录名把配置分发到各 IP 的配置口
@@ -277,7 +277,7 @@ src/bach/
           coremem_reissue.h        stall_way、Bypass 映射成进核加出核、同 VC 保序
           reduce_module.h          16 用户分区、RMW 累加、结果流水、Reduce credit
           retire.h                 Retire 广播与两处回收
-          credit_monitor.h         监听事件队列 16 项全相连
+          credit_monitor.h         模型兼容模块，业务许可由TS维护
         ts/
           cfg_reg.h                task_chain 64 项、datain_task、ROUTER_TABLE、配置检查、按 PID 找搬入任务
           user_match.h             判用户、找搬入任务、定跳过，含 DataIn_task_table
@@ -628,10 +628,10 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 ### 简化
 
 * **RV core 不建流水线**：kernel 是真实 RV32 程序，双发射顺序执行、一拍最多两条，访存与 DSA 读的延迟记在 gpr 就绪表上；分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争不体现。
-* **目标建模范围**：TS配置失败／重试、DTE合法性和结构化Except、有序首错、STOP/RUN/ERROR、状态回读和写响应等待需要实现；ECC需可注入端点不可纠正错误。看门狗／功耗及未冻结的异常位域、Flush终止细节保留TBD。当前代码未实现这些目标能力。
-* **TS 直接启动 DTE、DTE 的 3 Lane 方案、DSA-RF 调试通路不建**。
+* **当前错误处理范围**：TS配置失败／重试、DTE合法性和结构化Except、有序首错、STOP/RUN/ERROR、状态回读及写响应等待已实现。端点错误注入不等于SRAM ECC编码、纠错和回写。看门狗、功耗、未冻结异常位域及Flush终止协议继续保留TBD。
+* **TS 直接启动 DTE、DTE 的 3 Lane 方案、完整片外DSA调试链不建，VU配置接口的RF后门已实现**。
 * **Router 的输出移位拼接不建**：flit 定长 256 B，尾 flit 带有效字节数。
-* **一个 token、每个 EP 组内两个激活专家，默认按 EPTP-NK 切**：分片的方向与尺寸都照真实的来。每个专家的权重完整形状是 6144×2048（W2 是 2048×6144），FC1、FC3 chip 间切 N、chip 内切 K，每 core 的 W1、W3 是 K768×N256，W2 是 K256×N768。token 与权重用 MXFP8，MU 原语是 1×K128×N64 与 1×K64×N128，MU 输出与 Router reduce 的输入输出用 BF16。每 core 装两个专家的 W1 / W3 / W2 约 1.2 MiB。共享专家、多个 token 连着跑与派遣那一档不在里面。
+* **数值基线按 EPTP-NK 切分**：分片的方向与尺寸都照真实的来。每个专家的权重完整形状是 6144×2048（W2 是 2048×6144），FC1、FC3 chip 间切 N、chip 内切 K，每 core 的 W1、W3 是 K768×N256，W2 是 K256×N768。token 与权重用 MXFP8，MU 原语是 1×K128×N64 与 1×K64×N128，MU 输出与 Router reduce 的输入输出用 BF16。每 core 装两个专家的 W1 / W3 / W2 约 1.2 MiB。共享专家的完整部署仍需单独覆盖；连续32／128-token场景已有回归，注入时机与额度由测试入口控制，不能据此推断GPU与DPU派遣协议已完整实现。
 * **权重走数据面只建一颗 chip 那一档**：weights 加载模式的一整段照真实的建：配 `WEIGHTS_MODE`、包按 `path_core_mask` 落进指定 core、loader 数搬进来几笔、数够了切业务模式。更大规模那两份的权重用后门铺进 Matrix Mem：三百八十四个 core 合约 446 MiB，按一包 16 KB 约 2.9 万个包，逐包搬跑不完。
 * **时间常数未校准**：第 5 章标“偏小”“带问号”的值与第 8 章的冲突项都是配置值，支持同参数下的相对比较，不是绝对性能预测。
 
@@ -653,10 +653,10 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度、dsa_iss 收请求的队列深度 | 2、3（执行器按上一拍的 req_ready 决定发不发，req_ready 拉高后路上最多还有两笔，队列留出这两笔的位置） |
 | TS Stream Map更新 | 按字段合并Completion/Skip，TG目标冲突取消，Issue/Grant无重试；生命周期优先保护 |
-| `reduce_in_mask` 的逐核取值 | 按 path 图推导；中间列 chip 坏 core 那个例子里的逐核取值还没回填 |
+| `reduce_in_mask` 的逐核取值 | 按path图推导；编译器生成逐核值，Router单元文档保存中间列实例 |
 | Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
 | `dsar` 与 `dsari` 的区分位 | 《ISA 描述表》给了九条自定义指令的完整编码，逐条见 RV core 那一份文档。只有这两条的编码在表里完全相同，模型按其余四条的规律用 bit31 区分 |
-| MU、DTE 的寄存器地址映射 | `regmap.h` 临时映射 |
+| MU、DTE寄存器映射 | MU模型由`mu/regfile.h`定义；DTE Config/Template已按详设定义，控制及观测域的硬件偏移仍待统一 |
 | Mmem MU 读延迟 | 8T |
 | Cmem 的 MU 写延迟 | 16T |
 

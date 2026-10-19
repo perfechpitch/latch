@@ -539,7 +539,7 @@ const SCENES=[
         "act":["k0_0","k0_1","k0_2","k0_3","k1_0","k1_1","k1_2","k1_3","k2_0","k2_1","k2_2","k2_3","k3_0","k3_1","k3_2","k3_3","k4_0","k4_1","k4_2","k4_3","k5_0","k5_1","k5_2","k5_3","k6_0","k6_1","k6_2","k6_3","k7_0","k7_1","k7_2","k7_3","k8_0","k8_1","k8_2","k8_3","k9_0","k9_1","k9_2","k9_3","k10_0","k10_1","k10_2","k10_3","k11_0","k11_1","k11_2","k11_3"],
         "eact":["h0_0","h0_1","h0_2","h1_0","h1_1","h1_2","h2_0","h2_1","h2_2","h3_0","h3_1","h3_2","h4_0","h4_1","h4_2","h5_0","h5_1","h5_2","h6_0","h6_1","h6_2","h7_0","h7_1","h7_2","h8_0","h8_1","h8_2","h9_0","h9_1","h9_2","h10_0","h10_1","h10_2","h11_0","h11_1","h11_2","v0_0","v0_1","v0_2","v0_3","v1_0","v1_1","v1_2","v1_3","v2_0","v2_1","v2_2","v2_3","v3_0","v3_1","v3_2","v3_3","v4_0","v4_1","v4_2","v4_3","v5_0","v5_1","v5_2","v5_3","v6_0","v6_1","v6_2","v6_3","v7_0","v7_1","v7_2","v7_3","v8_0","v8_1","v8_2","v8_3","v9_0","v9_1","v9_2","v9_3","v10_0","v10_1","v10_2","v10_3"],
         "lt":"收到 → 输出",
-        "logic":[["chip→chip","c2c[d]","flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg"],["chip→chip","","归还  vc_release_vc · stream_release_user · reduce_release_user"],["","链路参数","C2C 64 GB/s · 300 ns，Router 到 Router 400T；跨 tray 纵向 120 GB/s（试算）"]],
+        "logic":[["chip→chip","c2c[d]","flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg"],["chip→chip","","归还  vc_release_vc · stream_release_user"],["","链路参数","C2C 64 GB/s · 300 ns，Router 到 Router 400T；跨 tray 纵向 120 GB/s（试算）"]],
         "ref":"02“机柜内多 tray 互联与 token 派遣”“互联参数”　link.md K1　chip.md F28～F42",
         "rows":[],
         "set":{},
@@ -626,7 +626,7 @@ const SCENES=[
         "act":["rt","ts","dte","drv"],
         "eact":["e_rt_ts","e_ts_rt","e_data_in","e_data_out","e_left","e_mid","e_right"],
         "lt":"收到 → 输出",
-        "logic":[["Router→TS","trigger_ch","user_id · path_id · reissue"],["Router→TS","direction_return / rmem_credit_done","方向valid／兼容UID；RMEM UID／valid"],["TS→Router","req / retire","user_id · stream_id · task_id · path_id ／ user_id → accepted"],["Router↔DTE DSA","in / out_core_data_ch","tdata[2047:0] · tkeep · tlast · thdr（出核加 vc_id）"]],
+        "logic":[["Router→TS","trigger_ch","user_id · path_id · reissue"],["Router→TS","direction_return / rmem_credit_done","方向valid／兼容UID；RMEM UID／valid"],["TS→Router","retire","普通退休UID/单拍valid，无Ready；方向许可由TS内部提交"],["Router↔DTE DSA","in / out_core_data_ch","tdata[2047:0] · tkeep · tlast · thdr（出核加 vc_id）"]],
         "ref":"router.md 接口　ts.md 接口　09-router-corein-工作细节.html",
         "rows":[],
         "set":{},
@@ -678,7 +678,7 @@ const SCENES=[
     "nodes":[
       {"id":"b_trig","x":44,"y":80,"w":110,"h":60,"fs":10.5,"t":"Router 触发","s":["包头就绪","第一个来自 PCIe","其余来自上一个 B core"]},
       {"id":"b_in","x":170,"y":80,"w":200,"h":60,"fs":10.5,"t":"datain_task · DTE","s":["Router → Matrix Mem","落 head 指向的槽位，DSA 置 head+1","不查 TS credit"]},
-      {"id":"b_mm","x":390,"y":86,"w":230,"h":48,"fs":10.5,"t":"Matrix Mem + Share Mem","s":["≈ 5200 个 6368 B 槽位","head 由链一推，tail 由链二推"]},
+      {"id":"b_mm","x":390,"y":86,"w":230,"h":48,"fs":10.5,"t":"Matrix Mem + Share Mem","s":["6656B跨度，软件可用4085槽","head 由链一推，tail 由链二推"]},
       {"id":"b_chk","x":640,"y":80,"w":160,"h":60,"fs":10.5,"t":"task 0 · MU","s":["check_flag","head == tail 就等","不等 → rv_done"]},
       {"id":"b_bc","x":816,"y":80,"w":180,"h":60,"fs":10.5,"t":"task 1 · DTE","s":["查下游 credit 后放行","Matrix Mem → Router 只发一次","tail+1 · END"]},
       {"id":"c0","x":44,"y":246,"w":124,"h":60,"fs":10.5,"t":"Router 触发","s":["包头就绪","trigger 带重发标记"]},
@@ -691,7 +691,7 @@ const SCENES=[
       {"id":"r_trig","x":44,"y":412,"w":140,"h":60,"fs":10.5,"t":"Router 触发 × 2 条 path","s":["本行结果","上一行 R core 的累加值","两个 stream，用户间乱序"]},
       {"id":"r_in0","x":200,"y":412,"w":190,"h":60,"fs":10.5,"t":"datain_task · DTE","s":["照包头 dst_addr 搬进 Matrix Mem","槽号就是 user_id，搬完置标志","映射表加一，不等标志"]},
       {"id":"r_in1","x":406,"y":412,"w":130,"h":60,"fs":10.5,"t":"软件用户 FIFO","s":["到齐就入队","每个用户只入队一次"]},
-      {"id":"r_mm","x":560,"y":418,"w":200,"h":48,"fs":10.5,"t":"Matrix Mem + Share Mem","s":["≈ 1300 个用户的半成品，每笔 12 KiB","按 user_id 分槽 · 映射表 · 标志表"]},
+      {"id":"r_mm","x":560,"y":418,"w":200,"h":48,"fs":10.5,"t":"Matrix Mem + Share Mem","s":["1520用户，每用户两半0x3080B","按 user_id 分槽 · 映射表 · 标志表"]},
       {"id":"r_scan","x":44,"y":500,"w":190,"h":60,"fs":10.5,"t":"task 0 · MU","s":["弹出 FIFO 队头，等标志置齐","清计数与标志，槽号记进 RC_SLOT_OFF","谁先集齐谁先走"]},
       {"id":"r_mv","x":250,"y":500,"w":170,"h":60,"fs":10.5,"t":"task 1 · DTE · END","s":["两笔 Matrix Mem → 本级 Rmem","逐级 reduce，Router 报完成"]},
       {"id":"r_sum","x":436,"y":500,"w":150,"h":60,"fs":10.5,"t":"Rmem","s":["两笔相加","BF16 进 · FP32 累加"]},
@@ -743,7 +743,7 @@ const SCENES=[
         "d":[
           "<b>kernel</b> 高度重复、KB 级，若干 core 装同一份：SCP 走 ctrl_noc 一份份写进三个 RV core 的 ITCM。",
           "<b>weights</b> 每 core 各不相同、MB 级：Host 发 msg 流，经 Router 用 P2P 送到各 core，DTE core 上的 weights loader 落进 Matrix Mem。",
-          "两种模式的差别只在 TS 的一个位：weights 加载模式 <code>trigger_task_chain_en = 0</code>，搬完不启动任务链。",
+          "加载与业务分别配置TS模式、DATAIN PC及DTE搬运参数：weights 加载模式 <code>trigger_task_chain_en = 0</code>，搬完不启动任务链。",
           "装完改三处切业务模式：路由表换成业务 path、这一位置 1、各 DSA 写静态配置。<b>先发最远路径的数据</b>能加速搬运。"
         ],
         "act":["b_in","c1","r_in0"],
@@ -764,7 +764,7 @@ const SCENES=[
           "B core 上没有矩阵和向量计算，MU core 被借去跑纯标量的 check_flag；R core 上 MU core 同样只做 check，求和在本级 Router 的 Rmem 里做。"
         ],
         "act":["b_trig","b_in","b_mm","b_chk","b_bc","c0","c1","c2","c3","c4","c5","c6","r_trig","r_in0","r_in1","r_mm","r_scan","r_mv","r_sum","r_out"],
-        "ref":"01“三类 core 各自在干什么”　03-ts“TS 的四种工作模式”",
+        "ref":"01“三类 core 各自在干什么”　03-ts“TS 的三种工作模式”",
         "rows":[],
         "set":{},
         "eact":[],
@@ -791,7 +791,7 @@ const SCENES=[
         "t":"B core链二：取得新增方向许可后逐VC发送",
         "d":[
           "task 0 的 kernel <code>check_flag</code> 循环比较 <code>head</code> 与 <code>tail</code>（volatile 读），相等就等，不等即有 ready 的 token。",
-          "TS在WAIT_CREDIT登记本用户的新增方向需求，三方向初值各N；所需方向全部满足才同沿扣账并READY，已用方向复用。Router对下游资源仍逐跳管理，旧全目的数计数与新返回接口的对应关系待统一。",
+          "TS在WAIT_CREDIT登记本用户的新增方向需求，三方向初值各N；所需方向全部满足才同沿扣账并READY，已用方向复用。Router按真实Stream release归还该用户实际持有方向，未持有及纯转发不重复归还。",
           "这是个<b>全有或全无</b>的判断，只有起点看得到全部目的地，Router 的某一跳看不到。",
           "DTE 把 <code>tail</code> 指向那一槽从 Matrix Mem 搬到 Router，<b>只搬一次</b>，搬完 <code>tail + 1</code>；之后由 Router 按 flow_dir 逐跳复制。"
         ],
@@ -810,7 +810,7 @@ const SCENES=[
           "Router 收到 token 触发建链，task 0 把 token 搬进 Core Mem，<code>stream_id</code> 直接换算成 Core Mem 的分片。",
           "中间是 MU 与 VU 的计算；tp_nk 下 FC1 / FC3 切 K 出部分和，要经 ReduceModule 逐级 reduce 汇到 dot core（每颗 chip 的逻辑 core7），dot core 做 silu · dot · 量化后把 FC2 输入广播给本 chip 另外 7 个 core。",
           "FC2 chip 内切 N，各 core 出一段发给 dot core 拼成 6144 维，不归约；chip 间切 K，一行 4 颗 chip 的 dot core 逐跳 reduce 得到本行结果，进本行 R core。",
-          "一个用户从收到发全程占着一个 stream 项，核内在途用户数因此等于 stream_table 的 16 项。逐 task 的展开见 TS 那份动画：计算 core 的链 6 项，dot core 的链 16 项（行首那颗 chip 15 项）。"
+          "一个用户从收到发全程占着一个 stream 项，核内在途用户数因此等于 stream_table 的 16 项。逐 task 的展开见 TS 那份动画：计算 core 的链 6 项，dot core 的链15项。"
         ],
         "act":["c0","c1","c2","c3","c4","c5","c6"],
         "eact":["c_0","c_1","c_2","c_3","c_4","c_5"],
@@ -1191,7 +1191,7 @@ const SCENES=[
         "d":[
           "weights 每个 core 都不同、MB 级，走不了配置总线：Host 发 msg 流，经 PCIe Switch 进 chip，Router 用 P2P 按 core id 送到各 core。",
           "weights 加载模式下路由表只用 <b>1 条 path</b>，软件在 msg 里标记这笔数据落在哪些 core；坏 core 上数据不进核，只透传。",
-          "每笔四步：Router 收到数据通知 TS → TS 派 DTE core 跑 weights loader → 标量指令算出落 Matrix Mem 的地址再发 DTE 指令 → 完成通知 TS 释放，<b>不触发任务链</b>。",
+          "每笔四步：Router 收到数据通知 TS → TS 派 DTE core 跑 weights loader → 读取包头落点与长度、配置DTE并写Trigger → 等数据和响应排空，加载不回业务ACK，<b>不触发任务链</b>。",
           "<b>先发最远路径的数据</b>：先发近的，那些不进本核的 weights 会卡在 Router 里，要等 DTE 把当前数据搬走才能继续收。"
         ],
         "act":["gpu","dpu","swL0","k0_0","k0_1","k0_2","k0_3","rt","ts","drv","dte","mm"],
@@ -1216,7 +1216,7 @@ const SCENES=[
         "rows":[[2,["EP0 B core","head 0 · tail 0","链二 task0 自启动，空转"]],[3,["EP0 计算 core","stream_table 空","trigger_task_chain_en = 1"]],[4,["第 0 行 R core","映射表 0 · FIFO 空","链二 task0 自启动，比 FIFO 头尾"]],[6,["EP1～5 B core","head 0 · tail 0","链二 task0 自启动，空转"]]],
         "lt":"收到 → 输出",
         "logic":[["ctrl_noc 端点→Router","cfg","RouterTable 换成业务 path：广播 path 1 · reduce path · P2P path"],["ctrl_noc 端点→TS","cfg","datain_task.pc = token 搬移 · trigger_task_chain_en = 1"],["ctrl_noc 端点→DSA","cfg","MU / VU / DTE 的静态配置寄存器"],["ctrl_noc 端点→DTE","cfg","业务模式进核配置：route · 回不回 Ack · 标志表基址与槽位大小，对应 bundle 的 DTEIN"],["TS（B / R core）","","SELF_START = 1 自驱动：16 个 stream 全部占满，16 条链的 task 0 连续下发，循环 check"]],
-        "ref":"06“装完切到业务模式”　03-ts“TS 的四种工作模式”　chip.md F21",
+        "ref":"06“装完切到业务模式”　03-ts“TS 的三种工作模式”　chip.md F21",
         "set":{},
         "eact":[],
         "tok":[]
@@ -1345,14 +1345,14 @@ const SCENES=[
         "d":[
           "普通DataOut安装WAIT_CREDIT，TS按实际PID低三方向减去drct_used形成需求。",
           "每方向初值N、全部新方向原子满足后扣账并READY。",
-          "该许可与Router逐flit的VC credit分开，旧Router请求/Grant接线待统一。"
+          "该许可由TS提交；Router按真实Stream release返回已持有方向，逐flit的VC credit独立维护。"
         ],
         "act":["ts","rt"],
         "eact":["e_ts_rt","e_rt_ts"],
         "tok":[{"ed":"e_ts_rt","lbl":"req"},{"ed":"e_rt_ts","lbl":"credit","c":"var(--ok)","delay":2}],
         "lt":"收到 → 输出",
         "logic":[["Stream Map→TS Credit Ctrl","Pending","SID／TID／新方向"],["Credit Ctrl→Map","grant","同沿READY／drct_used／计数扣账"]],
-        "ref":"03-router“出核前的资源监听”　03-ts“下游收不下”　<a href=\"07-units/chip/core/ts.md\">TS单元设计</a>F67",
+        "ref":"03-router“TS方向许可与Router返回”　03-ts“下游收不下”　<a href=\"07-units/chip/core/ts.md\">TS单元设计</a>F67",
         "rows":[],
         "set":{}
       },
@@ -1444,7 +1444,7 @@ const SCENES=[
         "t":"算 FFN ②　task 0：DTE 把 token 搬进 Core Mem",
         "d":[
           "DTE_Arb 选中 datain，下发给 DTE RV core；RV core 经 <code>hdr_rd</code> 读包头，拿到 <code>(gpu_id, token_id)</code> 算出 Core Mem 地址，配好 DSA 立刻交还自己。",
-          "DTE DSA 从 CoreStation 一拍 2048 bit 收整包，四个 Lane 并行经 DTE Xbar 写进 Core Mem 的第 0 片。",
+          "DTE DSA 从 CoreStation 一拍 2048 bit 收整包，InCh的RD/WR配合，经DTE Xbar写入Core Mem第0片。",
           "这一步<b>不再查 credit</b>：入站容量已由Router接纳与TS槽位资格保证，TS方向许可不按目的数扣账。",
           "RV Core 与 DSA 两路完成都到，done_bitmap 点亮 bit 0，task_ctrl 一拍找到 task 1。"
         ],
@@ -1489,7 +1489,7 @@ const SCENES=[
         "rows":[[3,["EP0 计算 core","stream 0 · task 2 · INFLY","等Core/DSA双ACK；RMEM归还另记"]]],
         "set":{"at":"chip 内 Router 的 ReduceModule 链"},
         "lt":"收到 → 输出",
-        "logic":[["TS 内部","rmem_busy","REDUCE_WAIT获准时占RMEM并READY；执行ACK完成任务，RMEM返回独立还空间"],["DTE DSA→Router.ReduceModule","out_core_data_ch","operation reduce · reduce_seq（取 task_id）· reduce_data_type"],["Router.ReduceModule","RMW","上下文 16 用户 × 32 KiB；BF16 进出，FP32 累加；一笔任务交付后携 UserID 的 release 回上游"],["坏 core.Router","透传档","只按 RouterTable 转发，不进 ReduceModule；stream release 按 Credit Bypass Route 静态转回上游"],["DTE DSA→TS / Router→TS","dsa_done / rmem_credit_done","只算搬完 ／ user_id · path_id → 当前任务 FINISH"]],
+        "logic":[["TS 内部","rmem_busy","REDUCE_WAIT获准时占RMEM并READY；执行ACK完成任务，RMEM返回独立还空间"],["DTE DSA→Router.ReduceModule","out_core_data_ch","operation reduce · reduce_seq（取 task_id）· reduce_data_type"],["Router.ReduceModule","RMW","上下文 16 用户 × 32 KiB；BF16 进出，FP32 累加；一笔任务交付后携 UserID 的 release 回上游"],["坏 core.Router","透传档","只按 RouterTable 转发，不进 ReduceModule；stream release 按 Credit Bypass Route 静态转回上游"],["DTE DSA→TS / Router→TS","dsa_done / rmem_credit_done","Core/DSA ACK完成任务 ／ RMEM仅按UID归还空间"]],
         "ref":"<a href=\"07-units/chip/core/ts.md\">TS单元设计</a>F59　03-reduce“一个 Reduce 包怎么走”“TS 与 DTE 侧的配合”　09-router-reduce-工作细节.html"
       },
       {
@@ -1532,18 +1532,18 @@ const SCENES=[
           "另外 7 个计算 core 把各自那一段 FC2 输出（1 × 768，BF16）发给 dot core，落在 concat 区第 s 段；dot core 自己那一段由 MU 直接写进去，8 段拼成 <b>6144 维</b>，这就是本 chip 的结果。",
           "chip 间这一级 FC2 固定切 K，整条 FFN <b>只做这一次 chip 间 reduce</b>：FC1 / FC3 的 N 与 FC2 的 K 是同一维度，中间的 SiLU · dot 逐元素，每个 chip 手里的三样东西自然对齐。",
           "一行 4 颗 chip 的 dot core 从第一列到最后一列逐跳 reduce，最后一跳落进本行 R core 的 Matrix Mem，得到<b>本行结果</b> 12 KiB。右图画中间列 chip 上的行链：西口 core5 → core6 → core7 → core8 → dot core core9 → mid → core4 → 东口，core7 是坏 core，只透传。",
-          "上一颗送来的那一包落进 dot core 的 Core Mem；本 chip 结果算好后，dot core 的 DTE 把两包作为本 core 的两个操作数先后送进本级 Rmem 相加，再发往下一颗。行首那颗只发本 chip 结果。",
+          "上一颗的分量直接进入dot core的RMEM，本地分量由DTE发入后累加；仅允许已准入用户最早未完成的Reduce进入，按任务号和PID保护上下文。行首为单流。",
           "行链与 chip 内归约链都按 BF16 进出 Router，ReduceModule 中间按 FP32 累加：一行结果 6144 个 BF16 共 12288 B，装得进一个 reduce 包。",
           "release 跨 chip 时 C2C Bridge 照原样透传，VC credit 在 C2C 上压缩包数量后再传。"
         ],
         "act":["k0_0","k0_1","k0_2","k0_3","k1_0","k1_1","k1_2","k1_3","q4","q5","q6","q7","q8","q9"],
         "eact":["h0_0","h0_1","h0_2","h1_0","h1_1","h1_2","qh10","qh11","qh12","qh13","qv4"],
         "tok":[{"ed":"h0_0","lbl":"行链","c":"var(--violet)"},{"ed":"h0_1","c":"var(--violet)","delay":1},{"ed":"h0_2","c":"var(--violet)","delay":2},{"ed":"h1_0","c":"var(--violet)"},{"ed":"h1_1","c":"var(--violet)","delay":1},{"ed":"h1_2","c":"var(--violet)","delay":2},{"ed":"qh10","c":"var(--violet)","delay":0.5},{"ed":"qh11","c":"var(--dim)","delay":1},{"ed":"qh12","lbl":"透传","c":"var(--dim)","delay":1.5},{"ed":"qh13","c":"var(--violet)","delay":2},{"ed":"qv4","lbl":"+本 chip","c":"var(--violet)","rev":1,"delay":2.5}],
-        "rows":[[3,["EP0 dot core","stream 0 · 行首 task 14、其余 task 15 · DTE END","本行结果 12 KiB 送本行 R core"]]],
+        "rows":[[3,["EP0 dot core","stream 0 · task14 · DTE END","本行结果 12 KiB 送本行 R core"]]],
         "set":{"at":"EP0 两行，各 4 颗 chip 之间"},
         "lt":"收到 → 输出",
-        "logic":[["计算 core.DTE DSA→Router","out_core_data_ch","槽位 s 的 concat path，包头落点 = dot core 的 concat 区第 s 段，1536 B"],["上一颗 chip→dot core.Core Mem","in_core_data_ch","上一颗发行链的 path · 落本 core 的 Core Mem，占本 core 的 Stream 资源"],["dot core.DTE DSA→Router","out_core_data_ch","本 chip 行链 path · 两包先后出核，表项开 Core 多操作数 · TASK_TYPE 4 · reduce_seq"],["chip→chip","c2c[E] → c2c[W]","reduce_data_type / reduce_outdata_type BF16，中间 FP32；下游那边的容量随 stream credit 一起给"],["RMEM→TS","UID／valid","只还空间，不完成TID"]],
-        "ref":"03-reduce“第二层”“Reduce credit 的闭环”　06“这种切分对 Router 提了一条独有的精度要求”"
+        "logic":[["计算 core.DTE DSA→Router","out_core_data_ch","槽位 s 的 concat path，包头落点 = dot core 的 concat 区第 s 段，1536 B"],["上一颗chip→dot core.RMEM","in_core_data_ch","PID=7 · 网络分量直接进RMEM，受用户准入和任务上下文保护"],["dot core.DTE DSA→Router","out_core_data_ch","PID=7、VC3 · 本地只发一包，非行首与网络分量在RMEM相加 · TASK_TYPE 4"],["chip→chip","c2c[E] → c2c[W]","reduce_data_type / reduce_outdata_type BF16，中间 FP32；下游那边的容量随 stream credit 一起给"],["RMEM→TS","UID／valid","只还空间，不完成TID"]],
+        "ref":"03-reduce“第二层”“本级RMEM许可与网络准入”　06“这种切分对 Router 提了一条独有的精度要求”"
       },
       {
         "t":"算 FFN ⑧　链尾送出后退休，credit 沿路退还",
@@ -1591,7 +1591,7 @@ const SCENES=[
         "rows":[[4,["第 0 行 R core","映射表 0 · FIFO 空","已送出，Matrix Mem 空间释放"]]],
         "set":{"at":"第 0 行 → 第 1 行的 R core，沿最后一列"},
         "lt":"收到 → 输出",
-        "logic":[["MU RV Core→Share Mem","sm_lsq","FIFO 弹出该用户 → 等标志置齐 → 清计数与标志，槽号写 RC_SLOT_OFF[stream_id]"],["DTE DSA→Router.ReduceModule","out_core_data_ch","Matrix Mem → Rmem，单流直通，目的 = 第 1 行 R core"],["R core(第 0 行).Router→chip 7.core0","c2c[S] → c2c[N]","12 KiB 累加值，BF16；经 core0、core5、core6、core7、core8 转发，落 core9"],["ReduceModule→TS","reduce_done · retire","Rmem 发完报 TS，释放 stream 与 Matrix Mem 空间"]],
+        "logic":[["MU RV Core→Share Mem","sm_lsq","FIFO 弹出该用户 → 等标志置齐 → 清计数与标志，槽号写 RC_SLOT_OFF[stream_id]"],["DTE DSA→Router.ReduceModule","out_core_data_ch","Matrix Mem → Rmem，单流直通，目的 = 第 1 行 R core"],["R core(第 0 行).Router→chip 7.core0","c2c[S] → c2c[N]","12 KiB 累加值，BF16；经 core0、core5、core6、core7、core8 转发，落 core9"],["ReduceModule→TS","reduce_done · retire","执行双ACK完成任务，RMEM返回还空间；两类条件满足后本地重生并回收上下文"]],
         "ref":"02“EP 组间的 reduction 通路”第 2 条　03-reduce“链的形状”"
       },
       {
@@ -1686,7 +1686,7 @@ const SCENES=[
           "链尾 R core 返回后，所有 R core 的 reduce-buffer 余量各加 1，dispatcher 才能派下一个用户。通知走反向，不经 output_cpu / input_cpu 转手。",
           "GPU 侧：各收端上报的 <code>retired_token</code> 取 min（组播反压按最慢收端聚合），<code>retired_min</code> 每前进 k 就 <code>buffer_used −= k</code>、<code>inflight_bach −= k</code>。",
           "Node 内部的 stream credit 早在计算 core 退休时就还给了相邻上游，一跳一跳退回 B core。",
-          "三种 release 与数据各走各的链路实例，参数相同。"
+          "VC/Stream两类release与数据分别排队，参数相同。"
         ],
         "act":["gpu","dpu"],
         "eact":["e_c113_sw","e_sw_ddr"],
@@ -1709,7 +1709,7 @@ const SCENES=[
         "eact":["e_rt_ts","e_ts_rt"],
         "lt":"收到 → 输出",
         "logic":[["GPU / DPU","①","buffer_used < depth · pool_avail = pool_total − Σ inflight"],["Router","②","stream credit · VC credit，互不复用"],["TS","③","TS方向计数，广播初值 = 目的 core 数，P2P = 1"]],
-        "ref":"01“反压：三层各管一段”　03-router“三类 credit 的管理方式”",
+        "ref":"01“反压：三层各管一段”　03-router“资源与 credit 的管理方式”",
         "rows":[],
         "set":{},
         "tok":[]
@@ -1726,7 +1726,7 @@ const SCENES=[
         "eact":["e_cmd_mu","e_cmd_vu","e_cmd_dte"],
         "tok":[{"ed":"e_cmd_mu","lbl":"S0"},{"ed":"e_cmd_vu","lbl":"S1","delay":1},{"ed":"e_cmd_dte","lbl":"S2","delay":2}],
         "lt":"收到 → 输出",
-        "logic":[["TS.MU_Arb / VU_Arb / DTE_Arb","","各自独立打拍，从 head_ptr 环形扫描选最老的 READY"],["TS→RV Core ×3","task_cmd","同一拍的 3 个 task 必来自 3 个不同 stream"],["三处峰值","","Matrix Mem 8.83 MTPS · 输入 PCIe 8.74 · 输出 PCIe 9.06，没有明显短板"]],
+        "logic":[["TS.MU_Arb / VU_Arb / DTE_Arb","","各自独立打拍，从 head_ptr 环形扫描选最老的 READY"],["TS→RV Core ×3","task_cmd","同一拍的 3 个 task 必来自 3 个不同 stream"],["三处峰值","","同一单位口径：Matrix Mem约9.26 MTPS · 输入PCIe约8.54 · 输出约8.85，均为理想估算"]],
         "ref":"01“多个用户怎么在同一个 core 上流水”　06“EP6+TP8 的运行时”　09-ts-工作细节.html",
         "rows":[],
         "set":{}
@@ -1770,10 +1770,10 @@ const SCENES=[
       {"id":"m_c","x":370,"y":190,"w":300,"h":64,"fs":11,"t":"计算 core","s":["单链：DTE 收 → MU → 逐级 reduce → DTE 收 → MU → DTE 送出","dot core 另做 VU 与 concat · 一个用户占一个 stream 项"]},
       {"id":"m_r","x":710,"y":190,"w":300,"h":64,"fs":11,"t":"R core","s":["链一两笔入库，链二谁先集齐谁先走","映射表与用户 FIFO 在 Share Mem，约 1300 用户"]},
       {"id":"m_rt","x":30,"y":320,"w":240,"h":90,"fs":11,"t":"Router","s":["三关：查表 · 拿资源 · 抢通路","stream / VC / Reduce 三类 credit","ReduceModule 流着加 · CoreStation 包头就绪即 trigger"]},
-      {"id":"m_ts","x":290,"y":320,"w":240,"h":90,"fs":11,"t":"TS","s":["两张表：task_chain · stream_table","四个动作：建表 · 判就绪 · 选最老 · 推进度","六类写口固定优先级，运行期不接受软件干预"]},
+      {"id":"m_ts","x":290,"y":320,"w":240,"h":90,"fs":11,"t":"TS","s":["两张表：task_chain · stream_table","四个动作：建表 · 判就绪 · 选最老 · 推进度","同SID按字段合并，完成/Skip位按OR累计"]},
       {"id":"m_rv","x":550,"y":320,"w":220,"h":90,"fs":11,"t":"RV core ×3","s":["task_queue → 跑 kernel → dsa_cfg","发完立刻交还自己","纯标量 task 自己报完成"]},
       {"id":"m_dsa","x":790,"y":320,"w":220,"h":90,"fs":11,"t":"DTE / MU / VU DSA","s":["整包搬运 / GEMV / 向量","三者无直连，经存储交换","干完直接向 TS 报 dsa_done"]},
-      {"id":"m_mem","x":30,"y":480,"w":980,"h":60,"fs":11,"t":"三块存储","s":["Core Mem 1 MB 按 stream 分 16 片 · Matrix Mem 32 MB 不分片 · Share Mem 32 KB 三核共享","软件用统一偏移地址，硬件按 stream_id 路由到分片"]}
+      {"id":"m_mem","x":30,"y":480,"w":980,"h":60,"fs":11,"t":"三块存储","s":["Core Mem 1 MB 按 stream 分 16 片 · Matrix Mem 36MiB不分片 · Share Mem 32 KB 三核共享","软件用统一偏移地址，硬件按 stream_id 路由到分片"]}
     ],
     "edges":[
       {"id":"x_in_sw","pts":[[180,100],[200,100]],"label":"tx","lx":190,"ly":92},
@@ -1825,7 +1825,7 @@ const SCENES=[
         "act":["m_sw"],
         "eact":["x_in_sw","x_sw_link"],
         "lt":"收到 → 输出",
-        "logic":[["链路→PCIe Switch","port[p].in","flit 字段 + 三种 release"],["PCIe Switch","W1","查 sw_mcast_tbl → 目的端口集合；全部 sw_out_q 有空才收"],["PCIe Switch→链路","port[p].out","W2 每端口每拍 1 flit"],["SCP→PCIe Switch","cfg","组播复制表与组播开关"]],
+        "logic":[["链路→PCIe Switch","port[p].in","flit字段及VC/Stream两类release"],["PCIe Switch","W1","查 sw_mcast_tbl → 目的端口集合；全部 sw_out_q 有空才收"],["PCIe Switch→链路","port[p].out","W2 每端口每拍 1 flit"],["SCP→PCIe Switch","cfg","组播复制表与组播开关"]],
         "rows":[[0,["sw_out_q[p]","FIFO，深 SW_Q_DEPTH 32 flit","满 → 上游 credit 不归还"]],[1,["sw_mcast_tbl","N × {dst_mask[C:0]}","配置，运行时只读"]],[2,["sw_lane_busy[2]","每路 x16 一个 last_busy_until","双路独立计时"]],[3,["—","—","—"]]],
         "ref":"pcie-switch.md W1、W2　02“tray 组成”",
         "set":{},
@@ -1836,13 +1836,13 @@ const SCENES=[
         "d":[
           "R2R、C2C、跨 tray 纵向、PCIe ↔ Router、ETH 都是这一个模块，差别只在带宽与延迟两个参数。",
           "flit 进入时按带宽排队、按延迟定到达拍：<code>arrive = max(now, last_busy_until) + ceil(size / bw) + latency</code>，到达拍才出现在对端端口。",
-          "数据与三种 release 各走各的实例，参数相同。到达拍单调递增，队首不挡更早的项。",
+          "数据及VC/Stream两类release各有独立队列，参数相同。到达拍单调递增，队首不挡更早的项。",
           "chip 间 C2C 按《系统与部署》的说法“当作一种长延迟的 R2R”。"
         ],
         "act":["m_link"],
         "eact":["x_sw_link","x_link_c2c"],
         "lt":"收到 → 输出",
-        "logic":[["发送侧→链路","link.in","flit 字段 · stream_release · reduce_release · vc_release"],["链路→接收侧","link.out","同字段，到达拍才拉 valid"],["参数","","R2R 256 B/T，走线左右 10T、mid 0T；C2C 400T / 64 GB/s · 300 ns；纵向 120 GB/s；PCIe↔Router 128 B/T；ETH 50 GB/s · 3 μs"]],
+        "logic":[["发送侧→链路","link.in","flit 字段 · stream_release · vc_release"],["链路→接收侧","link.out","同字段，到达拍才拉 valid"],["参数","","R2R 256 B/T，走线左右 10T、mid 0T；C2C 400T / 64 GB/s · 300 ns；纵向 120 GB/s；PCIe↔Router 128 B/T；ETH 50 GB/s · 3 μs"]],
         "rows":[[0,["in_flight","FIFO，深 LINK_Q_DEPTH × {item, arrive_cycle}","不会满：上游按 credit 发"]],[1,["last_busy_until","32 b","每笔 = max(now, last) + ceil(size / bw)"]],[2,["link_param（LPU 持有）","每条链路一项 {bw, latency}","参数表"]],[3,["—","—","—"]]],
         "ref":"link.md K1　02“互联参数”",
         "set":{},
@@ -1859,8 +1859,8 @@ const SCENES=[
         "act":["m_c2c"],
         "eact":["x_link_c2c","x_c2c_b"],
         "lt":"收到 → 输出",
-        "logic":[["链路→C2C Bridge","c2c[d]","flit 字段 + 三种 release"],["C2C Bridge→边界 core.Router","bridge2core[d]","同字段；ready = 对侧该 VC 的 credit > 0"],["C2C Bridge","AXI Bridge","credit ↔ AXI4 转换；同向数据与 release 仲裁，小包优先；TX write posted，RX 回 dummy response"]],
-        "rows":[[0,["tx_vc_buf[4] · tx_shared","每 VC 20 flit + 约 20 flit","覆盖本级 R2R 往返约 20 cycle"]],[1,["rx_vc_buf[4] · rx_shared","每 VC 80 flit + 约 300 flit","覆盖 PCIe 往返 600 ns @1024-bit"]],[2,["rx_reasm","按 seq_id 的重组缓冲，16 项","一个 flit 的段到齐即还原"]],[3,["c2c_credit","每方向每 VC private + shared","先扣 private 再扣 shared，归还先补 private"]]],
+        "logic":[["链路→C2C Bridge","c2c[d]","flit字段及VC/Stream两类release"],["C2C Bridge→边界 core.Router","bridge2core[d]","同字段；ready = 对侧该 VC 的 credit > 0"],["C2C Bridge","AXI Bridge","credit ↔ AXI4 转换；同向数据与 release 仲裁，小包优先；TX write posted，RX 回 dummy response"]],
+        "rows":[[0,["tx_vc_buf[4] · tx_shared","每 VC 20 flit + 约 20 flit","覆盖本级 R2R 往返约 20 cycle"]],[1,["rx_vc_buf[4] · rx_shared","每VC 20flit + 每方向shared300flit","覆盖 PCIe 往返 600 ns @1024-bit"]],[2,["rx_reasm","按 seq_id 的重组缓冲，16 项","一个 flit 的段到齐即还原"]],[3,["c2c_credit","每方向每 VC private + shared","先扣 private 再扣 shared，归还先补 private"]]],
         "ref":"chip.md F28～F42　03-router“C2C Bridge”",
         "set":{},
         "tok":[]
@@ -1894,7 +1894,7 @@ const SCENES=[
         "eact":["x_c2c_b","x_b_c","x_b_rt"],
         "lt":"收到 → 输出",
         "logic":[["Router.CoreStation→TS","trigger_ch","SELF_START = 1：不建表，派 datain_task"],["DTE DSA→Matrix Mem / Share Mem","","整包落 head 槽位；head = head + 1"],["MU RV Core→Share Mem","sm_lsq","while (*p_head == *p_tail)"],["TS→Router→TS","TS内部Pending／grant","三个方向初值各N，按新方向原子授权，逐VC发送额度独立"],["DTE DSA→Router","out_core_data_ch","只发一次；tail = tail + 1；END 自发建新链"]],
-        "rows":[[0,["Matrix Mem 槽位","32 MB ÷ 6368 B ≈ 5200 槽","按到达顺序分配与释放，顺序 FIFO"]],[1,["head / tail（Share Mem）","一对指针","head 链一推，tail 链二推"]],[2,["datain_task","1 项 {valid, unit DTE, weights_launch, pc}","手动配，链上不可再配 DTE datain"]],[3,["task_chain","task0 MU · task1 DTE credit_en END","SELF_START = 1"]]],
+        "rows":[[0,["Matrix Mem 槽位","36MiB ÷ 6656B，软件可用4085槽","按到达顺序分配与释放，顺序 FIFO"]],[1,["head / tail（Share Mem）","一对指针","head 链一推，tail 链二推"]],[2,["datain_task","1 项 {valid, unit DTE, weights_launch, pc}","手动配，链上不可再配 DTE datain"]],[3,["task_chain","task0 MU · task1 DTE credit_en END","SELF_START = 1"]]],
         "ref":"06“Broadcast Core”“B core 在广播里做什么”　01“B core 的工作流程”",
         "set":{},
         "tok":[]
@@ -1911,7 +1911,7 @@ const SCENES=[
         "eact":["x_b_c","x_c_r","x_c_ts"],
         "lt":"收到 → 输出",
         "logic":[["Router.CoreStation→TS","trigger_ch","新用户 → create at tail_ptr；老用户 → 复用 stream_id，表项不动"],["TS→RV Core→DSA→TS","task_cmd → dsa_cfg → dsa_done","一个 task 的共同形状"],["DTE DSA→Router.ReduceModule","out_core_data_ch","Reduce双ACK完成；RMEM Done只还空间"],["TS→Router.Retire→上游","retire → stream_release","链尾退休，credit 沿路退还"]],
-        "rows":[[0,["stream_table","16 项顺序 FIFO","head_ptr / tail_ptr 环形推进"]],[1,["Core Mem 分片","1 MB ÷ stream_num","stream_id → 物理分片，硬件路由"]],[2,["task_chain","tp_nk 下计算 core 6 项、dot core 16 项（行首 15 项）","wait_wake = 1 的 datain 由 Router trigger"]],[3,["TS方向计数","南北／西／东三个方向","每方向初值N；每用户已用方向不重复申请"]]],
+        "rows":[[0,["stream_table","16 项顺序 FIFO","head_ptr / tail_ptr 环形推进"]],[1,["Core Mem 分片","1 MB ÷ stream_num","stream_id → 物理分片，硬件路由"]],[2,["task_chain","tp_nk 下计算 core 6 项、dot core 15项","wait_wake = 1 的 datain 由 Router trigger"]],[3,["TS方向计数","南北／西／东三个方向","每方向初值N；每用户已用方向不重复申请"]]],
         "ref":"06“计算 Core”　03-core“Core Mem 的硬件多用户管理”　09-ts-工作细节.html",
         "set":{},
         "tok":[]
@@ -1945,8 +1945,8 @@ const SCENES=[
         "act":["m_rt"],
         "eact":["x_rt_ts","x_ts_rt","x_rt_mem","x_b_rt"],
         "lt":"收到 → 输出",
-        "logic":[["上游→Router.RouterStation","link[d]","flit；RC → VA → SA → ST"],["Router.CoreStation→TS","trigger_ch","user_id · path_id · reissue"],["Router→TS Credit Ctrl","direction_return","方向valid归还，旧桥接待统一"],["RMEM→TS","UID／valid","只还空间，不完成TID"],["Router→上游","stream / reduce / vc release","三类 release 各走各的实例"]],
-        "rows":[[0,["RouterTable","64 项，按 path_id；三份副本（Router 内多副本、DTE、ReduceModule）","编译侧读入，每颗 chip 不同"]],[1,["VC Buffer","每 VC private + 每方向 shared","flit 一进一出，private 互不侵占"]],[2,["ReduceModule 上下文","16 用户 × 32 KiB","按 UserID 读改写，BF16 进出，中间 FP32"]],[3,["stream credit 表 · 监听事件队列","按 UserID + 目标方向；16 项","进 core 三态准入；出核前资源监听"]]],
+        "logic":[["上游→Router.RouterStation","link[d]","flit；RC → VA → SA → ST"],["Router.CoreStation→TS","trigger_ch","user_id · path_id · reissue"],["Router→TS Credit Ctrl","direction_return","真实release归还已持有方向，下一拍可用"],["RMEM→TS","UID／valid","只还空间，不完成TID"],["Router→上游","stream / vc release","VC/Stream两类release独立排队"]],
+        "rows":[[0,["RouterTable","64 项，按 path_id；三份副本（Router 内多副本、DTE、ReduceModule）","编译侧读入，每颗 chip 不同"]],[1,["VC Buffer","每 VC private + 每方向 shared","flit 一进一出，private 互不侵占"]],[2,["ReduceModule 上下文","16 用户 × 32 KiB","按 UserID 读改写，BF16 进出，中间 FP32"]],[3,["Router实体用户表／TS方向Pending","按 UserID + 目标方向；16 项","进 core 三态准入；TS方向许可"]]],
         "ref":"03-router 全篇　09-router-*-工作细节.html 五份",
         "set":{},
         "tok":[]
@@ -1961,7 +1961,7 @@ const SCENES=[
         "eact":["x_rt_ts","x_ts_rt","x_ts_rv","x_dsa_ts","x_c_ts"],
         "lt":"收到 → 输出",
         "logic":[["各更新源→Map","按字段合并","同SID多完成位OR，目标冲突复核"]],
-        "rows":[[0,["task_chain","64 项，每项 SEND_UNIT · WAIT_WAKE · RECV_UNIT · CREDIT_EN · REDUCE · END 等","ctrl_noc 写，运行时只读"]],[1,["stream_table","16 项 {valid, user_id, reissue, task_id, fsm, done_bitmap[63:0]…}","8W，固定优先级"]],[2,["datain_task · DataIn_task_table","1 项 ／ 1 项","占住就拉低 trigger 的 ready"]],[3,["四张 64 位掩码","DATA_IN · REISSUE · END · EXE_MASK","task_chain 的纯函数，配完不再变"]]],
+        "rows":[[0,["task_chain","64 项，每项 SEND_UNIT · WAIT_WAKE · RECV_UNIT · CREDIT_EN · REDUCE · END 等","ctrl_noc 写，运行时只读"]],[1,["stream_table","16 项 {valid, user_id, reissue, task_id, fsm, done_bitmap[63:0]…}","按字段合并，完成与Skip位按OR累计"]],[2,["datain_task · DataIn_task_table","1 项 ／ 1 项","占住就拉低 trigger 的 ready"]],[3,["四张 64 位掩码","DATA_IN · REISSUE · END · EXE_MASK","task_chain 的纯函数，配完不再变"]]],
         "ref":"03-ts 全篇　09-ts-工作细节.html",
         "set":{},
         "tok":[]
@@ -1986,7 +1986,7 @@ const SCENES=[
       {
         "t":"三个 DSA　干重活，干完直接向 TS 报",
         "d":[
-          "<b>DTE</b>：一个搬运任务拆成读写两半又合回一次完成，四条 Lane，三条数据流（Inbound / Outbound / Inner），Header Parser 解包头。",
+          "<b>DTE</b>：一个搬运任务拆成读写两半又合回一次完成，五个Channel、十条issue lane，三条数据流（Inbound / Outbound / Inner），Header Parser 解包头。",
           "<b>MU</b>：8 K MAC，token × weights 的 GEMV，<code>D = sf_A × sf_B × A × B + C</code>；专家间累加就地做。",
           "<b>VU</b>：1024 bit/T，VALU ×3 · VSFU · LU / SU，宏指令模型；silu · dot · 量化、tp-reduce、ep-reduce、concat。",
           "三者之间没有任何直连，数据一律经存储交换。VU 不能直接读 Matrix Mem。"

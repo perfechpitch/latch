@@ -369,7 +369,7 @@ LPU 对外只有片外桩那一侧；chip 之间、chip 与 Switch 之间的连�
 ```
 port ext[p] (双向, credit/release, clk)          // PCIe Switch 上接片外桩的端口，字段同链路
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
-  in  stream_release_valid · reduce_release_valid · vc_release_valid
+  in  stream_release_valid · vc_release_valid
   out 同字段
 port chip.c2c[i][d] (双向, credit/release, clk)  // 第 i 颗 chip 的四个 C2C 端口，d ∈ {N, E, W, S}，由 L1 接线
 port sw.port[p] (双向, credit/release, clk)      // PCIe Switch 的端口，由 L1 接线

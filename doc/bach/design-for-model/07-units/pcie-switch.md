@@ -63,7 +63,6 @@ PCIe Switch 是 chip 阵列与片外之间的交换节点：
 port port[p] (双向, credit/release, clk)          // 每端口一对 in / out，字段同链路；外侧各接一对 Link 实例
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
   in  stream_release_valid · stream_release_user[15:0]
-  in  reduce_release_valid · reduce_release_user[15:0]
   in  vc_release_valid · vc_release_vc[1:0]
   out 同字段
 port cfg (slave, ctrl_noc 写事务, clk)            // 组播复制表与组播开关的配置口
@@ -127,6 +126,12 @@ MULTICAST    开关，默认关（《软件栈》“先假设 PCIe 没有组播�
 | 同层与同列 chip 直连不经 Switch | LPU 的接线 | `chip_direct_link` |
 
 ***
+
+## 当前模型的实现边界
+
+`PcieSwitch`每端口一个32-flit输出队列，全部组播目的有容量才接纳；上游按已分配额度发送，队满视为容量错误并断言，不是丢弃后重试。全部副本发走后向来源返还一次VC额度。
+
+`lane_rr`当前只累计发送次数；LPU装配对每个方向只建立一条Link，尚未建立两条x16各自计时和乱序的行为。上文双路x16是物理目标，当前测试覆盖路由、组播与容量归还，不能证明双路时序。
 
 ## 8　取舍
 

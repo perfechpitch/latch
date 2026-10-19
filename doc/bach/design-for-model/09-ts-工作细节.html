@@ -414,7 +414,7 @@ const SCENES=[
       {
         "t":"原子授权",
         "d":[
-          "复核等待身份和需求，有效grant同沿扣账、置drct_used和READY。固定E2／E3时序原文待统一。"
+          "复核等待身份和需求，有效grant同沿扣账、置drct_used和READY。模型采用E2提交，原文E3场景仍待统一。"
         ],
         "rows":[[0,["SID0（老）","东已用","READY"]],[1,["SID1（新）","继续等待","WAIT_CREDIT"]],[2,["东计数","0","只扣有效grant"]]],
         "logic":[],
@@ -629,7 +629,7 @@ const SCENES=[
       {
         "t":"权重加载",
         "d":[
-          "PC-only零身份，不建Stream，加载中丢新ACK/RMEM并暂停已有FIFO配对。请求时点与多包阶段范围待统一。"
+          "PC-only零身份，不建Stream，加载中丢新ACK/RMEM并暂停已有FIFO配对。loading只切模式，每阶段由一个已接受Trigger发起；整分片的阶段划分仍待定义。"
         ],
         "rows":[[0,["SELF_START","业务暂停","加载模式"]],[1,["Bypass","加载请求分开","PC-only全零身份"]],[2,["ACK","FIFO保留","新输入忽略"]]],
         "logic":[],

@@ -201,7 +201,7 @@ MU 是为 MoE 算子深度定制的 GEMV 加速核心，服务 Batch = 1（Token
 | F1 | 寄存器分静态配置与动态配置：静态配置基本不随用户变化，初始化阶段配好、业务流阶段快速调用；动态配置随用户变化，跟随任务下发，含静态配置的选择 |
 | F2 | 任务启动写 `dsawi` 到 `trigger`；trigger 寄存器含 last 标志 |
 | F3 | `streamID` / `taskID` / `userID` **不由软件写进寄存器**。MU RV core 执行 `dsaw` 时从自定义 CSR 抄进这笔配置请求，写 `TASK_TRIGGER` 被收下时从请求上采样进任务快照。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是这一组 |
-| F4 | 寄存器地址映射本轮用临时映射（`regmap.h`）。原来等的《MU/DTE 寄存器配置参数》已改名为《DTE 寄存器配置参数》，只剩 DTE 那一半（地址空间三段加寄存器模板，见《DTE 数据搬运引擎》），**MU 侧的寄存器地址映射仍无着落** |
+| F4 | 模型寄存器映射由 `mu/regfile.h` 定义。原来等的《MU/DTE 寄存器配置参数》已改名为《DTE 寄存器配置参数》，只剩 DTE 那一半（地址空间三段加寄存器模板，见《DTE 数据搬运引擎》），MU硬件映射与模型映射仍需核对冻结状态 |
 
 regfile 另记一个只供波形带出的标量：从上一笔 trigger 到写 `TASK_TRIGGER` 之间，软件写任务配置寄存器（`0x004`~`0x028`，即 `kMuPrimitiveDim` 到 `kMuPrimitiveMode`）的次数，写 trigger 那一刻锁进任务快照的 `cfg_count` 再清零（写 `TASK_TRIGGER` 是启动位不算、静态配置区 `0x400+` 走 default 也不计）。它不影响计算，只让 `trace2perfetto.py` 的 `MU-Core` 段 args 能带上一笔任务配置了多少个寄存器。
 
@@ -274,7 +274,7 @@ regfile 另记一个只供波形带出的标量：从上一笔 trigger 到写 `T
 | F39 | Wr concat buffer 1～2 KB：各 lane buffer 深度不同，取决于物理距离，最远 16 拍、最近 1 拍，越近 buffer 越大，最大深度 16 |
 | F40 | Store concat 按 vlane 分两种拼装方式：`vlane=1` 步进横切，所有 lane buffer 并行 128 B 截面，连续取 8 次攒满 1024 B（8T）；`vlane=2` 纵向整块，每 lane 一次取 8 B、共 256 B 截面，连续取 4 次攒满 1024 B（4T） |
 | F41 | 结果写回 Core Mem 后与 issue_q 的 finish 合成 `dsa_done`；trigger 里的 last 标志决定这一笔要不要报 TS |
-| F41a | `SYS_STATUS`（Offset `0x004`）的 `BUSY` 位给软件轮询：写 `SYS_CTRL` 的 `TASK_START` 起置位，到 F41 那一刻清，也就是结果写回 Core Mem 之后。一个 task 里连发几笔 MU 任务时，软件靠它等前一笔做完再配下一笔。位域表在原始文档的表格附件里，本地库没同步到，`BUSY` 本轮取 bit0（**待确认**） |
+| F41a | 模型的 `kMuStatus`／kernel `MU_STATUS` 位于0x404，BUSY取bit0；任务启动后置位，写回完成后清零。一个TS任务连发多笔MU任务时，kernel轮询它等待前笔完成。0x004是任务配置 `kMuPrimitiveDim`，保存Nblock/Kblock；硬件控制寄存器最终映射仍待统一 |
 
 ***
 
@@ -368,7 +368,7 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="20" y="188" font-size="10.5" fill="#6b7280">load</text>
   <rect x="150" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="160" y="170" font-size="8.5" fill="#92400e">M5</text>
-  <text x="292" y="170" font-size="8.5" fill="#92400e" text-anchor="end">D11</text>
+  <text x="292" y="170" font-size="8.5" fill="#92400e" text-anchor="end">D16</text>
   <text x="160" y="190" font-size="11" fill="#7c2d12">Token ldq</text>
   <text x="160" y="204" font-size="11" fill="#7c2d12">读 Core Mem</text>
   <rect x="316" y="156" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
@@ -390,12 +390,12 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="160" y="362" font-size="11" fill="#7c2d12">stq concat</text>
   <rect x="316" y="328" width="150" height="56" fill="#fbf3df" stroke="#b45309" stroke-dasharray="4 3" rx="4"/>
   <text x="326" y="342" font-size="8.5" fill="#92400e">M9</text>
-  <text x="458" y="342" font-size="8.5" fill="#92400e" text-anchor="end">D11</text>
+  <text x="458" y="342" font-size="8.5" fill="#92400e" text-anchor="end">D16</text>
   <text x="326" y="362" font-size="11" fill="#7c2d12">写 Core Mem</text>
   <text x="326" y="376" font-size="11" fill="#7c2d12">与 dsa_done</text>
   <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#aruov)" fill="none"/>
   <text x="20" y="438" font-size="10.5" fill="#374151">三段重叠：task0 计算与 task1 load 同拍，task0 写回与 task1 计算同拍，任务切换无 bubble。</text>
-  <text x="20" y="466" font-size="10.5" fill="#374151">M5 与 M9 的 11 拍取 Cmem MAS 的 MU 侧延迟；MU MAS 记读写各 16 拍，多出的是 ldq 与 stq 的排队，本轮按 11 拍加队列建（待定）。</text>
+  <text x="20" y="466" font-size="10.5" fill="#374151">M5与M9：Cmem MAS记11T，MU侧记16T；模型CoreMem的MU读写均取16T，队列等待另计。</text>
   <text x="20" y="494" font-size="10.5" fill="#374151">M7 的 10 级取 matrix exe 一节的单 lane 深度；参数表另记流水延时 9 T，差的一拍是脉动输出那一级，以 10 级为准（待定）。</text>
 </svg>
 ```
@@ -566,13 +566,13 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="776" y="170" font-size="10" fill="#334155" text-anchor="middle">sf_a[31:0]</text>
   <rect x="232" y="21" width="412" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="37" font-size="8.5" fill="#6b7280">M5</text>
-  <text x="630" y="37" font-size="8.5" fill="#6b7280" text-anchor="end">D11</text>
+  <text x="630" y="37" font-size="8.5" fill="#6b7280" text-anchor="end">D16</text>
   <text x="250" y="57" font-size="12" fill="#111827">Token ldq · 132 B 一拍取回</text>
   <text x="250" y="79" font-size="10.5" fill="#475569">1. cmem_rd.req = {addr=token_addr, scale_en=MXFP8}</text>
   <text x="250" y="99" font-size="10.5" fill="#475569">2. rd_outstanding 满 → 停发，等回数</text>
   <text x="250" y="119" font-size="10.5" fill="#475569">3. rsp_valid → rd_outstanding 写入 {rdata 128 B, scale 4 B}</text>
   <text x="250" y="139" font-size="10.5" fill="#475569">4. vlane_num &gt; 1 → 只取 256 B / vlane_num 字节再 copy 扩展到 256 B</text>
-  <text x="250" y="163" font-size="10" fill="#9ca3af">11 拍是 Cmem 侧的 MU 读延迟</text>
+  <text x="250" y="163" font-size="10" fill="#9ca3af">模型MU端口取16T；Cmem MAS另记11T</text>
   <path d="M188 73 L231 73" stroke="#475569" marker-end="url(#aru5)" fill="none"/>
   <path d="M188 127 L231 127" stroke="#475569" marker-end="url(#aru5)" fill="none"/>
   <path d="M644 58 L692 58" stroke="#475569" marker-end="url(#aru5)" fill="none"/>
@@ -717,7 +717,7 @@ load、计算、写回三段在相邻 task 之间重叠，第 1 层图按 t 标�
   <text x="809" y="167" font-size="9.5" fill="#6b7280" text-anchor="middle">task_id[5:0]</text>
   <rect x="232" y="20" width="445" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M9</text>
-  <text x="663" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D11</text>
+  <text x="663" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D16</text>
   <text x="250" y="56" font-size="12" fill="#111827">stq · 1 KB 分 8 拍写回并报完成</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. cmem_wr.req = {addr=result_addr, wdata 1024 b, scale 32 b, be}</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. 1 KB 按 8 拍发出，req_ready = 0 时保持</text>
@@ -751,7 +751,7 @@ Matrix Mem 读       8 KB（+1 KB scale），lane 内延迟 8T；ldq 侧记 4T�
 MU 配置耗时上限     < 64 T（未来可能要求 < 32 T）
 单 token 执行耗时   f(N, X) = 4096 × X / N（T），N 是每 core 的专家数、X 是激活数
 Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一，Mmem MAS 记 64 bank。未解，直接影响 8 KB/T 的组织方式
-寄存器地址映射      临时映射（regmap.h），等《MU/DTE 寄存器配置参数》
+寄存器地址映射      模型由mu/regfile.h定义，BUSY为0x404 bit0；硬件最终映射待统一
 ```
 
 ***
@@ -789,6 +789,12 @@ Matrix Mem bank 数  **口径冲突**：MU MAS 记 32 bank 与 32 lane 一对一
 | BUSY 到结果写回 Core Mem 之后才清，软件轮询它等一笔做完 | F41a | `mu_busy_poll` |
 
 ***
+
+### 当前模型的支持范围
+
+当前kernel使用MXFP8输入和权重、BF16输出，覆盖两种MXFP8原语及专家间加权累加。`regfile.h`的权重类型译码支持BF16、MXFP8和MXFP4；NVFP4编码当前回落为BF16，不能作为NVFP4数值实现验收。MU Drain & Trap和DIDT仍保留简化边界。
+
+DTE只可访问16×256B topK窗口。`GenEpInfo`内部仍分配1024项存储，属于模型内部容量；普通MU计算使用本SID，B Core的长期缓存由MM软件槽承担。
 
 ## 9　取舍
 

@@ -43,7 +43,7 @@
 * 数据只按 RouterTable 往 mid、left、right 转发，不投递本 core，不进 ReduceModule。
 * 只查、只扣下一跳链路的 VC credit，不查、不占 stream 与 Core Mem credit。
 * 不做溢流转存，`stall_way` 只能是留在 VC 等待。
-* 下游还回来的 Reduce release 按 `RTR_RELEASE_ROUTE` 静态转发。
+* 下游返回的 Stream release 按 `RTR_RELEASE_ROUTE` 静态转发。
 
 坏 core 的 TS、三个 RV core、三个 DSA 与存储照样构造，但不步进、不配置、不记波形。
 
@@ -360,7 +360,7 @@
 | F5 | 每行左右两端的 core 各接一个 C2C Bridge，行 0 左端引到 chip 的 N 口、行 0 右端引到 E 口、行 1 左端引到 W 口、行 1 右端引到 S 口，落到编号上是 core0 / core4 / core5 / core9 |
 | F6 | 每 core 构造一个 ctrl_noc 端点，按各单元文档声明的 `cfg` 口接线 |
 | F7 | 角色不存在 chip 与 core 里，由 SCP 在 core 配置阶段逐项写的几项配置体现：TS 的 `SELF_START`（B core、R core 为 1，计算 core 为 0）与 `B_CORE_DIRECTION`（B core 写广播的方向，计算 core 与 R core 为 0）；TS 的任务链与 datain 任务（计算 core 配计算 core 的任务链，B core、R core 配自启动任务链与 datain 任务）；DTE 业务模式下进核那一笔的 `route`（计算 core 落 Core Mem，B core、R core 落 Matrix Mem）、回不回 Ack（计算 core 回，B core、R core 不回）、标志表的基址与一个槽位多大（计算 core 不配，B core 配 token 槽位，R core 配行结果槽位）。不派角色的 core 这几项都不配 |
-| F8 | 路由表按 chip 从编译侧读入，不写死。逻辑上左右相邻的两个计算 core 物理上隔着坏 core 时，坏 core 配一条只转发的表项，方向与这一跳相同；这一跳在归约链上时，坏 core 再配 `RTR_RELEASE_ROUTE`，把从下游一侧进来的 Reduce release 转往上游一侧 |
+| F8 | 路由表按 chip 从编译侧读入，不写死。逻辑上左右相邻的两个计算 core 物理上隔着坏 core 时，坏 core 配一条只转发的表项，方向与这一跳相同；这一跳在归约链上时，坏 core 再配 `RTR_RELEASE_ROUTE`，按静态Mask将Stream release转往上游 |
 
 ### SCP 桩
 
@@ -404,7 +404,7 @@
 | F32 | 同向的数据与 credit release 之间做仲裁，小包优先；反向按类型 demux 分流 |
 | F33 | TX 方向的 AXI write 是 posted，写响应可以丢 |
 | F34 | RX 方向的 AXI 需要响应，由 AXI Bridge 返回 dummy response，释放 PCIe 的 outstanding 资源 |
-| F35 | VC Buffer 按方向分档：TX 是 private 20 flit/VC × 4 = 80 加 shared 约 20，合计 100 flit ≈ 28.8 KB，覆盖本级 R2R 往返约 20 cycle；RX 是 private 20 flit/VC × 4 = 80 加 shared 约 300，合计 380 flit ≈ 109.4 KB，覆盖 PCIe 往返 600 ns @1024-bit。两向合计约 138.7 KB |
+| F35 | VC Buffer 按方向分档：TX 是 private 20 flit/VC × 4 = 80 加 shared 约 20，合计 100flit = 28.125KiB，覆盖本级 R2R 往返约 20 cycle；RX 是 private 20 flit/VC × 4 = 80 加 shared 约 300，合计 380flit = 106.875KiB，覆盖 PCIe 往返 600 ns @1024-bit。两向合计135KiB（按288B/flit） |
 | F35a | 与本片 core 之间照 VC credit 那一套：一个 flit 离开桥的输入缓冲、交给下一级时，才把那个 VC 的位置还给 core。收下就还是不行的，那时它还占着位置，core 拿回额度又发，本级已经没地方收，那些 flit 只能丢，而 credit 已经扣掉了。收不收得下只看这个缓冲，容量与 Router 给这个方向的 VC credit 总量一致；对侧还有没有位置是往线上发那一步的事，两件事不能混 |
 | F36 | credit 与这个结构一一对应，记法同 core 内 Router：每 VC 一个 private 计数器加每方向一个 shared 计数器，发送先扣 private 再扣 shared，归还先补 private。一个方向的 credit 总量等于对侧该方向的 buffer 容量，不超发。往线上发按进来的先后取第一笔有额度的，一个 VC 没额度只压住这个 VC；同一个 VC 内按进来的先后发 |
 | F36a | 链路层 credit 的归还跨片走：收方把一段所在的那个 flit 交给本片 core 之后，发一笔回给发方，发方收到才恢复额度。core 那一侧堵住时 RX 不还，反压就沿链路传回发方。这一笔到对侧的桥为止，不往 core 送，与三类业务 release 的透传是两回事。单向流量下尤其要走这条路，否则发方的额度用完就再也回不来 |
@@ -423,7 +423,6 @@
 port c2c[d] (双向, credit/release, clk)           // d ∈ {N, E, W, S}：chip 对外的四个口，由 LPU 接到相邻 chip 或 PCIe Switch
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
   in  stream_release_valid · stream_release_user[15:0]
-  in  reduce_release_valid · reduce_release_user[15:0]
   in  vc_release_valid · vc_release_vc[1:0]
   out 同字段
 port bridge2core[d] (双向, credit/release, clk)   // C2C Bridge 与边界 core 的 Router 之间，字段同上；ready 的成立条件是对侧该 VC 的 credit 大于 0
@@ -623,7 +622,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="250" y="78" font-size="10.5" fill="#475569">1. RC：按 path_id 查得出口方向与下一跳 VC</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. VA：查 c2c_credit[方向][VC] &gt; 0</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. SA：同向的数据与 credit release 之间仲裁，小包优先</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，三类 release 一律透传</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. Bridge 不建 stream credit 表，也不参与 Reduce 累加，VC与Stream两类release 一律透传</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">反向按类型 demux 分流</text>
   <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
   <path d="M188 142 L231 142" stroke="#475569" marker-end="url(#arc3)" fill="none"/>
@@ -718,7 +717,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="104" y="79" font-size="10.5" fill="#374151" text-anchor="middle">c2c[d]</text>
   <text x="104" y="97" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
   <text x="104" y="115" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_release_valid</text>
-  <text x="104" y="133" font-size="9.5" fill="#6b7280" text-anchor="middle">reduce_release_valid</text>
+  <text x="104" y="133" font-size="9.5" fill="#6b7280" text-anchor="middle">stream_release_valid</text>
   <polygon points="626,69 792,69 782,127 616,127" fill="#f8fafc" stroke="#374151"/>
   <text x="704" y="88" font-size="10.5" fill="#374151" text-anchor="middle">c2c[d]</text>
   <text x="704" y="106" font-size="9.5" fill="#6b7280" text-anchor="middle">flit_valid · flit_msg</text>
@@ -728,7 +727,7 @@ Chip 自己不打拍，这一层的逐拍行为在 SCP 桩、ctrl_noc 端点与�
   <text x="558" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D300</text>
   <text x="250" y="56" font-size="12" fill="#111827">AXI Bridge · credit 与 AXI4 的协议转换</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 出方向：credit 语义转成 AXI write burst</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. 入方向：AXI read/write 转回 flit 与三类 release</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 入方向：AXI read/write 转回 flit 与VC与Stream两类release</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. release 的粒度是 flit，在 C2C 上压缩包数量后再传</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. 出方向 300 拍是 PCIe C2C 的 300 ns，入方向计 0</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Router 到 Router 的 400 T 含这一段与两侧 Bridge</text>
@@ -753,9 +752,9 @@ ITCM 装载拍数      镜像字节数 / 4 B
 C2C_BRIDGE        每 chip 4 个，分布在 mesh 两侧，不是每 core 一个
 C2C_SPLIT         4 KB 边界拆包，seq_id 4 bit
 C2C_WIDTH         TX 2048 → 1024，RX 1024 → 2048
-C2C_VC_BUF        合计约 138.7 KB；TX private 20 flit/VC ×4 + shared 约 20，RX private 20 flit/VC ×4 + shared 约 300
+C2C_VC_BUF        合计135KiB（按288B/flit）；TX private 20 flit/VC ×4 + shared 约 20，RX private 20 flit/VC ×4 + shared 约 300
 C2C_LATENCY       Router 到 Router 400T，PCIe C2C 64 GB/s；HAS 记跨 chip 单向 ≤ 200～300 ns
-C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100 flit ≈ 28.8 KB；RX private 20 flit/VC × 4 + shared 300 = 380 flit ≈ 109.4 KB
+C2C_VC_BUF_DETAIL TX private 20 flit/VC × 4 + shared 20 = 100flit = 28.125KiB；RX private 20 flit/VC × 4 + shared 300 = 380flit = 106.875KiB
 ```
 
 ***

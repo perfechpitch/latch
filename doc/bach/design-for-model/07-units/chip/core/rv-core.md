@@ -59,7 +59,7 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 <text x="172" y="341" font-size="11" fill="#111827" font-weight="600">指令执行器（src/rv32 的 SystemRv32）</text>
 <text x="172.0" y="358.0" font-size="8.5" fill="#475569">RV32IMC，只支持 M 态，实现 M 态 CSR，不支持 S / U / H；fence 实现为 nop</text>
 <text x="172.0" y="371.5" font-size="8.5" fill="#475569">覆盖 Decode 接入 custom-0 自定义指令：</text>
-<text x="172.0" y="385.0" font-size="8.5" fill="#475569">　dsar / dsari 读 DSA 寄存器（不会被阻塞）</text>
+<text x="172.0" y="385.0" font-size="8.5" fill="#475569">　dsar / dsari 异步读DSA寄存器，请求受ready约束</text>
 <text x="172.0" y="398.5" font-size="8.5" fill="#475569">　dsaw / dsawi 写 DSA 寄存器，一条写一个</text>
 <text x="172.0" y="412.0" font-size="8.5" fill="#475569">　task_done（带 TS 标志位）· loop</text>
 <text x="172.0" y="425.5" font-size="8.5" fill="#475569">双发射顺序执行，一拍最多两条；访存与 DSA 读的延迟记在 gpr 就绪表上</text>
@@ -163,10 +163,10 @@ RV core 是 TS 与 DSA 之间的桥梁：从 TS 收 task，按 `task_pc` 跑 ITC
 | F1 | 提前接收 TS 下发的 task，前一个 task 完成后立刻执行队头缓存的那个，做到用户之间 task 的无 bubble 调度 |
 | F2 | 按 task_queue 是否有空槽产生 `task_ack`；未被接收时 TS 不能释放该 task 跳到下一个 |
 | F2a | 一笔命令连着几拍出现在端口上，按 `seq` 认它，同一笔只入队一次。不按 `stream_id` 与 `task_id` 认：B core 与 R core 的 datain 任务不占 stream 表项，几笔的这两项都是 0 |
-| F3 | 三Core下发字段PC32、SID4、TID6、UID16、实际PID8、VCID2与valid；SID/TID/UID/PID/VCID进入自定义CSR，DSA配置请求保存该身份直到Fire。task_dsa_en是当前仿真适配字段，目标接口不靠它替代recv_unit |
+| F3 | 三Core下发字段PC32、SID4、TID6、UID16、实际PID8、VCID2与valid；SID/TID/UID/PID进入身份读口，VCID保存在任务上下文；DSA配置请求保存完整身份直到Fire。task_dsa_en是当前仿真适配字段，目标接口不靠它替代recv_unit |
 | F4 | 自定义 CSR 四个：`stream_id`、`task_id` 只读，`user_id` 与 `path_id` 可读写。`path_id` 是当前任务的 PID，PID 更新任务里 kernel 把新 PID 写进去，随 `task_done` 带回 TS。`user_id` 有两条写入路径，写的是同一个字段：普通计算 core 上 TS 下发 task 时硬件写入；B core 与 R core 上 TS 下发时还没有用户身份，软件认出之后自己写。软件读它算 R core 的用户映射表与 Matrix Mem 地址，Router 与 credit 记账认的也是它 |
 | F5 | 自启动的 B core 与 R core 上，软件从 Share Mem 认出这一笔属于哪个用户（B core 按 `head` / `tail` 取一格，R core 从软件用户 FIFO 弹出队头）后把 `user_id` 写进自定义 CSR，随 `task_done` 经 `rv_done` 回 TS，由 TS 的 `completion` 写口补进 stream_table 那一项。没有专用的 bind 通路 |
-| F6 | 完成信息四个字段：`stream_id`、`user_id`、`task_id`、`pid`（`path_id` 这个 CSR 的当前值）。`task_id` 只读，异步 datain 任务是例外，由软件识别包头后写入，用于告诉 TS 是任务链中哪一步完成 |
+| F6 | 完成信息四个字段：`stream_id`、`user_id`、`task_id`、`pid`（当前`path_id`）。现行DataIn任务号由TS入口匹配确定，kernel使用下发的TID |
 | F6a | 自定义 CSR 读它当场拿到当前这一笔 task 的身份，不排队也不异步返回。DSA 寄存器读是另一档：发出去就走，数据由 dsa_rq 按记录的顺序写回 |
 | F7 | 身份到三个 DSA 走同一条路。自定义 CSR 留给软件读。RV 执行 `dsaw` 的那一拍把当时的 `streamID` / `taskID` / `userID` / `pathID` / `vcid` 抄进这笔配置请求，DSA 收下 trigger 写时用请求上的这一份，软件不必再写一遍。DTE 取全部五项，MU/VU命令同样带实际PID和VCID，请求快照保留身份，DSA按本单元接口使用所需字段（`streamID` / `taskID` / `userID`）。`dsa_done` 回给 TS 的 `stream_id` 与 `task_id` 就是它。配置通路把 trigger 挡住时，已经发出的请求仍带着发出那一拍的身份 |
 
@@ -208,7 +208,7 @@ RV Core 顺序派遣、没有 ROB 重排序，会出现乱序写回，所以每�
 | - | - |
 | F21 | dsa_iss 每拍最多下发一条配置或 trigger 指令 |
 | F22 | DSA 任务配置下发指令按下发通道是否反压阻塞判断是否下发成功 |
-| F23 | DSA 读寄存器指令不会被阻塞 |
+| F23 | DSA读请求按目标ready和dsa_rq容量发出；接受后异步返回，不占住RV等待数据的执行位置 |
 | F24 | dsa_rq 8 项，按顺序记录已下发的读指令信息，返回数据后按记录的目的寄存器编号写回 gpr |
 | F25 | DSA 读寄存器指令不支持同步读返回，软件要查询状态只能轮询 |
 
@@ -486,7 +486,7 @@ kernel 清单按 RV core 分：
   <text x="250" y="56" font-size="12" fill="#111827">dsa_iss · 每拍最多一条配置或 trigger</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. 指令是 dsaw/dsawi → dsa_cfg = {we=1, addr, wdata}</text>
   <text x="250" y="98" font-size="10.5" fill="#475569">2. req_ready=0 → 本条阻塞，pc 保持（DSA 配置通路满时反压）</text>
-  <text x="250" y="118" font-size="10.5" fill="#475569">3. 指令是 dsar/dsari → dsa_cfg = {we=0, addr}，不阻塞</text>
+  <text x="250" y="118" font-size="10.5" fill="#475569">3. dsar/dsari按目标ready发{we=0,addr}，接受后异步返回</text>
   <text x="250" y="138" font-size="10.5" fill="#475569">4. dsar 同时 dsa_rq.push(rd)，并把 gpr_ready[rd] 清零</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">写 DSA 寄存器一条写一个</text>
   <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arv3)" fill="none"/>
@@ -681,7 +681,7 @@ custom-0 字段布局   见下一节
 | task_queue 提前接收，做到用户之间无 bubble 调度 | F1 | `task_queue_prefetch` |
 | 按空槽产生 task_ack，未接收时 TS 不能跳到下一个 | F2 | `task_ack_handshake` |
 | 同一笔命令按 seq 认，连着几笔身份相同的 datain 也不会漏 | F2a | `cmd_seq` |
-| 下发七字段与完成三字段，user_id 可写、其余只读 | F3、F6 | `task_fields` |
+| 下发PC/身份与valid，完成SID/UID/TID/PID；user_id与path_id可写 | F3、F6 | `task_fields` |
 | 自定义 CSR 四个，user_id 与 path_id 可写 | F4 | `user_id_csr` |
 | 自启动 core 由软件写 user_id CSR，随 rv_done 回 TS | F5 | `self_start_writeback` |
 | 自定义 CSR 同步返回，DSA 寄存器读异步写回 | F6a | `csr_sync_read` |
@@ -714,7 +714,9 @@ custom-0 字段布局   见下一节
 
 ## TS／DTE 详设接口要求
 
-任务命令包含PC32、SID4、TID6、UID16、PID8、VCID2和valid；三Core各自valid/ready保持完整命令。MU/VU同样接收按实际PID查询的VCID，经CSR传给DSA Trigger。匿名SELF_START Task0不从Trigger绑定UID，软件识别用户后经合法Core完成返回；等待双ACK的Task0由配对完成绑定。
+任务命令包含PC32、SID4、TID6、UID16、PID8、VCID2和valid；三Core各自valid/ready保持完整命令。MU/VU同样接收按实际PID查询的VCID，经任务上下文保存到DSA Trigger请求。匿名SELF_START Task0不从Trigger绑定UID，软件识别用户后经合法Core完成返回；等待双ACK的Task0由配对完成绑定。
+
+VCID保存在任务上下文并随配置请求传递；模型任务控制区只提供SID/TID/UID/PID四个身份读口。`exec.h`仍保留写TID的旧兼容入口，现行DataIn kernel不使用它；硬件只读TID约束与该兼容入口需在接口收敛时处理。
 
 DSA配置请求逐笔保存发出时的SID/TID/UID/PID/VCID，直到Fire，不能在反压期间从已经切换的CSR重读。DTE配置请求被接收后一拍返回读值，valid-only无ID，连续读/写可交错；RV读取未就绪目的寄存器仍按自身gpr就绪规则等待。DTE的一拍读合同不规定MU/VU的读延迟。
 
@@ -729,9 +731,9 @@ Reduce软件发Core完成，DTE物理搬运及Ack退休后发DSA完成，TS按�
   * 本轮关心的是 core 内的调度与访存排队，不是标量核自身的 IPC
   * kernel 是真实 RV32 程序，指令条数是真的；一拍最多两条加上访存与 DSA 读的真实延迟，已经能反映“配置耗时是否小于计算耗时”这一条约束
   * 代价是分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争都不体现
-* **为什么 DSA 读寄存器不阻塞而配置写会阻塞**
-  * 配置写要占 DSA 的配置通路，通路满了只能等
-  * 读只是取一个状态，用 dsa_rq 记下目的寄存器就能异步返回，不必占住发射口
+* **DSA读的请求与返回分别记账**
+  * 请求侧遵循目标ready及dsa_rq容量。DTE在RUN/STOP且全局Q满时反压读写请求
+  * 接受后由dsa_rq保存目的寄存器，数据异步写回；依赖该目的寄存器的指令等待就绪
 * **为什么栈顶与全局指针在复位时直接赋值**
   * 模型只跑业务流那一段：TS 下发 task 时取 `task_pc` 起始执行，firmware 从 `boot_pc` 跑到那条不通知 TS 的 `task_done` 为止的那一段没有执行的时机
   * `sp` 与 `gp` 是 firmware 起始那两条指令设的，不设就是 0，kernel 一用栈就访问 0 号地址附近

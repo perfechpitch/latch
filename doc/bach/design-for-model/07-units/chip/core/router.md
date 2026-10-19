@@ -4,17 +4,21 @@
 **层**：详细实现，建立在《latch 建模计划》（[`07-latch-建模计划.md`](../../../07-latch-建模计划.md)）的建模方式之上
 **在硬件里的位置**：LPU → chip → core → **Router**
 
-给实现 Router 的人：八个逐拍推进的模块各自做哪些事、端口与存储怎么定。每个 Core 一份，坏 core 与不派角色的 core 也有。
+给实现 Router 的人：Router各模块与TS许可接口各自做哪些事、端口与存储怎么定。每个 Core 一份，坏 core 与不派角色的 core 也有。
 
 章节与画法按《硬件电路设计描述规范》（`/home/colin/develop/forge/fuse/gmp/uarch/硬件电路说明.md`）。
 
 **对应设计**：
 
 * 《Router 片上交换与归约》全篇
-* 《归约的完整过程》：“第二层：chip 内 core 间的逐跳累加”“Reduce credit 的闭环”
+* 《归约的完整过程》：“第二层：chip 内 core 间的逐跳累加”“本级RMEM许可与网络准入”
 * 《软件栈》：“Router 软件视角”“使用示例：中间列 chip 的坏 core2、core7”“阻塞重传四步”
 
 ***
+
+## 资源与完成协议
+
+TS管理三方向业务许可和每SID的本级RMEM许可。Router维护实体用户表，按真实Stream release归还用户已持有方向；本级退休与各下游方向授权分别释放。Reduce输出逐flit使用VC credit，接收端检查用户准入、任务号、PID及物理上下文。
 
 ## 1　定位与边界
 
@@ -32,241 +36,31 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | - | - | - |
 | 管什么 | 下游 VC Buffer 有没有空槽 | 目标 core 有没有空间容纳这个用户的数据 |
 | 粒度 | 按下游方向加 VC，flit | 按 UserID 加方向，一个表项 |
-| 谁维护 | RouterStation 的独立计数器，硬件自动维护；每个 VC 的深度由软件经 ctrl_noc 静态配置，取够覆盖 credit 往返延迟即可，不必装得下整包 | Router 是唯一有效状态；DTE 持一份 cache；TS 内另有一份本级表，按与 Router 完全一致的逻辑分配空项 |
-| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核的包在 TS 下发任务前由 Router 授权 |
+| 谁维护 | RouterStation 的逐方向、逐 VC 计数器 | Router 保存实体用户表；TS 独立保存三方向计数及每用户已用方向；DTE cache 为兼容观测 |
+| 何时扣 | flit 发出时扣该方向该 VC 一个；经 CoreMem 重注入的包，Output Port 识别到重注入标记才扣 | 新 UserID 的包在本级占一个表项；出核任务由 TS 原子取得新增方向许可后下发 |
 | 何时还 | flit 离开下游 VC Buffer 就归还 | 用户在下游 core 跑完任务链、用完 Core Mem 后发携带 UserID 的 release |
 | 快慢 | 快，flit 一进一出就还 | 慢，要等那个用户在下游 core 上跑完整条任务链 |
 
-一项 stream credit 同时代表目标 core 的 Core Mem 与 ReduceMemory 容量：两块存储按同样的办法给 16 个用户等分，一个用户拿到一项就两边都有位置，所以逐级归约往下游发不另记一笔。
+Stream 准入与本级 RMEM 许可分别记账。Core Mem 按启用 Stream 槽划分，RMEM 有16个按需分配的32KiB用户上下文；网络分量只有通过接收端任务及物理上下文检查才可进入。
 
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2240 1150" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" role="img" aria-label="Router 第 0 层">
-<title>Router 第 0 层</title>
-<defs><marker id="a" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#475569"/></marker><marker id="as" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#475569"/></marker><marker id="g" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0f766e"/></marker><marker id="gs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0f766e"/></marker><marker id="o" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#b45309"/></marker><marker id="os" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#b45309"/></marker><marker id="p" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#7c3aed"/></marker><marker id="ps" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#7c3aed"/></marker><marker id="i" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#4338ca"/></marker><marker id="is" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#4338ca"/></marker><marker id="t" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#0d9488"/></marker><marker id="ts" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#0d9488"/></marker><marker id="r" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#be123c"/></marker><marker id="rs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#be123c"/></marker><marker id="b" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#2563eb"/></marker><marker id="bs" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#2563eb"/></marker><marker id="m" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#d97706"/></marker><marker id="ms" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#d97706"/></marker><marker id="l" markerWidth="10" markerHeight="10" refX="8.5" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 z" fill="#9aa1ad"/></marker><marker id="ls" markerWidth="10" markerHeight="10" refX="0.5" refY="4" orient="auto"><path d="M9,0 L0,4 L9,8 z" fill="#9aa1ad"/></marker></defs>
-<rect x="0" y="0" width="2240" height="1150" fill="#ffffff"/>
-<text x="20" y="26" font-size="12" fill="#111827">Router · 第 0 层（八个逐拍推进的模块；每 Core 一份，坏 core 也有。方位照 MAS 框图：core 侧模块在上，left / right 在两侧，mid 朝另一排在下）</text>
-<text x="884" y="26" font-size="9.5" fill="#6b7280">灰线 = flit 数据面　橙线 = 三类 credit 与 release　绿线 = 与 TS 的控制通路　紫虚线 = ctrl_noc 配置</text>
-<rect x="40" y="120" width="330" height="208.5" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="52" y="141" font-size="11" fill="#111827" font-weight="600">RouterTable / CSR</text>
-<text x="52.0" y="158.0" font-size="8.5" fill="#475569">64 条表项，索引 path_id</text>
-<text x="52.0" y="171.5" font-size="8.5" fill="#475569">字段：cur_vc · flow_dir · nxt_vc · streamNeedMask</text>
-<text x="52.0" y="185.0" font-size="8.5" fill="#475569">　　　operation · stall_way · reduce_outdata_type</text>
-<text x="52.0" y="198.5" font-size="8.5" fill="#475569">只描述静态路由与资源需求，不保存包的动态状态</text>
-<text x="52.0" y="212.0" font-size="8.5" fill="#475569">内部多副本：所有需并行查询的位置各一份</text>
-<text x="52.0" y="225.5" font-size="8.5" fill="#475569">更新状态机把同一笔写依次写入全部副本并记完成</text>
-<text x="52.0" y="239.0" font-size="8.5" fill="#475569">全部副本写完才向软件返回完成，禁止部分新部分旧</text>
-<text x="52.0" y="252.5" font-size="8.5" fill="#475569">外部两份（DTE、ReduceModule）由软件写，硬件不同步</text>
-<text x="52.0" y="266.0" font-size="8.5" fill="#475569">Credit Bypass Route：每个业务 credit 输入端口一张</text>
-<text x="52.0" y="279.5" font-size="8.5" fill="#475569">　静态输出方向 Mask，跨过不落地的 core 时靠改它切换 credit 路径</text>
-<text x="52.0" y="293.0" font-size="8.5" fill="#475569">core_bad_mask：10 bit，本 core 那一位为 1 就进透传档</text>
-<text x="358" y="319.5" font-size="8.5" fill="#9ca3af" text-anchor="end">软件经 R2CU 接口配置</text>
-<rect x="400" y="120" width="330" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="412" y="141" font-size="11" fill="#111827" font-weight="600">CoreMem 重发</text>
-<text x="412.0" y="158.0" font-size="8.5" fill="#475569">stall_way = 转存时：整包重定向到本地 Core Mem</text>
-<text x="412.0" y="171.5" font-size="8.5" fill="#475569">Bypass 被映射成“进 core + 出 core”两段</text>
-<text x="412.0" y="185.0" font-size="8.5" fill="#475569">CoreMem 中只保存包（含 UserID · PathID · size）</text>
-<text x="412.0" y="198.5" font-size="8.5" fill="#475569">重发时用 PathID 重查 RouterTable，不重复保存 VC 与路由</text>
-<text x="412.0" y="212.0" font-size="8.5" fill="#475569">同 VC 保序：该 VC 有未完成的重发包时后续包不得越过</text>
-<text x="412.0" y="225.5" font-size="8.5" fill="#475569">按 VC 粒度维护 pending_reinject 计数器防超车</text>
-<text x="412.0" y="239.0" font-size="8.5" fill="#475569">进 core 暂存时改写 overflow_reinject = 1</text>
-<text x="412.0" y="252.5" font-size="8.5" fill="#475569">出 core 重发时改回 0；Output Port 识别到该标记才扣 credit</text>
-<text x="412.0" y="266.0" font-size="8.5" fill="#475569">坏 core 不接收溢流，coremem credit 直接 bypass</text>
-<text x="412.0" y="279.5" font-size="8.5" fill="#475569">无论直接发还是重发，完成后都向 TS 回 UserID + PathID</text>
-<rect x="760" y="120" width="400" height="181.0" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="772" y="141" font-size="11" fill="#111827" font-weight="600">CoreStation</text>
-<text x="772.0" y="158.0" font-size="8.5" fill="#475569">HeaderFIFO：按接收顺序存包头，DTE 读完写 1 弹出</text>
-<text x="772.0" y="171.5" font-size="8.5" fill="#475569">OutputBuffer（in_core_fifo）：整包写入，不支持包间交织</text>
-<text x="772.0" y="185.0" font-size="8.5" fill="#475569">三态准入在 Xbar：UserID 已分配 → 直接发；未分配但有空项 → 记录占用；</text>
-<text x="772.0" y="198.5" font-size="8.5" fill="#475569">　无空项 → 不往 Core 出口发，那一笔留在它那个 VC 上等</text>
-<text x="772.0" y="212.0" font-size="8.5" fill="#475569">已过 Stream 检查，进 core 不再查 VC credit</text>
-<text x="772.0" y="225.5" font-size="8.5" fill="#475569">出 core：Core 方向输入 VC，与 DTE 之间按 VC credit 协议</text>
-<text x="772.0" y="239.0" font-size="8.5" fill="#475569">反压时 valid / Header / Payload / 首尾标志 / 有效字节保持不变</text>
-<text x="772.0" y="252.5" font-size="8.5" fill="#475569">收满一个包按顺序经 router2ts_trigger_ch 直接通知 TS</text>
-<text x="772.0" y="266.0" font-size="8.5" fill="#475569">判定收完：比较已接收数据量与包头里的 payload 大小</text>
-<text x="772.0" y="279.5" font-size="8.5" fill="#475569">进 core 与出 core 两条路完全并行，不共享仲裁状态</text>
-<rect x="1200" y="120" width="300" height="194.5" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="1212" y="141" font-size="11" fill="#111827" font-weight="600">Retire</text>
-<text x="1212.0" y="158.0" font-size="8.5" fill="#475569">Core 判定任务链结束后向 Router 与 ReduceModule 广播</text>
-<text x="1212.0" y="171.5" font-size="8.5" fill="#475569">Core 的保证：该 UserID 全部进 core、出 core 搬运完成</text>
-<text x="1212.0" y="185.0" font-size="8.5" fill="#475569">　且不会再发起新搬运之后才发 Retire</text>
-<text x="1212.0" y="198.5" font-size="8.5" fill="#475569">Retire 发出后 Router 上不得再出现以该 Core 为源或</text>
-<text x="1212.0" y="212.0" font-size="8.5" fill="#475569">　目标的该用户包</text>
-<text x="1212.0" y="225.5" font-size="8.5" fill="#475569">Router 的动作：停止该 UserID 的新发送，删除其全部</text>
-<text x="1212.0" y="239.0" font-size="8.5" fill="#475569">　stream credit 授权表项</text>
-<text x="1212.0" y="252.5" font-size="8.5" fill="#475569">ReduceModule 的动作：本地分区当场放；下游映射</text>
-<text x="1212.0" y="266.0" font-size="8.5" fill="#475569">　等在途任务的 Reduce release 都回来才清</text>
-<text x="1212.0" y="279.5" font-size="8.5" fill="#475569">本级 core 与所有下级出口的 release 经 core credit crossbar</text>
-<text x="1212.0" y="293.0" font-size="8.5" fill="#475569">　汇总，发往除来向外的另两个 R2R port，逐跳传到上游</text>
-<rect x="1560" y="120" width="400" height="195.0" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="1572" y="141" font-size="11" fill="#111827" font-weight="600">CoreMemCreditMonitor</text>
-<text x="1572.0" y="158.0" font-size="8.5" fill="#475569">监听事件队列：16 项全相连</text>
-<text x="1572.0" y="171.5" font-size="8.5" fill="#475569">TS 注册时带 UserID · StreamID · TaskID · PathID</text>
-<text x="1572.0" y="185.0" font-size="8.5" fill="#475569">Router 按 PathID 查出要发的下游方向、VC 与 stream 需求</text>
-<text x="1572.0" y="198.5" font-size="8.5" fill="#475569">申请到 → 经反向控制通路通知 TS</text>
-<text x="1572.0" y="212.0" font-size="8.5" fill="#475569">　（回 StreamID · TaskID · PathID）</text>
-<text x="1572.0" y="225.5" font-size="8.5" fill="#475569">申请不到 → 需求记进队列监听，资源满足再通知</text>
-<text x="1572.0" y="239.0" font-size="8.5" fill="#475569">多个事件同时满足时按 StreamID 仲裁，选最老的通知 TS</text>
-<text x="1572.0" y="252.5" font-size="8.5" fill="#475569">进 core 重发的任务也注册到该队列</text>
-<text x="1572.0" y="266.0" font-size="8.5" fill="#475569">同一 VC 有未重发完的包时后续包不能提前发</text>
-<text x="1572.0" y="279.5" font-size="8.5" fill="#475569">另输出 per-port 的 stream_credit 给 core 与 DTE</text>
-<text x="1948" y="306.0" font-size="8.5" fill="#9ca3af" text-anchor="end">出核前的资源监听在 Router，不在 TS</text>
-<rect x="170" y="395.0" width="340" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="182" y="416.0" font-size="11" fill="#111827" font-weight="600">RouterStation[left]</text>
-<text x="182.0" y="433.0" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
-<text x="182.0" y="446.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
-<text x="182.0" y="460.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
-<text x="182.0" y="473.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
-<text x="182.0" y="487.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
-<text x="182.0" y="500.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
-<text x="182.0" y="514.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
-<text x="182.0" y="527.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
-<text x="182.0" y="541.0" font-size="8.5" fill="#475569">坏 core（透传档）：不投递本 core、不占 stream 坑，VC credit 照查</text>
-<rect x="760" y="395.0" width="400" height="221.5" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="772" y="416.0" font-size="11" fill="#111827" font-weight="600">Xbar</text>
-<text x="772.0" y="433.0" font-size="8.5" fill="#475569">5 入 7 出</text>
-<text x="772.0" y="446.5" font-size="8.5" fill="#475569"></text>
-<text x="772.0" y="460.0" font-size="8.5" fill="#475569">入：left · right</text>
-<text x="772.0" y="473.5" font-size="8.5" fill="#475569">　　mid · local</text>
-<text x="772.0" y="487.0" font-size="8.5" fill="#475569">　　reduce 回注</text>
-<text x="772.0" y="500.5" font-size="8.5" fill="#475569"></text>
-<text x="772.0" y="514.0" font-size="8.5" fill="#475569">出：left · right</text>
-<text x="772.0" y="527.5" font-size="8.5" fill="#475569">　　mid · core</text>
-<text x="772.0" y="541.0" font-size="8.5" fill="#475569">　　reduce_0/1/2</text>
-<text x="772.0" y="554.5" font-size="8.5" fill="#475569"></text>
-<text x="772.0" y="568.0" font-size="8.5" fill="#475569">按输出独立</text>
-<text x="772.0" y="581.5" font-size="8.5" fill="#475569">RoundRobin</text>
-<text x="772.0" y="595.0" font-size="8.5" fill="#475569"></text>
-<text x="960.0" y="433.0" font-size="8.5" fill="#475569">贪婪整包：</text>
-<text x="960.0" y="446.5" font-size="8.5" fill="#475569">整包 &gt; 上包 body</text>
-<text x="960.0" y="460.0" font-size="8.5" fill="#475569">&gt; 轮询</text>
-<text x="960.0" y="473.5" font-size="8.5" fill="#475569"></text>
-<text x="960.0" y="487.0" font-size="8.5" fill="#475569">多播同拍复制</text>
-<text x="960.0" y="500.5" font-size="8.5" fill="#475569">全有或全无</text>
-<text x="960.0" y="514.0" font-size="8.5" fill="#475569"></text>
-<text x="960.0" y="527.5" font-size="8.5" fill="#475569">入口锁定到尾 flit</text>
-<text x="960.0" y="541.0" font-size="8.5" fill="#475569">（进 core 或</text>
-<text x="960.0" y="554.5" font-size="8.5" fill="#475569">ReduceModule）</text>
-<text x="960.0" y="568.0" font-size="8.5" fill="#475569"></text>
-<text x="960.0" y="581.5" font-size="8.5" fill="#475569">R2R 可在 flit</text>
-<text x="960.0" y="595.0" font-size="8.5" fill="#475569">边界切换包</text>
-<rect x="1300" y="395.0" width="400" height="249.0" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="1312" y="416.0" font-size="11" fill="#111827" font-weight="600">ReduceModule</text>
-<text x="1312.0" y="433.0" font-size="8.5" fill="#475569">三路输入仲裁（Data ×3）：仲裁 SRAM / Bank / 计算资源</text>
-<text x="1312.0" y="446.5" font-size="8.5" fill="#475569">　进入后锁定当前包直至尾 flit；资源不足对输入反压</text>
-<text x="1312.0" y="460.0" font-size="8.5" fill="#475569">输入精度处理：BF16 扩展为 FP32，数据面统一 FP32</text>
-<text x="1312.0" y="473.5" font-size="8.5" fill="#475569">Reduce Context SRAM：16 用户 × 32 KiB，FP32 中间结果</text>
-<text x="1312.0" y="487.0" font-size="8.5" fill="#475569">RMW 管线：首份输入建上下文，后续输入原位累加，80 GFLOPS</text>
-<text x="1312.0" y="500.5" font-size="8.5" fill="#475569">User Context Table：UserID · 包状态 · 输入完成 · 输出状态 · Retire</text>
-<text x="1312.0" y="514.0" font-size="8.5" fill="#475569">RouterTable Copy：输出方向 · 下一跳 VC · operation · 输出精度</text>
-<text x="1312.0" y="527.5" font-size="8.5" fill="#475569">结果流水：元素加完就发，整包锁定到尾 flit</text>
-<text x="1312.0" y="541.0" font-size="8.5" fill="#475569">　发送前查目标 VC credit</text>
-<text x="1312.0" y="554.5" font-size="8.5" fill="#475569">Downstream Reduce Credit Map：按 UserID 加方向，每笔任务准入一次、</text>
-<text x="1312.0" y="568.0" font-size="8.5" fill="#475569">　按 release 恢复</text>
-<text x="1312.0" y="581.5" font-size="8.5" fill="#475569">三条硬约束：必须执行 Reduce 不许降级 · 上下文保护 ·</text>
-<text x="1312.0" y="595.0" font-size="8.5" fill="#475569">　中间累加固定 FP32</text>
-<text x="1312.0" y="608.5" font-size="8.5" fill="#475569">整包发出后向 core 返回 UserID</text>
-<text x="1688" y="635.0" font-size="8.5" fill="#9ca3af" text-anchor="end">输入三路各 160 GB/s，输出 160 GB/s</text>
-<rect x="1760" y="395.0" width="340" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="1772" y="416.0" font-size="11" fill="#111827" font-weight="600">RouterStation[right]</text>
-<text x="1772.0" y="433.0" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
-<text x="1772.0" y="446.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
-<text x="1772.0" y="460.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
-<text x="1772.0" y="473.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
-<text x="1772.0" y="487.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
-<text x="1772.0" y="500.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
-<text x="1772.0" y="514.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
-<text x="1772.0" y="527.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
-<text x="1772.0" y="541.0" font-size="8.5" fill="#475569">坏 core（透传档）：不投递本 core、不占 stream 坑，VC credit 照查</text>
-<rect x="790" y="734.0" width="340" height="167.5" rx="4" fill="#f8fafc" stroke="#374151"/>
-<text x="802" y="755.0" font-size="11" fill="#111827" font-weight="600">RouterStation[mid]</text>
-<text x="802.0" y="772.0" font-size="8.5" fill="#475569">Header Parser：取 path_id · path_core_mask · user_id</text>
-<text x="802.0" y="785.5" font-size="8.5" fill="#475569">　size · vc_id，查 RouterTable 得出方向与资源</text>
-<text x="802.0" y="799.0" font-size="8.5" fill="#475569">VC Buffer ×4（private 20 + shared pool 约 20 flit）</text>
-<text x="802.0" y="812.5" font-size="8.5" fill="#475569">Packet Context：VC · 输出方向 · 剩余长度 · 包边界</text>
-<text x="802.0" y="826.0" font-size="8.5" fill="#475569">Stream Resource Table：下游各方向的 UserID 占用</text>
-<text x="802.0" y="839.5" font-size="8.5" fill="#475569">VC Credit 计数器：每下游方向每 VC 一个</text>
-<text x="802.0" y="853.0" font-size="8.5" fill="#475569">Output Buffer + Packet Shifter（按总线宽度拼接）</text>
-<text x="802.0" y="866.5" font-size="8.5" fill="#475569">Credit Release 静态旁路：按 CSR 的方向 Mask 转发</text>
-<text x="802.0" y="880.0" font-size="8.5" fill="#475569">坏 core（透传档）：不投递本 core、不占 stream 坑，VC credit 照查</text>
-<polygon points="49,44 160,44 151,74 40,74" fill="#f8fafc" stroke="#374151"/>
-<text x="100.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">cfg（ctrl_noc）</text>
-<polygon points="779,44 890,44 881,74 770,74" fill="#f8fafc" stroke="#374151"/>
-<text x="830.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">in_core_data_ch</text>
-<polygon points="909,44 1020,44 1011,74 900,74" fill="#f8fafc" stroke="#374151"/>
-<text x="960.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">out_core_data_ch</text>
-<polygon points="1039,44 1150,44 1141,74 1030,74" fill="#f8fafc" stroke="#374151"/>
-<text x="1090.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">router2ts_trigger_ch</text>
-<polygon points="1209,44 1350,44 1341,74 1200,74" fill="#f8fafc" stroke="#374151"/>
-<text x="1275.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">ts2router retire / credit 返还</text>
-<polygon points="1469,44 1590,44 1581,74 1460,74" fill="#f8fafc" stroke="#374151"/>
-<text x="1525.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">rmem2ts_credit_done</text>
-<polygon points="1619,44 1760,44 1751,74 1610,74" fill="#f8fafc" stroke="#374151"/>
-<text x="1685.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">router2ts_direction_return</text>
-<polygon points="1799,44 1940,44 1931,74 1790,74" fill="#f8fafc" stroke="#374151"/>
-<text x="1865.0" y="62.5" font-size="9" fill="#374151" text-anchor="middle">ts2router 资源注册</text>
-<polygon points="29,462.75 140,462.75 131,494.75 20,494.75" fill="#f8fafc" stroke="#374151"/>
-<text x="80.0" y="482.2" font-size="9" fill="#374151" text-anchor="middle">left_data_ch</text>
-<polygon points="2109,462.75 2220,462.75 2211,494.75 2100,494.75" fill="#f8fafc" stroke="#374151"/>
-<text x="2160.0" y="482.2" font-size="9" fill="#374151" text-anchor="middle">right_data_ch</text>
-<polygon points="909,941.5 1020,941.5 1011,973.5 900,973.5" fill="#f8fafc" stroke="#374151"/>
-<text x="960.0" y="961.0" font-size="9" fill="#374151" text-anchor="middle">mid_data_ch</text>
-<path d="M136.5 478.8 L169.0 478.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
-<path d="M2101.0 478.8 L2103.5 478.8" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
-<path d="M960.1 902.5 L964.4 940.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
-<path d="M510.0 445.2 L759.0 461.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="615.4" y="431.8" width="38.3" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="634.5010464655378" y="439.25" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">flit 入</text>
-<path d="M760.0 550.0 L511.0 512.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="585.9" y="498.8" width="99.2" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="635.4943808056712" y="506.25" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">出口 → output buffer</text>
-<path d="M1828.0 562.5 L1828.0 674.0 L1120.0 674.0 L1120.0 617.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="1498.0" y="661.5" width="103.9" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="1550" y="669.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">right 的 flit 入 Xbar</text>
-<path d="M1060.0 616.5 L1060.0 692.0 L1930.0 692.0 L1930.0 563.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="1507.6" y="695.5" width="84.9" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="1550" y="703.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">Xbar → right 出口</text>
-<path d="M892.0 734.0 L840.4 617.4" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="878.8" y="678.5" width="10.5" height="33.5" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 884 695.25)" x="884" y="698.2" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">mid 入</text>
-<path d="M940.0 616.5 L1027.4 733.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="942.8" y="669.5" width="10.5" height="51.6" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 948 695.25)" x="948" y="698.2" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">→ mid 出口</text>
-<path d="M880.0 395.0 L880.0 302.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="866.8" y="295.2" width="10.5" height="105.6" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 872 348.0)" x="872" y="351.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">→ core（进 core 整包）</text>
-<path d="M1040.0 301.0 L1040.0 394.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="1042.8" y="303.7" width="10.5" height="88.6" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 1048 348.0)" x="1048" y="351.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">local ←（出 core）</text>
-<path d="M1160.0 461.4 L1299.0 469.6" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="1189.4" y="447.9" width="80.1" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="1229.5008658896331" y="455.45" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">→ reduce 输入 ×3</text>
-<path d="M1300.0 569.3 L1161.0 550.2" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<rect x="1177.9" y="536.5" width="105.3" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="1230.4953394199226" y="544.05" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">结果回注（第 5 路输入）</text>
-<path d="M830.0 120.0 L825.6 75.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<path d="M955.5 74.0 L959.9 119.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)"/>
-<path d="M1090.0 120.0 L1085.6 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
-<path d="M1270.5 74.0 L1274.9 119.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
-<path d="M1525.0 395.0 L1520.5 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
-<path d="M1685.0 120.0 L1680.6 75.0" stroke="#0f766e" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#g)"/>
-<path d="M1860.5 74.0 L1864.9 119.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
-<path d="M731.0 210.5 L759.0 210.5" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#a)" marker-start="url(#as)"/>
-<path d="M1200.0 217.2 L1161.0 210.7" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
-<path d="M1400.1 314.5 L1400.0 394.0" stroke="#b45309" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#o)"/>
-<rect x="1402.8" y="302.4" width="10.5" height="104.6" fill="#ffffff" opacity="0.92"/>
-<text transform="rotate(-90 1408 354.75)" x="1408" y="357.7" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#b45309" text-anchor="middle">Retire 广播 → 延迟回收</text>
-<text x="20" y="1074" font-size="10.5" fill="#374151" text-anchor="start">通路载荷：RX单通道valid/ready，TX逐VC credit；Trigger=UID/PID/reissue；方向归还=valid；RMEM返回=UID/valid；退休=UID/valid，无Ready。</text>
-<text x="20" y="1094" font-size="10.5" fill="#374151" text-anchor="start">CoreMem 重发 ↔ CoreStation：stall_way = 转存时整包重定向到本地 Core Mem；Retire → CoreStation：停发该 UserID。</text>
-<path d="M271.0 328.5 L272.0 394.0" stroke="#475569" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#a)"/>
-<rect x="440.7" y="377.5" width="238.6" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="560" y="385.0" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#475569" text-anchor="middle">查表结果 → 各 RouterStation 与 ReduceModule（副本）</text>
-<path d="M95.5 74.0 L105.8 119.0" stroke="#7c3aed" stroke-width="1.3" fill="none" stroke-linejoin="round" stroke-dasharray="4 3" marker-end="url(#p)"/>
-<rect x="230.7" y="88.5" width="338.5" height="10.5" fill="#ffffff" opacity="0.92"/>
-<text x="400" y="96" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif" font-size="8.5" fill="#7c3aed" text-anchor="middle">cfg 写事务 → RouterTable / CSR、Credit Bypass Route、各 Station 静态配置</text>
-<text x="20" y="1114" font-size="10.5" fill="#374151" text-anchor="start">三类 credit 互不复用：VC credit 管下游 VC Buffer 的空槽（RouterStation 维护）；stream credit 管目标 core 的 Core Mem 空间（Router 是唯一有效状态，DTE 持 cache）；</text>
-<text x="20" y="1134" font-size="10.5" fill="#374151" text-anchor="start">本级RMEM由TS每SID记一位，REDUCE_WAIT许可时占用，UID返回只还空间；下游那边的容量随 stream credit 一起给，Router 不另记。ReduceModule 输入三路各 160 GB/s，输出 160 GB/s。</text>
-</svg>
+```mermaid
+flowchart TD
+  T[TS三方向计数与Pending] --> A[新增方向原子授权并READY]
+  A --> RV[RV配置与DTE Trigger]
+  RV --> D[DTE逐VC发送]
+  N[网络输入] --> R[RouterStation与Xbar]
+  D --> R
+  R --> S[实体Stream用户表与入口缓冲]
+  S --> C[CoreStation与DTE RX]
+  R --> G[用户与任务准入检查]
+  G --> M[RMEM用户上下文与RMW]
+  M --> V[按VC credit输出结果]
+  V --> U[结果尾拍交付后按UID还本级RMEM许可]
+  M --> E[空闲且用户退休后回收上下文]
+  L[下游Stream release] --> X[按来向删除用户项并校验持有方向]
+  X --> T
 ```
+
 
 ***
 
@@ -338,11 +132,11 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F43 | `op_type` 分 reduce 与 reduce_twice 两档：reduce 第一次收到就写入上下文，reduce_twice 要到第二次或第三次收到才与上下文里的值相加。两个源允许都来自本 core 的 DTE，即用 Router 完成 core 内两个 token 的 reduce 再发出 |
 | F44 | “全部方向”取自 RouterTable 的 `reduce_in_mask`：按包头的 `path_id` 查 `rdc_rtab[path_id].reduce_in_mask`，得到这条 path 在本级会有哪几个相邻方向送来分量。某个结果元素要等集合里各方向对应的那个元素都进来。一笔任务的首份输入进来时把这个集合一并记进 `rdc_user_tab`，这笔任务做完前不再重查 |
 | F45 | `reduce_in_mask` 为 0 表示本级不做累加：坏 core 与这条 path 上只转发的好 core 都是这一档，包按 `flow_dir` 直接转发，不进 ReduceModule |
-| F46 | 结果往下游发不查下游的 ReduceMemory：那边的容量与它的 Core Mem 一起分配，上游发数据进那个 core 时取得的那一项 stream credit 同时代表两者，逐 flit 只受 VC credit 约束 |
-| F47 | Downstream Reduce Credit Map 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：取得准入时置忙，收到 release 时放开 |
+| F46 | 结果逐flit只检查目标VC credit；接收端按用户准入、最早未完成Reduce及RMEM物理上下文反压。Stream准入和本级RMEM占用分别记账。 |
+| F47 | 首flit获准时按UID预留RMEM上下文，保存任务号及PID；忙或已预留时仅接受相同任务及PID的分量。 |
 | F48 | RMEM整包结果交付后，rmem2ts_credit_done_uid/valid向TS归还该UID的空间，无TID/PID依赖。执行任务完成由Core/DSA ACK负责；旧reduce_seq是模型扩展，包头位域未冻结 |
-| F49 | 输入侧只有 VC credit 准入，`credit > 0` 即收 |
-| F50 | 表项的建与删：收到本级 core 该 UserID 的 Retire 后本地分区可以回收；相邻下游各方向在途任务的 release 全部回来之后，才删掉这个用户的映射给其他用户用 |
+| F49 | 进入ReduceModule前检查任务准入、输入缓冲及物理上下文；网络VC credit只保证链路缓冲容量。 |
+| F50 | User Retire回收本地UID上下文；busy或reserved时先记retired，结果交付完成后再回收。 |
 | F51 | 16 个用户分区在用户第一笔 Reduce 任务真正进来时分配，后面的任务接着用，收到这个用户的 User Retire 才释放。新用户进来时 16 个分区都占着，就对那一路输入反压，等有用户 Retire 放出一个 |
 | F52 | 链上没有同步点：上游分量到达时不必等本 core 算完，先存进上下文，本地出核的分量出来时再加 |
 | F113 | 三路输入与 `reduce_in_mask` 同一套编号：bit0 上下、bit1 左、bit2 右。本 core 自己那一份分量从 core 方向进来，也占其中一路，走哪一路由本表项 `flow_dir` 的 reduce1 与 reduce2 两位指定：两位都不置走 bit0，置 reduce1 走 bit1，置 reduce2 走 bit2。既收上游分量又出自己那一份的 core 靠这两位把两者错开 |
@@ -387,16 +181,14 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F72 | ReduceModule 完成计算并发出全部包后向 Core 返回 UserID；Core 判定任务链结束后向 Router 和 ReduceModule 广播 User Retire |
 | F73 | Core 的保证：仅可在该 UserID 的全部进 core、出 core 数据搬运完成，且不会再发起新搬运之后发 Retire。Retire 发出后，Router 上不得再出现以该 Core 为源或目标的该用户包 |
 | F74 | Router 的动作：只删这个 UserID 进本 core 那一项，同时往三个 R2R 方向各发一笔携带 UserID 的 release。本级记的各下游方向那几项不动，它们要等那些下游各自退休时还回来。上游收到 release 只删来向那个方向这一项，查无此项就丢掉。已经进了本级、正在等仲裁的包照发；“停止新发送”说的是新包要重新申请授权，而 Retire 之后本来就不会再有新包 |
-| F75 | ReduceModule 的动作：本地分区当场放，这个用户还有在做的任务就等结果交付完再放；相邻下游 Reduce 资源映射与本地分区分开清，在途任务的 Reduce release 都回来后才清掉这个用户的映射 |
-| F76 | Stream credit 的回程：每个 Router 用一个组合逻辑的 core credit crossbar 汇总本级 core 与所有下级出口的 pulse 加 user，发往除来向外的另两个 R2R port，逐跳传到上游；跨 chip 经 C2C Bridge 透传 |
+| F75 | ReduceModule本地分区空闲时回收；仍busy或reserved时保留退休标记，结果交付后释放。 |
+| F76 | 本级退休向三个R2R方向各发一次Stream release；收到下游release先交本级删除来向的用户项，再按该输入口静态Mask转发。 |
 
 ### Router 与 TS 的资源接口
 
-TS详设管理南北、西、东三个方向的计数及每用户已使用方向，输入每方向valid-only归还；普通用户退休输出UID/单拍valid；RMEM单独按UID返回。TS没有外部资源请求/Grant握手。
+TS管理南北、西、东三个方向计数、每SID Pending及已用方向。提交前复核TID和等待资格，有效许可同沿扣账并READY。
 
-Router资料中的CoreMemCreditMonitor监听、重发就绪和User Resource Allocation Table属于Router侧机制。旧F77～F85请求/通知接口与新的TS合同如何桥接、是否保留DTE stream_cache，尚未由双方详设共同冻结，登记在缺口文档；不能直接把旧监听队列作为TS Credit Ctrl实现。
-
-同VC重发保序、Router自身容量与下游资源表仍按Router设计维护。目标联调须证明无重复扣账、无超额许可和无早释放，并分别验证方向返回、用户退休、RMEM返回。
+Router保存实体用户表，按真实Stream release归还TS已持有方向；纯转发和未持有方向不产生重复返回。普通用户退休为UID／单拍valid；RMEM返回另按UID恢复本地空间，重发完成另行清除对应标记。
 
 ### VC 分配与更换
 
@@ -405,7 +197,7 @@ Router资料中的CoreMemCreditMonitor监听、重发就绪和User Resource Allo
 | F86 | VC 数取 4 的依据：目前最复杂的场景里，一个 Router 最多同时经过 4 条同向数据流 |
 | F87 | VC3 专给逐级 reduce，VC0 / VC1 / VC2 支持除 reduce 外的全部操作类型、由软件配。逐级 reduce 单独占一个 VC 的原因有三条：这类数据基本不进 core，在 Router 里直接与 core 内数据求和；绝大多数场景都存在逐级 reduce；reduce 要求整包缓冲，每个 VC 都支持 reduce 的话 buffer 尺寸过大 |
 | F88 | 三个传输方向各一套独立的 VC 与 credit，防止不同方向的数据流互相阻塞 |
-| F89 | VC Buffer 的容量分配：reduce 专用的 VC3 是 16 KB，三个共享 VC 各 8 KB，三个方向各一套，合计 (16 + 8 × 3) × 3 = 120 KB |
+| F89 | 模型每方向VC0～3各private20flit、共享20flit，共100flit；软件可配private深度。另一份通信资料的VC3 16KB及其它VC各8KB属于尚未统一的容量方案。 |
 | F90 | 软件分配 VC 的两条原则：可能互相阻塞导致死锁的数据流**必须**分到不同 VC；可能互相阻塞导致性能下降的数据流**尽量**分到不同 VC |
 | F91 | 要换 VC 的场景：一条 path 前半段做 reduce、后半段做 bypass，需要在 DTE 的 RV core 软件不介入的前提下由 Router 自己换。必须实现的是 RouterTable 里为每条 `path_id` 指定“下一跳的 VC” |
 | F92 | 换 VC 的实现方式已定：下一跳的 VC 编码在包头里，下一跳 Router 解包直接取；本跳 Router 读到表里的“下一跳 VC”后改写包头里的这个字段供下一跳读。被否掉的另一种做法是包里不带 VC、每个 Router 各查各的表得到“本跳 VC”与“下一跳 VC”，它要求上一跳表里的“下一跳 VC”与本跳表里的“本跳 VC”永远相等，配错就死锁 |
@@ -415,7 +207,7 @@ Router资料中的CoreMemCreditMonitor监听、重发就绪和User Resource Allo
 
 | 编号 | 功能 |
 | - | - |
-| F94 | 逐级的 reduce / concat 在 Router 里按序执行，只缓存最老那个用户的数据，最多支持 3 个数据源同时参与：两个上游 core 的分量加一个本 core 的分量 |
+| F94 | 逐级Reduce按输入流顺序接收，同一用户同一任务最多三路操作数；16个用户可各自持有上下文。 |
 | F95 | 非逐级的 reduce / concat **必须进 core 内执行**：数据在 Core Mem 里等其他来源到达后再算，支持不同用户之间的数据乱序到达。原因是非逐级汇聚时用户间会乱序：chip0 往 chip1 传 usr0 的数据途中，chip1 自己 usr1 的数据可能先到汇聚点 |
 | F96 | ReduceBuffer 要装得下一个完整 Token：Core 必须一次性把 Reduce Token 完整发进 Router 的 ReduceBuffer，不能分段传输，否则效率严重下降。中间结果按 FP32 存，8192 个元素就是 32 KB，每个用户一格 |
 | F97 | ReduceBuffer 不得用作流量控制的缓存。“Reduce 完成后不切 `path_id`，直接从 ReduceBuffer 发 P2P”这种把两条 path 合并的做法，只在后续 P2P 能立即发出时才允许；发不出去就让 Reduce 结果先进本 core 的 Core Mem，用 Core Mem 做流控缓冲 |
@@ -434,8 +226,8 @@ Router资料中的CoreMemCreditMonitor监听、重发就绪和User Resource Allo
 
 | 编号 | 功能 |
 | - | - |
-| F103 | 最短包长 16 B，即只含包头与路由信息的空包；最长允许 64 KB，实际支持到 (16 K + 32) B |
-| F104 | 不设包尾：包的结束靠包长度计数。整包校验建议物理层按 transfer 做、软件做整包校验，软件的校验位算进软件 payload |
+| F103 | Packet固定32B包头；16bit含头长度上限65535B，8B对齐最大65528B，纯头包32B。RMEM容量按FP32驻留另限32KiB。 |
+| F104 | 接口显式传递head/tail，长度用于校验；无tail、提前tail或未闭合重入head均须检查。 |
 | F105 | 线包32B头内sw_aux固定16B，按软件字段保存，不参与数值累加；当前模型payload前缀16B的兼容规则须与业务协议统一，不能当成DTE自动插入的数据 |
 | F106 | 其他类型的包 Router 完全不感知内容和长度，只做透明传输 |
 | F107 | Router 把数据送给 DTE 时**不剥离任何数据**，DTE 的软件能看到包头、路由信息在内的全部内容。其中 VC 字段每一跳 Router 都会改，每个 core 看到的内容不完全一致 |
@@ -444,9 +236,9 @@ Router资料中的CoreMemCreditMonitor监听、重发就绪和User Resource Allo
 
 | 编号 | 功能 |
 | - | - |
-| F108 | credit 的单位是 1 KB |
+| F108 | TS方向许可按用户及新增方向计数；Router兼容CoreMem容量计数按1KB，二者有各自状态和归还条件。 |
 | F109 | 广播扣 credit 时扣掉的不只是广播数据本身的空间，还含提前预留的输出结果空间。原文的例子是一笔广播扣 32，其中 8 KB 是广播数据空间、24 KB 是提前预留的输出结果空间，该方向的 credit 从 128 减到 96 |
-| F110 | 广播 credit 的释放时机是计算完成、运算结果写到下游的同时，把这一笔一次性释放回上游的 CreditMonitor |
+| F110 | 下游用户退休返回Stream release，Router只归还该来向用户已持有的容量及授权；TS只归还该方向实际持有的许可。 |
 | F111 | bypass 的扣与还：Core0 的 Router 查表要 bypass 给 Core1 时先查 Core1 的 credit 并扣掉，Core1 算完释放空间后通知 Core0 的 CreditMonitor 加回；反向同理，core2 的数据要经 core1 bypass 时扣 core1 的 credit，core1 把数据发给 core0 后归还 |
 | F112 | `rtab[path_id].ext_dst` 是这条 path 出了阵列之后的目的标识：0～47 是 chip，48 是出口桩。出核造包时按 `path_id` 取它写进包头的 `dst`，PCIe Switch 按 `dst` 查目的端口 |
 
@@ -479,7 +271,7 @@ port rmem2ts_credit_done (master, valid-only, clk)
   out uid[15:0] · valid                                   // 仅还RMEM，不完成任务
 port ts2router_credit_release (slave, valid-only, clk)
   in uid[15:0] · valid                                    // 无Ready，无条件接收普通用户退休
-port stream_credit (master, 电平, clk)               // per-port 的 stream credit 同步信息，给 core 与 DTE
+port stream_credit (master, 观测电平, clk)           // 模型兼容观测，不产生TS许可或额外扣账
   out credit_vld[2:0] · credit_user[2:0][15:0]
 port cmem_reissue (master, valid/ready, clk)          // CoreMem 重发与 Core Mem 之间的暂存读写，256 B
   out req_valid · req_we · req_addr[17:0] · req_wdata[2047:0]
@@ -502,19 +294,18 @@ mem vc_buf[d][v]      FIFO      private 每 VC 20 flit                          
 mem vc_shared[d]      FIFO      每方向 20 flit，四个 VC 先到先得                             1W1R  private 满时借用           复位空
 mem pkt_ctx[d][v]     FF 阵列   {vc[1:0], out_mask[6:0], remain_len[15:0], head, tail, locked}  1RW  队首上下文             复位空
 mem xbar_in_q[i]      FIFO      每入口 4 项 × 队首上下文                                    1W1R  剩余 < 2 时报收得下        复位空    // i ∈ {left,right,mid,core,reduce}
-mem core_credit[d]    FF        每方向一个，单位 1 KB                                       1RW   首次占坑时按 nxt_credit_require 扣，Retire 还  复位 128
+mem core_credit[d]    FF        每方向一个，单位 1 KB                                       1RW   首次占用按nxt_credit_require扣，对应下游release归还  复位 128
 mem vc_credit[d][v]   FF        private 计数器，每下游方向每 VC 一个                          1RW   private > 0 时扣它；release 回来时优先补它  复位 20
 mem vc_shared_cr[d]   FF        shared 计数器，每下游方向一个                                1RW   private 为 0 时扣它；private 已满时 release 补它  复位 20
 mem stream_tab[d]     FF 阵列   每方向 16 项 × {valid, user_id[15:0]}                        1RW   建：新 UserID 首次到达；删：release 或 Retire  复位空
-mem hdr_fifo          FIFO      16 × 256 B 包头                                             1W1R  DTE 读完写 1 弹出          复位空
+mem hdr_fifo          FIFO      16 × 32B硬件包头（模型另带Message诊断上下文）                                             1W1R  DTE 读完写 1 弹出          复位空
 mem out_buf           FIFO      60 flit（in_core_fifo）                                     1W1R  整包写入，不交织          复位空
 mem rdc_ctx           SRAM      16 用户 × 32 KiB，FP32 中间累加结果                          1R1W  RMW 原位累加              复位未定义
 mem rdc_user_tab      FF 阵列   16 × {user_id[15:0], path_id[7:0], pkt_state[2:0], in_done_mask[2:0], expect_mask[2:0], out_state[1:0], retired}  1RW  建上下文时记下 expect_mask = rdc_rtab[path_id].reduce_in_mask  复位空
-mem rdc_down_credit   FF 阵列   16 用户 × 3 方向 × 忙标志                                    1RW   任务头一次提交时置忙，release 放开  复位 空闲
+mem rdc_reservation   FF 阵列   每UID保存reserved、任务号与PID，和16项本地上下文共用容量       1RW   首flit准入时预留，任务交付后清占用
 mem rdc_out_q         队列      每个在做的任务一项，最多 16 项                               1W1R  队头发出首 flit 后锁定到尾 flit  复位空
 mem rdc_rtab          FF 阵列   64 项，RouterTable 的外部副本                                1R1W  软件写                    复位 0
 mem reissue_tab       FF 阵列   每 VC 一项 {pending_reinject[7:0]}                           1RW   进 core 暂存加 1，重发减 1  复位 0
-mem monitor_q         FF 阵列   16 项全相连 × {user_id[15:0], stream_id[3:0], task_id[5:0], path_id[7:0], need_mask[6:0]}  1RW  —  复位空
 mem retire_pend       FF 阵列   16 × {user_id[15:0], from_core, to_rdc}                      1RW   广播后逐项回收            复位空
 mem 级间 latch         级间 latch 各级之间的包上下文与 flit                                   —     每拍覆写                  —
 ```
@@ -548,9 +339,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 中间列 chip 的 `core_bad_mask` 是 `0x084`，core2、core7 是坏 core，这颗 chip 的 10 个 core 都写这个值。下表是这颗 chip 上归约用的几条 path 的表项，在模型里当 Router 单测的输入。C9 是这颗 chip 的 dot core，即每颗 chip 的逻辑 core7：chip 内 FC1、FC3 部分和的归约落点，也是往行链上发本 chip 结果的那个 core。
 
 * **chip 内归约 path**：按逻辑槽位次序 6 → 5 → 4 → 0 → 1 → 2 → 3 → 7，物理上走 C8 →（C7）→ C6 → C5 → C0 → C1 →（C2）→ C3 → C4 → C9，落进 C9 的 Core Mem。
-* **行链的两条 path**：一行 4 颗 chip 的 dot core 逐颗相加，最后一跳落进本行 R core。一行里第 gx 颗 chip 的 dot core 发的那一包用 `ROW_PATH[gx % 2]`，`ROW_PATH = (7, 13)`，所以一颗中间列 chip 收的是上一颗发的那个号，发的是另一个号（第 1 列那颗收 7、发 13，第 2 列那颗收 13、发 7）。
-  * 收的那条：上一颗 chip 发的那一包从 W 口进 C5，走 C5 → C6 →（C7）→ C8 → C9，落进 C9 的 Core Mem。
-  * 发的那条：本 chip 结果算好后，C9 的 DTE 把落进来的那一包与本 chip 结果先后送进本级 Rmem，两包作为本 core 的两个操作数相加（Core 多操作数），结果经 mid 到 C4，从 E 口出。
+* **行链 PID=7**：上一 chip 的分量从 W 口进 C5，经 C5 → C6 →（C7）→ C8 → C9，直接进入 C9 的 RMEM。本地结果由 DTE 发入，累加后经 mid 到 C4，从 E 口出。接收端按用户准入、最早未完成 Reduce、任务号及 PID 保护上下文。
 * **R core 之间那条 path**：最后一列 chip 的 C9 是 R core，它的 DTE 把一个用户的两笔从 Matrix Mem 先后送进本级 Rmem，相加的结果从 S 口发往下一行；最后一行经 mid 到 C4，从 E 口出。第 0 行只有本行一笔。这条 path 只在最后一列 chip 上有，下表单列 C9 那一项。
 
 括号里是透传的坏 core。
@@ -567,13 +356,12 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 | C3 | chip 内归约 | 右 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
 | C4 | chip 内归约 | 上下 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
 | C9 dot core | chip 内归约 | 出方向全不置位，加 reduce1 | 0 进核 | 0 | Reduce1 | 末端 | bit0、bit1 |
-| C5 | 行链，收 | 右 | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
-| C6 | 行链，收 | 右 | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
-| C7 坏 core | 行链，收 | 右 | 1 不进核 | 0 | 转发 | 只能留在 VC | 0 |
-| C8 | 行链，收 | 右 | 1 不进核 | 右 | 转发 | 留在 VC | 0 |
-| C9 dot core | 行链，收 | 出方向全不置位 | 0 进核 | 进本 core | 转发 | 留在 VC | 0 |
-| C9 dot core | 行链，发 | 上下，加 reduce1 与 reduce2 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
-| C4 | 行链，发 | 右（出 E 口） | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
+| C5 | 行链 | 右 | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
+| C6 | 行链 | 右 | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
+| C7 坏 core | 行链 | 右 | 1 不进核 | 0 | 转发 | 只能留在 VC | 0 |
+| C8 | 行链 | 右 | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
+| C9 dot core | 行链 | 上下 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
+| C4 | 行链 | 右（出 E 口） | 1 不进核 | 0 | 转发 | 留在 VC | 0 |
 | C9 R core | R core 之间，第 1～10 行 | 右（出 S 口），加 reduce1 与 reduce2 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
 | C9 R core | R core 之间，第 0 行 | 右（出 S 口） | 1 不进核 | 0 | Reduce0 | 留在 VC | bit0 |
 | C9 R core | R core 之间，第 11 行 | 上下（经 C4 出 E 口），加 reduce1 与 reduce2 | 1 不进核 | 0 | Reduce1 | 留在 VC | bit0、bit1 |
@@ -582,9 +370,9 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 
 同一个 core 上不同 path 的表项互相独立：C7 在两条 path 上都只转发，一条往左、一条往右，仍然要两个表项。
 
-两列各看各的：`flow_dir` 只管往外发哪几个方向，进不进本核看 `path_core_bypass`，所以 C9 在 chip 内归约 path 与行链收的那条上是“不再外发只进本核”，在行链发的那条上是“往 mid 发、不进本核”。`streamNeedMask` 看的是下一跳会不会把数据落进它的 core：坏 core 上数据不落地，隔着坏 core 的那一跳要查的是坏 core 之后那个落地的 core 的坑，坏 core 自己不查。chip 内归约 path 与行链发的那条是归约 path，进本 core 那一位与三个方向位一律填 0；行链收的那条落进 C9 的 Core Mem，C9 置进本 core 那一位，C8 置往 C9 那一侧的右位，这一包要占 C9 的 Stream 资源，C5、C6 的下一跳只转发，不置。
+`flow_dir` 管外发方向，`path_core_bypass` 管是否投递本核。chip 内归约结果投递 C9 的 Core Mem；行链的网络分量进入 C9 的 ReduceModule，与本地分量累加后往 mid 发送。行链沿途不占 Core Mem 的 Stream 表项，`streamNeedMask` 为0。
 
-`reduce_in_mask` 按上面的规则推，隔着坏 core 的一跳由收方按实际收到的方向填：C6 从右侧收，C3 从左侧收。本 core 那一份分量默认走 bit0；上游从 mid 来时会与它挤在同一路，所以 chip 内归约 path 上的 C0 与 C9 置 `flow_dir` 的 reduce1，把自己那一份挪到 bit1。链首 C8 只出本 core 那一份，填 Reduce0。行链发的那条上 C9 的两份都从本 core 出来，`flow_dir` 的 reduce1、reduce2 两位都置，两份依次占 bit0、bit1；行首那颗 chip 的 dot core 只出本 core 那一份，填 Reduce0、只收 bit0。
+`reduce_in_mask` 按上面的规则推，隔着坏 core 的一跳由收方按实际收到的方向填：C6 从右侧收，C3 从左侧收。本 core 那一份分量默认走 bit0；上游从 mid 来时会与它挤在同一路，所以 chip 内归约 path 上的 C0 与 C9 置 `flow_dir` 的 reduce1，把自己那一份挪到 bit1。链首 C8 只出本 core 那一份，填 Reduce0。行链上 C9 从左侧收网络分量到 bit1，本地分量走 bit0，填 Reduce1；行首仅本地一份，填 Reduce0、只收 bit0。
 
 表里没列的三项：
 
@@ -598,7 +386,7 @@ mem 级间 latch         级间 latch 各级之间的包上下文与 flit       
 | C7 坏 core | 左 | 右 |
 | C7 坏 core | 右 | 左 |
 
-chip 内归约 path 与行链发的那条不记 stream 资源，没有 release 要走。行链收的那条在 C8 上记 C9 的坑，C9 退休时 release 从右侧进 C8，交给本级，不经过坏 core。这四项是给穿过这两个坏 core 的搬运 path 配的，token 广播、concat 与 FC2 输入广播都隔着它们。好 core 的口上不配：收到的 release 一律交给本级。
+chip内归约和行链的结果输出逐flit使用VC credit，接收端检查用户、任务和物理上下文。表中的静态 release 路由供 token 广播、concat 与 FC2 输入广播等穿过坏 core 的搬运使用；接收 release 时先交给本级，再按已配掩码转发。
 
 ### 一层里 path 怎么分
 
@@ -612,11 +400,11 @@ chip 内归约 path 与行链发的那条不记 stream 资源，没有 release �
 | chip 内归约 | chip 内 8 个计算 core 的 FC1、FC3 部分和逐跳 reduce，落进 dot core |
 | FC2 输入广播 | dot core 把 FC2 输入广播给本 chip 另外 7 个计算 core |
 | concat | 另外 7 个计算 core 各走自己那一条，把 FC2 输出里自己那一段发给 dot core |
-| 行链 | 一行 4 颗 chip 的 dot core 逐颗相加，落进本行 R core；上一颗送来的那一包先落进 dot core 的 Core Mem，与本 chip 结果一起送进本级 Rmem |
+| 行链 | 一行4颗chip的dot core逐颗相加，落进本行R Core；网络分量直接进入RMEM，本地分量由DTE发入 |
 
 chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC 上要按 F90 复核会不会互相卡住；FC2 输入广播与 concat 各用一个 VC，与 token 广播分开。按 dp10 / ep16 / pp3 试算的上界是 55 条，64 项的表装得下。
 
-行链与 R core 之间那条链各占两条轮换：行链按 chip 在行里的列号奇偶，R core 之间那条链按行号奇偶。一个 dot core 既要收上一颗 chip 那一包又要往下一颗发，一个 R core 既要收上一行那一笔又要往下一行发，收的那一档要落进本 core、发的那一档经本级 Rmem 相加后外发，同一个 path_id 上填不下这两种。轮换之后每个 core 上收与发各占一条，互不覆盖。这条链每行一跳：从本行 R core 的 S 口下到下一层最后一列 chip 的 N 口，经 core0、core5、core6、core7、core8 落到 core9。
+行链统一使用 PID=7，在同一 RouterTable 项中配置网络输入与本地输入的归约。R Core 之间的链按行号奇偶轮换两条 path：收的 path 落进 Matrix Mem，发的 path 由本地 DTE 向 RMEM 提交两操作数。跨行从本行 R Core 的 S 口到下一层最后一列 chip 的 N 口，经 core0、core5、core6、core7、core8 落到 core9。
 
 ***
 
@@ -726,7 +514,7 @@ chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC �
   <rect x="150" y="414" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="160" y="428" font-size="8.5" fill="#6b7280">M15</text>
   <text x="292" y="428" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="160" y="448" font-size="11" fill="#111827">监听队列</text>
+  <text x="160" y="448" font-size="11" fill="#111827">TS方向Pending</text>
   <rect x="316" y="414" width="150" height="56" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="326" y="428" font-size="8.5" fill="#6b7280">M16</text>
   <text x="458" y="428" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
@@ -858,11 +646,11 @@ chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC �
   <rect x="232" y="68" width="462" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="84" font-size="8.5" fill="#6b7280">M3</text>
   <text x="680" y="84" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="250" y="104" font-size="12" fill="#111827">VA · 三类 credit 一起判</text>
+  <text x="250" y="104" font-size="12" fill="#111827">VA · VC、Stream与RMEM准入条件</text>
   <text x="250" y="126" font-size="10.5" fill="#475569">1. vc_ok = ∀o∈out_mask: private[o][nxt_vc[o]] &gt; 0 || shared_cr[o] &gt; 0</text>
   <text x="250" y="146" font-size="10.5" fill="#475569">2. st_ok = ∀o∈need_stream: stream_tab[o] 命中 user_id 或有空项</text>
-  <text x="250" y="166" font-size="10.5" fill="#475569">3. rd_ok = operation≠Reduce || rdc_down_credit[user_id][o] ≥ 整包 flit 数</text>
-  <text x="250" y="186" font-size="10.5" fill="#475569">4. grant = vc_ok &amp;&amp; st_ok &amp;&amp; rd_ok；!grant → stall_way ? 走 M13 : 留在本 VC</text>
+  <text x="250" y="166" font-size="10.5" fill="#475569">3. rd_ok = 用户准入、任务号、PID及RMEM物理上下文检查通过</text>
+  <text x="250" y="186" font-size="10.5" fill="#475569">4. grant = vc_ok &amp;&amp; st_ok &amp;&amp; rd_ok；!grant时Reduce保持等待，其它任务按stall_way选择等待或暂存</text>
   <text x="250" y="210" font-size="10" fill="#9ca3af">多播全有全无：grant 为假时所有分支一起等</text>
   <line x1="188" y1="66" x2="228" y2="66" stroke="#475569" marker-end="url(#arr3)"/>
   <path d="M188 145 L231 145" stroke="#475569" marker-end="url(#arr3)" fill="none"/>
@@ -1193,7 +981,7 @@ chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC �
   <text x="104" y="99" font-size="10" fill="#334155" text-anchor="middle">user_id[15:0]</text>
   <rect x="20" y="119" width="168" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="24" y="123" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="140" font-size="10" fill="#374151" text-anchor="middle">rdc_down_credit · FF 16×3 · 1RW</text>
+  <text x="104" y="140" font-size="10" fill="#374151" text-anchor="middle">rdc_ctx：UID／任务号／PID／reserved</text>
   <rect x="754" y="51" width="176" height="42" fill="#ffffff" stroke="#374151"/>
   <rect x="758" y="55" width="168" height="34" fill="none" stroke="#374151"/>
   <text x="842" y="72" font-size="10" fill="#374151" text-anchor="middle">rdc_out_q · 在做的任务 ≤ 16 · 1W</text>
@@ -1206,7 +994,7 @@ chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC �
   <text x="250" y="56" font-size="12" fill="#111827">ReduceModule · 转精度后回注 Xbar</text>
   <text x="250" y="78" font-size="10.5" fill="#475569">1. out = (reduce_outdata_type==BF16) ? FP32toBF16(rdc_ctx[user]) : rdc_ctx[user]</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. 每个 flit：vc_credit[o][nxt_vc] &gt; 0 且本 flit 的元素都 &lt; ready_elem</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. 尾 flit 发完 → rmem2ts_credit_done.valid = 1，给上游还 release</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. 结果尾拍交付 → UID返回本级TS，仅归还RMEM许可</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等</text>
   <path d="M188 72 L231 72" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
   <path d="M188 140 L231 140" stroke="#475569" marker-end="url(#arrc)" fill="none"/>
@@ -1252,51 +1040,37 @@ chip 内归约、行链与 R core 之间那条链都放 VC3，同在一个 VC �
 
 ### M14 · 取出重发
 
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 874 198" font-family="PingFang SC, Noto Sans CJK SC, Microsoft YaHei, sans-serif">
-  <defs><marker id="arre" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#475569"/></marker></defs>
-  <rect x="0" y="0" width="874" height="198" fill="#ffffff"/>
-
-  <rect x="20" y="42" width="168" height="42" fill="#ffffff" stroke="#374151"/>
-  <rect x="24" y="46" width="160" height="34" fill="none" stroke="#374151"/>
-  <text x="104" y="63" font-size="10" fill="#374151" text-anchor="middle">reissue_tab · FF · 1RW</text>
-  <polygon points="30,96 188,96 178,154 20,154" fill="#f8fafc" stroke="#374151"/>
-  <text x="104" y="115" font-size="10.5" fill="#374151" text-anchor="middle">cmem_reissue</text>
-  <text x="104" y="133" font-size="9.5" fill="#6b7280" text-anchor="middle">rsp_valid</text>
-  <text x="104" y="151" font-size="9.5" fill="#6b7280" text-anchor="middle">rsp_rdata[2047:0]</text>
-  <rect x="678" y="53" width="176" height="92" fill="#f1f5f9" stroke="#334155"/>
-  <rect x="678" y="53" width="176" height="18" fill="#334155"/>
-  <text x="766" y="66" font-size="10.5" fill="#ffffff" text-anchor="middle">IN_RC</text>
-  <text x="766" y="93" font-size="10" fill="#334155" text-anchor="middle">vc[1:0]</text>
-  <text x="766" y="115" font-size="10" fill="#334155" text-anchor="middle">path_id[7:0]</text>
-  <text x="766" y="137" font-size="10" fill="#334155" text-anchor="middle">user_id[15:0]</text>
-  <rect x="232" y="20" width="402" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
-  <text x="250" y="36" font-size="8.5" fill="#6b7280">M14</text>
-  <text x="620" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D变长</text>
-  <text x="250" y="56" font-size="12" fill="#111827">CoreMem 重发 · 重查表后再进 M2</text>
-  <text x="250" y="78" font-size="10.5" fill="#475569">1. 唤醒条件：CoreMemCreditMonitor 通知该 user 的资源到手</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. cmem_reissue.req = {we=0, addr=槽号}；rsp_rdata → 整包</text>
-  <text x="250" y="118" font-size="10.5" fill="#475569">3. e = rtab[包头.path_id]（不复用暂存前的 VC 与路由）</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. overflow_reinject = 0；reissue_tab[vc].pending_reinject −= 1</text>
-  <text x="250" y="162" font-size="10" fill="#9ca3af">同 VC 有未重发完的包时后续包不得越过</text>
-  <path d="M188 63 L231 63" stroke="#475569" marker-end="url(#arre)" fill="none"/>
-  <path d="M188 125 L231 125" stroke="#475569" marker-end="url(#arre)" fill="none"/>
-  <path d="M634 99 L677 99" stroke="#475569" marker-end="url(#arre)" fill="none"/>
-</svg>
+```mermaid
+flowchart TD
+  T[TS三方向计数与Pending] --> A[新增方向原子授权并READY]
+  A --> RV[RV配置与DTE Trigger]
+  RV --> D[DTE逐VC发送]
+  N[网络输入] --> R[RouterStation与Xbar]
+  D --> R
+  R --> S[实体Stream用户表与入口缓冲]
+  S --> C[CoreStation与DTE RX]
+  R --> G[用户与任务准入检查]
+  G --> M[RMEM用户上下文与RMW]
+  M --> V[按VC credit输出结果]
+  V --> U[结果尾拍交付后按UID还本级RMEM许可]
+  M --> E[空闲且用户退休后回收上下文]
+  L[下游Stream release] --> X[按来向删除用户项并校验持有方向]
+  X --> T
 ```
 
-### M15 · TS 返回接口与旧监听桥接
+
+### M15 · TS方向许可返回
 
 ```mermaid
 flowchart LR
-  DIR[Router三方向归还valid] --> TS[TS内部Credit Ctrl]
-  TS --> MAP[Grant扣账与READY同沿]
-  RM[RMEM UID／valid] --> SPACE[TS每SID空间恢复]
-  RET[TS普通UID／valid] --> RTR[Router无条件接收退休]
-  OLD[Router旧资源监听] -. 桥接合同待统一 .-> DIR
+  R[真实Stream release] --> X[Router按来向释放实体用户项]
+  X --> H[核对该用户已持有方向]
+  H --> T[方向valid返回TS]
+  T --> C[计数沿更新]
+  C --> N[下一拍可授权新增方向]
 ```
 
-TS内部登记SID/TID和新增方向，不向Router发资源申请。Router旧监听、重发就绪及DTE stream_cache如何对接新返回，等待双方接口统一；原请求/Grant状态机不定义TS当前合同。
+下游Stream release按来向交给Router实体用户表。只有该用户实际持有此方向时才产生一次方向返回。RMEM UID返回及重发完成通知分别使用独立接口。
 
 ### M16 · Retire 广播
 
@@ -1321,11 +1095,11 @@ TS内部登记SID/TID和新增方向，不向Router发资源申请。Router旧�
   <rect x="232" y="20" width="412" height="158" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="250" y="36" font-size="8.5" fill="#6b7280">M16</text>
   <text x="630" y="36" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
-  <text x="250" y="56" font-size="12" fill="#111827">Retire · 立即删表项，本地分区当场放</text>
-  <text x="250" y="78" font-size="10.5" fill="#475569">1. ts2router_retire.accepted = retire_pend 有空项</text>
-  <text x="250" y="98" font-size="10.5" fill="#475569">2. 立即：∀d: stream_tab[d] 删除该 user_id 的全部授权</text>
+  <text x="250" y="56" font-size="12" fill="#111827">Retire · 本级用户项与RMEM上下文分别释放</text>
+  <text x="250" y="78" font-size="10.5" fill="#475569">1. 接收UID／单拍valid退休通知，无外部Ready</text>
+  <text x="250" y="98" font-size="10.5" fill="#475569">2. 清进Core用户项；各下游方向项等待对应release</text>
   <text x="250" y="118" font-size="10.5" fill="#475569">3. ReduceModule：该 user 没有在做的任务 → 当场放分区</text>
-  <text x="250" y="138" font-size="10.5" fill="#475569">4. rdc_down_credit[user][*] 等在途任务的 release 回来才清</text>
+  <text x="250" y="138" font-size="10.5" fill="#475569">4. RMEM空闲时回收；busy/reserved则等待当前结果交付</text>
   <text x="250" y="162" font-size="10" fill="#9ca3af">Core 保证发 Retire 前该 user 不再有进出 core 的搬运</text>
   <path d="M188 71 L231 71" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
   <path d="M188 133 L231 133" stroke="#475569" marker-end="url(#arrg)" fill="none"/>
@@ -1383,7 +1157,7 @@ core_bad_mask       每颗 chip 10 bit，第 i 位对应 core i；每颗 chip �
 VC                  每输入方向 4 类（VC0～3），输出方向不设 VC Buffer
                     VC3 专给逐级 reduce，VC0～2 支持除 reduce 外的操作、软件可配；4 这个数来自“最复杂场景下一个 Router 最多经过 4 条同向数据流”
 credit 记账单位      1 KB；广播一次扣的量含提前预留的输出结果空间（原文例：8 KB 广播 + 24 KB 输出 = 扣 32）
-VC Buffer           private 每 VC 深度 20（覆盖 RTT，软件可配，防死锁下限 2）加每方向一个 shared pool 20 flit（覆盖 credit 往返），一个方向合计 100 flit ≈ 25 KB
+VC Buffer           private 每 VC 深度 20（覆盖 RTT，软件可配，防死锁下限 2）加每方向一个 shared pool 20 flit（覆盖 credit 往返），一个方向合计 100flit的payload为25KiB，含头28.125KiB
                     private 那 20 flit 任何时候都只归本 VC，shared pool 先到先得。建模按这个结构建，不摊平成每 VC 一个独立深度
                     另一份口径：《通信机制（分析过程）》按容量记，reduce 专用 VC3 是 16 KB、三个共享 VC 各 8 KB、三方向各一套，
                     合计 (16 + 8×3) × 3 = 120 KB。两份口径未对齐，见第 8 章
@@ -1394,15 +1168,12 @@ Reduce 输入 / 输出   三路各 160 GB/s / 160 GB/s；算力 80 GFLOPS（FP32
 ReduceModule 上下文  16 用户 × 32 KiB，按 FP32 驻留算，合计 512 KiB；一个用户占满一格这个下界来自“Core 必须一次性整包发进 ReduceBuffer，不能分段”
 ReduceModule bank 数、RMW 拍数、每路输入缓冲   4、2、32 flit（待定）
 CoreStation HeaderFIFO / OutputBuffer 深度   16 / 60 flit；OutputBuffer 取 DATA_NOC HAS“Router 外（每 Core）”表的
-                    DTE-local 桥接 Router→DTE 60 flits ≈ 16.9 KB，HeaderFIFO 仍无出处
-监听事件队列        16 项全相连
+                    DTE-local 桥接 Router→DTE 60 flits ≈16.9KiB，HeaderFIFO 仍无出处
+方向许可Pending     由TS保存，每SID最多一项
 Xbar 与 ReduceModule 三路输入的仲裁算法      轮询（待定）
 operation 的 reduce0 / reduce1 / reduce2     单流经 Rmem 不计算 / 两流 / 三流（Router MAS）
-包结构              硬件包头 16 B：Reserved 7 B · Hardware Used 1 B（Bypass 即 overflow_reinject、Bad packet）· UserID 2 B · Reserved 1 B
-                  · PathID 1 B（有效 6 bit）· CoreMask 2 B · size 2 B（含包头）
-                  sw_aux16B包含在32B头内；使能数据段总长最大65496；reduce_seq的硬件位置未冻结
-                  包里不带 task_id 与 vc_id：task_id 是 core 内的，VC 由 RouterTable 按 PathID 定
-包长范围            最短 16 B（只含包头与路由信息的空包），最长 64 KB、实际支持到 (16K + 32) B；不设包尾，结束靠包长度计数
+包结构              32B；Byte0 PID，Byte2～3 core_mask，Byte5 loopback（[3:2]为VCID），Byte6～7含头pkt_length，Byte8～9 UID，Byte16～31 sw_aux
+                  path字段8bit，当前RouterTable64项仅使用0～63；reduce_seq为模型诊断归属，不占硬件Reserved位
 reduce包            32B包头不做数值累加；payload额外控制前缀须按业务协议明确，当前模型兼容规则待统一
 总线                Header 与 Payload 走两根独立并行总线，hflit 256 bit 与 pflit 2048 bit，按同一包边界保持对应；进 core 拼接成完整包，出 core 自动拆分
 ```
@@ -1452,7 +1223,7 @@ reduce包            32B包头不做数值累加；payload额外控制前缀须�
 | TS 的 trigger 入口占满时请求原地保持，不丢 trigger | F31 | `trigger_backpressure` |
 | DTE RV core 经 cm_lsq 读包头后写 1 弹出，映射出下一个包头 | F32 | `header_pop` |
 | 反压时数据保持，解除后从同一 flit 继续 | F33 | `backpressure_hold` |
-| 出 core 前置申请：先拿到下游 Stream 或 Reduce 资源才发 | F34、F83 | `out_core_pre_grant` |
+| 出 core 前置申请：先拿到下游 Stream 或 Reduce 资源才发 | F34、TS方向许可接口 | `out_core_pre_grant` |
 | 进 core 与出 core 完全并行 | F35 | `in_out_parallel` |
 | ReduceModule 三路输入仲裁，进入后锁定到尾 flit | F36 | `reduce_input_arb` |
 | BF16 扩 FP32，中间累加固定 FP32，输出可配 | F37、F41 | `reduce_precision` |
@@ -1474,12 +1245,10 @@ reduce包            32B包头不做数值累加；payload额外控制前缀须�
 | 同 VC 有未重发完的包时后续包不得越过 | F68、F82 | `reissue_order` |
 | overflow_reinject 标记，Output Port 识别到才扣 credit | F69 | `reinject_flag` |
 | 完成后向 TS 回 UserID + PathID | F71 | `reissue_done` |
-| Retire 的三方时序：Core 保证 → Router 立即删表项 → ReduceModule 当场放分区、下游映射等 release | F72～F75 | `retire_three_party` |
+| Retire三方时序：Core资格检查、Router只清本级用户项、RMEM空闲回收或记retired待交付 | F72～F75 | `retire_three_party` |
 | Stream credit 经 core credit crossbar 逐跳传到上游 | F76 | `stream_credit_hop` |
-| 监听事件队列 16 项全相连，按 StreamID 选最老通知 TS | F77～F80 | `credit_monitor_q` |
-| 进 core 重发的任务也注册到监听队列 | F81 | `reissue_register` |
-| TS启用N槽和Router入口容量一致，旧资源监听桥接待统一 | TS详设／资源接口 | 后续联调`stream_tab_consistent` |
-| per-port stream_credit 同步给 core 与 DTE | F85 | `stream_credit_sync` |
+| TS方向许可与Router实体用户表按UID生命周期配合 | TS详设／资源接口 | 后续联调`stream_tab_consistent` |
+| per-port stream_credit 同步给 core 与 DTE | 资源观测接口 | `stream_credit_sync` |
 | VC3 专给逐级 reduce，VC0～2 软件可配 | F86、F87 | `vc_class_split` |
 | 三方向各一套独立 VC 与 credit | F88 | `vc_per_direction` |
 | 换 VC 靠改写包头，本跳写下一跳读 | F91、F92 | `vc_swap_in_header` |
@@ -1507,7 +1276,7 @@ reduce包            32B包头不做数值累加；payload额外控制前缀须�
 | A5b | 多播的两个方向只有一侧要占坑 | 只向那一侧申请 |
 | A5c | 多播的两个方向都要占坑，一侧为 0 | 两个方向都不发，整体转暂存；两侧都够了才一起发 |
 | A5d | 多播的两个方向，其中一侧本 user 已持有坑 | 只查没持有的那一侧；两侧都已持有时不查 credit 直接发 |
-| A7 | 逐级 reduce | reduce 与进核数据共用同一份 CoreMem credit，只记一次账；分量不额外占坑 |
+| A7 | 逐级Reduce | Stream用户准入、TS本级RMEM许可及物理上下文分别记账；网络分量按任务／PID匹配，输出只消耗VC credit |
 | A7c | 一条 path 的 reduce 输入方向超过 3 个 | 构造期报错：`reduce_in_mask` 只有三位 |
 | A8 | 查表与带宽计量 | 查表拍数与链路占用拍数与参数表一致 |
 | A9 | `path_core_mask` 决定进不进核的两个分支 | 该位为 1 时进核，为 0 时只转发 |
@@ -1538,9 +1307,6 @@ reduce包            32B包头不做数值累加；payload额外控制前缀须�
   * 一起等的代价是性能，各自走的代价是状态爆炸
 * **为什么 Reduce 不允许降级**
   * 若允许绕过 Reduce 直接存储或转发，下游收到的是未归约的原始数据，且并不知道这件事，也没有补做归约的机会。宁可反压
-* **为什么退休时 ReduceModule 的下游映射要等 release 回来才清**
-  * Retire 只说明 core 侧的搬运结束了，而 ReduceModule 发往相邻下游的任务可能还没做完
-  * 本地分区按Router退休合同释放，只留下游映射；等下游各方向在途任务的 Reduce release 都回来才清，旧 release 才不会落到复用这个 UserID 的新用户上
 * **为什么分区在用户第一笔任务进来时才分配**
   * 只有真做 reduce 的用户才占分区，只收发普通数据的用户不占
   * 代价是 16 个分区用光时要对新用户的输入反压，等别的用户 Retire

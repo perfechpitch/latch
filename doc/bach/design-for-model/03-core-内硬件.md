@@ -24,7 +24,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 * **stream credit**：目标 core 的 Core Mem 空间
 * **Reduce Credit**：下游 ReduceModule 的上下文
 
-展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、按任务类型分的走法、三类 credit 的管理方式、ReduceModule 与用户退休、跳过与 C2C Bridge。
+展开在[《Router 片上交换与归约》](03-router-片上交换与归约.md)：六级流水线与单跳延迟、RouterTable 的字段与三份副本、按任务类型分的走法、资源与 credit 的管理方式、ReduceModule 与用户退休、跳过与 C2C Bridge。
 
 ***
 
@@ -112,7 +112,7 @@ Router 是 chip 内 core 阵列的数据交换与**片上归约**中心，物理
 <text x="270" y="677" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="12.5" fill="#7c3aed" font-weight="700" text-anchor="start">Router　片上交换与归约中心</text>
 <text x="270" y="692" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">RouterStation ×3（left / right / mid，每方向 VC ×4）· CoreStation ×1 · Xbar 5 入 7 出 · ReduceModule · CoreMemCreditMonitor</text>
 <text x="270" y="705" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">每方向 256 B/T，进 core 与出 core 通路完全并行 · Reduce 输入 3 路各 160 GB/s，算力 80 GFLOPS，上下文 16 用户 × 32 KiB</text>
-<text x="270" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">三层 credit：VC 按 flit · stream 按 UserID + 方向 · reduce 按 UserID　VC Buffer 100 flit/port ≈ 25 KB ×3，flit 级仲裁</text>
+<text x="270" y="718" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#5c6370" font-weight="400" text-anchor="start">三层 credit：VC 按 flit · stream 按 UserID + 方向 · reduce 按 UserID　VC Buffer 100flit/port，payload25KiB、含头28.125KiB ×3，flit 级仲裁</text>
 <path d="M935 438.7 L935 659.3" stroke="#2563eb" stroke-width="2.2" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#keabs)" marker-end="url(#keab)"/>
 <text x="944" y="470" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">256 B/T ×2</text>
 <text x="944" y="482" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9" fill="#2563eb" font-weight="400" text-anchor="start">进 / 出 core</text>
@@ -444,12 +444,14 @@ TS 与 RV core 之间有物理路径延时，“前一个 task 完成再通知 T
 | `task_pc` | 有 | — | 起始取指 PC |
 | `stream_id` | 有 | 有 | 4 bit，用于计算该用户的 Core Mem 与 share_mem 区域基址；硬件写入自定义 CSR，只读 |
 | `user_id` | 有 | 有 | 用户号，软件读它算 R-core 的用户映射表和 Matrix Mem 地址，Router 与 credit 记账认的也是它；**可读写**，普通计算 core 上 TS 下发 task 时硬件写入，B core 与 R core 上由软件从 Share Mem 认出用户后写入（R core 从软件用户 FIFO 弹出，B core 按 `head` 取一格） |
-| `task_id` | — | 有 | 6 bit，只读；**异步 datain 任务由软件识别包头后写入**，用于告诉 TS 是任务链中哪一步完成 |
+| `task_id` | 有 | 有 | 6bit，由TS选择并下发；现行DataIn任务号在入口匹配时确定 |
+| `path_id`／`pid` | 有 | 有 | 实际PID；软件写入的新值仅在合法PID_UPDATE任务完成时更新TS |
+| `vcid` | 有 | — | 2bit，随任务命令保存并传至DSA配置请求 |
 
 ### dsa_iss 的下发规则
 
 * DSA 任务配置下发指令<mde-comment id="uk6dnm">根据下发通道是否反压阻塞判断是否下发成功</mde-comment>
-* DSA 读寄存器指令**不会被阻塞**；`dsa_rq`（8 项）按顺序记录已下发的读指令信息，返回数据后按记录的目的寄存器编号写回 gpr
+* DSA读请求受目标ready和`dsa_rq`容量限制；接受后异步返回。`dsa_rq`深8，按顺序记录目的寄存器，返回后写回gpr
 
 ### 异常
 

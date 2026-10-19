@@ -19,7 +19,7 @@
 
 * 每条物理链路每个方向一个实例
 * flit 进入时按带宽排队、按延迟定到达拍，到达拍才出现在对端端口
-* 数据与三种 release 各走各的实例，参数相同
+* 数据、VC release、Stream release 各有独立在途队列和带宽占用，参数相同
 
 模型里全部链路都是这一个模块，差别只在带宽、延迟两个参数：
 
@@ -52,7 +52,7 @@
   <path d="M532 108 L594 108" stroke="#475569" marker-end="url(#l0)" fill="none"/>
 
   <text x="760" y="98" font-size="10" fill="#374151">一条物理链路 = 两个实例，方向相反</text>
-  <text x="760" y="118" font-size="10" fill="#374151">三种 release 各走自己的实例</text>
+  <text x="760" y="118" font-size="10" fill="#374151">VC与Stream两种release 各走自己的实例</text>
 
   <text x="20" y="200" font-size="10.5" fill="#374151">到达拍在发送侧算好写进 item，链路只负责到点交付；端口固有的一拍延迟被吸收，时序 owner 唯一是本模块。</text>
   <text x="20" y="222" font-size="10.5" fill="#374151">同一实例上到达拍单调递增（发送侧占用时刻单调），队首不会挡住更早到达的项，这一条加断言。</text>
@@ -67,7 +67,6 @@
 port link.in (slave, credit/release, clk)         // 发送侧端口的镜像：Router link[d].out、片外桩的 tx、Switch 的 port[p].out
   in  flit_valid · flit_vc[1:0] · flit_head · flit_tail · flit_bytes[8:0] · flit_msg
   in  stream_release_valid · stream_release_user[15:0]
-  in  reduce_release_valid · reduce_release_user[15:0]
   in  vc_release_valid · vc_release_vc[1:0]
 port link.out (master, credit/release, clk)       // 接收侧端口的镜像，同字段；到达拍才拉 valid
 ```
@@ -108,7 +107,7 @@ C2C_VERT     tray 间纵向链路 120 GB/s（试算值，待定）
 PCIE_ROUTER  128 B/T；左右 10T + 25T，上下 10T + 50T
 ETH_IN       50 GB/s 每口，3 μs → 3000T
 PCIE_IN      x16 54.4 GB/s；PCIE_OUT x32 108.8 GB/s
-LINK_Q_DEPTH 按 latency / 每拍 1 flit 上限取（10T → 10；400T → 400）
+LINK_Q_DEPTH 模型参数：R2R 64、C2C 448、PCIe C2C 352、tray纵向448、PCIe-Router左右64/上下96、ETH3072
 单位换算     1 T = 1 ns；拍数 = ceil(size / bw)，size ≤ 0 算一拍
 ```
 

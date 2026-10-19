@@ -440,7 +440,7 @@
   * ① SCP 先配 weights 加载模式（三处配置见下表），再通知上位 CPU 可以下发
   * ② SCP 读每个 core 的 `core_id`：编译器按物理 id 配路由表，用户 kernel 只见逻辑 id
   * 数据路径：Host msg 流 → PCIe → Router → Router 通知 TS 触发 datain → TS 派 DTE RV core 跑 weights loader；数据由 DTE 按包头里的落点搬进 Matrix Mem，loader 数搬进来几笔 → datain 出槽，不触发任务链；先发最远路径的数据
-  * 完成：weights loader 计数满 → 自定义指令中断 SCP → 执行 WFT 进入正常模式
+  * 原始加载软件方案以loader计数满后中断SCP通知结束。当前kernel计数并提交搬运后yield；加载控制方等待DTE数据、写响应与队列排空后切业务，计数或RV返回不构成加载完成
 * ③ 切业务模式（SCP 收到中断后改三处；只配好 core，坏 core 跳过）
   * Router 路由表换业务路径：token 广播、组间转发、chip 内归约、FC2 输入广播、concat、行链、R core 之间的逐行一跳
   * TS：`datain_task` 的 pc 指向 token 搬移，`trigger_task_chain_en = 1`；`task_chain` 配成本 core 角色的业务任务链（也可在 weights 模式就配好）
@@ -454,7 +454,7 @@ weights 加载模式的三处配置：
 | - | - |
 | Router | 路由表只用 1 条 path，是 weights 专用的 P2P 路径；path 与物理 core id 解耦，软件在 path 里指定 core index、在 msg 里标记落在哪些 core；坏 core 与不派角色的好 core 不落 weights，只按表项转发 |
 | TS | `WEIGHTS_MODE = 1`；`datain_task` 的 pc 指向 weights loader，`trigger_task_chain_en = 0`，搬完不启动任务链 |
-| DTE | SCP 复位 DTE → 全局静态寄存器 → task LUT → stream 表 → header / topK 参数 → 使能 TS 直接触发；进核那一笔一律落 Matrix Mem、不回 Ack；DTE 回 `init_done` |
+| DTE | DTE复位STOP；初始化Config／8套Template及HeaderTable，resume后允许下发。TS派weights loader，RV配置段地址、字节长度并写Trigger；有效数据写MM，不回业务ACK |
 
 切业务模式时体现角色的几项配置：真机上没有记角色的寄存器，角色由下表几项体现，SCP 逐 core 写。不派角色的好 core 这几项都不配，坏 core 整个跳过。
 
@@ -673,7 +673,7 @@ weights 加载模式的三处配置：
 * `core_bad_mask` 由 bundle 的 `CHIP` 记录给出；业务模式下进核那一笔的配置与标志表几何由 `DTEIN` 记录给出，计算 core、B core、R core 各一条
 * 坏 core 的 TS、三个 RV core、三个 DSA 与存储照样构造，但不步进、不配置、不记波形
 * 三份 RouterTable 一致不在输入自洽检查里查，由 SCP 桩的写入顺序保证
-* 本轮不建：`async_int` 与 IPI 的行为（留接口名与状态位）；Debug Module、DTM、GDB；Host / Node / tray CPU 的流控与退出；RV core 异常与 TS Except Check 的行为
+* 本轮不建：`async_int` 与 IPI 的行为（留接口名与状态位）；Debug Module、DTM、GDB；Host / Node / tray CPU 的流控与退出；RV core完整异常处理；TS已实现配置检查及失败启动抑制
 
 ***
 

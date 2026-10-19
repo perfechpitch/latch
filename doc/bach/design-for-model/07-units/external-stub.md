@@ -38,7 +38,7 @@ LPU 之外的全部硬件（GPU、SmartNIC 里的 DPU、ETH 交换机、tray 上
 * 按 `(gpu_id, token_id)` 与参考实现逐 bit 比对
 * 记完成集合
 
-两者各带一个路由器（自己那一侧的 RouterStation 与链路模型），包在这里进出链路。
+当前InStub／OutStub直接通过LinkEnd发送和接收flit，外侧Link承担带宽与延迟；桩内未构造RouterStation。
 
 片外那几样硬件在桩里的落点：
 
@@ -114,7 +114,7 @@ port rx (slave, credit/release, clk)              // 链路 → 桩侧路由器�
   out vc_release_valid · vc_release_vc[1:0]
 port retired (slave, 脉冲, clk)                   // 收端（出口桩 / 各 R core）上报的 retired_token
   in  valid · gpu_id[7:0] · retired_token[15:0] · src[7:0]
-port dispatch (master, valid/ready, clk)          // EP6+TP8：LPU Dispatch 派遣到 R core 的 reduce-buffer 余量记账
+port dispatch（模型内余量检查，clk）          // EP6+TP8：LPU Dispatch 派遣到 R core 的 reduce-buffer 余量记账
   out req_valid · req_gpu[7:0] · req_token[15:0]
   in  req_ready                                     // = 所有 R core 余量 > 0
 port done (master, 电平, clk)                     // 出口桩：完成集合与比对结果，验收读取
@@ -225,6 +225,14 @@ BCORE_MM_SLOTS       ≥ 32 × 26 = 832（B core Matrix Mem 槽位，参数校�
 | 先发最远路径的数据 | `inject_tbl` 顺序 | `weights_far_first` |
 
 ***
+
+## 当前模型与MoE回归入口
+
+`InjectItem::bytes`默认6368B，对应原产品输入格式。MoE回归使用6144B激活、192B scale和256B topK共6592B；DTE段长按8B对齐，数据通过256B逻辑拍和双128B物理请求搬运。两者的专家信息编码转换属于软件协议，不能互换字节数。
+
+InStub按注入表顺序尝试队头，GPU本地额度、全局池及全部dispatch_slots均有位才注入；当前没有跨GPU轮询grant调度器。出口尾拍从完整Message中取得LogicalPayload后再比较，逐flit有效字节量另作检查。
+
+完整MoE测试的SpreadHarness直接驱动入口桥，按token_gap和测试额度注入；多token回归与通用InStub的GPU门控是不同验证入口。默认6368B桩用例不代表已验证6592B业务包的全部编程契约。
 
 ## 8　取舍
 
