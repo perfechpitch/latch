@@ -1,8 +1,9 @@
 """Convert one packed BachFlow layer into a BACHIR 12 text bundle.
 
 The bundle is the latch model's input. Every record is either a packed word
-decoded through the defs layouts, a file range the runtime already exposes, or
-a forward entry derived for a core the planner left without a table. Nothing is
+decoded through the defs layouts, a file range the runtime already exposes, a
+forward entry derived for a core the planner left without a table, or an exit
+entry derived for a boundary core that has no task (``_egress``). Nothing is
 inferred from pcode, from route JSON, or from the old exporter.
 
 A condition the model cannot represent fails the conversion. The text is
@@ -48,6 +49,9 @@ REDUCE_TASK = 4
 # The model's RouterTable, DTE path copy and reduce lane bookkeeping hold
 # PathIDs 0..63 (kPathNum).
 PATH_LIMIT = 64
+# The chip port a boundary core leaves the machine through: R cores sit on the
+# last chip column, B cores on the first.
+OUTWARD = {"rcore": Direction.E, "bcore": Direction.W}
 
 
 class ConvertError(ValueError):
@@ -162,9 +166,10 @@ class Inventory:
 
     cores: list[dict] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    derived: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
-        return {"cores": self.cores, "missing": self.missing}
+        return {"cores": self.cores, "missing": self.missing, "derived": self.derived}
 
 
 @dataclass
@@ -208,6 +213,7 @@ def _convert(layer: Layer) -> Bundle:
     if problems:
         raise ConvertError("\n".join(problems))
 
+    egress = _egress(layer, topo, faces, routes, problems)
     _derive_passthrough(layer, topo, faces, routes, releases, problems)
     _check_same_face(layer, topo, faces, routes, problems)
     _reduce_lanes(layer, topo, faces, routes, problems)
@@ -215,7 +221,9 @@ def _convert(layer: Layer) -> Bundle:
     if problems:
         raise ConvertError("\n".join(problems))
 
-    return _render(layer, faces, routes, releases, problems)
+    bundle = _render(layer, faces, routes, releases, problems)
+    bundle.inventory.derived = egress
+    return bundle
 
 
 def _routes(core: Core, faces: Faces) -> dict[int, Route]:
@@ -294,6 +302,60 @@ def _check_same_face(layer, topo, faces, routes, problems) -> None:
                 "face; the model has one lane per station, so the addition "
                 "would change"
             )
+
+
+def _egress(layer, topo, faces, routes, problems) -> list[str]:
+    """Send an entry that enters a consumer-less B or R core out of the chip.
+
+    A net that leaves the machine (PCIe switch, then DDR) ends on the boundary
+    core as an entry that enters that core. The model has no PCIe switch, and a
+    core with no task chain and no datain never drains its core station, so the
+    packets would back up into the net. Such an entry leaves on the core's chip
+    port instead, with the core bypassed. That port must face off the grid,
+    where the harness sink attaches; a link to another chip is not an exit.
+    A boundary core that has tasks keeps its entries as packed.
+
+    Returns one provenance line per rewritten entry; none of them is packed.
+    """
+    notes = []
+    for chip in layer.chips:
+        for core in chip.cores:
+            outward = OUTWARD.get(core.role)
+            if outward is None or core.bad:
+                continue
+            if _chain(core, [], chip.c) or _datain(core, [], chip.c) is not None:
+                continue
+            for path, route in sorted(routes.get((chip.c, core.p), {}).items()):
+                if not route.enters:
+                    continue
+                where = f"chip {chip.c} core {core.p} path {path}"
+                station = faces.station(core.p, outward)
+                if route.operation or route.mask_en:
+                    problems.append(
+                        f"{where} enters the {core.role}, which has no task, but "
+                        "is a reduce or core-mask entry, which cannot leave the chip "
+                        "as a forward"
+                    )
+                elif station is None:
+                    problems.append(
+                        f"{where} enters the {core.role}, which has no task, and "
+                        f"that core has no {outward.name} chip port to send it out on"
+                    )
+                elif topo.neighbor(Coord(*chip.coord, core.p), outward) is not None:
+                    problems.append(
+                        f"{where} enters the {core.role}, which has no task, but its "
+                        f"{outward.name} port links to another chip, not off the grid"
+                    )
+                else:
+                    route.flow |= STATION_BIT[station]
+                    route.bypass = 1
+                    route.enters = False
+                    notes.append(
+                        f"{where}: enters the {core.role}, which has no task; sent "
+                        f"out its {outward.name} chip port with the core bypassed "
+                        "(derived, not packed)"
+                    )
+    return notes
 
 
 def _word(layer: Layer, c: int, p: int, path: int) -> dict:

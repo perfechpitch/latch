@@ -85,6 +85,7 @@ class InputBundle:
     images: list[dict] = field(default_factory=list)
     init_finish: list[dict] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    derived: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -95,6 +96,7 @@ class InputBundle:
             "images": self.images,
             "init_finish": self.init_finish,
             "missing": self.missing,
+            "derived": self.derived,
             "compat": _COMPAT,
         }
 
@@ -438,6 +440,7 @@ def _write(out_dir, name, text, bundle, cores, images, finish) -> InputBundle:
         images=image_rows,
         init_finish=finish,
         missing=list(bundle.inventory.missing),
+        derived=list(bundle.inventory.derived),
     )
     result.bachir.write_text(text, encoding="utf-8")
     result.core_map.write_text(_core_map(cores), encoding="utf-8")
@@ -480,6 +483,10 @@ def _inventory(result: InputBundle) -> str:
     if result.missing:
         lines.append("# missing:")
         for row in result.missing:
+            lines.append(f"# {row}")
+    if result.derived:
+        lines.append("# derived (RTAB the pack does not carry):")
+        for row in result.derived:
             lines.append(f"# {row}")
     return "\n".join(lines) + "\n"
 

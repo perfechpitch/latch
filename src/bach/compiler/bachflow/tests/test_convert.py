@@ -230,3 +230,40 @@ def test_path_id_past_the_model_table_fails(tmp_path):
     buff, bwgt = build(tmp_path, cores={(0, 2): {"path": path}})
     with pytest.raises(ConvertError, match="below 64"):
         convert(buff, bwgt)
+
+
+CORE_ONLY = 0b1_0000
+
+
+def test_exit_into_a_taskless_r_core_leaves_the_chip_east(tmp_path):
+    path = zero_path()
+    path[25] = route(directionMask=CORE_ONLY)
+    buff, bwgt = build(tmp_path, cores={(3, 4): {"path": path}})
+    bundle = convert(buff, bwgt)
+    rtab = _rtab(bundle.text, 3, 4, 25)
+    assert (rtab[5], rtab[14]) == ("4", "1")
+    assert ["TSRTAB", "3", "4", "25", "4", "0"] in lines_of(bundle.text, "TSRTAB")
+    assert len(bundle.inventory.derived) == 1
+    assert "chip 3 core 4 path 25" in bundle.inventory.derived[0]
+    assert "not packed" in bundle.inventory.derived[0]
+
+
+def test_r_core_with_tasks_keeps_the_entry_entering(tmp_path):
+    path = zero_path()
+    path[25] = route(directionMask=CORE_ONLY)
+    buff, bwgt = build(tmp_path, cores={(3, 4): {
+        "path": path, "datain": (0x30, datain()), "task": [(0x40, task(TASK_END=1))],
+    }})
+    bundle = convert(buff, bwgt)
+    rtab = _rtab(bundle.text, 3, 4, 25)
+    assert (rtab[5], rtab[14]) == ("0", "0")
+    assert bundle.inventory.derived == []
+
+
+def test_exit_into_a_b_core_without_a_west_port_fails(tmp_path):
+    # This pack puts the B core on p0, which carries no west chip port.
+    path = zero_path()
+    path[25] = route(directionMask=CORE_ONLY)
+    buff, bwgt = build(tmp_path, cores={(0, 0): {"path": path}})
+    with pytest.raises(ConvertError, match="no W chip port"):
+        convert(buff, bwgt)

@@ -47,6 +47,18 @@ reduce task is open, whatever its PathID, and rounds once. The adapter checks
 that those entries' external packets number `operation - 1`, gives them one lane
 mask, and keeps each entry's own input precision. Packed routes are not changed.
 
+## Exit through a boundary core
+
+A net that leaves the machine (PCIe switch, then DDR) ends on an R or B core
+as an entry that enters that core. The model has no PCIe switch, and a
+boundary core with no task chain and no datain never drains its core station,
+so later users back up behind earlier ones. On such a core the adapter sends
+that entry out of the core's chip port instead (R east, B west), with the core
+bypassed; the harness sink sits on that port. The port must face off the grid,
+and the entry must be a plain transfer, or the conversion fails. A boundary
+core that has tasks keeps its entries as packed. Each rewritten entry is listed
+under `derived` in the inventory, because the pack does not carry it.
+
 ## Explicit experiment
 
 The full-run test exposes `BACHFLOW_INPUT_SF_PREFILL=1` for the approved
