@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 from bachflow.segments import SEGMENT_BY_NAME
-from bach.compiler.bachflow import ConvertError
 from bach.compiler.bachflow.legacy_input import (
     PackageError,
     _span,
@@ -52,7 +51,7 @@ def test_shifted_image_span_keeps_bytes_at_its_hex_address(tmp_path, segment):
     spec[segment] = data
     spec[f"{segment}_off"] = offset
     buff, bwgt = build(tmp_path, cores={(0, 1): spec})
-    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+    packed = package_input((buff, bwgt), tmp_path / "out")
     kernel = lines_of(packed.text, "KERNELCORE")[0]
     image = decode_ihex((packed.out_dir / kernel[4]).read_text())
     base = 0 if segment == "itcm" else 0x0010_0000
@@ -106,7 +105,7 @@ def _active(tmp):
 
 def test_ordinary_core_becomes_bachir11_without_native_records(tmp_path):
     buff, bwgt = _active(tmp_path)
-    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+    packed = package_input((buff, bwgt), tmp_path / "out")
     text = packed.text
     assert text.startswith("BACHIR 11\n")
     for tag in ("FILESPAN", "FORMAT", "ABI", "COREMAP", "INITFINISH", "KERNEL "):
@@ -140,7 +139,7 @@ def test_inactive_compute_is_spare_in_the_bundle_and_kept_in_the_sidecar(tmp_pat
         (0, 1): {"task": [(0x10, task(TASK_END=1))], "init_finish": 1,
                  "itcm": b"\x13\x00"},
     })
-    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+    packed = package_input((buff, bwgt), tmp_path / "out")
     text = packed.text
     assert ["CORE", "0", "0", "3"] in lines_of(text, "CORE")
     assert all(ln[1:3] != ["0", "0"] for ln in lines_of(text, "CFGMISC"))
@@ -156,7 +155,7 @@ def test_bad_core_stays_spare_and_keeps_only_its_forward(tmp_path):
                  "task": [(0x10, task(TASK_PATH_ID=4, TASK_END=1))], "init_finish": 1},
         (1, 2): {"release": release(0, 0, 0x8)},
     })
-    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+    packed = package_input((buff, bwgt), tmp_path / "out")
     assert ["CORE", "1", "2", "3"] in lines_of(packed.text, "CORE")
     assert "1 2 -1 3" in packed.core_map.read_text().splitlines()
     assert any(ln[1:4] == ["1", "2", "4"] for ln in lines_of(packed.text, "RTAB"))
@@ -168,37 +167,11 @@ def test_zero_init_finish_on_an_active_core_is_rejected(tmp_path):
         (0, 1): {"task": [(0x10, task(TASK_END=1))], "init_finish": 0},
     })
     try:
-        package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+        package_input((buff, bwgt), tmp_path / "out")
     except PackageError as exc:
         assert "TS_INIT_FINISH" in str(exc)
     else:
         raise AssertionError("a packed finish of 0 was packaged")
-
-
-def test_legacy_premerge_marker_is_kept(tmp_path):
-    east, north = zero_path(), zero_path()
-    east[7] = route(directionMask=0b1000, nxtVC=0)
-    north[7] = route(directionMask=0b0001, nxtVC=0)
-    forward, target = zero_path(), zero_path()
-    forward[7] = route(directionMask=0b1000, nxtVC=0, stallWay=1)
-    target[7] = route(directionMask=0b0010, operation=3, nxtVC=0, reduceOutPrecision=0)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 1): {"path": east},
-        (0, 7): {"path": north},
-        (0, 2): {"path": forward},
-        (0, 3): {"path": target, "task": [(0x10, task(TASK_END=1))], "init_finish": 1},
-    })
-    with pytest.raises(ConvertError, match="same-face packet multiplicity"):
-        package_input((buff, bwgt), tmp_path / "out")
-    assert not (tmp_path / "out").exists()
-    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=True)
-    assert packed.text.startswith("BACHIR 11\n# LEGACY_REDUCE_MAPPING")
-    assert "extra rounding boundary" in packed.text
-    forward_row = [
-        ln for ln in lines_of(packed.text, "RTAB") if ln[1:4] == ["0", "2", "7"]
-    ][0]
-    assert [forward_row[4], forward_row[6], forward_row[28]] == ["2", "3", "2"]
-    assert packed.legacy_reduces and packed.legacy_reduces[0]["experimental"] is True
 
 
 def test_same_image_bytes_are_one_file(tmp_path):
@@ -207,7 +180,7 @@ def test_same_image_bytes_are_one_file(tmp_path):
         (0, 1): {"task": [(0x10, task(TASK_END=1))], "init_finish": 1, "itcm": body},
         (0, 2): {"task": [(0x10, task(TASK_END=1))], "init_finish": 1, "itcm": body},
     })
-    packed = package_input((buff, bwgt), tmp_path / "out", legacy_reduce_mapping=False)
+    packed = package_input((buff, bwgt), tmp_path / "out")
     names = {ln[4] for ln in lines_of(packed.text, "KERNELCORE")}
     assert len(names) == 1
     assert len(list(packed.out_dir.glob("*.hex"))) == 1

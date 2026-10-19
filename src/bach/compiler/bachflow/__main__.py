@@ -4,8 +4,7 @@
 
 ``--hw FILE.toml`` overrides the Bach default hardware. The bundle is written
 only when the conversion succeeds. ``--inventory FILE.json`` writes the harness
-inventory beside it. ``--legacy-reduce-mapping`` is off by default and is an
-experimental simulator translation; without it a same-face reduce still fails.
+inventory beside it.
 """
 
 from __future__ import annotations
@@ -25,18 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--hw", default=None, help="hardware TOML; default is the Bach mesh")
     ap.add_argument("--out", required=True, help="where to write the .bachir")
     ap.add_argument("--inventory", default=None, help="where to write the harness inventory")
-    ap.add_argument(
-        "--legacy-reduce-mapping",
-        action="store_true",
-        help="experimental: pre-merge a two-lane forwarding predecessor; "
-             "default rejects that shape",
-    )
     args = ap.parse_args(argv)
     try:
-        bundle = convert(
-            args.buff, args.bwgt, args.hw,
-            legacy_reduce_mapping=args.legacy_reduce_mapping,
-        )
+        bundle = convert(args.buff, args.bwgt, args.hw)
     except ConvertError as exc:
         print(exc, file=sys.stderr)
         return 2

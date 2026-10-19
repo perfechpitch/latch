@@ -188,191 +188,45 @@ def _rtab(text, chip, core, path):
     return rows[0]
 
 
-def _predecessor_pack(tmp):
-    """p1 sends east into p2, p7 sends north into p2, and p2 only forwards east.
+def _split_pack(tmp, task_type=4):
+    """p2 sends two packets east into p3 under PathIDs 7 and 9.
 
-    p3 is a reduce2 whose table shows that one east arrival plus its own input.
-    The second packet is the north arrival p2 forwarded, which is the shape the
-    old exporter pre-merged. Chip and core come from the topology, not a guess.
+    They land on one face, so p3's reduce2 has an entry for each PathID. The
+    words differ only in input precision: 9 is FP32 on west and CORE. The
+    reduce task names 7, the core's own operand.
     """
-    east = zero_path()
-    east[7] = route(directionMask=0b1000, nxtVC=0)
-    north = zero_path()
-    north[7] = route(directionMask=0b0001, nxtVC=0)
-    forward = zero_path()
-    forward[7] = route(directionMask=0b1000, nxtVC=0, stallWay=1)
-    target = zero_path()
-    target[7] = route(directionMask=0b0010, operation=3, nxtVC=0, reduceOutPrecision=0)
+    upstream, target = zero_path(), zero_path()
+    upstream[7] = route(directionMask=0b1000)
+    upstream[9] = route(directionMask=0b1000)
+    target[7] = route(directionMask=0b0010, operation=3)
+    target[9] = route(directionMask=0b0010, operation=3, reduceInPrecision=0b1_0100)
     return build(tmp, cores={
-        (0, 1): {"path": east},
-        (0, 7): {"path": north},
-        (0, 2): {"path": forward},
-        (0, 3): {"path": target, "task": [(0x10, task(TASK_END=1))]},
+        (0, 2): {"path": upstream},
+        (0, 3): {"path": target, "task": [
+            (0x10, task(TASK_TYPE=task_type, TASK_PATH_ID=7, TASK_END=1)),
+        ]},
     })
 
 
-def test_legacy_predecessor_is_rejected_by_default(tmp_path):
-    buff, bwgt = _predecessor_pack(tmp_path)
-    with pytest.raises(ConvertError, match="reduce2 requires 2 external packets"):
+def test_split_paths_on_one_face_are_one_net(tmp_path):
+    bundle = convert(*_split_pack(tmp_path))
+    own, spare = _rtab(bundle.text, 0, 3, 7), _rtab(bundle.text, 0, 3, 9)
+    assert own[28] == spare[28] == "3"
+    # One lane mask and one flow for the net; the model checks they agree.
+    assert own[27] == spare[27] and own[5] == spare[5]
+    assert bin(int(own[27])).count("1") == 2
+    # Precision stays per entry.
+    assert [own[25], spare[25]] == ["0", "1"]
+
+
+def test_split_paths_without_one_reduce_task_fail(tmp_path):
+    with pytest.raises(ConvertError, match="0 reduce tasks name them"):
+        convert(*_split_pack(tmp_path, task_type=0))
+
+
+def test_path_id_past_the_model_table_fails(tmp_path):
+    path = zero_path()
+    path[64] = route(directionMask=0b1000)
+    buff, bwgt = build(tmp_path, cores={(0, 2): {"path": path}})
+    with pytest.raises(ConvertError, match="below 64"):
         convert(buff, bwgt)
-
-
-def test_legacy_predecessor_premerges_on_two_lanes(tmp_path):
-    buff, bwgt = _predecessor_pack(tmp_path)
-    bundle = convert(buff, bwgt, legacy_reduce_mapping=True)
-    forward = _rtab(bundle.text, 0, 2, 7)
-    target = _rtab(bundle.text, 0, 3, 7)
-    # The forwarder takes the old reduce VC. The target stays on the packed VC;
-    # other reduce entries are not translated.
-    assert [forward[4], forward[6], forward[27], forward[28]] == ["2", "3", "3", "2"]
-    assert [target[4], target[6], target[27], target[28]] == ["2", "0", "3", "2"]
-    assert forward[7:12] == ["3", "3", "3", "3", "3"]
-    assert target[7:12] == ["0", "0", "0", "0", "0"]
-    # The forwarder sends only on its packed flow. No reduce-flow bit was added.
-    assert forward[5] == "4"
-    assert "LEGACY_REDUCE_MAPPING" in bundle.text
-    assert bundle.inventory.legacy_reduces
-    row = bundle.inventory.legacy_reduces[0]
-    assert row["forward_core"] == 2 and row["target_core"] == 3
-    assert row["forward_lanes"] == [0, 1]
-    assert row["experimental"] is True
-    assert row["forward_odtype"] == row["forward_dtype"]
-
-
-def test_legacy_does_not_rewire_a_one_lane_predecessor(tmp_path):
-    upstream, downstream = zero_path(), zero_path()
-    upstream[7] = route(directionMask=0b1000, nxtVC=0)
-    downstream[7] = route(directionMask=0b0010, operation=3, nxtVC=0)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 2): {"path": upstream},
-        (0, 3): {"path": downstream},
-    })
-    with pytest.raises(ConvertError, match="reduce2 requires 2 external packets"):
-        convert(buff, bwgt, legacy_reduce_mapping=True)
-
-
-def test_legacy_does_not_rewire_a_forwarder_that_injects(tmp_path):
-    # Same two arrivals as the accepted shape, but p2's table also names CORE.
-    # That is its own input, so the predecessor add does not apply.
-    east, north = zero_path(), zero_path()
-    east[7] = route(directionMask=0b1000)
-    north[7] = route(directionMask=0b0001)
-    forward, target = zero_path(), zero_path()
-    forward[7] = route(directionMask=0b1000 | 0b1_0000)
-    target[7] = route(directionMask=0b0010, operation=3)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 1): {"path": east},
-        (0, 7): {"path": north},
-        (0, 2): {"path": forward},
-        (0, 3): {"path": target},
-    })
-    with pytest.raises(ConvertError, match="reduce2 requires 2 external packets"):
-        convert(buff, bwgt, legacy_reduce_mapping=True)
-
-
-def test_legacy_does_not_rewire_same_face_arrivals(tmp_path, monkeypatch):
-    # Two of the predecessor's hops land on one station. The grid's port map
-    # cannot pack that, so the arrival list is the collision itself. Opting in
-    # must not turn it into a reduce.
-    east, north = zero_path(), zero_path()
-    east[7] = route(directionMask=0b1000)
-    north[7] = route(directionMask=0b0001)
-    forward, target = zero_path(), zero_path()
-    forward[7] = route(directionMask=0b1000)
-    target[7] = route(directionMask=0b0010, operation=3)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 1): {"path": east},
-        (0, 7): {"path": north},
-        (0, 2): {"path": forward},
-        (0, 3): {"path": target},
-    })
-    import importlib
-    real = importlib.import_module("bach.compiler.bachflow.convert")._arrivals
-
-    def collided(*args):
-        hops = real(*args)
-        hops[(0, 2, 7)] = [(1, 2, (0, 1)), (1, 0, (0, 7))]
-        hops[(0, 3, 7)] = [(1, 2, (0, 2)), (1, 2, (0, 2))]
-        return hops
-
-    monkeypatch.setattr(
-        importlib.import_module("bach.compiler.bachflow.convert"), "_arrivals", collided,
-    )
-    with pytest.raises(ConvertError, match="one face"):
-        convert(buff, bwgt, legacy_reduce_mapping=True)
-
-
-def test_ordinary_reduce_is_unchanged_by_the_legacy_flag(tmp_path):
-    upstream, downstream = zero_path(), zero_path()
-    upstream[7] = route(directionMask=0b1000, nxtVC=1)
-    downstream[7] = route(
-        directionMask=0b0010, operation=2, nxtVC=1, reduceOutPrecision=0,
-    )
-    buff, bwgt = build(tmp_path, cores={
-        (0, 2): {"path": upstream},
-        (0, 3): {"path": downstream, "task": [(0x10, task(TASK_END=1))]},
-    })
-    plain = convert(buff, bwgt)
-    opted = convert(buff, bwgt, legacy_reduce_mapping=True)
-    assert _rtab(plain.text, 0, 3, 7) == _rtab(opted.text, 0, 3, 7)
-    assert "LEGACY_REDUCE_MAPPING" not in plain.text
-    assert "LEGACY_REDUCE_MAPPING" not in opted.text
-    assert opted.inventory.legacy_reduces == []
-
-
-def test_legacy_rejects_a_mixed_target_precision(tmp_path):
-    # p3 receives the forwarder on its west face, precision bit 2. The forwarder's
-    # other input arrives from the south, bit 1, and that bit is FP32. One output
-    # dtype cannot say both.
-    east, north = zero_path(), zero_path()
-    east[7] = route(directionMask=0b1000)
-    north[7] = route(directionMask=0b0001)
-    forward, target = zero_path(), zero_path()
-    forward[7] = route(directionMask=0b1000)
-    target[7] = route(directionMask=0b0010, operation=3, reduceInPrecision=0b0010)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 1): {"path": east},
-        (0, 7): {"path": north},
-        (0, 2): {"path": forward},
-        (0, 3): {"path": target},
-    })
-    with pytest.raises(ConvertError, match="reduce2 requires 2 external packets"):
-        convert(buff, bwgt, legacy_reduce_mapping=True)
-
-
-def test_legacy_rejects_a_forwarder_with_two_edges(tmp_path):
-    # p2 sends east and south, so the two packets are not one forwarded edge.
-    east, north = zero_path(), zero_path()
-    east[7] = route(directionMask=0b1000)
-    north[7] = route(directionMask=0b0001)
-    forward, target = zero_path(), zero_path()
-    forward[7] = route(directionMask=0b1000 | 0b0010)
-    target[7] = route(directionMask=0b0010, operation=3)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 1): {"path": east},
-        (0, 7): {"path": north},
-        (0, 2): {"path": forward},
-        (0, 3): {"path": target},
-    })
-    with pytest.raises(ConvertError, match="reduce2 requires 2 external packets"):
-        convert(buff, bwgt, legacy_reduce_mapping=True)
-
-
-def test_legacy_rejects_a_cross_chip_forwarder(tmp_path):
-    # Chip 0's east port is p4. Its one east edge reaches chip 1's west port,
-    # which is p5, not a core on chip 0. The record would name only the sender
-    # core, so a cross-chip sender is not rewritten.
-    east, north = zero_path(), zero_path()
-    east[7] = route(directionMask=0b1000)
-    north[7] = route(directionMask=0b0001)
-    forward, target = zero_path(), zero_path()
-    forward[7] = route(directionMask=0b1000)
-    target[7] = route(directionMask=0b0100, operation=3)
-    buff, bwgt = build(tmp_path, cores={
-        (0, 3): {"path": east},
-        (0, 9): {"path": north},
-        (0, 4): {"path": forward},
-        (1, 5): {"path": target},
-    })
-    with pytest.raises(ConvertError, match="reduce2 requires 2 external packets"):
-        convert(buff, bwgt, legacy_reduce_mapping=True)

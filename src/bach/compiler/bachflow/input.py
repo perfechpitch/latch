@@ -1,11 +1,10 @@
 """Write existing latch inputs from a packed layer and exact saved token files.
 
     python -m bach.compiler.bachflow.input layer.buff layer.bwgt \
-        --token user101.token --out-dir bundle --legacy-reduce-mapping
+        --token user101.token --out-dir bundle
 
 The output is bundle/ep1_adapter/, used by the adjacent packed-input test.
 Weights are converted only for shared and token-selected physical expert slots.
-The reduce workaround is experimental and requires an explicit flag.
 """
 from __future__ import annotations
 
@@ -24,15 +23,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--token", action="append", required=True)
     parser.add_argument("--out-dir", required=True)
     parser.add_argument("--hw")
-    parser.add_argument("--legacy-reduce-mapping", action="store_true")
     args = parser.parse_args(argv)
     dest = Path(args.out_dir) / "ep1_adapter"
     if dest.exists():
         parser.error(f"{dest} already exists; use a new directory")
     layer = open_layer(args.buff, args.bwgt, args.hw)
     try:
-        bundle = package_input(layer, args.out_dir,
-                               legacy_reduce_mapping=args.legacy_reduce_mapping)
+        bundle = package_input(layer, args.out_dir)
         rows = write_weights(layer, args.token, bundle.out_dir)
         if not rows:
             raise ValueError("the packed input contains no selected expert weights")

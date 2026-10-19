@@ -10,7 +10,7 @@ Run with BachFlow's shared Python environment and latch's `src` on `PYTHONPATH`:
 ```bash
 PYTHONPATH=<latch>/src <BachFlow>/.venv/bin/python -m bach.compiler.bachflow.input \
   layer.buff layer.bwgt --token user101.token --token user202.token \
-  --out-dir <new-directory> --legacy-reduce-mapping
+  --out-dir <new-directory>
 ```
 
 The output is `<new-directory>/ep1_adapter/`. An existing destination is rejected.
@@ -38,18 +38,21 @@ This adapter is deliberately limited to the current EP1 MXFP8 scene:
 Other formats or geometries fail conversion. This is not a general checkpoint
 loader or a simulator storage-layout change.
 
+## Reduce nets split by PathID
+
+A same-face reduce join sends one of its packets under a spare PathID, so one
+reduce on a core can own several RouterTable entries that differ only in input
+precision. The native Router sums every packet that arrives while the core's
+reduce task is open, whatever its PathID, and rounds once. The adapter checks
+that those entries' external packets number `operation - 1`, gives them one lane
+mask, and keeps each entry's own input precision. Packed routes are not changed.
+
 ## Explicit experiment
 
-`--legacy-reduce-mapping` is off by default. The current scene requires this
-previously approved simulator-only mapping for two same-face reduce shapes.
-It premerges two external inputs at their forwarding predecessor and introduces
-an extra BF16 rounding boundary. Packed routes and native Router code are not
-changed. The default rejects the unsupported packet multiplicity.
-
-The full-run test also exposes `BACHFLOW_INPUT_SF_PREFILL=1` for the approved
+The full-run test exposes `BACHFLOW_INPUT_SF_PREFILL=1` for the approved
 activation-scale-one experiment. That prefill is restricted to packed input
 activation ranges; original weight scales and VU-generated FC2 scales are kept.
-Do not present these experiments as proof of exact hardware equivalence.
+Do not present this experiment as proof of exact hardware equivalence.
 
 The independent reference in `compiler/reference/checkpoint_golden.py` reads the
 original complete global safetensors tensors and exact saved token bytes.
@@ -70,17 +73,13 @@ checkpoint directory in this recipe. A doubled vector, a missing user,
 and an unfinished task chain are failures. A transport-only run is not a
 numerical result.
 
-The validated full run is an experiment. It needs both opt-ins, and it still
-does not by itself accept the numbers:
-
-- `BACHFLOW_LEGACY_REDUCE_MAPPING=1` loads the simulator-only premerge. Two
-  same-face reduces are summed at the forwarding predecessor, which adds one
-  BF16 rounding the packed route does not have.
-- `BACHFLOW_INPUT_SF_PREFILL=1` writes activation scale one into the packed
-  input ranges only. Weight scales and VU-generated FC2 scales stay as packed.
+The validated full run is an experiment. It needs one opt-in, and it still
+does not by itself accept the numbers: `BACHFLOW_INPUT_SF_PREFILL=1` writes
+activation scale one into the packed input ranges only. Weight scales and
+VU-generated FC2 scales stay as packed.
 
 `BACHFLOW_TRANSPORT_ONLY=1` stops after the broadcast check. Do not pass it
-together with the full-run opt-ins, and do not compare its capture.
+together with the full-run opt-in, and do not compare its capture.
 
 The C++ driver accepts `BACHFLOW_USER_COUNT` of 1 or 2 only. User 1 is file
 `user101.token`. User 2 adds `user202.token`. Other user ids are not a parameter.
@@ -133,7 +132,7 @@ PYTHONPATH=<latch>/src \
   <py> -m bach.compiler.bachflow.input \
   <scene>/layer.buff <scene>/layer.bwgt \
   --token <token-dir>/user101.token --token <token-dir>/user202.token \
-  --out-dir <new-bundle-parent> --legacy-reduce-mapping
+  --out-dir <new-bundle-parent>
 ```
 
 ### 3. Build and run
@@ -160,7 +159,6 @@ BACHFLOW_OUT_DIR=<new-empty-capture-dir> \
 BACHFLOW_USER_COUNT=2 \
 BACHFLOW_CYCLE_LIMIT=24000 \
 BACHFLOW_WALL_LIMIT=1200 \
-BACHFLOW_LEGACY_REDUCE_MAPPING=1 \
 BACHFLOW_INPUT_SF_PREFILL=1 \
   bash <latch>/src/bach/compiler/bachflow/scripts/run-exact-native.sh
 ```

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Bounded EP1 exact-token run inside the latch Docker image.
 #
-# Transport-only and the approved full-run experiments are different exits.
-# A full run requires both explicit opt-ins and never claims numerical
-# acceptance; compare_output.py is the only numerical gate.
+# Transport-only and the full run are different exits. A full run requires an
+# explicit opt-in and never claims numerical acceptance; compare_output.py is
+# the only numerical gate.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,7 +24,6 @@ skip_build="${LATCH_SKIP_BUILD:-0}"
 npz_dir="${BACHFLOW_NPZ_DIR:-}"
 
 transport="${BACHFLOW_TRANSPORT_ONLY:-0}"
-legacy="${BACHFLOW_LEGACY_REDUCE_MAPPING:-0}"
 sf_one="${BACHFLOW_INPUT_SF_PREFILL:-0}"
 
 usage() {
@@ -39,9 +38,9 @@ Required:
 Mode (exactly one):
   BACHFLOW_TRANSPORT_ONLY=1
       stops after broadcast. Not numerical acceptance.
-  BACHFLOW_LEGACY_REDUCE_MAPPING=1 and BACHFLOW_INPUT_SF_PREFILL=1
-      bounded full execution of the approved experiments. Still not a
-      numerical pass; run compare_output.py on the capture afterwards.
+  BACHFLOW_INPUT_SF_PREFILL=1
+      bounded full execution with the input scale prefilled to one. Still
+      not a numerical pass; run compare_output.py on the capture afterwards.
 
 Optional:
   LATCH_ROOT               latch checkout mounted at /work/latch
@@ -92,12 +91,12 @@ fail() {
 [[ "$skip_build" == 0 || "$skip_build" == 1 ]] || fail "LATCH_SKIP_BUILD must be 0 or 1."
 
 full=0
-if [[ "$transport" == 1 && "$legacy" == 0 && "$sf_one" == 0 ]]; then
+if [[ "$transport" == 1 && "$sf_one" == 0 ]]; then
   :
-elif [[ "$transport" == 0 && "$legacy" == 1 && "$sf_one" == 1 ]]; then
+elif [[ "$transport" == 0 && "$sf_one" == 1 ]]; then
   full=1
 else
-  fail "Choose transport-only (BACHFLOW_TRANSPORT_ONLY=1) or the approved full run (BACHFLOW_LEGACY_REDUCE_MAPPING=1 and BACHFLOW_INPUT_SF_PREFILL=1). Do not combine them. A full run is not numerical acceptance."
+  fail "Choose transport-only (BACHFLOW_TRANSPORT_ONLY=1) or the full run (BACHFLOW_INPUT_SF_PREFILL=1). Do not combine them. A full run is not numerical acceptance."
 fi
 
 [[ -d "$latch_root" ]] || fail "LATCH_ROOT is not a directory: $latch_root"
@@ -129,7 +128,7 @@ egress_addr="${BACHFLOW_EGRESS_ADDR:-1212156672}"
 
 mode_note="transport-only; not a numerical result"
 if [[ "$full" == 1 ]]; then
-  mode_note="full run with explicit legacy mapping and SF-one; compare_output.py decides acceptance"
+  mode_note="full run with SF-one; compare_output.py decides acceptance"
 fi
 printf '%s\n' "exact-native: $mode_note"
 printf '%s\n' "latch=$latch_root image=$image build=$build_dir users=$users cycles=$cycles wall=${wall}s"
@@ -153,7 +152,6 @@ docker run --rm \
   -e BACHFLOW_EGRESS_PHYS="$egress_phys" \
   -e BACHFLOW_EGRESS_ADDR="$egress_addr" \
   -e BACHFLOW_TRANSPORT_ONLY="$transport" \
-  -e BACHFLOW_LEGACY_REDUCE_MAPPING="$legacy" \
   -e BACHFLOW_INPUT_SF_PREFILL="$sf_one" \
   -e BACHFLOW_CYCLE_LIMIT="$cycles" \
   -e BACHFLOW_USER_COUNT="$users" \

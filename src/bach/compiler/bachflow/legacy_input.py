@@ -84,12 +84,10 @@ class InputBundle:
     cores: list[dict] = field(default_factory=list)
     images: list[dict] = field(default_factory=list)
     init_finish: list[dict] = field(default_factory=list)
-    experimental: str | None = None
-    legacy_reduces: list[dict] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
-        out = {
+        return {
             "name": self.name,
             "bachir": self.bachir.name,
             "core_map": self.core_map.name,
@@ -99,10 +97,6 @@ class InputBundle:
             "missing": self.missing,
             "compat": _COMPAT,
         }
-        if self.experimental:
-            out["experimental"] = self.experimental
-            out["legacy_reduces"] = self.legacy_reduces
-        return out
 
 
 _COMPAT = [
@@ -113,8 +107,6 @@ _COMPAT = [
     "No ABI record. The wrapper sets the BachFlow ABI on every core that has a "
     "KERNELCORE image, before execution.",
     "Weights are not in this bundle. FORMAT and mmem spans are inventory only.",
-    "A retained LEGACY_REDUCE_MAPPING comment is the experimental simulator "
-    "pre-merge. It adds a rounding boundary and does not change the packed route.",
 ]
 
 
@@ -122,22 +114,19 @@ def package_input(
     layer,
     out_dir,
     *,
-    legacy_reduce_mapping: bool = False,
     name: str = "ep1_adapter",
 ) -> InputBundle:
     """Write ``out_dir/name/`` as a BACHIR 11 bundle.
 
     ``layer`` is an open packed layer (``open_layer``) or ``(buff, bwgt)``. The
-    current converter runs first. The experimental reduce pre-merge requires
-    explicit ``legacy_reduce_mapping=True``; the default keeps strict rejection.
-    A failure of that conversion, or of a check below, writes nothing.
+    current converter runs first. A failure of that conversion, or of a check below, writes nothing.
     """
     owns = False
     if isinstance(layer, (tuple, list)):
         layer = open_layer(layer[0], layer[1], None)
         owns = True
     try:
-        bundle = _convert(layer, legacy_reduce_mapping=legacy_reduce_mapping)
+        bundle = _convert(layer)
         return _package(layer, bundle, Path(out_dir), name)
     finally:
         if owns:
@@ -151,7 +140,7 @@ def _package(layer, bundle, out_dir: Path, name: str) -> InputBundle:
     finish = _finish(records, cores)
     images = _images(layer, cores)
     smem = _smem(layer, cores)
-    text = _render(bundle.text, records, cores, images, smem)
+    text = _render(records, cores, images, smem)
     return _write(out_dir, name, text, bundle, cores, images, finish)
 
 
@@ -375,12 +364,10 @@ def _smem(layer, cores) -> dict[tuple[int, int], list[tuple[int, int]]]:
     return out
 
 
-def _render(text, records, cores, images, smem) -> str:
+def _render(records, cores, images, smem) -> str:
     lines = [BACHIR11]
     for tag, fields, raw in records:
         if tag == "#":
-            if raw.startswith("# LEGACY"):
-                lines.append(raw)
             continue
         if tag in ("BACHIR", "SOURCE"):
             continue
@@ -395,10 +382,6 @@ def _render(text, records, cores, images, smem) -> str:
         lines.append(raw)
     _append_kernels(lines, images)
     _append_smem(lines, smem)
-    if "LEGACY_REDUCE_MAPPING" in text and not any(
-        ln.startswith("# LEGACY") for ln in lines
-    ):
-        raise PackageError("the experimental pre-merge marker was lost")
     return "\n".join(lines) + "\n"
 
 
@@ -454,8 +437,6 @@ def _write(out_dir, name, text, bundle, cores, images, finish) -> InputBundle:
         cores=core_rows,
         images=image_rows,
         init_finish=finish,
-        experimental=bundle.inventory.as_dict().get("experimental"),
-        legacy_reduces=list(bundle.inventory.legacy_reduces),
         missing=list(bundle.inventory.missing),
     )
     result.bachir.write_text(text, encoding="utf-8")
@@ -490,8 +471,6 @@ def _inventory(result: InputBundle) -> str:
         "# core that has a task and does not call it on a core that has none.",
         "# A packed word other than 1 on an active core is rejected, not stored.",
     ]
-    if result.experimental:
-        lines.append(f"# experimental: {result.experimental}")
     lines.append("# compat:")
     for note in _COMPAT:
         lines.append(f"# - {note}")

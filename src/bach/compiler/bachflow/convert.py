@@ -8,12 +8,6 @@ inferred from pcode, from route JSON, or from the old exporter.
 A condition the model cannot represent fails the conversion. The text is
 returned only after every check has passed, so a failure never leaves a
 runnable bundle behind.
-
-``legacy_reduce_mapping`` is off. It is an experimental simulator translation of
-one shape the old exporter pre-merged: a forwarding core with two distinct
-external lanes and no table CORE injection, sending both packets onward to a
-reduce that also adds its own input. The packed routes are not rewritten. The
-extra rounding boundary that translation inserts stays visible in the bundle.
 """
 
 from __future__ import annotations
@@ -49,9 +43,11 @@ UNIT = {"dte": 0, "mu": 1, "vu": 2}
 # unless the word says reduce.
 OP_TRANSFER = 1
 OP_REDUCE = 2
-# Old exporter reduce VC. Only the synthesized predecessor add uses it. A packed
-# reduce keeps the word's own VC, and so does every transfer.
-REDUCE_VC = 3
+# TS TASK_TYPE of a reduce task; its TASK_PATH_ID is the core's own operand.
+REDUCE_TASK = 4
+# The model's RouterTable, DTE path copy and reduce lane bookkeeping hold
+# PathIDs 0..63 (kPathNum).
+PATH_LIMIT = 64
 
 
 class ConvertError(ValueError):
@@ -161,73 +157,14 @@ def _dtype(precision: int, lanes: list[tuple[int, int]]) -> int:
 
 
 @dataclass
-class LegacyReduce:
-    """One experimental predecessor pre-merge. Not a packed route change.
-
-    ``forward`` is the core that only forwarded two external packets. ``target``
-    is the reduce those packets were headed for. Precisions are the model's
-    reduce dtype of each rewritten entry after the translation, not the packed
-    word: the packed words are left as decoded.
-    """
-
-    chip: int
-    path: int
-    forward_core: int
-    forward_lanes: tuple[int, ...]
-    forward_dtype: int
-    forward_odtype: int
-    target_core: int
-    target_lane: int
-    target_own: int
-    target_dtype: int
-    target_odtype: int
-    packed_target_operation: int
-    forward_vc: int
-    target_vc: int
-
-    def as_dict(self) -> dict:
-        return {
-            "chip": self.chip,
-            "path": self.path,
-            "forward_core": self.forward_core,
-            "forward_lanes": list(self.forward_lanes),
-            "forward_dtype": self.forward_dtype,
-            "forward_odtype": self.forward_odtype,
-            "forward_vc": self.forward_vc,
-            "target_core": self.target_core,
-            "target_lane": self.target_lane,
-            "target_own": self.target_own,
-            "target_dtype": self.target_dtype,
-            "target_odtype": self.target_odtype,
-            "target_vc": self.target_vc,
-            "packed_target_operation": self.packed_target_operation,
-            "experimental": True,
-            "note": (
-                "simulator-only predecessor add; packed route unchanged; "
-                "forward output precision follows the target input and is an "
-                "extra rounding boundary; forward VC is the old reduce VC, "
-                "the target keeps its packed VC"
-            ),
-        }
-
-
-@dataclass
 class Inventory:
     """What the packed layer carries, and what it does not."""
 
     cores: list[dict] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
-    legacy_reduces: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
-        out = {"cores": self.cores, "missing": self.missing}
-        if self.legacy_reduces:
-            out["experimental"] = (
-                "legacy_reduce_mapping rewrote simulator entries only; "
-                "packed routes and the native router are unchanged"
-            )
-            out["legacy_reduces"] = self.legacy_reduces
-        return out
+        return {"cores": self.cores, "missing": self.missing}
 
 
 @dataclass
@@ -236,16 +173,11 @@ class Bundle:
     inventory: Inventory
 
 
-def convert(buff, bwgt, hw=None, *, legacy_reduce_mapping: bool = False) -> Bundle:
-    """Convert one packed layer. Raises ``ConvertError`` with no bundle on failure.
-
-    ``legacy_reduce_mapping`` defaults off. The default still rejects a reduce
-    whose external packets are not one per station. Turned on, it applies the
-    old exporter's predecessor add and records each rewrite on the inventory.
-    """
+def convert(buff, bwgt, hw=None) -> Bundle:
+    """Convert one packed layer. Raises ``ConvertError`` with no bundle on failure."""
     layer = open_layer(buff, bwgt, hw)
     try:
-        return _convert(layer, legacy_reduce_mapping=legacy_reduce_mapping)
+        return _convert(layer)
     finally:
         _drop_views(layer)
         layer.close()
@@ -258,7 +190,7 @@ def _drop_views(layer) -> None:
             core.extents = {}
 
 
-def _convert(layer: Layer, *, legacy_reduce_mapping: bool = False) -> Bundle:
+def _convert(layer: Layer) -> Bundle:
     hw = layer.runtime.hw
     faces = Faces(hw)
     topo = build_topology(hw)
@@ -277,39 +209,13 @@ def _convert(layer: Layer, *, legacy_reduce_mapping: bool = False) -> Bundle:
         raise ConvertError("\n".join(problems))
 
     _derive_passthrough(layer, topo, faces, routes, releases, problems)
-    legacy: list[LegacyReduce] = []
-    if legacy_reduce_mapping:
-        legacy = _legacy_reduce_mapping(layer, topo, faces, routes, problems)
     _check_same_face(layer, topo, faces, routes, problems)
-    _reduce_lanes(layer, topo, faces, routes, problems, legacy)
+    _reduce_lanes(layer, topo, faces, routes, problems)
     _stream_need(layer, topo, faces, routes, problems)
     if problems:
         raise ConvertError("\n".join(problems))
 
-    bundle = _render(layer, faces, routes, releases, problems)
-    if legacy:
-        _mark_legacy(bundle, legacy)
-    bundle.inventory.legacy_reduces = [row.as_dict() for row in legacy]
-    return bundle
-
-
-def _mark_legacy(bundle, legacy) -> None:
-    """Name each experimental rewrite in the bundle. The RTAB lines stay data."""
-    notes = [
-        "# LEGACY_REDUCE_MAPPING experimental: simulator entries only; "
-        "packed routes unchanged; forwarder output precision is the target "
-        "input precision and is an extra rounding boundary"
-    ]
-    for row in legacy:
-        notes.append(
-            f"# LEGACY chip {row.chip} path {row.path}: "
-            f"forward p{row.forward_core} lanes {list(row.forward_lanes)} "
-            f"dtype {row.forward_dtype} odtype {row.forward_odtype}; "
-            f"target p{row.target_core} lane {row.target_lane} own {row.target_own} "
-            f"dtype {row.target_dtype} odtype {row.target_odtype}; "
-            f"packed target operation {row.packed_target_operation}"
-        )
-    bundle.text = bundle.text.replace(HEADER + "\n", HEADER + "\n" + "\n".join(notes) + "\n", 1)
+    return _render(layer, faces, routes, releases, problems)
 
 
 def _routes(core: Core, faces: Faces) -> dict[int, Route]:
@@ -324,6 +230,10 @@ def _routes(core: Core, faces: Faces) -> dict[int, Route]:
         word = lo | hi << 32
         if word == 0:
             continue
+        if path >= PATH_LIMIT:
+            raise ConvertError(
+                f"path {path}: the model's RouterTable holds PathIDs below {PATH_LIMIT}"
+            )
         route = _route_of(path, word)
         flow, lost = _flow(router_word(word)["directionMask"], faces.faces(core.p).get)
         if lost:
@@ -363,102 +273,6 @@ def _release(core: Core, faces: Faces) -> dict[int, int]:
                 raise ConvertError(f"release cites absent source station {src_station}")
             out[src_station] = out.get(src_station, 0) | STATION_BIT[station]
     return out
-
-
-def _legacy_reduce_mapping(layer, topo, faces, routes, problems) -> list[LegacyReduce]:
-    """Pre-merge a two-lane forwarder into the reduce it feeds. Experimental.
-
-    Phase one only reads. It keeps a reduce that is short exactly one external
-    packet, whose single table sender is a same-chip transfer with no CORE
-    injection and exactly one outgoing edge, and whose sender is itself reached
-    by two distinct stations of one precision. Phase two writes those records.
-    A same-face collision, a shortfall with any other shape, a forwarder that
-    injects or fans out, a cross-chip sender, or a precision the one output
-    dtype cannot say is not rewritten; the strict checks reject those. The
-    forwarder's output dtype is that one input precision, which is the extra
-    rounding boundary.
-    """
-    arrivals = _arrivals(layer, topo, faces, routes)
-    pending = _legacy_reduce_records(layer, arrivals, routes)
-    return _apply_legacy(layer, routes, pending, problems)
-
-
-def _legacy_reduce_records(layer, arrivals, routes) -> list[tuple]:
-    """Rewrite records, computed before any route is changed.
-
-    A predecessor is the sender on the arrival list, never a chip index chosen
-    for this scene. Each tuple is ``(target, sender, predecessor hops, dtype)``.
-    """
-    out = []
-    for (c, p, path), hops in sorted(arrivals.items()):
-        route = routes.get((c, p), {}).get(path)
-        if route is None or route.derived or route.operation < 2:
-            continue
-        stations = [lane for lane, _bit, _src in hops]
-        if len(stations) != len(set(stations)):
-            continue
-        if len(stations) != route.operation - 2 or len(hops) != 1:
-            continue
-        _lane, bit, src = hops[0]
-        if src[0] != c:
-            continue
-        forward = routes.get(src, {}).get(path)
-        if (
-            forward is None or forward.derived or forward.operation != 0
-            or forward.enters or bin(forward.flow).count("1") != 1
-        ):
-            continue
-        pred = arrivals.get((*src, path), [])
-        pred_lanes = [item[0] for item in pred]
-        if len(pred) != 2 or len(set(pred_lanes)) != 2:
-            continue
-        # The target's packed mask has one bit for the face the forwarder uses.
-        # Both packets the forwarder adds must be that precision. Reading the
-        # mask with the forwarder's own faces would invent a mixed dtype, and
-        # the model's output precision is one bit, so a mix is rejected.
-        precision = _word(layer, c, p, path)["reduceInPrecision"]
-        uniform = (precision >> bit) & 1
-        if any(((precision >> item[1]) & 1) != uniform for item in pred):
-            continue
-        dtype = uniform
-        out.append(((c, p, path), src, pred, dtype, hops[0][0]))
-    return out
-
-
-def _apply_legacy(layer, routes, pending, problems) -> list[LegacyReduce]:
-    """Write the recorded pre-merges. The target's own lane is filled later.
-
-    The forwarder becomes an upstream-only reduce on its two external lanes, on
-    VC 3. That VC belongs to this synthesized add only. The target's operation
-    drops by one external packet and it keeps the packed VC. Its mask, own lane
-    and dtype are left at zero so ``_reduce_lanes`` fills them from the one lane
-    that remains; that fill does not compare the lane count with the packed
-    operation.
-    """
-    records = []
-    for (c, p, path), src, pred, dtype, external in pending:
-        route = routes[c, p][path]
-        forward = routes[src][path]
-        packed = route.operation
-        lanes = tuple(sorted({item[0] for item in pred}))
-        forward.op_type = OP_REDUCE
-        forward.operation = 2
-        forward.cur_vc = REDUCE_VC
-        forward.nxt_vc = (REDUCE_VC,) * 5
-        forward.reduce_in = sum(1 << lane for lane in lanes)
-        forward.reduce_dtype = dtype
-        forward.reduce_odtype = dtype
-        route.operation = packed - 1
-        records.append(LegacyReduce(
-            chip=c, path=path,
-            forward_core=src[1], forward_lanes=lanes,
-            forward_dtype=dtype, forward_odtype=dtype, forward_vc=REDUCE_VC,
-            target_core=p, target_lane=external, target_own=-1,
-            target_dtype=0, target_odtype=route.reduce_odtype,
-            target_vc=route.cur_vc,
-            packed_target_operation=packed,
-        ))
-    return records
 
 
 def _check_same_face(layer, topo, faces, routes, problems) -> None:
@@ -596,72 +410,92 @@ def _arrivals(layer, topo, faces, routes) -> dict[tuple, list[tuple]]:
     return incoming
 
 
-def _reduce_lanes(layer, topo, faces, routes, problems, legacy=()) -> None:
-    """Name the lanes a reduce entry waits on. The operation is not changed.
+def _reduce_lanes(layer, topo, faces, routes, problems) -> None:
+    """Name the lanes each reduce net waits on. The operation is not changed.
+
+    A same-face join sends one of its packets under a spare PathID, so one
+    reduce on a core can own several entries whose words differ only in input
+    precision. The model sums every packet that arrives while the core's reduce
+    task is open, whatever its PathID, so such entries are one net: their
+    external packets together must number ``operation - 1``. When a net has
+    more than one entry, exactly one of them is the PathID a reduce task names;
+    that entry carries the core's own input.
 
     An incoming lane is the station the upstream entry sends on, seen from this
-    core. The core's own input takes the lowest free lane, and the reduce flow
-    bit records which one. Two arrivals on one station were already rejected.
-
-    A legacy forwarder is the exception. It adds only the external lanes it was
-    given and has no own input, so its lane count is not checked against an
-    operation: the packed word was a transfer. A legacy target is an ordinary
-    reduce of whatever external lanes remain, and this same choice fills the
-    record's own lane and dtype.
+    core. Every entry of a net gets the same lane mask and own-lane flow bit,
+    which the model checks; the own input takes the lowest station no packet
+    arrives on. Input dtype stays per entry, from that entry's own precision.
     """
     incoming = _arrivals(layer, topo, faces, routes)
-    rewritten = {(row.chip, row.forward_core, row.path): row for row in legacy}
-    targets = {(row.chip, row.target_core, row.path): row for row in legacy}
     for (c, p), table in routes.items():
-        for path, route in table.items():
+        nets: dict[tuple, list[int]] = {}
+        for path, route in sorted(table.items()):
             if route.operation == 0 or route.derived:
                 continue
-            lanes = incoming.get((c, p, path), [])
-            stations = [lane for lane, _bit, _src in lanes]
-            if len(stations) != len(set(stations)):
-                continue
-            row = rewritten.get((c, p, path))
-            if row is not None:
-                if sorted(stations) != list(row.forward_lanes):
-                    problems.append(
-                        f"chip {c} core {p} path {path}: legacy forwarder lanes "
-                        f"{sorted(stations)} are not the recorded "
-                        f"{list(row.forward_lanes)}"
-                    )
-                continue
-            expected = route.operation - 1
-            if len(stations) != expected:
-                problems.append(
-                    f"chip {c} core {p} path {path}: reduce{expected} requires "
-                    f"{expected} external packets, but only {len(stations)} distinct "
-                    "incoming lanes are represented; same-face packet multiplicity "
-                    "is unsupported and must not be silently reduced"
-                )
-                continue
-            own = next((n for n in (MID, 1, 2) if n not in stations), None)
-            if own is None:
-                problems.append(
-                    f"chip {c} core {p} path {path}: all three stations carry an "
-                    "input, so the core's own input has no lane"
-                )
-                continue
-            mask = 1 << own
-            for lane in stations:
-                mask |= 1 << lane
-            route.reduce_in = mask
-            route.reduce_dtype = _dtype(
-                _word(layer, c, p, path)["reduceInPrecision"],
-                [(lane, bit) for lane, bit, _src in lanes] + [(own, _CORE_PREC)],
-            )
-            if own == 1:
-                route.flow |= 1 << 3
-            elif own == 2:
-                route.flow |= 1 << 4
-            target = targets.get((c, p, path))
-            if target is not None:
-                target.target_own = own
-                target.target_dtype = route.reduce_dtype
-                target.target_odtype = route.reduce_odtype
+            nets.setdefault(_net_key(layer, c, p, path), []).append(path)
+        tasks = _reduce_task_paths(layer.chips[c].cores[p], c)
+        for paths in nets.values():
+            _net_lanes(layer, c, p, paths, tasks, table, incoming, problems)
+
+
+def _net_key(layer, c, p, path) -> tuple:
+    word = _word(layer, c, p, path)
+    word.pop("reduceInPrecision")
+    return tuple(sorted(word.items()))
+
+
+def _reduce_task_paths(core: Core, chip: int) -> set[int]:
+    return {
+        attr["TASK_PATH_ID"] for _idx, _pc, attr in _chain(core, [], chip)
+        if attr["TASK_TYPE"] == REDUCE_TASK
+    }
+
+
+def _net_lanes(layer, c, p, paths, tasks, table, incoming, problems) -> None:
+    where = f"chip {c} core {p} path {'/'.join(str(path) for path in paths)}"
+    if len(paths) > 1 and len(tasks & set(paths)) != 1:
+        problems.append(
+            f"{where}: these reduce entries differ only in input precision, but "
+            f"{len(tasks & set(paths))} reduce tasks name them, not one; the "
+            "core's own input cannot be placed"
+        )
+        return
+    per_path = {path: incoming.get((c, p, path), []) for path in paths}
+    if any(
+        len({lane for lane, _bit, _src in hops}) != len(hops)
+        for hops in per_path.values()
+    ):
+        return  # _check_same_face already reported it
+    hops = [hop for path in paths for hop in per_path[path]]
+    expected = table[paths[0]].operation - 1
+    if len(hops) != expected:
+        problems.append(
+            f"{where}: reduce{expected} requires {expected} external packets, "
+            f"but {len(hops)} arrive; the model must not reduce a different count"
+        )
+        return
+    stations = {lane for lane, _bit, _src in hops}
+    own = next((n for n in (MID, 1, 2) if n not in stations), None)
+    if own is None:
+        problems.append(
+            f"{where}: all three stations carry an input, so the core's own "
+            "input has no lane"
+        )
+        return
+    mask = 1 << own
+    for lane in stations:
+        mask |= 1 << lane
+    for path in paths:
+        route = table[path]
+        route.reduce_in = mask
+        route.reduce_dtype = _dtype(
+            _word(layer, c, p, path)["reduceInPrecision"],
+            [(lane, bit) for lane, bit, _src in per_path[path]] + [(own, _CORE_PREC)],
+        )
+        if own == 1:
+            route.flow |= 1 << 3
+        elif own == 2:
+            route.flow |= 1 << 4
 
 
 def _stream_need(layer, topo, faces, routes, problems) -> None:

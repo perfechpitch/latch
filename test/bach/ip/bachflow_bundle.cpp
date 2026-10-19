@@ -174,14 +174,7 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   Core &first_compute = all[0]->GetCore(compute_pos->first.second);
   bool transport_only = EnvU64("BACHFLOW_TRANSPORT_ONLY", 0) != 0;
   bool input_sf_prefill = EnvU64("BACHFLOW_INPUT_SF_PREFILL", 0) != 0;
-  bool legacy_mapping = EnvU64("BACHFLOW_LEGACY_REDUCE_MAPPING", 0) != 0;
-  ASSERT_TRUE(transport_only || legacy_mapping)
-      << "Full execution requires the explicitly approved legacy mapping experiment.";
   if (!transport_only) {
-    std::ifstream bundle(root + "/" + name + "/" + name + ".bachir");
-    std::string text((std::istreambuf_iterator<char>(bundle)), std::istreambuf_iterator<char>());
-    ASSERT_NE(text.find("LEGACY_REDUCE_MAPPING"), std::string::npos)
-        << "Refusing the old unnormalized diagnostic bundle.";
     ASSERT_GE(out.addr, kMuDocCmemBase);
     ASSERT_LT(out.addr, kMuDocCmemBase + kMuDocCmemBytes);
     harness.output_addr = out.addr - kMuDocCmemBase;
