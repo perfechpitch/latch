@@ -336,7 +336,7 @@ Router 是 core 与片上网络之间的交换点，同时承担三件事：包�
 | F41 | 精度：中间累加固定 FP32，输出按 RouterTable 的 `reduce_outdata_type` 转成 FP32 或 BF16 |
 | F42 | 结果按 flit 出：某个结果 flit 所需的各方向操作数都累加完了，这个 flit 就能发，不等整包；一个包发出首 flit 后锁定到尾 flit，后面的结果没好就占着输出等。发送前查目标 VC credit，作为 Xbar 的第五路输入参与仲裁 |
 | F43 | `op_type` 分 reduce 与 reduce_twice 两档：reduce 第一次收到就写入上下文，reduce_twice 要到第二次或第三次收到才与上下文里的值相加。两个源允许都来自本 core 的 DTE，即用 Router 完成 core 内两个 token 的 reduce 再发出 |
-| F44 | “全部方向”取自 RouterTable 的 `reduce_in_mask`：按包头的 `path_id` 查 `rdc_rtab[path_id].reduce_in_mask`，得到这条 path 在本级会有哪几个相邻方向送来分量。某个结果元素要等集合里各方向对应的那个元素都进来。一笔任务的首份输入进来时把这个集合一并记进 `rdc_user_tab`，这笔任务做完前不再重查 |
+| F44 | 一笔要收几包取自首份输入那条表项的 `operation`（reduce0/1/2 收 1/2/3 包，含本 core 那一份），首份进来时记进 `rdc_user_tab`，这笔任务做完前不再重查。同口会合的两包 PathID 不同、各查各的表项，一路可以来好几包，所以不按 `reduce_in_mask` 的路数算。同一 user 的任务一笔接一笔做：任务开着时到的 reduce 包不分 PathID 都加进这一笔，收满为止；收满之后到的，或这一路已经收过同一 PathID 的，是下一笔。每包按自己表项的输入精度解，整份和只舍入一次；结果用本 core 那一份（走 `flow_dir` reduce1 / reduce2 指定那一路的包）的 PathID 与表项发出。某个结果元素要等每一包对应的那个元素都进来 |
 | F45 | `reduce_in_mask` 为 0 表示本级不做累加：坏 core 与这条 path 上只转发的好 core 都是这一档，包按 `flow_dir` 直接转发，不进 ReduceModule |
 | F46 | 结果往下游发不查下游的 ReduceMemory：那边的容量与它的 Core Mem 一起分配，上游发数据进那个 core 时取得的那一项 stream credit 同时代表两者，逐 flit 只受 VC credit 约束 |
 | F47 | Downstream Reduce Credit Map 按 UserID 加目标方向记相邻下游能不能接这个用户的下一笔任务：取得准入时置忙，收到 release 时放开 |
@@ -1457,7 +1457,7 @@ reduce包            32B包头不做数值累加；payload额外控制前缀须�
 | ReduceModule 三路输入仲裁，进入后锁定到尾 flit | F36 | `reduce_input_arb` |
 | BF16 扩 FP32，中间累加固定 FP32，输出可配 | F37、F41 | `reduce_precision` |
 | 首份输入建上下文，后续原位 RMW 累加 | F38 | `reduce_rmw` |
-| 收齐判据取自 RouterTable 的 reduce_in_mask，任务开始时记进 expect_mask | F46 | `reduce_in_mask` |
+| 收齐判据是首份表项 operation 的包数，任务开始时记下；同口会合的几包按各自表项的精度解、凑一份和 | F44 | `reduce_in_mask` |
 | 本 core 那一份分量走哪一路输入由 flow_dir 的 reduce1 / reduce2 指定 | F113 | `reduce_self_lane` |
 | Core 多操作数：本 core 先后送出的几包依次占 reduce_in_mask 的几路 | F113a | `reduce_core_operands` |
 | reduce_in_mask 为 0 的核不累加，只按 flow_dir 转发 | F47 | `reduce_passthrough` |

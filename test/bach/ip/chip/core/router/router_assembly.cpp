@@ -196,7 +196,7 @@ RouteEntry ReduceSink(uint64_t in_mask) {
   e.flow_dir = 0;
   e.path_core_bypass = false;
   e.reduce_in_mask = in_mask;
-  e.operation = Operation::kReduce2;
+  e.operation = Operation::kReduce1;
   e.reduce_data_type = kReduceFp32;
   e.reduce_outdata_type = kReduceFp32;
   return e;

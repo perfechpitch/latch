@@ -74,7 +74,7 @@ MessagePtr Part(uint64_t user, uint64_t path, uint64_t seq, float value) {
   return m;
 }
 
-// 中继累加：等两路分量，算完往右发。
+// 中继累加：in_mask 每一路一包，收齐了往右发。本核那一份走 mid。
 RouteEntry Relay(uint64_t in_mask, uint64_t dtype = kReduceFp32,
                  uint64_t out_dtype = kReduceFp32) {
   RouteEntry e;
@@ -82,7 +82,7 @@ RouteEntry Relay(uint64_t in_mask, uint64_t dtype = kReduceFp32,
   e.flow_dir = kFlowRight;
   e.path_core_bypass = true;
   e.reduce_in_mask = in_mask;
-  e.operation = Operation::kReduce1;
+  e.operation = Operation(__builtin_popcountll(in_mask));
   e.reduce_data_type = dtype;
   e.reduce_outdata_type = out_dtype;
   return e;
@@ -114,11 +114,11 @@ class ReduceHarness : public BachModule {
   uint64_t first_head_at = 0, last_tail_at = 0;
   // ReduceModule 累计挡住了几拍输入。计数是 Logic，要在协程里读。
   uint64_t stalled = 0;
-  std::vector<uint64_t> out_users;
+  std::vector<uint64_t> out_users, out_paths;
   std::vector<float> out_values;
   std::vector<uint8_t> out_heads;
   std::vector<MessagePtr> out_msgs;
-  std::vector<uint64_t> done_users, done_seqs;
+  std::vector<uint64_t> done_users, done_seqs, done_paths;
 
  protected:
   void Step() override {
@@ -135,6 +135,7 @@ class ReduceHarness : public BachModule {
       last_tail_seq = v.seq;
       last_tail_at = now;
       out_users.push_back(v.user_id);
+      out_paths.push_back(v.path_id);
       if (v.msg) {
         out_values.push_back(WordOf(v.msg->payload));
         out_heads.push_back(SwHeadOf(v.msg->payload));
@@ -145,6 +146,7 @@ class ReduceHarness : public BachModule {
     if (rm.Done().Valid()) {
       done_users.push_back(rm.Done().user_id.Get());
       done_seqs.push_back(rm.Done().reduce_seq.Get());
+      done_paths.push_back(rm.Done().path_id.Get());
     }
 
     Feed(now);
@@ -333,8 +335,8 @@ TEST(BachReduce, DifferentTaskIdSameUserAdds) {
   EXPECT_EQ(seqs[0], 3u);
 }
 
-// 行链（path 7）先占住用户分区后，另一条 path 的两个操作数都到齐，仍不进入
-// 当前分区。它们留在各自输入缓冲的队头，不改这一笔的边界。
+// 行链（path 7）收满两包、结果还没发出时，另一条 path 的两个操作数都到了，
+// 仍不进入当前分区。它们留在各自输入缓冲的队头，不改这一笔的边界。
 TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
   ReduceModule::State state;
   uint64_t results = 0;
@@ -345,9 +347,11 @@ TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
     b.tab->Preload(7, Relay(0b011));
     b.tab->Preload(3, Relay(0b011));
     ReduceHarness h(clk, *b.rm, b.wires);
+    h.grant_from = 1000;
     h.jobs = {{2, 1, Part(40, 7, 14, 100.0f)},
-              {6, 0, Part(40, 3, 2, 10.0f)},
-              {8, 1, Part(40, 3, 2, 32.0f)}};
+              {4, 0, Part(40, 7, 14, 23.0f)},
+              {8, 0, Part(40, 3, 2, 10.0f)},
+              {10, 1, Part(40, 3, 2, 32.0f)}};
     clk->Continue(100 * kPeriod);
     RT::JoinAll();
     state = b.rm->Inspect();
@@ -359,8 +363,8 @@ TEST(BachReduce, LaterTaskKeepsEarlierTaskAtInputHeads) {
   EXPECT_EQ(state.tasks[0].user_id, 40u);
   EXPECT_EQ(state.tasks[0].path_id, 7u);
   EXPECT_EQ(state.tasks[0].reduce_seq, 14u);
-  EXPECT_EQ(state.tasks[0].in_done_mask, 0b010u);
-  EXPECT_EQ(state.tasks[0].expect_mask, 0b011u);
+  EXPECT_EQ(state.tasks[0].need, 2u);
+  EXPECT_EQ(state.tasks[0].received, 2u);
   EXPECT_EQ(state.input_depth, (std::array<uint64_t, 3>{1, 1, 0}));
   EXPECT_EQ(state.input_heads[0].msg->path_id, 3u);
   EXPECT_EQ(state.input_heads[1].msg->path_id, 3u);
@@ -578,10 +582,11 @@ TEST(BachReduce, LockedToTailAcrossInputs) {
     Bench b(clk);
     b.tab->Preload(9, Relay(0b011));
     ReduceHarness h(clk, *b.rm, b.wires);
-    // lane0 的包分两拍：head 之后隔十拍才来 tail。中间 lane1 想插一笔。
-    h.jobs = {{2, 0, Part(77, 9, 5, 10.0f), false},
-              {4, 1, Part(77, 9, 5, 1000.0f), true},
-              {12, 0, Part(77, 9, 5, 5.0f), true}};
+    // lane0 的包分两个 flit：head 之后隔十拍才来 tail。中间 lane1 想插一笔。
+    MessagePtr mid = LongPart(77, 9, 5, 15.0f, 64);
+    h.jobs = {{2, 0, mid, false, true},
+              {4, 1, LongPart(77, 9, 5, 1000.0f, 64), true},
+              {12, 0, mid, true, false}};
     clk->Continue(100 * kPeriod);
     RT::JoinAll();
     values = h.out_values;
@@ -590,7 +595,7 @@ TEST(BachReduce, LockedToTailAcrossInputs) {
   RT::Reset();
   EXPECT_GT(stalled, 0u) << "锁定期间 lane1 那一笔要被挡住";
   ASSERT_EQ(values.size(), 1u);
-  // 10 + 5 是 lane0 那个包的两拍，1000 是 lane1 那一份，锁定解除后才收进来。
+  // 15 是 lane0 那个包，1000 是 lane1 那一份，锁定解除后才收进来。
   EXPECT_FLOAT_EQ(values[0], 1015.0f) << "挡住的那一份不能丢";
 }
 
@@ -684,4 +689,156 @@ TEST(BachReduce, SoftwareHeaderIsSkippedAndKept) {
   RT::Reset();
   EXPECT_FLOAT_EQ(value, 7.0f) << "只有数据段参与加法";
   EXPECT_EQ(head, 0xA5) << "那 16 B 原样留在输出里，没被加进去";
+}
+
+namespace {
+
+// 同面会合：一条 net 在本核有两条表项 P = 9 与 Q = 12，只差 PathID 与输入精度。
+// 一笔收三包（operation = 3），本核那一份走 left。
+constexpr uint64_t kPathP = 9, kPathQ = 12;
+
+void PreloadSplit(RouterTable& tab, uint64_t p_dtype, uint64_t q_dtype,
+                  uint64_t out_dtype) {
+  RouteEntry p = Relay(0b111, p_dtype, out_dtype);
+  p.flow_dir |= kFlowReduce1;
+  RouteEntry q = p;
+  q.reduce_data_type = q_dtype;
+  tab.Preload(kPathP, p);
+  tab.Preload(kPathQ, q);
+}
+
+MessagePtr Bf16Part(uint64_t user, uint64_t path, uint64_t seq, float v) {
+  auto m = std::make_shared<Message>();
+  m->user_id = user;
+  m->path_id = path;
+  m->reduce_seq = seq;
+  m->payload.assign(kReduceSwHeaderBytes + 2, 0);
+  uint16_t bits = numeric::ToBf16(v);
+  m->payload[kReduceSwHeaderBytes] = uint8_t(bits & 0xFF);
+  m->payload[kReduceSwHeaderBytes + 1] = uint8_t((bits >> 8) & 0xFF);
+  m->size = m->payload.size();
+  return m;
+}
+
+struct SplitRun {
+  std::vector<float> values;
+  std::vector<uint64_t> out_paths, done_paths;
+  ReduceModule::State state;
+};
+
+SplitRun RunSplit(std::vector<ReduceHarness::Job> jobs) {
+  SplitRun out;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    PreloadSplit(*b.tab, kReduceFp32, kReduceFp32, kReduceFp32);
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = std::move(jobs);
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    out.values = h.out_values;
+    out.out_paths = h.out_paths;
+    out.done_paths = h.done_paths;
+    out.state = b.rm->Inspect();
+  }
+  RT::Reset();
+  return out;
+}
+
+}  // namespace
+
+// 一路上来两包、PathID 不同：两包加本核那一份凑一份和，结果与 ReduceDone 各
+// 一个，用本核那一份的 PathID。两包谁先到都一样。
+TEST(BachReduce, SplitPathsOnOneLaneJoinOneSum) {
+  SplitRun p_first = RunSplit({{2, 0, Part(77, kPathP, 5, 10.0f)},
+                               {6, 0, Part(77, kPathQ, 3, 30.0f)},
+                               {10, 1, Part(77, kPathP, 5, 2.0f)}});
+  SplitRun q_first = RunSplit({{2, 0, Part(77, kPathQ, 3, 30.0f)},
+                               {4, 1, Part(77, kPathP, 5, 2.0f)},
+                               {8, 0, Part(77, kPathP, 5, 10.0f)}});
+  for (SplitRun const* run : {&p_first, &q_first}) {
+    ASSERT_EQ(run->values.size(), 1u) << "三份合成一个结果";
+    EXPECT_FLOAT_EQ(run->values[0], 42.0f);
+    EXPECT_EQ(run->out_paths, (std::vector<uint64_t>{kPathP}))
+        << "结果用本核那一份的 PathID 发，备用 PathID 先到也一样";
+    EXPECT_EQ(run->done_paths, (std::vector<uint64_t>{kPathP}))
+        << "一份和只回一次 ReduceDone";
+  }
+}
+
+// 做加法的核用自己 DataOut 的 PathID 发和：上游两包都是 P，本核那一份是 Q，
+// 结果走 Q，不走先到的 P。
+TEST(BachReduce, SumLeavesUnderTheLocalOperandsPathId) {
+  SplitRun run = RunSplit({{2, 0, Part(77, kPathP, 5, 10.0f)},
+                           {6, 2, Part(77, kPathP, 5, 30.0f)},
+                           {10, 1, Part(77, kPathQ, 3, 2.0f)}});
+  ASSERT_EQ(run.values.size(), 1u);
+  EXPECT_FLOAT_EQ(run.values[0], 42.0f);
+  EXPECT_EQ(run.out_paths, (std::vector<uint64_t>{kPathQ}));
+  EXPECT_EQ(run.done_paths, (std::vector<uint64_t>{kPathQ}));
+}
+
+// 同一路的两包各按自己表项的精度解：P 是 FP32、Q 是 BF16。整份和一次累加、
+// 只舍入一次：BF16(1 + 2^-8 + 2^-8) = 1 + 2^-7，先舍 BF16(1 + 2^-8) 会得 1。
+TEST(BachReduce, SplitPathsKeepTheirOwnPrecisionAndRoundOnce) {
+  float value = 0.0f;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    // Q 那条：mid 是 BF16，left（本核那一份）与 right 仍是 FP32。
+    PreloadSplit(*b.tab, kReduceFp32, kReduceDtypePerLane | 0b110,
+                 kReduceBf16);
+    ReduceHarness h(clk, *b.rm, b.wires);
+    float tiny = 1.0f / 256.0f;
+    h.jobs = {{2, 0, Part(77, kPathP, 5, 1.0f)},
+              {6, 0, Bf16Part(77, kPathQ, 3, tiny)},
+              {10, 1, Part(77, kPathP, 5, tiny)}};
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    if (!h.out_msgs.empty()) {
+      std::vector<uint8_t> const& p = h.out_msgs.front()->payload;
+      if (p.size() >= kReduceSwHeaderBytes + 2) {
+        uint16_t bits = uint16_t(uint16_t(p[kReduceSwHeaderBytes]) |
+                                 (uint16_t(p[kReduceSwHeaderBytes + 1]) << 8));
+        value = numeric::FromBf16(bits);
+      }
+    }
+  }
+  RT::Reset();
+  EXPECT_FLOAT_EQ(value, 1.0f + 1.0f / 128.0f);
+}
+
+// 收满 operation 包之后再来的是下一笔：这一路上没收过的 PathID 也一样，留在队头，
+// 不加进这一份和；这一笔发完它才开始下一笔。
+TEST(BachReduce, PacketBeyondTheCountWaitsAsTheNextTask) {
+  SplitRun run = RunSplit({{2, 0, Part(77, kPathP, 5, 10.0f)},
+                           {4, 0, Part(77, kPathQ, 3, 30.0f)},
+                           {6, 1, Part(77, kPathP, 5, 2.0f)},
+                           {8, 2, Part(77, kPathQ, 6, 500.0f)}});
+  ASSERT_EQ(run.values.size(), 1u);
+  EXPECT_FLOAT_EQ(run.values[0], 42.0f) << "多出来那一包没加进来";
+  ASSERT_EQ(run.state.tasks.size(), 1u) << "多出来那一包开了下一笔";
+  EXPECT_EQ(run.state.tasks[0].received, 1u);
+  EXPECT_EQ(run.state.tasks[0].reduce_seq, 6u);
+}
+
+// 一笔里混进另一条 net 的包（表项不是同一条 net 的那几条）就报错：PathID 不用来
+// 分辨是哪一笔，靠的是同一 user 的任务一笔接一笔做。
+TEST(BachReduce, PacketOfAnotherNetInOpenSumIsAnError) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  auto run = [] {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    PreloadSplit(*b.tab, kReduceFp32, kReduceFp32, kReduceFp32);
+    b.tab->Preload(20, Relay(0b011));
+    ReduceHarness h(clk, *b.rm, b.wires);
+    h.jobs = {{2, 0, Part(77, kPathP, 5, 10.0f)},
+              {6, 2, Part(77, 20, 7, 1.0f)}};
+    clk->Continue(50 * kPeriod);
+    RT::JoinAll();
+  };
+  EXPECT_DEATH(run(), "");
 }

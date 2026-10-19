@@ -17,22 +17,28 @@
 // Rmem 容量，所以 reduce 这一路不单独记账、也不单独还，业务级资源只有 Stream
 // 那一套，用户任务链跑完退休时还一次。
 //
-// “全部方向”取自 RouterTable 的 reduce_in_mask：按包头的 path_id 查表，得到
-// 这条 path 在本级会有哪几个相邻方向送来分量。首份输入建上下文时把这个集合一并
-// 记进用户表，本包收齐前不再重查。
+// 一笔要收几包取自首份输入那条表项的 operation：reduce{N} 是 N 包上游加本核
+// 一份，共 operation 包。同口会合的两包 PathID 不同、各查各的表项，所以一路
+// 可以来好几包，包数不能按 reduce_in_mask 的路数算。
 //
 // 必须执行 Reduce：SRAM、Bank 或计算单元暂不可用时对输入反压，不允许绕过 Reduce
 // 降级为直接存储或转发。
 //
 // 上下文保护：当前任务的全部输入处理完、结果全部发出之前，同一 User 的下一笔
 // 任务不得进来覆盖（F-030）。各核的 task id 各自编号，包头里的 reduce_seq 不
-// 参与配对：同一 user、同一 path 上还没到的那一路就是这一笔的输入。这一路已经
-// 收过、或者 path 不同，才是下一笔，留在队头等到这一笔做完。
+// 参与配对，PathID 也不用来分辨是哪一笔：同一 user 的任务一笔接一笔做，任务
+// 开着时到的 reduce 包，不管从哪一路来、PathID 是什么，都加进这一笔，收满
+// operation 包为止。收满之后到的，或者这一路已经收过同一条 path 的（同一个面
+// 上同一 PathID 不会来两包），是下一笔，留在队头等到这一笔做完。
+//
+// 结果用本核那一份的 PathID 与表项发出：做加法的核用自己 DataOut 的 PathID。
+// 本核那一份走哪一路由它表项 flow_dir 的 reduce1 / reduce2 两位定（见
+// RouterStation::ReduceLaneOf），落在那一路上的包就是它。
 //
 // 收不下的 flit 留在本路的输入缓冲里，按缓冲余量对 Xbar 反压。收不下有两种：
 // 这一 User 正锁在另一路的包上；新用户进来时 16 个分区都占着。
-// 已经进到输入缓冲的下一笔（另一条 path，或这一路已经收过）留在该路队头，
-// 不写进当前分区。Xbar 上还没准入的下一笔留在 Xbar 那个 VC 的队头，不进这里。
+// 已经进到输入缓冲的下一笔留在该路队头，不写进当前分区。Xbar 上还没准入的
+// 下一笔留在 Xbar 那个 VC 的队头，不进这里。
 //
 // 分区：16 个用户各一个 kReduceCtxBytes 的分区，按 FP32 驻留数据量算（F-044）。
 // 用户第一笔任务真正进来时分配，后面的任务接着用，收到这个用户的 User Retire 才
@@ -42,8 +48,8 @@
 // 链上没有同步点：上游分量到达时不必等本 core 算完，先存进上下文，本地出核的
 // 分量出来时再加。
 //
-// 数值：输入按 RouterTable 的 reduce_data_type 解，BF16 先扩成 FP32，FP32 直接
-// 进；中间累加固定 FP32；输出按 reduce_outdata_type 转成 FP32 或 BF16。
+// 数值：每包按它自己那条表项的 reduce_data_type 解，BF16 先扩成 FP32，FP32 直接
+// 进；整份和在 FP32 里累加，输出按 reduce_outdata_type 只舍入一次。
 //
 // 包最前面 16 B 是软件辅助信息，加法跳过这一段，原样留在输出里。
 
@@ -182,18 +188,10 @@ public:
       return ok;
     }
     auto const &c = it->second;
-    // 下一笔是另一条 path。同一 path 上别的核 task id 不同，reduce_seq 不作为
-    // 拒绝条件：这一笔还缺的那一路要能进来。
-    if (c.busy || c.reserved) {
-      bool ok = c.path_id == m.path_id;
-      if (!ok) {
-        deny_why = 2;
-        deny_user = m.user_id;
-        deny_path = m.path_id;
-        deny_held = c.path_id;
-      }
-      return ok;
-    }
+    // 任务开着时什么 path 都收：还缺的包要能进来；收满之后到的是下一笔，在
+    // 输入缓冲队头等。
+    if (c.busy || c.reserved)
+      return true;
     if (c.retired) {
       deny_why = 3;
       deny_user = m.user_id;
@@ -229,6 +227,7 @@ public:
   struct TaskState {
     uint64_t user_id, path_id, reduce_seq, expect_mask, in_done_mask;
     bool busy = false, reserved = false;
+    uint64_t need = 0, received = 0;
   };
   struct State {
     std::vector<TaskState> tasks;
@@ -249,7 +248,8 @@ public:
       if (!c.busy && !c.reserved)
         continue;
       s.tasks.push_back({item.first, c.path_id, c.reduce_seq, c.expect_mask,
-                         c.in_done_mask, c.busy, c.reserved});
+                         c.in_done_mask, c.busy, c.reserved, c.need,
+                         c.received});
     }
     for (uint64_t r = 0; r < 3; ++r) {
       s.input_depth[r] = in_buf[r].size();
@@ -309,20 +309,27 @@ private:
   uint64_t last_retire_seq = 0, last_reuse_seq = 0;
   std::shared_ptr<RetireBroadcastPort> slot_reuse;
 
+  static_assert(kPathNum <= 64, "lane_paths 按 64 位记 path");
   // 一个用户的本地分区，以及它正在做的那一笔任务。
   struct Ctx {
     bool reserved = false;
     bool busy = false; // 有一笔任务在做：首份输入进来到结果尾 flit 交付
+    // 结果发出用的 PathID：本核那一份的；它还没到时先记首份的。
     uint64_t path_id = 0;
     uint64_t reduce_seq = 0;
-    uint64_t expect_mask = 0; // 这笔任务开始时记下的 reduce_in_mask
-    uint64_t in_done_mask = 0;
-    std::array<uint64_t, 3> got{}; // 各路那一份已经收进来的字节
+    uint64_t expect_mask = 0;  // 首份表项的 reduce_in_mask，只作观测
+    uint64_t in_done_mask = 0; // 收完过至少一包的那几路，只作观测
+    uint64_t need = 0;         // 这笔要收几包：首份表项的 operation
+    uint64_t started = 0, received = 0; // 已经进来包头、已经收完的包数
+    RouteEntry first_entry;    // 首份那条表项，后面每包的表项要跟它是同一条 net
+    std::array<uint64_t, 3> lane_paths{}; // 各路这笔收过哪几条 path，按位记
+    std::array<uint64_t, 3> lane_dtype{}; // 各路当前那一包的输入精度
+    std::array<uint64_t, 3> got{}; // 各路当前那一包已经收进来的字节
     std::vector<float> acc;        // FP32 中间累加结果
     std::vector<bool> seen;        // 各元素是不是已经写进过第一份
     std::vector<uint8_t> sw_head;  // 首份输入的软件辅助信息，输出时照抄
     uint64_t aux = kReduceSwHeaderBytes;
-    uint64_t in_dtype = kReduceBf16, out_dtype = kReduceBf16;
+    uint64_t out_dtype = kReduceBf16;
     bool retired = false;     // 收到 Retire，这笔任务交付完就放分区
     uint64_t locked_from = 3; // 锁定到尾 flit 的那一路，3 = 没锁
     MessagePtr first_msg;     // 首份输入的包头，输出时照抄
@@ -397,11 +404,10 @@ private:
     }
     Ctx &c = it->second;
 
-    // 另一条 path，或这一路已经收过一份，是下一笔。同一 path 上 reduce_seq
-    // 不同的另一路是这一笔还缺的输入，写进当前分区。
-    bool lane_done = f.head && ((c.in_done_mask >> r) & 1ull) != 0;
-    bool foreign =
-        (c.busy || c.reserved) && (f.msg->path_id != c.path_id || lane_done);
+    // 收满了，或这一路已经收过这条 path，是下一笔。
+    bool foreign = c.busy && f.head &&
+                   (c.started == c.need ||
+                    ((c.lane_paths[r] >> f.msg->path_id) & 1ull) != 0);
     if (foreign) {
       // 留在本路队头。收进 park 会把这一路的反压放掉，后面的包整段涌进来。
       ++stalled_pending;
@@ -427,18 +433,22 @@ private:
     }
     if (f.head) {
       if (!c.busy) {
-        // 首份输入开始这笔任务，把 expect_mask 一并记下，本任务做完前不再重查。
+        // 首份输入开始这笔任务，把要收几包一并记下，本任务做完前不再重查。
         c.busy = true;
         c.reserved = false;
         c.path_id = f.msg->path_id;
         c.reduce_seq = f.msg->reduce_seq;
         c.expect_mask = e.reduce_in_mask;
         c.in_done_mask = 0;
+        c.need = uint64_t(e.operation);
+        c.started = c.received = 0;
+        c.first_entry = e;
+        c.lane_paths = {};
         c.got = {};
-        c.in_dtype = e.reduce_data_type;
         c.out_dtype = e.reduce_outdata_type;
         c.aux = f.msg->payload_aux;
-        uint64_t n = ElemsOf(f.msg->size, LaneDtype(c.in_dtype, r), c.aux);
+        uint64_t n =
+            ElemsOf(f.msg->size, LaneDtype(e.reduce_data_type, r), c.aux);
         c.acc.assign(n, 0.0f);
         c.seen.assign(n, false);
         CheckCtxFits(c);
@@ -448,38 +458,61 @@ private:
         c.first_msg = f.msg;
         out_q.push_back({user, c.reduce_seq, nullptr, 0});
       }
-      // 这一路一个新包开始，收了多少从包头起算。
+      LOGCHECK(SameNet(c.first_entry, e),
+               "ReduceModule: 一笔里来了另一条 net 的包，同一 user 的 reduce "
+               "任务一笔接一笔做的前提不成立。");
+      // 这一路一个新包开始，收了多少从包头起算；精度按这一包自己的表项。
+      ++c.started;
+      c.lane_paths[r] |= 1ull << f.msg->path_id;
+      c.lane_dtype[r] = LaneDtype(e.reduce_data_type, r);
       c.got[r] = 0;
+      if (r == CoreLane(e.flow_dir))
+        c.path_id = f.msg->path_id;
     }
     uint64_t lo = c.got[r];
     uint64_t hi =
         f.tail ? f.msg->size : std::min<uint64_t>(lo + kFlitBytes, f.msg->size);
-    AccumRange(c, f.msg->payload, lo, hi, LaneDtype(c.in_dtype, r));
+    AccumRange(c, f.msg->payload, lo, hi, c.lane_dtype[r]);
     c.got[r] = hi;
     c.locked_from = f.tail ? 3 : r;
     ++accepted_pending;
-    if (f.tail)
+    if (f.tail) {
+      ++c.received;
       c.in_done_mask |= 1ull << r;
+    }
   }
 
-  // 结果包里前多少字节已经算好：一个结果元素要等各路对应的那个元素都进来，收齐
-  // 的那一路不再限制。有一路一个元素都还没进来就是 0。
+  // 同一条 net 在一核上的几条表项只差 PathID 与输入精度。
+  static bool SameNet(RouteEntry const &a, RouteEntry const &b) {
+    return a.operation == b.operation && a.flow_dir == b.flow_dir &&
+           a.reduce_in_mask == b.reduce_in_mask &&
+           a.reduce_outdata_type == b.reduce_outdata_type;
+  }
+
+  // 本核那一份走哪一路，与 RouterStation::ReduceLaneOf 同一套；两位都置是 Core
+  // 多操作数，几路都可能是本核的，认不出来就返回 3。
+  static uint64_t CoreLane(uint64_t flow_dir) {
+    bool r1 = (flow_dir & kFlowReduce1) != 0;
+    bool r2 = (flow_dir & kFlowReduce2) != 0;
+    if (r1 && r2)
+      return 3;
+    return r2 ? 2 : (r1 ? 1 : 0);
+  }
+
+  // 结果包里前多少字节已经算好：一个结果元素要等每一包对应的那个元素都进来。
+  // 还有一包连包头都没进来就是 0；包都开始了，只剩锁着的那一包在收，它收到
+  // 哪个元素就算到哪。
   uint64_t ReadyBytes(Ctx const &c, uint64_t out_size) const {
-    if (c.in_done_mask == c.expect_mask)
+    if (c.received == c.need)
       return out_size;
-    uint64_t out_n = ElemBytes(c.out_dtype);
-    uint64_t elems = ~0ull;
-    for (uint64_t r = 0; r < 3; ++r) {
-      if (((c.expect_mask >> r) & 1u) == 0)
-        continue;
-      if ((c.in_done_mask >> r) & 1u)
-        continue;
-      uint64_t in_n = ElemBytes(LaneDtype(c.in_dtype, r));
-      if (c.got[r] < c.aux + in_n)
-        return 0;
-      elems = std::min(elems, (c.got[r] - c.aux) / in_n);
-    }
-    return std::min(out_size, c.aux + elems * out_n);
+    if (c.started < c.need || c.locked_from >= 3)
+      return 0;
+    uint64_t r = c.locked_from;
+    uint64_t in_n = ElemBytes(c.lane_dtype[r]);
+    if (c.got[r] < c.aux + in_n)
+      return 0;
+    uint64_t elems = (c.got[r] - c.aux) / in_n;
+    return std::min(out_size, c.aux + elems * ElemBytes(c.out_dtype));
   }
 
   // 结果包的长度：软件辅助信息加上按输出精度排的累加结果。
@@ -666,6 +699,8 @@ private:
     out_q.pop_front();
     c.busy = false;
     c.in_done_mask = 0;
+    c.started = c.received = 0;
+    c.lane_paths = {};
     c.got = {};
     c.locked_from = 3;
     if (c.retired)
@@ -680,8 +715,10 @@ private:
       uint64_t size = OutSizeOf(c);
       if (ReadyBytes(c, size) < std::min(size, kFlitBytes))
         continue;
-      // 结果包的包头照抄首份输入，数据按 flit 填：发哪个 flit 之前写哪一段。
+      // 结果包的包头照抄首份输入，PathID 换成本核那一份的；数据按 flit 填：发
+      // 哪个 flit 之前写哪一段。
       auto m = std::make_shared<Message>(*c.first_msg);
+      m->path_id = c.path_id;
       m->payload.assign(size, 0);
       m->size = size;
       OutItem item = *i;
