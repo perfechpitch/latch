@@ -42,8 +42,15 @@ std::vector<std::unique_ptr<Chip>> MakeChips(ClockPtr clk) {
   return owned;
 }
 
-uint64_t PrefillPackedInputScales(std::string const &path,
-                                 std::vector<Chip *> const &chips) {
+// 输入 scale 旁带不由传输写，SF-one 只能由 harness 预填。gate/up 的 VU 输出会落在
+// 同一个流的输入区间里，盖掉旁带，所以 SID 换了用户（allocation 变了）就得重填。
+struct InputScaleCores {
+  uint64_t templates = 0;
+  std::set<std::pair<uint64_t, uint64_t>> cores;
+};
+
+InputScaleCores FindInputScaleCores(std::string const &path,
+                                    std::vector<Chip *> const &chips) {
   std::ifstream input(path);
   LOGCHECK(input.good(), "读不出输入 scale 模板。");
   std::map<std::tuple<uint64_t, uint64_t, uint64_t>, std::map<uint64_t, uint64_t>> templates;
@@ -59,7 +66,7 @@ uint64_t PrefillPackedInputScales(std::string const &path,
     uint64_t relative = offset - kMuTemplateBase;
     templates[{chip, core, relative / kMuTemplateStride}][relative % kMuTemplateStride] = value;
   }
-  uint64_t count = 0;
+  InputScaleCores found;
   for (auto const &entry : templates) {
     auto const &words = entry.second;
     auto mode_pos = words.find(kMuPrimitiveMode - kMuPrimitiveDim);
@@ -76,11 +83,10 @@ uint64_t PrefillPackedInputScales(std::string const &path,
                  k && k % 32 == 0 && base < kMuDocCmemBytes &&
                  stride == kInputStride && base + k <= kDataBytes,
              "输入 scale 模板不在完整广播 token 区间内。");
-    for (uint64_t sid = 0; sid < kInputStreams; ++sid)
-      chips[chip]->GetCore(core).Cmem().PokeScale(sid * stride, ByteBlock(kScaleBytes, 0x7f));
-    ++count;
+    found.cores.insert({chip, core});
+    ++found.templates;
   }
-  return count;
+  return found;
 }
 
 // JoinAll 之后的现场：只写没走空的 core。打拍寄存器此时停在复位值，所以占用
@@ -158,11 +164,12 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   if (golden.empty()) {
     FAIL() << "设了 BACHFLOW_EXACT_RUN 但没有 BACHFLOW_GOLDEN_DIR。";
   }
-  // 第 k 个用户（从 0 起）号是 101 * (k + 1)。只有 101、202 两份 token：
-  // 偶数号用 101 那份，奇数号用 202 那份，所以 303 起的输出该与同份 token 的一致。
+  // 用户 0、1 号是 101、202，第 k 个（k >= 2）是 300 + k。只有 101、202 两份
+  // token：偶数 k 用 101 那份，奇数 k 用 202 那份，后面的输出该与同份 token 的一致。
+  // pcode 进口按用户号索引 1024 项的流表（不取模），用户号必须 < 1024。
   uint64_t user_count = EnvU64("BACHFLOW_USER_COUNT", 1);
-  if (user_count < 1 || user_count > kInputStreams) {
-    FAIL() << "BACHFLOW_USER_COUNT 只能是 1.." << kInputStreams << "。";
+  if (user_count < 1 || user_count > kMaxUsers) {
+    FAIL() << "BACHFLOW_USER_COUNT 只能是 1.." << kMaxUsers << "。";
   }
   std::vector<uint8_t> body101, body202;
   std::string why;
@@ -174,7 +181,7 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   std::vector<uint64_t> users;
   std::map<uint64_t, std::vector<uint8_t> const *> body_of;
   for (uint64_t k = 0; k < user_count; ++k) {
-    users.push_back(101 * (k + 1));
+    users.push_back(ExactUserId(k));
     body_of[users.back()] = k % 2 == 0 ? &body101 : &body202;
   }
 
@@ -225,6 +232,9 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   Core &first_compute = all[0]->GetCore(compute_pos->first.second);
   bool transport_only = EnvU64("BACHFLOW_TRANSPORT_ONLY", 0) != 0;
   bool input_sf_prefill = EnvU64("BACHFLOW_INPUT_SF_PREFILL", 0) != 0;
+  InputScaleCores scale_cores;
+  std::map<std::pair<std::pair<uint64_t, uint64_t>, uint64_t>, uint64_t> scale_allocation;
+  uint64_t scale_refills = 0;
   if (!transport_only) {
     ASSERT_GE(out.addr, kMuDocCmemBase);
     ASSERT_LT(out.addr, kMuDocCmemBase + kMuDocCmemBytes);
@@ -238,11 +248,26 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
       ASSERT_TRUE(std::all_of(body202.end() - kScaleBytes, body202.end(),
                              [](uint8_t value) { return value == 0x7f; }));
     }
-    uint64_t prefilled = PrefillPackedInputScales(root + "/" + name + "/" + name + ".bachir", all);
-    ASSERT_EQ(prefilled, 256u) << "Gate/up input templates only; no FC2/VU scale writes.";
-    transport << "input_sf_prefill 1 templates " << prefilled << '\n';
+    scale_cores = FindInputScaleCores(root + "/" + name + "/" + name + ".bachir", all);
+    ASSERT_EQ(scale_cores.templates, 256u) << "Gate/up input templates only; no FC2/VU scale writes.";
+    transport << "input_sf_prefill 1 templates " << scale_cores.templates << " cores "
+              << scale_cores.cores.size() << '\n';
   }
   harness.observe = [&](uint64_t cycle) {
+    for (auto const &at : scale_cores.cores) {
+      Core &core = all[at.first]->GetCore(at.second);
+      auto snap = core.GetTs().Table().SnapPtr()->Get();
+      if (!snap) continue;
+      for (uint64_t sid = 0; sid < snap->slot_num && sid < kInputStreams; ++sid) {
+        StreamEntry const &e = snap->entry[sid];
+        if (!e.valid) continue;
+        uint64_t &seen = scale_allocation[{at, sid}];
+        if (seen == e.allocation) continue;
+        seen = e.allocation;
+        core.Cmem().PokeScale(sid * kInputStride, ByteBlock(kScaleBytes, kSavedScaleByte));
+        ++scale_refills;
+      }
+    }
     if (cycle % 256 == 0) {
       uint64_t instructions = 0, mu_dispatch = 0, mu_done = 0;
       for (auto *chip : all) {
@@ -363,6 +388,7 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   clk->Continue(limit + 2);
   RT::JoinAll();
   RunResult const &note = harness.result;
+  transport << "input_sf_refills " << scale_refills << '\n';
   std::ofstream diagnostics(ScratchOut() + "/cores.txt");
   ASSERT_TRUE(diagnostics.good());
   for (uint64_t c = 0; c < all.size(); ++c) {

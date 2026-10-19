@@ -88,15 +88,21 @@ numerical result.
 The validated full run is an experiment. It needs one opt-in, and it still
 does not by itself accept the numbers: `BACHFLOW_INPUT_SF_PREFILL=1` writes
 activation scale one into the packed input ranges only. Weight scales and
-VU-generated FC2 scales stay as packed.
+VU-generated FC2 scales stay as packed. The driver writes it each time a gate/up
+core gives a stream ID to a new user, because the transport does not write the
+input scale and that stream's later VU output overwrites part of it.
 
 `BACHFLOW_TRANSPORT_ONLY=1` stops after the broadcast check. Do not pass it
 together with the full-run opt-in, and do not compare its capture.
 
-The C++ driver accepts `BACHFLOW_USER_COUNT` of 1 to 16. User k (from 0) has
-id `101 * (k + 1)`. Even k sends `user101.token` and odd k `user202.token`, so
-only 101 and 202 have their own golden; every later user's output must equal
-the output of the user that sent the same token.
+The C++ driver accepts `BACHFLOW_USER_COUNT` of 1 to 724. Users 0 and 1 have
+ids 101 and 202, and user k for k >= 2 has id `300 + k`. Even k sends
+`user101.token` and odd k `user202.token`, so only 101 and 202 have their own
+golden; every later user's output must equal the output of the user that sent
+the same token. The bound comes from pcode's ingress kernel. It indexes a
+1024-entry stream table by user id and places each arrival in a 1024-slot ring
+by arrival order, so ids and arrival counts must stay below 1024. More than 16
+users reuse the 16 stream IDs; the input feed is paced by C2C link credit.
 
 Documented EP1 endpoints, overridable by the same variables:
 
@@ -179,7 +185,7 @@ BACHFLOW_INPUT_SF_PREFILL=1 \
 
 Drop `LATCH_SKIP_BUILD` to configure a Release Ninja build and build
 `bachflow_bundle` and `ep1_exact_token`. The short 3000-cycle default is useful
-for diagnostics, not a complete two-user run; use the full budget above. The script rejects any user count outside 1..16
+for diagnostics, not a complete two-user run; use the full budget above. The script rejects any user count outside 1..724
 before Docker starts. A second run needs a new empty `BACHFLOW_OUT_DIR`.
 
 The script does not compare. On a full run it prints the exact next command and

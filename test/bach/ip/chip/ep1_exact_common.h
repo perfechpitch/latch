@@ -307,6 +307,16 @@ constexpr uint64_t kScaleGroups = kDataBytes / 32; // 192
 constexpr uint64_t kInputStreams = 16;
 constexpr uint8_t kSavedScaleByte = 0x7f;
 
+// pcode 进口 DTE 按到达次序 & 1023 放头、topK 和数据，流表 p_stream 按用户号索引
+// 1024 项，都不按 SID。用户号和到达次序都得 < 1024。
+constexpr uint64_t kIngressRing = 1024;
+constexpr uint64_t kUserIdBase = 300;
+constexpr uint64_t kMaxUsers = kIngressRing - kUserIdBase;
+
+inline uint64_t ExactUserId(uint64_t k) {
+  return k < 2 ? 101 * (k + 1) : kUserIdBase + k;
+}
+
 inline void PokeInputScale(CoreMem &mem, std::vector<uint8_t> const &saved,
                            uint64_t base) {
   LOGCHECK(saved.size() == kSavedBytes, "scale 预填要整份 6392 B。");
