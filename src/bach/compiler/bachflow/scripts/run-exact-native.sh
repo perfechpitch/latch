@@ -32,7 +32,7 @@ Usage: run-exact-native.sh
 
 Required:
   BACHFLOW_BUNDLE_PARENT   host directory that contains <bundle name>/
-  BACHFLOW_GOLDEN_DIR      host directory with user101.token (and user202.token for 2 users)
+  BACHFLOW_GOLDEN_DIR      host directory with user101.token (and user202.token for 2+ users)
   BACHFLOW_OUT_DIR         new or empty host directory for this run's capture
 
 Mode (exactly one):
@@ -58,8 +58,8 @@ Optional:
                            BACHFLOW_GOLDEN_DIR.
   BACHFLOW_BUNDLE_NAME     bundle directory name (default: ep1_adapter)
   BACHFLOW_CYCLE_LIMIT     driver cycle budget (default: 3000)
-  BACHFLOW_USER_COUNT      1 or 2 (default: 1). The driver hardcodes users
-                           101 and 202; any other count is rejected here.
+  BACHFLOW_USER_COUNT      1..16 (default: 1). User k (from 0) is 101*(k+1);
+                           even k sends user101.token, odd k user202.token.
   BACHFLOW_WALL_LIMIT      timeout(1) seconds around the binary (default: 300)
   BACHFLOW_INGRESS_CHIP/PHYS/ADDR
   BACHFLOW_EGRESS_CHIP/PHYS/ADDR
@@ -85,7 +85,7 @@ fail() {
 [[ -n "$bundle_parent" ]] || fail "BACHFLOW_BUNDLE_PARENT is required (host directory containing the bundle)."
 [[ -n "$golden_dir" ]] || fail "BACHFLOW_GOLDEN_DIR is required."
 [[ -n "$out_dir" ]] || fail "BACHFLOW_OUT_DIR is required (a new directory for this run)."
-[[ "$users" == 1 || "$users" == 2 ]] || fail "BACHFLOW_USER_COUNT must be 1 or 2 (driver hardcodes users 101 and 202)."
+[[ "$users" =~ ^[0-9]+$ && "$users" -ge 1 && "$users" -le 16 ]] || fail "BACHFLOW_USER_COUNT must be 1..16."
 [[ "$cycles" =~ ^[0-9]+$ && "$cycles" -gt 0 ]] || fail "BACHFLOW_CYCLE_LIMIT must be a positive integer."
 [[ "$wall" =~ ^[0-9]+$ && "$wall" -gt 0 ]] || fail "BACHFLOW_WALL_LIMIT must be a positive integer."
 [[ "$skip_build" == 0 || "$skip_build" == 1 ]] || fail "LATCH_SKIP_BUILD must be 0 or 1."
@@ -103,7 +103,7 @@ fi
 [[ -d "$bundle_parent/$bundle_name" ]] || fail "Bundle not found: $bundle_parent/$bundle_name"
 [[ -d "$golden_dir" ]] || fail "Golden directory not found: $golden_dir"
 [[ -f "$golden_dir/user101.token" ]] || fail "Missing $golden_dir/user101.token"
-if [[ "$users" == 2 ]]; then
+if [[ "$users" -ge 2 ]]; then
   [[ -f "$golden_dir/user202.token" ]] || fail "Missing $golden_dir/user202.token"
 fi
 
@@ -174,7 +174,7 @@ status=$?
 if [[ "$full" == 1 ]]; then
   compare_golden="${npz_dir:-$golden_dir}"
   user_args="101"
-  if [[ "$users" == 2 ]]; then
+  if [[ "$users" -ge 2 ]]; then
     user_args="101 202"
   fi
   printf '%s\n' "numerical comparison was not run; driver exit ${status} is not acceptance"

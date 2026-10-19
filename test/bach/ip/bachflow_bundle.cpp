@@ -3,7 +3,7 @@
 // 没设 BACHFLOW_EXACT_RUN 就跳过。设了却缺 bundle、端点或两份 token，失败。
 // 地址和物理 core 只从环境来。主线程从编好的包读出来再填。
 // 出口期望逻辑 7（fc2_concat，chip 47 物理 8）。进口期望逻辑 8。
-// 不要把出口断言成逻辑 8。用户 101 和 202 各一份文件，不改字节。
+// 不要把出口断言成逻辑 8。用户 101 和 202 各一份文件，不改字节；更多用户轮流复用这两份。
 
 #include <gtest/gtest.h>
 
@@ -83,6 +83,50 @@ uint64_t PrefillPackedInputScales(std::string const &path,
   return count;
 }
 
+// JoinAll 之后的现场：只写没走空的 core。打拍寄存器此时停在复位值，所以占用
+// 读 Occupied()、表项读 Peek()，不读 InFlight() 或 snapshot。
+void DumpBusyCore(std::ostream &o, uint64_t c, uint64_t p, Core &core) {
+  Router &r = core.GetRouter();
+  Xbar &xb = r.GetXbar();
+  CoreStation &cs = r.GetCoreStation();
+  auto red = r.GetReduce().Inspect();
+  uint64_t occupied = core.GetTs().Table().Occupied();
+  bool queued = cs.OutBufDepth() || cs.HeaderDepth() || r.GetReduce().OutQueued() ||
+                red.input_depth[0] || red.input_depth[1] || red.input_depth[2];
+  for (uint64_t d = 0; d < 4; ++d) queued |= r.Station(d).QueueDepth() != 0;
+  for (uint64_t d = 0; d < kXbarInNum; ++d) queued |= xb.InDepth(d) != 0;
+  if (!occupied && !queued && red.tasks.empty()) return;
+  o << c << ' ' << p << " dte_error " << core.GetDte().Completion().Error()
+    << " occupied " << occupied << " mu " << core.GetMu().DoneCnt() << '/'
+    << core.GetMu().DispatchCnt() << " rdc_ctx " << r.GetReduce().ContextUsed();
+  for (uint64_t u = 0; u < 3; ++u)
+    o << " pc" << u << ' ' << core.Rv(u).Exec().Pc();
+  o << '\n';
+  for (uint64_t sid = 0; sid < kStreamNum; ++sid) {
+    StreamEntry const &e = core.GetTs().Table().Peek(sid);
+    if (!e.valid) continue;
+    o << "  task sid " << sid << " user " << e.user_id << (e.user_id_vld ? "" : "?")
+      << " t" << e.task_id << " fsm " << int(e.task_fsm) << " done 0x" << std::hex
+      << e.done_bitmap << std::dec << " path " << e.task_path_id << '\n';
+  }
+  if (!queued && red.tasks.empty()) return;
+  o << "  router q";
+  for (uint64_t d = 0; d < 4; ++d) {
+    uint64_t hp = 0, hu = 0;
+    o << ' ' << r.Station(d).QueueDepth();
+    if (r.Station(d).QueueHead(hp, hu)) o << "(p" << hp << "u" << hu << ")";
+  }
+  o << " xb";
+  for (uint64_t d = 0; d < kXbarInNum; ++d)
+    if (xb.InDepth(d)) o << ' ' << d << ':' << xb.InDepth(d);
+  o << " cbuf " << cs.OutBufDepth() << " hdr " << cs.HeaderDepth() << " rdc_in "
+    << red.input_depth[0] << ' ' << red.input_depth[1] << ' ' << red.input_depth[2]
+    << " rdc_outq " << r.GetReduce().OutQueued();
+  for (auto const &t : red.tasks)
+    o << " red u" << t.user_id << " p" << t.path_id << ' ' << t.received << '/' << t.need;
+  o << '\n';
+}
+
 } // namespace
 
 TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
@@ -114,17 +158,24 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   if (golden.empty()) {
     FAIL() << "设了 BACHFLOW_EXACT_RUN 但没有 BACHFLOW_GOLDEN_DIR。";
   }
-  // 第一次只跑 101。两份一起跑要显式设 BACHFLOW_USER_COUNT=2。
+  // 第 k 个用户（从 0 起）号是 101 * (k + 1)。只有 101、202 两份 token：
+  // 偶数号用 101 那份，奇数号用 202 那份，所以 303 起的输出该与同份 token 的一致。
   uint64_t user_count = EnvU64("BACHFLOW_USER_COUNT", 1);
-  if (user_count != 1 && user_count != 2) {
-    FAIL() << "BACHFLOW_USER_COUNT 只能是 1 或 2。";
+  if (user_count < 1 || user_count > kInputStreams) {
+    FAIL() << "BACHFLOW_USER_COUNT 只能是 1.." << kInputStreams << "。";
   }
   std::vector<uint8_t> body101, body202;
   std::string why;
   ASSERT_TRUE(LoadSavedFile(golden + "/user101.token", &body101, &why)) << why;
-  if (user_count == 2) {
+  if (user_count >= 2) {
     ASSERT_TRUE(LoadSavedFile(golden + "/user202.token", &body202, &why)) << why;
     EXPECT_NE(body101, body202);
+  }
+  std::vector<uint64_t> users;
+  std::map<uint64_t, std::vector<uint8_t> const *> body_of;
+  for (uint64_t k = 0; k < user_count; ++k) {
+    users.push_back(101 * (k + 1));
+    body_of[users.back()] = k % 2 == 0 ? &body101 : &body202;
   }
 
   EnsureSlots(kChipNum * (kMaxCorePerChip + 1));
@@ -183,7 +234,7 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   if (input_sf_prefill) {
     ASSERT_TRUE(std::all_of(body101.end() - kScaleBytes, body101.end(),
                            [](uint8_t value) { return value == 0x7f; }));
-    if (user_count == 2) {
+    if (user_count >= 2) {
       ASSERT_TRUE(std::all_of(body202.end() - kScaleBytes, body202.end(),
                              [](uint8_t value) { return value == 0x7f; }));
     }
@@ -230,8 +281,8 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
     if (dte.ToTs().Valid() && dte.ToTs().task_id.Get() == 63 &&
         inlet_count < user_count) {
       uint64_t slot = inlet_count++;
-      uint64_t user = slot == 0 ? 101 : 202;
-      auto const &body = slot == 0 ? body101 : body202;
+      uint64_t user = users[slot];
+      auto const &body = *body_of.at(user);
       auto topk = ingress.Cmem().Peek(0x8000 + slot * kTopkBytes, kTopkBytes);
       auto data_sf = ingress.Mmem().Peek(slot * (kDataBytes + kScaleBytes),
                                          kDataBytes + kScaleBytes);
@@ -251,12 +302,13 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
         !broadcast_users.count(ack.user_id.Get())) {
       uint64_t user = ack.user_id.Get(), sid = ack.stream_id.Get();
       EXPECT_TRUE(harness.requested_users.count(user));
-      auto const &body = user == 101 ? body101 : body202;
-      if (body.size() != kSavedBytes) {
+      auto found_body = body_of.find(user);
+      if (found_body == body_of.end() || found_body->second->size() != kSavedBytes) {
         ADD_FAILURE() << "Unexpected broadcast user " << user;
         harness.halted = true;
         return;
       }
+      auto const &body = *found_body->second;
       auto topk = first_compute.GetMu().EpInfo().TopkBytes(sid);
       ByteBlock want_topk(body.begin(), body.begin() + kTopkBytes);
       auto got = first_compute.Cmem().Peek(sid * 0x10000, kDataBytes + kScaleBytes);
@@ -284,12 +336,10 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
       transport << "error " << cycle << ' ' << last_error << '\n';
     }
   };
-  harness.saved.push_back(body101);
-  harness.queue.push_back(ExactToken(101, kIngressPath, in.addr, body101, 101));
-  if (user_count == 2) {
-    harness.saved.push_back(body202);
+  for (uint64_t user : users) {
+    harness.saved.push_back(*body_of.at(user));
     harness.queue.push_back(
-        ExactToken(202, kIngressPath, in.addr, body202, 202));
+        ExactToken(user, kIngressPath, in.addr, *body_of.at(user), user));
   }
   harness.watches.push_back(
       {in.chip, in.physical, &all[in.chip]->GetCore(in.physical)});
@@ -297,15 +347,15 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
       {out.chip, out.physical, &all[out.chip]->GetCore(out.physical)});
   harness.watches.push_back({0, compute_pos->first.second, &first_compute});
 
-  harness.requested_users = {101};
-  if (user_count == 2) harness.requested_users.insert(202);
+  harness.requested_users = std::set<uint64_t>(users.begin(), users.end());
 
   // 检查排队身份后执行有界时钟。
   EXPECT_EQ(harness.queue.size(), user_count);
-  EXPECT_EQ(harness.queue[0]->user_id, 101u);
-  EXPECT_EQ(harness.queue[0]->size, kSavedBytes);
-  if (user_count == 2) {
-    EXPECT_EQ(harness.queue[1]->user_id, 202u);
+  for (uint64_t k = 0; k < user_count; ++k) {
+    EXPECT_EQ(harness.queue[k]->user_id, users[k]);
+    EXPECT_EQ(harness.queue[k]->size, kSavedBytes);
+  }
+  if (user_count >= 2) {
     EXPECT_NE(harness.queue[0]->payload, harness.queue[1]->payload);
   }
 
@@ -317,31 +367,10 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   ASSERT_TRUE(diagnostics.good());
   for (uint64_t c = 0; c < all.size(); ++c) {
     for (uint64_t p = 0; p < all[c]->CoreNum(); ++p) {
-      auto &core = all[c]->GetCore(p);
-      if (core.Bad() || !core.GetTs().Cfg().HasTask()) continue;
-      diagnostics << c << ' ' << p << " dte_error "
-                  << core.GetDte().Completion().Error()
-                  << " inflight " << core.GetTs().Table().InFlight();
-      for (uint64_t u = 0; u < 3; ++u)
-        diagnostics << " pc" << u << ' ' << core.Rv(u).Exec().Pc()
-                    << " inst" << u << ' ' << core.Rv(u).Exec().Insts();
-      diagnostics << '\n';
-      auto snapshot = core.GetTs().Table().SnapPtr()->Get();
-      if (snapshot) {
-        for (uint64_t sid = 0; sid < snapshot->slot_num; ++sid) {
-          auto const &entry = snapshot->entry[sid];
-          if (!entry.valid || !entry.user_id_vld) continue;
-          diagnostics << "task " << c << ' ' << p << " user " << entry.user_id
-                      << " sid " << sid << " allocation " << entry.allocation
-                      << " index " << entry.task_id << " fsm " << uint64_t(entry.task_fsm)
-                      << " done " << entry.done_bitmap << " path " << entry.task_path_id << '\n';
-        }
-      }
+      if (!all[c]->GetCore(p).Bad())
+        DumpBusyCore(diagnostics, c, p, all[c]->GetCore(p));
     }
   }
-  std::vector<uint64_t> users = {101};
-  if (user_count == 2)
-    users.push_back(202);
   WriteRecords(ScratchOut() + "/run.txt", note, users);
   WriteBf16(ScratchOut(), note);
   if (transport_only) {
