@@ -19,6 +19,7 @@ out_dir="${BACHFLOW_OUT_DIR:-}"
 
 cycles="${BACHFLOW_CYCLE_LIMIT:-3000}"
 users="${BACHFLOW_USER_COUNT:-1}"
+in_flight="${BACHFLOW_MAX_IN_FLIGHT:-}"
 wall="${BACHFLOW_WALL_LIMIT:-300}"
 skip_build="${LATCH_SKIP_BUILD:-0}"
 npz_dir="${BACHFLOW_NPZ_DIR:-}"
@@ -62,6 +63,9 @@ Optional:
                            user k >= 2 is 300+k (ids stay below pcode's
                            1024-entry stream table); even k sends
                            user101.token, odd k user202.token.
+  BACHFLOW_MAX_IN_FLIGHT   feed user k only after user k-N has its egress
+                           output (default: unset, no limit beyond C2C credit).
+                           32 users deadlock without it; see README.
   BACHFLOW_WALL_LIMIT      timeout(1) seconds around the binary (default: 300)
   BACHFLOW_INGRESS_CHIP/PHYS/ADDR
   BACHFLOW_EGRESS_CHIP/PHYS/ADDR
@@ -88,6 +92,7 @@ fail() {
 [[ -n "$golden_dir" ]] || fail "BACHFLOW_GOLDEN_DIR is required."
 [[ -n "$out_dir" ]] || fail "BACHFLOW_OUT_DIR is required (a new directory for this run)."
 [[ "$users" =~ ^[0-9]+$ && "$users" -ge 1 && "$users" -le 724 ]] || fail "BACHFLOW_USER_COUNT must be 1..724."
+[[ -z "$in_flight" || ( "$in_flight" =~ ^[0-9]+$ && "$in_flight" -ge 1 ) ]] || fail "BACHFLOW_MAX_IN_FLIGHT must be a positive integer."
 [[ "$cycles" =~ ^[0-9]+$ && "$cycles" -gt 0 ]] || fail "BACHFLOW_CYCLE_LIMIT must be a positive integer."
 [[ "$wall" =~ ^[0-9]+$ && "$wall" -gt 0 ]] || fail "BACHFLOW_WALL_LIMIT must be a positive integer."
 [[ "$skip_build" == 0 || "$skip_build" == 1 ]] || fail "LATCH_SKIP_BUILD must be 0 or 1."
@@ -157,6 +162,7 @@ docker run --rm \
   -e BACHFLOW_INPUT_SF_PREFILL="$sf_one" \
   -e BACHFLOW_CYCLE_LIMIT="$cycles" \
   -e BACHFLOW_USER_COUNT="$users" \
+  -e BACHFLOW_MAX_IN_FLIGHT="$in_flight" \
   -e BACHFLOW_WALL_LIMIT="$wall" \
   -e LATCH_BUILD_DIR="$build_dir" \
   -e LATCH_BUILD_JOBS="$jobs" \

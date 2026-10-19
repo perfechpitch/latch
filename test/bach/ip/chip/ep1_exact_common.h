@@ -464,6 +464,9 @@ public:
   uint64_t output_stride = kInputStride;
   uint64_t output_bytes = 0;
   bool halted = false;
+  // 进口最多比出口多送这么多个用户。不设就不限，只靠 C2C 链路 credit。
+  uint64_t max_in_flight = ~uint64_t{0} / 2;
+  uint64_t fed = 0;
 
 protected:
   void Step() override {
@@ -501,7 +504,9 @@ protected:
     }
 
     LinkEndPtr feed_in = in_stub.FromCore();
-    if (input_packets.empty() && !queue.empty() && CycleNow() >= 2) {
+    if (input_packets.empty() && !queue.empty() && CycleNow() >= 2 &&
+        fed < result.stored_outputs.size() + max_in_flight) {
+      ++fed;
       input_packets.push_back(queue.front());
       queue.erase(queue.begin());
     }

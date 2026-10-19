@@ -218,6 +218,10 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
                        all[out.chip]->GetCore(out.physical), out.physical,
                        limit);
   harness.expected = user_count;
+  harness.max_in_flight = EnvU64("BACHFLOW_MAX_IN_FLIGHT", ~uint64_t{0} / 2);
+  if (harness.max_in_flight == 0) {
+    FAIL() << "BACHFLOW_MAX_IN_FLIGHT 不能是 0。";
+  }
   std::filesystem::create_directories(ScratchOut());
   std::ofstream transport(ScratchOut() + "/transport.txt");
   ASSERT_TRUE(transport.good());

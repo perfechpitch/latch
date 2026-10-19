@@ -104,6 +104,14 @@ the same token. The bound comes from pcode's ingress kernel. It indexes a
 by arrival order, so ids and arrival counts must stay below 1024. More than 16
 users reuse the 16 stream IDs; the input feed is paced by C2C link credit.
 
+Without a further limit, 32 users deadlock on this layer: with about 20 users
+between ingress and egress, every ReduceModule partition on the chip-47 cores
+holds a partly received reduce, and the inputs they wait for sit behind newer
+users' packets in router queues. `BACHFLOW_MAX_IN_FLIGHT=N` feeds user k only
+after user k-N has its egress output. N = 16 is the tested setting. It is a
+harness workaround that keeps runs measurable, not a claim that the hardware
+needs host-side pacing.
+
 Documented EP1 endpoints, overridable by the same variables:
 
 | end | chip | physical | address |
