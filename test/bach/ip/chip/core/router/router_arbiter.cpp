@@ -40,6 +40,8 @@ class ReqFeeder : public BachModule {
     // 这一笔在下游要占多少 KB。
     uint64_t require = 0;
     bool spill = false;
+    uint64_t path = 1;
+    uint64_t input_vc = kVcNum;
   };
 
   ReqFeeder(ClockPtr c, const std::string& name,
@@ -53,10 +55,10 @@ class ReqFeeder : public BachModule {
   void Step() override {
     uint64_t now = CycleNow();
     if (cursor < jobs.size() && jobs[cursor].at <= now &&
-        port->RoomFor(jobs[cursor].vc)) {
+        port->RoomFor(jobs[cursor].input_vc < kVcNum ? jobs[cursor].input_vc : jobs[cursor].vc)) {
       msg = std::make_shared<Message>();
       msg->user_id = jobs[cursor].user;
-      msg->path_id = 1;
+      msg->path_id = jobs[cursor].path;
       msg->size = 256;
       msg->vc = 3;  // 与请求里的 vc 不同，看它有没有被改写
       Drive();
@@ -74,10 +76,12 @@ class ReqFeeder : public BachModule {
     port->valid = 1;
     port->out_mask = j.out_mask;
     port->vc = j.vc;
+    port->input_vc_valid = j.input_vc < kVcNum;
+    port->input_vc = j.input_vc < kVcNum ? j.input_vc : j.vc;
     port->head = j.head ? 1 : 0;
     port->tail = j.tail ? 1 : 0;
     port->bytes = 256;
-    port->path_id = 1;
+    port->path_id = j.path;
     port->user_id = j.user;
     port->enters_core = 0;
     port->stall_way = j.spill ? 1 : 0;
@@ -199,6 +203,7 @@ void CheckReducePacketOwnership(bool independent_lane) {
     } else {
       EXPECT_EQ(first_tap.users,(std::vector<uint64_t>{100,100,200,200}));
       EXPECT_TRUE(other_tap.users.empty());
+      EXPECT_EQ(first_tap.vcs, (std::vector<uint64_t>{0,0,0,0}));
     }
   }
   RT::Reset();
@@ -754,4 +759,164 @@ TEST(BachXbar, CoreSideStopsWhenTheCoreTableIsFull) {
   RT::Reset();
   EXPECT_EQ(used, kStreamTabEntries) << "16 项占满";
   EXPECT_EQ(got, kStreamTabEntries) << "第 17 个用户那一笔发不出去";
+}
+
+// DATA_NOC reduce interface is VC0; RIU selects the network VC by path.
+TEST(BachXbar, ReduceRiuMapsSingleInterfaceVcToEveryNetworkVc) {
+  for (uint64_t target = 0; target < kVcNum; ++target) {
+    EnsureSlots();
+    auto clk = MakeClock(0, kPeriod);
+    RouterTable table(clk, "riu_table");
+    RouteEntry entry;
+    entry.cur_vc = target;
+    entry.nxt_vc.fill(target);
+    table.Preload(1, entry);
+    Bench b(clk);
+    b.xb->AttachReduceRouteTable(table, 4);
+    auto jobs = Burst(2, 1ull << kOutRight, 0, 77);
+    jobs[0].at = 2; jobs[0].tail = false;
+    jobs[1].at = 10; jobs[1].head = false; jobs[1].user = 77;
+    ReqFeeder reduce(clk, "reduce", b.Req(kInReduce), jobs);
+    OutTap tap(clk, "out", b.out[kOutRight], b.back[kOutRight], false);
+    clk->Continue(40);
+    RT::JoinAll();
+    EXPECT_EQ(tap.vcs, (std::vector<uint64_t>{target, target}));
+    EXPECT_EQ(tap.users, (std::vector<uint64_t>{77,77}));
+    EXPECT_EQ(b.xb->VcCredit(kOutRight, target), kVcPrivateDepth - 2);
+    EXPECT_EQ(b.xb->OverflowCount(), 0u);
+    RT::Reset();
+  }
+}
+
+TEST(BachXbar, ReduceRiuBackpressureUsesPhysicalQueueNotTargetVc) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  RouterTable table(clk, "riu_table");
+  RouteEntry entry;
+  entry.cur_vc = 2;
+  entry.nxt_vc.fill(2);
+  table.Preload(1, entry);
+  Bench b(clk);
+  b.xb->AttachReduceRouteTable(table, 4);
+  ReqFeeder reduce(clk, "reduce", b.Req(kInReduce), Burst(80, 1ull << kOutRight, 0, 0));
+  OutTap tap(clk, "out", b.out[kOutRight], b.back[kOutRight], false);
+  clk->Continue(150);
+  RT::JoinAll();
+  EXPECT_EQ(tap.vcs.size(), kVcPrivateDepth + kVcSharedDepth);
+  for (auto vc : tap.vcs) EXPECT_EQ(vc, 2u);
+  EXPECT_LT(reduce.granted, 80u);
+  EXPECT_GT(reduce.granted, tap.got);
+  EXPECT_EQ(b.xb->VcCredit(kOutRight, 0), kVcPrivateDepth);
+  EXPECT_EQ(b.xb->OverflowCount(), 0u);
+  RT::Reset();
+}
+
+TEST(BachXbar, ReduceRiuKeepsPhysicalFifoOrderAcrossDifferentTargetVcs) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  RouterTable table(clk, "riu_table");
+  RouteEntry entry;
+  entry.cur_vc = 0; entry.nxt_vc.fill(0); table.Preload(1, entry);
+  entry.cur_vc = 1; entry.nxt_vc.fill(1); table.Preload(2, entry);
+  Bench b(clk);
+  b.xb->AttachReduceRouteTable(table, 4);
+  // Exhaust network VC0 first; VC1 remains available. The later VC1-target
+  // result must not bypass the blocked VC0-target result in physical VC0.
+  ReqFeeder ordinary(clk, "ordinary", b.Req(kInLeft),
+      Burst(kVcPrivateDepth + kVcSharedDepth, 1ull << kOutRight, 0, 100));
+  auto jobs = Burst(2, 1ull << kOutRight, 0, 77);
+  jobs[0].at = 80;
+  jobs[1].at = 81; jobs[1].path = 2;
+  ReqFeeder reduce(clk, "reduce", b.Req(kInReduce), jobs);
+  OutTap tap(clk, "out", b.out[kOutRight], b.back[kOutRight], true, 120);
+  clk->Continue(200);
+  RT::JoinAll();
+  ASSERT_EQ(tap.users.size(), kVcPrivateDepth + kVcSharedDepth + 2);
+  size_t n = tap.users.size();
+  EXPECT_EQ(tap.users[n-2], 77u); EXPECT_EQ(tap.users[n-1], 78u);
+  EXPECT_EQ(tap.vcs[n-2], 0u); EXPECT_EQ(tap.vcs[n-1], 1u);
+  EXPECT_GE(tap.at[n-2], 120u);
+  EXPECT_LT(tap.at[n-2], tap.at[n-1]);
+  EXPECT_EQ(b.xb->OverflowCount(), 0u);
+  RT::Reset();
+}
+
+namespace {
+void CheckSourceVcQueues(bool same_source) {
+  {
+    EnsureSlots();auto clk=MakeClock(0,kPeriod);Bench b(clk);
+    b.xb->SetVcDepth({0,0,0,0},0); // R2R VC0 deliberately backpressured.
+    b.xb->ForceReady(true); // Independently ready Reduce lane, no R2R credit.
+    auto reduce=MakeWire(clk);b.xb->AttachReduceOut(1,reduce);
+    auto jobs=Burst(same_source?1:kXbarInMark,1ull<<kOutRight,0,100);
+    for(auto& j:jobs) j.input_vc=3;
+    ReqFeeder::Job other;
+    other.at=8;other.out_mask=1ull<<kOutReduce1;other.vc=same_source?1:0;
+    other.input_vc=same_source?3:0;other.user=503;jobs.push_back(other);
+    ReqFeeder feeder(clk,"source",b.Req(kInLeft),jobs);
+    OutTap tap(clk,"reduce",reduce,MakeWire(clk),false);
+    clk->Continue(60);RT::JoinAll();
+    EXPECT_EQ(b.xb->SentCount(kOutRight),0u);
+    EXPECT_EQ(b.xb->VcCredit(kOutRight,0),0u);
+    EXPECT_EQ(b.xb->SharedCredit(kOutRight),0u);
+    if(same_source) EXPECT_TRUE(tap.users.empty()) << "same input VC cannot pass its blocked head";
+    else EXPECT_EQ(tap.users,(std::vector<uint64_t>{503})) << "source VC0 must progress despite blocked source VC3, even with equal target VC0";
+  }
+  RT::Reset();
+}
+}
+TEST(BachXbar, DifferentSourceVcsKeepIndependentQueuesAfterTargetRemap) {
+  CheckSourceVcQueues(false);
+}
+TEST(BachXbar, SameSourceVcCannotPassBlockedHeadAfterTargetRemap) {
+  CheckSourceVcQueues(true);
+}
+
+namespace {
+class SourceVcOverflowTap : public BachModule {
+ public:
+  SourceVcOverflowTap(ClockPtr c,std::shared_ptr<OverflowPort> p)
+      :BachModule(c,"source-overflow"),port(std::move(p)){}
+  std::vector<uint64_t> vcs;
+ protected:
+  void Step() override {auto f=port->View();if(f.valid)vcs.push_back(f.vc);}
+ private:
+  std::shared_ptr<OverflowPort> port;
+};
+}
+TEST(BachXbar, SpillRetainsOriginalSourceVcAfterTargetRemap) {
+  {
+    EnsureSlots();auto clk=MakeClock(0,kPeriod);Bench b(clk);
+    b.xb->SetCoreCredit(kOutMid,0);
+    auto jobs=Burst(2,1ull<<kOutMid,1,100,true);
+    for(auto& j:jobs){j.input_vc=3;j.require=1;j.spill=true;j.user=100;}
+    jobs[0].tail=false;jobs[1].head=false;
+    ReqFeeder feeder(clk,"source",b.Req(kInLeft),jobs);
+    SourceVcOverflowTap tap(clk,b.xb->OverflowPtr());
+    clk->Continue(60);RT::JoinAll();
+    EXPECT_EQ(b.xb->OverflowCount(),2u);
+    EXPECT_EQ(tap.vcs,(std::vector<uint64_t>{3,3}));
+    EXPECT_EQ(b.xb->SentCount(kOutMid),0u);
+  }
+  RT::Reset();
+}
+
+TEST(BachXbar, RemappedSourceQueuesKeepOnePacketOwnerAcrossMulticastStall) {
+  {
+    EnsureSlots();auto clk=MakeClock(0,kPeriod);Bench b(clk);
+    b.xb->SetVcDepth({1,1,1,1},0);
+    auto jobs=Burst(3,1ull<<kOutRight,0,100);
+    jobs[0].at=2;jobs[0].input_vc=3;jobs[0].tail=false;
+    jobs[0].out_mask=(1ull<<kOutRight)|(1ull<<kOutMid);
+    jobs[1]=jobs[0];jobs[1].at=4;jobs[1].head=false;jobs[1].tail=true;
+    jobs[2].at=8;jobs[2].input_vc=0;jobs[2].user=200;
+    ReqFeeder feed(clk,"same-input",b.Req(kInLeft),jobs);
+    OutTap right(clk,"right",b.out[kOutRight],b.back[kOutRight],true);
+    OutTap mid(clk,"mid",b.out[kOutMid],b.back[kOutMid],true,20);
+    clk->Continue(60);RT::JoinAll();
+    EXPECT_EQ(right.users,(std::vector<uint64_t>{100,100,200}));
+    ASSERT_EQ(right.at.size(),3u);EXPECT_GT(right.at[2],20u);
+    EXPECT_EQ(mid.users,(std::vector<uint64_t>{100,100}));
+  }
+  RT::Reset();
 }

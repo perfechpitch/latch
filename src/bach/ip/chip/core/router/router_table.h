@@ -32,8 +32,10 @@ constexpr uint64_t kPathNum = 64;
 // core_bad_mask 的位数：一颗 chip 2×5 共 10 个 core。
 constexpr uint64_t kCoreBadMaskBits = 10;
 
-// VC 数。VC3 专给逐级 reduce，VC0/1/2 由软件配给其余操作类型。
+// Legacy compiler default for network reduction routes; not a hardware reserve.
 constexpr uint64_t kReduceVc = 3;
+// DATA_NOC reduce interfaces use one VC0. RIU maps it to the path's network VC.
+constexpr uint64_t kReduceInterfaceVc = 0;
 
 // 输入侧的方向：三个 R2R 加 core。vc_buf、vc_credit、stream_tab 都按它开。
 enum Dir : uint64_t {

@@ -35,6 +35,8 @@ namespace bach {
 class XbarReqPort : public Logic {
  public:
   Logic64 valid, out_mask, vc, head, tail, bytes;
+  // Keep the original input FIFO independent of the next-hop/network VC.
+  Logic64 input_vc, input_vc_valid;
   Logic64 path_id, user_id, enters_core, stall_way, stream_need;
   // 这个入口的队列里从队首起有没有一整个包。仲裁的第二档看它：手里攥着整包的
   // 入口先走，免得几个只来了半个包的入口互相插队，谁都拼不齐。
@@ -50,10 +52,10 @@ class XbarReqPort : public Logic {
   Logic64 seq;
 
   explicit XbarReqPort(ClockPtr c)
-      : valid(c), out_mask(c), vc(c), head(c), tail(c), bytes(c), path_id(c),
+      : valid(c), out_mask(c), vc(c), head(c), tail(c), bytes(c), input_vc(c), input_vc_valid(c), path_id(c),
         user_id(c), enters_core(c), stall_way(c), stream_need(c),
         whole_packet(c), credit_require(c), msg(c), room(c), seq(c) {
-    Fields(valid, out_mask, vc, head, tail, bytes, path_id, user_id,
+    Fields(valid, out_mask, vc, head, tail, bytes, input_vc, input_vc_valid, path_id, user_id,
            enters_core, stall_way, stream_need, whole_packet, credit_require,
            msg, room, seq);
   }
@@ -62,6 +64,8 @@ class XbarReqPort : public Logic {
     valid = 0;
     out_mask = 0;
     vc = 0;
+    input_vc = 0;
+    input_vc_valid = 0;
     head = 0;
     tail = 0;
     bytes = 0;
@@ -84,6 +88,7 @@ struct XbarReqView {
   bool valid = false;
   uint64_t out_mask = 0;
   uint64_t vc = 0;
+  uint64_t input_vc = 0;
   bool head = false, tail = false;
   uint64_t bytes = 0;
   uint64_t path_id = 0, user_id = 0;
@@ -101,6 +106,7 @@ inline XbarReqView ReadXbarReq(XbarReqPort const& p) {
   if (!v.valid) return v;
   v.out_mask = p.out_mask.Get();
   v.vc = p.vc.Get();
+  v.input_vc = p.input_vc_valid.Get() ? p.input_vc.Get() : v.vc;
   v.head = p.head.Get() != 0;
   v.tail = p.tail.Get() != 0;
   v.bytes = p.bytes.Get();

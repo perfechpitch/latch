@@ -243,6 +243,7 @@ class Router {
     xbar->AttachReq(kInRight, stations[2]->ReqPtr());
     xbar->AttachReq(kInLocal, stations[3]->ReqPtr());
     xbar->AttachReq(kInReduce, reduce->ReqPtr());
+    xbar->AttachReduceRouteTable(*rtab, 4);
     for (auto& st : stations) st->AttachLevel(xbar->LevelPtr());
 
     // core 方向：Xbar 的 core 出口进 CoreStation，CoreStation 拆出来的出核数据

@@ -115,7 +115,7 @@ class ReduceHarness : public BachModule {
   uint64_t first_head_at = 0, last_tail_at = 0;
   // ReduceModule 累计挡住了几拍输入。计数是 Logic，要在协程里读。
   uint64_t stalled = 0;
-  std::vector<uint64_t> out_users;
+  std::vector<uint64_t> out_users, out_vcs;
   std::vector<float> out_values;
   std::vector<uint8_t> out_heads;
   std::vector<MessagePtr> out_msgs;
@@ -136,6 +136,7 @@ class ReduceHarness : public BachModule {
       last_tail_seq = v.seq;
       last_tail_at = now;
       out_users.push_back(v.user_id);
+      out_vcs.push_back(v.vc);
       if (v.msg) {
         out_values.push_back(WordOf(v.msg->payload));
         out_heads.push_back(SwHeadOf(v.msg->payload));
@@ -787,4 +788,20 @@ TEST(BachReduce, LegacyPathsRemainSerializedPerUser) {
   b.rm->ReserveHead(*Part(77, 9, 9, 1));
   EXPECT_FALSE(b.rm->CanAcceptHead(*Part(77, 10, 10, 1)));
   EXPECT_TRUE(b.rm->CanAcceptHead(*Part(77, 9, 9, 1)));
+}
+
+TEST(BachReduce, OutputUsesSingleInterfaceVc0) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  auto entry = Relay(0b001);
+  entry.cur_vc = 2;
+  entry.nxt_vc.fill(2);
+  b.tab->Preload(9, entry);
+  ReduceHarness h(clk, *b.rm, b.wires);
+  h.jobs = {{2, 0, Part(77, 9, 5, 10.0f)}};
+  clk->Continue(40);
+  RT::JoinAll();
+  EXPECT_EQ(h.out_vcs, (std::vector<uint64_t>{0}));
+  RT::Reset();
 }

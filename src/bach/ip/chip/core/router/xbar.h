@@ -90,6 +90,12 @@ class Xbar : public BachModule {
   void AttachReq(uint64_t in_idx, std::shared_ptr<XbarReqPort> port) {
     reqs.at(in_idx) = std::move(port);
   }
+  // Reduce -> Router has one physical VC0 FIFO. Its RIU uses the path table
+  // to select the network VC; this is independent of that physical queue.
+  void AttachReduceRouteTable(RouterTable& table, uint64_t copy_idx) {
+    reduce_rtab = &table;
+    reduce_copy = copy_idx;
+  }
   std::shared_ptr<CreditLevelPort> LevelPtr() const { return level; }
 
   // 三个 R2R 出方向的线，接下游链路。
@@ -298,9 +304,29 @@ class Xbar : public BachModule {
       if (!v.valid || v.seq == last_seq[in]) continue;
       last_seq[in] = v.seq;
       LOGCHECK(v.vc < kVcNum, "Xbar: VC 号越界。");
-      LOGCHECK(in_q[in][v.vc].size() < kXbarInDepth,
+      uint64_t queue_vc = v.input_vc;
+      LOGCHECK(queue_vc < kVcNum, "Xbar: source queue VC is out of range");
+      if (in == kInReduce && reduce_rtab) {
+        LOGCHECK(v.vc == kReduceInterfaceVc, "RIU: reduce interface must use VC0");
+        auto const& entry = reduce_rtab->Lookup(reduce_copy, v.path_id);
+        LOGCHECK(entry.valid, "RIU: reduce path is not configured");
+        // The physical FIFO stays VC0. Only the request used by network VA/SA
+        // carries target_vc, so backpressure cannot grant another VC's queue.
+        bool found = false;
+        uint64_t target_vc = entry.cur_vc;
+        for (uint64_t out = 0; out < kR2RNum; ++out) {
+          if (!(v.out_mask & (1ull << out))) continue;
+          LOGCHECK(!found || target_vc == entry.nxt_vc[out],
+                   "RIU: one multicast request needs equal network VCs");
+          target_vc = entry.nxt_vc[out];
+          found = true;
+        }
+        LOGCHECK(target_vc < kVcNum, "RIU: target VC is out of range");
+        v.vc = target_vc;
+      }
+      LOGCHECK(in_q[in][queue_vc].size() < kXbarInDepth,
                "Xbar: 入口缓冲满了。上游按 room 发，满就说明门限留少了。");
-      in_q[in][v.vc].push_back(v);
+      in_q[in][queue_vc].push_back(v);
     }
   }
 
@@ -310,6 +336,7 @@ class Xbar : public BachModule {
       if (!reqs[in]) continue;
       uint64_t room = 0;
       for (uint64_t v = 0; v < kVcNum; ++v) {
+        if (in == kInReduce && reduce_rtab && v != kReduceInterfaceVc) continue;
         if (in_q[in][v].size() < kXbarInMark) room |= 1ull << v;
       }
       reqs[in]->DriveRoom(room);
@@ -390,7 +417,7 @@ class Xbar : public BachModule {
       bool business_blocked = false;
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
-        if (!OwnerOk(o, v.vc, in)) {
+        if (!OwnerOk(o, v.vc, in, v.input_vc)) {
           owner_busy = true;
           ok = false;
           break;
@@ -441,6 +468,7 @@ class Xbar : public BachModule {
         Consume(o, v);
         Emit(o, v);
         vc_owner[o][v.vc] = v.tail ? 0 : in + 1;
+        vc_owner_source[o][v.vc] = v.tail ? 0 : v.input_vc;
       }
 
       ++granted_pending;
@@ -458,7 +486,7 @@ class Xbar : public BachModule {
   void Spill(XbarReqView const& v) {
     FlitView f;
     f.valid = true;
-    f.vc = v.vc;
+    f.vc = v.input_vc;
     f.head = v.head;
     f.tail = v.tail;
     f.bytes = v.bytes;
@@ -508,7 +536,7 @@ class Xbar : public BachModule {
   //
   // 进 core 那个出口整个独占，不分 VC：core 内的输入不支持几个包交织，发完一
   // 个包才调度下一个。下游 CoreStation 到 DTE 只有一条通路，不按 VC 分开缓冲。
-  bool OwnerOk(uint64_t o, uint64_t vc, uint64_t in) const {
+  bool OwnerOk(uint64_t o, uint64_t vc, uint64_t in, uint64_t source_vc) const {
     LOGCHECK(vc < kVcNum, "Xbar: VC 号越界。");
     // Core and each reduce lane have one receive FIFO, shared by all VCs.
     // Keep a packet contiguous there even when another incoming VC is ready.
@@ -517,7 +545,8 @@ class Xbar : public BachModule {
         if (v != vc && vc_owner[o][v] != 0) return false;
       }
     }
-    return vc_owner[o][vc] == 0 || vc_owner[o][vc] == in + 1;
+    return vc_owner[o][vc] == 0 ||
+        (vc_owner[o][vc] == in + 1 && vc_owner_source[o][vc] == source_vc);
   }
 
   bool ResourceOk(uint64_t o, XbarReqView const& v) const {
@@ -588,7 +617,10 @@ class Xbar : public BachModule {
     } else {
       dst = reduce_out[o - kOutReduce0].get();
     }
-    dst->flit.Drive(v.vc, v.head, v.tail, v.bytes, v.msg);
+    // Router -> reduce converts the selected network VC to physical VC0.
+    // Existing per-lane packet ownership prevents interleaving at this merge.
+    uint64_t wire_vc = o >= kOutReduce0 ? kReduceInterfaceVc : v.vc;
+    dst->flit.Drive(wire_vc, v.head, v.tail, v.bytes, v.msg);
     if (o < kR2RNum) {
       dst->release.DriveVc(false, 0);
     } else {
@@ -609,6 +641,8 @@ class Xbar : public BachModule {
     level->Drive(ok, free_mask);
   }
 
+  RouterTable* reduce_rtab = nullptr;
+  uint64_t reduce_copy = 0;
   std::vector<std::shared_ptr<XbarReqPort>> reqs;
   std::shared_ptr<CreditLevelPort> level;
   std::vector<LinkEndPtr> out_link, back_link, reduce_out;
@@ -638,6 +672,9 @@ class Xbar : public BachModule {
   std::array<std::array<bool, kVcNum>, kXbarInNum> spill_packet{};
   // 各出口各 VC 正被哪个入口的包占着：入口号加一，0 表示空着。
   std::array<std::array<uint64_t, kVcNum>, kXbarOutNum> vc_owner{};
+  // Several original VC queues may share one network VC at the same input.
+  // Keep the packet owner until tail actually leaves, including source VC.
+  std::array<std::array<uint64_t, kVcNum>, kXbarOutNum> vc_owner_source{};
   uint64_t rr_last = 0;
   uint64_t granted_pending = 0, stalled_pending = 0, overflow_pending = 0;
 

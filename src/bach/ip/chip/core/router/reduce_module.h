@@ -289,6 +289,7 @@ class ReduceModule : public BachModule {
     if (!f.valid || !f.msg) return;
     LOGCHECK(in_buf[r].size() < kReduceInDepth,
              "ReduceModule: 输入缓冲满了，Xbar 没按准入电平停。");
+    LOGCHECK(f.vc == kReduceInterfaceVc, "ReduceModule: interface must use VC0");
     in_buf[r].push_back(f);
   }
 
@@ -486,7 +487,7 @@ class ReduceModule : public BachModule {
   // 结果没好就占着输出等，不换别的包。
   void EmitOne() {
     // 与各 RouterStation 同一套：Xbar 那一侧上一拍说收得下就发，发了当场出队。
-    if (!req->RoomFor(kReduceVc) || out_q.empty()) {
+    if (!req->RoomFor(kReduceInterfaceVc) || out_q.empty()) {
       req->IdleReq();
       done->Idle();
       return;
@@ -525,7 +526,7 @@ class ReduceModule : public BachModule {
     PackRange(c, *it.msg, it.sent, it.sent + bytes);
     req->valid = 1;
     req->out_mask = mask;
-    req->vc = kReduceVc;
+    req->vc = kReduceInterfaceVc;
     req->head = head ? 1 : 0;
     req->tail = tail ? 1 : 0;
     req->bytes = bytes;

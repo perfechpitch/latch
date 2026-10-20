@@ -177,7 +177,7 @@ class RouterStation : public BachModule {
       }
       // Xbar 那一侧这个 VC 的入口缓冲快满了，这个 VC 本拍不发，队列原地不动。
       uint64_t nvc = NextVcOf(e, mask, f.vc);
-      if (!req->RoomFor(nvc)) continue;
+      if (!req->RoomFor(v)) continue;
       // Several incoming VCs may map to the same next-hop VC. Keep each
       // packet contiguous before entering Xbar's per-input/per-VC FIFO;
       // Xbar only distinguishes input ports and cannot untangle that FIFO.
@@ -193,6 +193,8 @@ class RouterStation : public BachModule {
       req->valid = 1;
       req->out_mask = mask;
       req->vc = nvc;
+      req->input_vc = v;
+      req->input_vc_valid = 1;
       req->head = f.head ? 1 : 0;
       req->tail = f.tail ? 1 : 0;
       req->bytes = f.bytes;
