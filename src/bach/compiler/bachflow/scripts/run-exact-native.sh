@@ -181,12 +181,17 @@ status=$?
 
 if [[ "$full" == 1 ]]; then
   compare_golden="${npz_dir:-$golden_dir}"
-  user_args="101"
-  if [[ "$users" -ge 2 ]]; then
-    user_args="101 202"
+  user_args="--users 101"
+  if [[ "$users" -eq 2 ]]; then
+    user_args="--users 101 202"
+  elif [[ "$users" -gt 2 ]]; then
+    user_args="--all-users"
+  fi
+  if [[ "$status" == 124 ]]; then
+    printf '%s\n' "wall-clock limit of ${wall} s reached; raise BACHFLOW_WALL_LIMIT"
   fi
   printf '%s\n' "numerical comparison was not run; driver exit ${status} is not acceptance"
-  printf '%s\n' "next: PYTHONPATH=${latch_root}/src python -m bach.compiler.bachflow.compare_output --run ${out_dir} --golden ${compare_golden} --users ${user_args} --out ${out_dir}/metrics.json"
+  printf '%s\n' "next: PYTHONPATH=${latch_root}/src python -m bach.compiler.bachflow.compare_output --run ${out_dir} --golden ${compare_golden} ${user_args} --out ${out_dir}/metrics.json"
 else
   printf '%s\n' "transport-only finished (exit ${status}); do not run numerical compare on this capture"
 fi

@@ -110,7 +110,15 @@ holds a partly received reduce, and the inputs they wait for sit behind newer
 users' packets in router queues. `BACHFLOW_MAX_IN_FLIGHT=N` feeds user k only
 after user k-N has its egress output. N = 16 is the tested setting. It is a
 harness workaround that keeps runs measurable, not a claim that the hardware
-needs host-side pacing.
+needs host-side pacing. With N = 16, 64 and 128 users complete. Before the
+Router retired a transit core on the packet's tail flit, 64 users with N = 16
+deadlocked as well.
+
+A run needs `BACHFLOW_CYCLE_LIMIT` and `BACHFLOW_WALL_LIMIT` well above the
+defaults (3000 cycles, 300 s): one user ends near cycle 7000, 16 users near
+10000, 64 users near 33000, 128 users near 63000. With four runs side by side
+on one host, wall time was about 10 minutes for 1 user, 16 for 16 users, 45
+for 64 and 90 for 128. Even one user overruns the 300 s default.
 
 Documented EP1 endpoints, overridable by the same variables:
 
@@ -219,3 +227,10 @@ PYTHONPATH=<latch>/src \
 
 Two users: `--users 101 202`. Omit `--reference-module`; the default import is
 the same-repo `bach.compiler.reference.checkpoint_golden`.
+
+More than two users: `--all-users` instead of `--users`. It reads the requested
+users from the run's `user` lines and requires every one of them to have
+completed. 101 and 202 are compared with their golden. Every later user must
+equal, byte for byte, the output of the user that sent the same token. `--users
+101 202` on such a run fails with an ownership mismatch, because the capture
+holds more users than requested.

@@ -70,14 +70,15 @@ def _stored(user: int, sid: int, allocation: int, nbytes: int = 12288) -> str:
     )
 
 
-def _run(tmp: Path, run: Path, golden: Path, users: list[int]) -> subprocess.CompletedProcess[str]:
+def _run(tmp: Path, run: Path, golden: Path, users: list[int] | None) -> subprocess.CompletedProcess[str]:
+    selection = ["--all-users"] if users is None else ["--users", *[str(user) for user in users]]
     return subprocess.run(
         [
             sys.executable, "-I", str(MODULE),
             "--run", str(run),
             "--golden", str(golden),
             "--reference-module", str(_reference(tmp)),
-            "--users", *[str(user) for user in users],
+            *selection,
             "--out", str(tmp / "metrics.json"),
         ],
         capture_output=True,
@@ -218,3 +219,40 @@ def test_wrong_element_count_rejected(tmp_path: Path):
     result = _run(tmp_path, run, golden, [101])
     assert result.returncode != 0
     assert "6144" in result.stderr
+
+
+def _many_users(tmp: Path, *, missing: int | None = None):
+    a, b = _values(), _values()[::-1].copy()
+    run, golden = _layout(tmp, {101: a, 202: b}, [])
+    users = [101, 202, 302, 303]
+    for user, values in ((302, a), (303, b)):
+        (run / f"user{user}.bf16").write_bytes(_bf16(values))
+    lines = ["completed_by_end 1"]
+    lines += [_stored(u, k, 1) for k, u in enumerate(users) if u != missing]
+    lines += [f"user {u}" for u in users]
+    (run / "run.txt").write_text("".join(line + "\n" for line in lines))
+    return run, golden
+
+
+def test_all_users_pass_when_later_users_match_their_token(tmp_path: Path):
+    run, golden = _many_users(tmp_path)
+    result = _run(tmp_path, run, golden, None)
+    assert result.returncode == 0, result.stderr
+    report = json.loads((tmp_path / "metrics.json").read_text())
+    assert report["users"]["302"]["same_as"] == 101
+    assert report["users"]["303"]["same_as"] == 202
+
+
+def test_all_users_reject_a_later_user_that_differs(tmp_path: Path):
+    run, golden = _many_users(tmp_path)
+    (run / "user303.bf16").write_bytes((run / "user101.bf16").read_bytes())
+    result = _run(tmp_path, run, golden, None)
+    assert result.returncode == 1
+    assert json.loads((tmp_path / "metrics.json").read_text())["users"]["303"]["ok"] is False
+
+
+def test_all_users_reject_a_missing_user(tmp_path: Path):
+    run, golden = _many_users(tmp_path, missing=303)
+    result = _run(tmp_path, run, golden, None)
+    assert result.returncode != 0
+    assert "Output ownership mismatch" in result.stderr
