@@ -541,6 +541,17 @@ private:
     return false;
   }
 
+  // 纯转发（不进核、不进归约）的包，包尾发出去才告诉本核这一笔走完。包头一发
+  // 就退休违反 F-036：release 回到上游时包身还在上游 Xbar，后面的 flit 又把
+  // 这个 user 占回上游的 stream 坑和 credit，再也没有 release 来还。
+  void NoteForwardDone(XbarReqView const& v) {
+    constexpr uint64_t kStayMask = (1ull << kOutCore) | (1ull << kOutReduce0) |
+                                   (1ull << kOutReduce1) | (1ull << kOutReduce2);
+    if (v.tail && v.msg && (v.out_mask & kStayMask) == 0 && forward_skip) {
+      forward_skip(v.user_id, v.path_id);
+    }
+  }
+
   // 包头发出去就占住这条 VC，包尾发出去才放开。单 flit 整包当拍放开。
   void NoteFlight(uint64_t in, XbarReqView const& v) {
     if (v.tail) {
@@ -800,6 +811,7 @@ private:
       if (!ok) continue;
       XbarReqView v = *it;
       q.erase(it);
+      NoteForwardDone(v);
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
         taken[o] = true;
@@ -881,12 +893,8 @@ private:
       if (v.head && (v.out_mask & reduce_mask) && reduce_reserve && v.msg) {
         reduce_reserve(*v.msg);
       }
-      // 纯转发：不进核、不进归约。改送进核的那一档已经在上面返回，不会到这里。
-      constexpr uint64_t kStayMask = (1ull << kOutCore) | (1ull << kOutReduce0) |
-                                     (1ull << kOutReduce1) | (1ull << kOutReduce2);
-      if (v.head && v.msg && (v.out_mask & kStayMask) == 0 && forward_skip) {
-        forward_skip(v.user_id, v.path_id);
-      }
+      // 改送进核的那一档已经在上面返回，不会到这里。
+      NoteForwardDone(v);
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0)
           continue;
@@ -1042,11 +1050,7 @@ private:
     if (v.head && (v.out_mask & reduce_mask) && reduce_reserve && v.msg) {
       reduce_reserve(*v.msg);
     }
-    constexpr uint64_t kStayMask = (1ull << kOutCore) | (1ull << kOutReduce0) |
-                                   (1ull << kOutReduce1) | (1ull << kOutReduce2);
-    if (v.head && v.msg && (v.out_mask & kStayMask) == 0 && forward_skip) {
-      forward_skip(v.user_id, v.path_id);
-    }
+    NoteForwardDone(v);
     for (uint64_t o = 0; o < kXbarOutNum; ++o) {
       if (((v.out_mask >> o) & 1u) == 0) continue;
       taken[o] = true;
