@@ -241,6 +241,80 @@ TEST(BachRouterAsm, ForwardsAcrossAssembly) {
   EXPECT_EQ(users[0], 42u);
 }
 
+// 一包分几拍从同一方向进来：每个 flit 各给 head/tail。
+class FlitPusher : public BachModule {
+ public:
+  struct Flit {
+    uint64_t at = 0;
+    bool head = false, tail = false;
+  };
+
+  FlitPusher(ClockPtr c, LinkEndPtr port, MessagePtr m, std::vector<Flit> list)
+      : BachModule(c, "flit_pusher"), sink(std::move(port)), msg(std::move(m)),
+        flits(std::move(list)) {}
+
+ protected:
+  void Step() override {
+    uint64_t now = CycleNow();
+    for (auto const& f : flits) {
+      if (f.at != now) continue;
+      sink->flit.Drive(0, f.head, f.tail, 64, msg);
+      return;
+    }
+    sink->flit.Idle();
+  }
+
+ private:
+  LinkEndPtr sink;
+  MessagePtr msg;
+  std::vector<Flit> flits;
+};
+
+// 只转发的多 flit 包，包尾离开本核之后才通知 TS 这一笔走完（F-036）。包头一走
+// 就通知的话，本核退休、release 回上游时包身还在上游，上游会把这个 user 的
+// stream 坑再占回去，以后没有 release 来还。
+TEST(BachRouterAsm, PureForwardNotifiesAfterTail) {
+  std::vector<uint64_t> flit_at, skip_at;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Router rt(clk, "router", RouterCfg{});
+    rt.Preload(3, Forward(kFlowRight, /*enters_core=*/false));
+
+    FlitPusher push(clk, rt.InWire(kLeft), MakeMsg(3, 42),
+                    {{2, true, false}, {3, false, false}, {20, false, true}});
+    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+    class SkipSide : public BachModule {
+     public:
+      SkipSide(ClockPtr c, Router& r) : BachModule(c, "skip_side"), rt(r) {}
+      std::vector<uint64_t> at;
+
+     protected:
+      void Step() override {
+        rt.ToDte().DriveReady(true);
+        rt.FromDte().Idle();
+        if (rt.Trigger().Valid() && rt.Trigger().skip_only.Get() != 0) {
+          at.push_back(CycleNow());
+        }
+        rt.Trigger().DriveReady(true);
+        rt.CreditReq().Idle();
+        rt.RetireReq().Idle();
+      }
+
+     private:
+      Router& rt;
+    } core(clk, rt);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    flit_at = down.ats;
+    skip_at = core.at;
+  }
+  RT::Reset();
+  ASSERT_EQ(flit_at.size(), 3u) << "三个 flit 都往右转出去";
+  ASSERT_EQ(skip_at.size(), 1u) << "一包只通知一次";
+  EXPECT_GE(skip_at[0], flit_at.back()) << "包尾出去之前就通知了";
+}
+
 // A9：进核由包头 path_core_mask 的第 idx 位定，该位为 1 时进核，为 0 时
 // 只转发。位到 core 的对应不是固定编码，每个 core 在自己的表项里指定看哪一位。
 TEST(BachRouterAsm, CoreMaskBitDecidesEntry) {
