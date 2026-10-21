@@ -160,10 +160,11 @@ protected:
             break;
           }
         }
-        // 新用户只带 skip_only（归约已收下这一包）：不建表项、不认领搬入。
         // 本核没有 kernel（Task(0) 的 PC 为 0）：不从地址 0 取指，也不建一条
-        // 走不完的链。两种都是收下 trigger 就算。
-        if (next.hit || !(next.skip_only || cfg.Task(0).task_pc == 0))
+        // 走不完的链，收下 trigger 就算。
+        // 新用户只带 skip_only 也照样建表：bypass 可能先于这个用户的第一笔搬入
+        // 到本核，链上那一对重发任务还在，丢了这次通知就再没人把它们记完成。
+        if (next.hit || cfg.Task(0).task_pc != 0)
           lookup = next;
         last_trigger_seq = next.seq;
       }

@@ -52,6 +52,8 @@ public:
   // 同一个 user 在这一拍再推一笔 trigger，0 表示不推。
   uint64_t again_at = 0;
   bool sent_again = false;
+  // 第一笔 trigger 只带 skip_only（归约已收下这一包）。
+  bool skip_only = false;
   // Router 侧收不收退休请求。不收的话那个 stream 做完了也一直留在表里。
   bool accept_retire = true;
   uint64_t retire_seen = 0;
@@ -66,7 +68,7 @@ protected:
     bool second = sent && again_at && !sent_again && now >= again_at;
     if (first || second) {
       if (!trigger_hold) {
-        ts.Trigger().Drive(user, path, false);
+        ts.Trigger().Drive(user, path, false, first && skip_only);
         trigger_hold = true;
         trigger_at = now;
       } else if (now >= trigger_at + 2 && ts.Trigger().Ready()) {
@@ -363,6 +365,40 @@ TEST(BachTs, SameUserCanCreateAgainAfterValidOnlyRetirement) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
   EXPECT_EQ(RunSameUserTwice(true), std::vector<uint64_t>({0, 1, 0, 1}));
   EXPECT_EQ(RunSameUserTwice(false), std::vector<uint64_t>({0, 1, 0, 1}));
+}
+
+// 用户在本核的第一笔通知就是 skip_only：归约收下了它的包，本核还没见过这个
+// 用户。照样建表项、把那一对重发任务记完成，链走完退休，不派搬入。
+TEST(BachTs, SkipOnlyFirstTriggerStillCreatesTheUser) {
+  uint64_t dte = 0, retire = 0, retire_user = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Ts ts(clk, "ts", TsCfg{});
+    TaskEntry in = DatainTask(SendUnit::kDte, false);
+    in.task_type = TaskType::kP2pReissueIn;
+    in.p2p_reissue_tid = 1;
+    in.path_id = 4;
+    ts.Cfg().WriteTask(0, in);
+    TaskEntry out = MakeTask(SendUnit::kDte, true);
+    out.task_type = TaskType::kReissueOut;
+    out.credit_en = true;
+    ts.Cfg().WriteTask(1, out);
+    ts.InitFinish();
+
+    RouterSide router(clk, ts, 2, 55, /*pid=*/4);
+    router.skip_only = true;
+    UnitSide units(clk, ts, 2);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    dte = units.dte_cmds;
+    retire = router.retire_seen;
+    retire_user = router.retire_user;
+  }
+  RT::Reset();
+  EXPECT_EQ(dte, 0u);
+  EXPECT_EQ(retire, 1u);
+  EXPECT_EQ(retire_user, 55u);
 }
 
 // 表满时拉低 trigger 的 ready，不丢请求。
