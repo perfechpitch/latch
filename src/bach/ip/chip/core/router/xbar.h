@@ -186,10 +186,6 @@ public:
   std::string LockText(uint64_t in) const {
     std::string s;
     for (uint64_t v = 0; v < kVcNum; ++v) {
-      if (order_.at(in)[v].on) {
-        s += " ord" + std::to_string(v) + ":u" + std::to_string(order_[in][v].user) +
-             "p" + std::to_string(order_[in][v].path);
-      }
       if (flight_.at(in)[v].on) {
         s += " fl" + std::to_string(v) + ":u" + std::to_string(flight_[in][v].user) +
              "p" + std::to_string(flight_[in][v].path);
@@ -516,7 +512,7 @@ private:
 
   bool MeshStreamShort(uint64_t o, XbarReqView const& v) const {
     if (o >= kR2RNum || pass_through || !Needs(v, o)) return false;
-    if (!StreamOk(o, v.user_id)) return true;
+    if (!StreamOk(o, v.user_id) || WaitAhead(o, v)) return true;
     return stream_tab[o].count(v.user_id) == 0 &&
            core_credit[o] < v.credit_require;
   }
@@ -586,11 +582,12 @@ private:
     for (uint64_t in = 0; in < kXbarInNum; ++in) {
       if (!reqs[in]) continue;
       uint64_t block = 0;
-      // F-027：整包已经进核、重发还没交付完的那一笔挡住后续包。F-012 与第
-      // 505–506 行：包头已经发出、包尾还没发出的那一包也独占这条 VC，包身
-      // 还在上游时同样不让后面的包插进来，它自己的包身由 hold_pull 抽出来先发。
+      // F-012 与第 505–506 行：包头已经发出、包尾还没发出的那一包独占这条
+      // VC，包身还在上游时同样不让后面的包插进来，它自己的包身由 hold_pull
+      // 抽出来先发。整包进核等重发的那一包不再占着这条 VC（F-027 的保序只管
+      // 重发包之间的先后，见 DivertToCore）。
       for (uint64_t v = 0; v < kVcNum; ++v) {
-        if (order_[in][v].on || flight_[in][v].on) block |= 1ull << v;
+        if (flight_[in][v].on) block |= 1ull << v;
       }
       if (divert_[in].on) block |= 1ull << divert_[in].vc;
       if (core_pkt_[in].on) block |= 1ull << core_pkt_[in].vc;
@@ -626,24 +623,9 @@ private:
   }
 
   // 一笔授予之后都走这里。in_packet 记在入口上而不是记“上一拍发的是谁”：一个包
-  // 的两个 flit 之间可能隔着一拍，那一拍会被别的入口占掉。重发包从本核再发出去，
-  // 包尾这一拍对上原来那条 VC 上的保序记录，后面的包才可以走；包尾无论从哪条
-  // 续包路径发出都要清。
+  // 的两个 flit 之间可能隔着一拍，那一拍会被别的入口占掉。
   void AfterGrant(uint64_t in, XbarReqView const& v) {
     in_packet[in] = !v.tail;
-    if (in == kInLocal && v.tail) ReleaseOrder(v.user_id, v.path_id);
-  }
-
-  // 重发包从本核发完，清掉对得上的那条保序记录。
-  void ReleaseOrder(uint64_t user, uint64_t path) {
-    for (uint64_t in = 0; in < kXbarInNum; ++in) {
-      for (uint64_t v = 0; v < kVcNum; ++v) {
-        if (!order_[in][v].on) continue;
-        if (order_[in][v].user == user && order_[in][v].path == path) {
-          order_[in][v].on = false;
-        }
-      }
-    }
   }
 
   // 一个入口各 VC 的队首按交进来的先后排：station 的序号一笔加一，小的先到。
@@ -699,14 +681,27 @@ private:
   bool CoreCanTake(uint64_t in, XbarReqView const& v,
                    std::array<bool, kXbarOutNum> const& taken) const {
     if (taken[kOutCore] || !OwnerOk(kOutCore, v.vc, in)) return false;
-    return ResourceOk(kOutCore, v);
+    if (!ResourceOk(kOutCore, v)) return false;
+    // 改送进核的包要在本核起一笔重发任务，占本核一项 stream；原表项多半没置
+    // 进核那一位，不在这里查，满了的核也会被塞进新用户。
+    return pass_through || StreamOk(kOutCore, v.user_id);
   }
 
-  // 把这一 flit 送进本核，并标上重发。包尾之前同一条 VC 上的后续包不能越过它。
+  // 把这一 flit 送进本核，并标上重发。包尾之前同一条 VC 上的后续包不能越过它；
+  // 包尾进核之后这条 VC 就让出来，后面的包只要资源够就照常走。F-027 的保序只管
+  // 重发包自己：重发时仍用原来的 VC，彼此按先后发；它不让别的包等这条 VC。
   void DivertToCore(uint64_t in, std::deque<XbarReqView>& q,
                     std::deque<XbarReqView>::iterator it,
                     std::array<bool, kXbarOutNum>& taken) {
     XbarReqView v = *it;
+    // 改送那一刻起，这个用户在缺 stream 的方向上排队等重发；同 VC 后到的新用户
+    // 看到有人在等也要改送进核，由 TS 按用户年龄排出先后，不能直通抢走下游
+    // 归还的那一项。
+    if (v.head) {
+      for (uint64_t o = 0; o < kR2RNum; ++o)
+        if (((v.out_mask >> o) & 1u) && MeshStreamShort(o, v))
+          reissue_wait_[o][{v.user_id, v.path_id}] = v.vc;
+    }
     // 多播的几个方向共享同一个 Message。重发标记只打在送进本核的这一份上，
     // 不能改共享对象，否则还在别的路口上的副本也会被当成已经改道。
     if (v.head && v.msg) {
@@ -716,6 +711,8 @@ private:
     }
     taken[kOutCore] = true;
     Consume(kOutCore, v);
+    if (!pass_through)
+      stream_tab[kOutCore].insert(v.user_id);
     Emit(kOutCore, v);
     vc_owner[kOutCore][v.vc] = v.tail ? 0 : in + 1;
     NoteCore(in, v, true);
@@ -725,10 +722,6 @@ private:
     q.erase(it);
     if (v.tail) {
       divert_[in].on = false;
-      // 整包已经进核。这条 VC 上的后续包等到这笔重发从本核再发出去才放行。
-      order_[in][v.vc].on = true;
-      order_[in][v.vc].user = v.user_id;
-      order_[in][v.vc].path = v.path_id;
     } else {
       divert_[in].on = true;
       divert_[in].vc = v.vc;
@@ -842,7 +835,6 @@ private:
       if (core_pkt_[in].on && vcs[k] == core_pkt_[in].vc) continue;
       // 未发完的那一包独占这条 VC：包尾之前不授予别的包，包身还在上游也等。
       if (flight_[in][vcs[k]].on) continue;
-      if (order_[in][vcs[k]].on) continue;
       std::deque<XbarReqView>& q = in_q[in][vcs[k]];
       if (q.empty()) continue;
       XbarReqView const& v = q.front();
@@ -1156,7 +1148,7 @@ private:
       return true;
     if (!Needs(v, o))
       return true;
-    if (!StreamOk(o, v.user_id))
+    if (!StreamOk(o, v.user_id) || WaitAhead(o, v))
       return false;
     // 已经占过坑的用户不再扣量：坑按 user 记，量也跟着那一次记。
     return stream_tab[o].count(v.user_id) != 0 ||
@@ -1166,6 +1158,17 @@ private:
   // 这一笔往出口 o 发之前查不查那一侧的 stream 资源，看表项的 streamNeedMask。
   static bool Needs(XbarReqView const &v, uint64_t o) {
     return ((v.stream_need >> o) & 1u) != 0;
+  }
+
+  // 同 VC 上有别的用户已改送进核在等重发，就让它先。已占下游一项的用户不抢
+  // 下游新还回的那一项，不用等。
+  bool WaitAhead(uint64_t o, XbarReqView const &v) const {
+    if (stream_tab[o].count(v.user_id) != 0)
+      return false;
+    for (auto const& [up, vc] : reissue_wait_[o])
+      if (vc == v.vc && up.first != v.user_id)
+        return true;
+    return false;
   }
 
   // 三态准入：已占的直接过；没占但有空项则过（占用在 Consume 里做）；满了不过。
@@ -1189,6 +1192,12 @@ private:
     } else {
       --shared_cr[o];
     }
+    // 等重发的用户包头发出去才不再挡后来者：许可到真正发出之间 DTE 还要读 CM，
+    // 这段时间放直通包过去，到下游就排在它前面了。包头占住这一出口的 VC 之后，
+    // 同 VC 的后来者只能跟在包尾后面。按 (user, path) 清：同一用户别的 path
+    // 先从这一出口发出，不代表等重发的那个包已经发出。
+    if (v.head)
+      reissue_wait_[o].erase({v.user_id, v.path_id});
     if (pass_through)
       return;
     // 坑按 user 记，不按包记：同一个 user 第二次发送余额不变。credit 的量也
@@ -1252,6 +1261,8 @@ private:
   std::array<std::set<uint64_t>, kOutCore + 1> stream_tab;
   std::array<uint64_t, kR2RNum> core_credit{};
   std::array<std::map<uint64_t, uint64_t>, kR2RNum> taken_kb;
+  std::array<std::map<std::pair<uint64_t, uint64_t>, uint64_t>, kR2RNum>
+      reissue_wait_;
   bool force_ready = false;
   std::function<bool(Message const &)> reduce_admission;
   std::function<void(uint64_t, uint64_t)> forward_skip;
@@ -1289,13 +1300,6 @@ private:
     uint64_t path = 0;
   };
   std::array<std::array<Flight, kVcNum>, kXbarInNum> flight_{};
-  // 整包已经进核、重发还没从本核再发出去。同一条 VC 上的后续包先不发。
-  struct Order {
-    bool on = false;
-    uint64_t user = 0;
-    uint64_t path = 0;
-  };
-  std::array<std::array<Order, kVcNum>, kXbarInNum> order_{};
   // 从被挡住的队头后面抽出来、还没发完的那一包。
   std::array<bool, kXbarInNum> bypass_on{};
   std::array<uint64_t, kXbarInNum> bypass_user{}, bypass_path{}, bypass_seq{};

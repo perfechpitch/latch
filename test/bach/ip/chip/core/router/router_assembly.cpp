@@ -695,6 +695,89 @@ TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
   EXPECT_EQ(overflow, 0u);
 }
 
+// 往右的 stream 表被 16 个别的用户占满，stallWay=1 的包整包进核等重发。这条 VC
+// 随即让出来：同一条 VC 上后到的包，进本核的、往左转发的，资源够就照常走，不等
+// 那笔重发（F-027 的保序只管重发包自己）。
+TEST(BachRouterAsm, DivertedPacketDoesNotHoldItsVc) {
+  uint64_t to_core = 0, left_got = 0, right_got = 0;
+  std::vector<uint64_t> left_users;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Router rt(clk, "router", RouterCfg{});
+    RouteEntry blocked = Forward(kFlowRight, false, /*stall_way=*/true);
+    blocked.stream_need = 1ull << kRight;
+    rt.Preload(3, blocked);
+    rt.Preload(4, Forward(0, /*enters_core=*/true));
+    rt.Preload(5, Forward(kFlowLeft, false));
+    for (uint64_t u = 1; u <= 16; ++u) rt.GetXbar().TakeStream(1ull << kRight, u);
+
+    Pusher push(clk, rt.InWire(kMid),
+                {{1, MakeMsg(3, 100)}, {2, MakeMsg(4, 200)}, {3, MakeMsg(5, 300)}});
+    Downstream right(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+    Downstream left(clk, rt.OutWire(kLeft), rt.BackWire(kLeft), true);
+    CoreSide core(clk, rt);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    to_core = rt.GetXbar().SentCount(kOutCore);
+    left_got = left.got;
+    left_users = left.users;
+    right_got = right.got;
+  }
+  RT::Reset();
+  EXPECT_EQ(right_got, 0u) << "stream 表满，用户 100 不该往右发";
+  EXPECT_EQ(to_core, 2u) << "用户 100 改送进核，用户 200 照常进核";
+  ASSERT_EQ(left_got, 1u) << "往左的包不该等用户 100 的重发";
+  EXPECT_EQ(left_users[0], 300u);
+}
+
+// 用户 100 往右缺 stream，整包进核等重发。之后右边还回一项，同一条 VC 上后到
+// 的用户 200 也往右：它不能直通拿走这一项，要跟着进核，由 TS 按用户年龄排出
+// 重发的先后。
+TEST(BachRouterAsm, LaterUserFollowsADivertedOneIntoTheCore) {
+  // 右边下游在第 15 拍还回用户 1 占的那一项。
+  class FreeOne : public BachModule {
+   public:
+    FreeOne(ClockPtr c, LinkEndPtr in)
+        : BachModule(c, "free_one"), from_down(std::move(in)) {}
+
+   protected:
+    void Step() override {
+      from_down->flit.Idle();
+      from_down->release.DriveStream(CycleNow() == 15, CycleNow() == 15 ? 1 : 0);
+    }
+
+   private:
+    LinkEndPtr from_down;
+  };
+
+  uint64_t to_core = 0, right_got = 0, stream_right = 0;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Router rt(clk, "router", RouterCfg{});
+    RouteEntry blocked = Forward(kFlowRight, false, /*stall_way=*/true);
+    blocked.stream_need = 1ull << kRight;
+    rt.Preload(3, blocked);
+    rt.Preload(6, blocked);
+    for (uint64_t u = 1; u <= 16; ++u) rt.GetXbar().TakeStream(1ull << kRight, u);
+
+    Pusher push(clk, rt.InWire(kMid), {{1, MakeMsg(3, 100)}, {30, MakeMsg(6, 200)}});
+    Downstream right(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+    FreeOne free_one(clk, rt.InWire(kRight));
+    CoreSide core(clk, rt);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    to_core = rt.GetXbar().SentCount(kOutCore);
+    right_got = right.got;
+    stream_right = rt.GetXbar().StreamUsed(kRight);
+  }
+  RT::Reset();
+  EXPECT_EQ(stream_right, 15u) << "右边该还回一项";
+  EXPECT_EQ(right_got, 0u) << "用户 200 不该越过等重发的用户 100 往右走";
+  EXPECT_EQ(to_core, 2u);
+}
+
 // 坏 core：core_bad_mask 里本 core 那一位为 1，整个 Router 进透传档，不投递本
 // core、不记账。
 TEST(BachRouterAsm, PassThroughRouterKeepsNoState) {
