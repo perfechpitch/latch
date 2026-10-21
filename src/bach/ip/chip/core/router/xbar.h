@@ -540,9 +540,12 @@ private:
   // 纯转发（不进核、不进归约）的包，包尾发出去才告诉本核这一笔走完。包头一发
   // 就退休违反 F-036：release 回到上游时包身还在上游 Xbar，后面的 flit 又把
   // 这个 user 占回上游的 stream 坑和 credit，再也没有 release 来还。
-  void NoteForwardDone(XbarReqView const& v) {
+  // 本核 TS 自己发出的包和归约结果不算转发：它们在本核已有自己的任务，包尾
+  // 晚于 TS 退休才离开时再报一次，会给已退休的用户另起一项永远等不到数据的槽。
+  void NoteForwardDone(uint64_t in, XbarReqView const& v) {
     constexpr uint64_t kStayMask = (1ull << kOutCore) | (1ull << kOutReduce0) |
                                    (1ull << kOutReduce1) | (1ull << kOutReduce2);
+    if (in >= kInLocal) return;
     if (v.tail && v.msg && (v.out_mask & kStayMask) == 0 && forward_skip) {
       forward_skip(v.user_id, v.path_id);
     }
@@ -804,7 +807,7 @@ private:
       if (!ok) continue;
       XbarReqView v = *it;
       q.erase(it);
-      NoteForwardDone(v);
+      NoteForwardDone(in, v);
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0) continue;
         taken[o] = true;
@@ -886,7 +889,7 @@ private:
         reduce_reserve(*v.msg);
       }
       // 改送进核的那一档已经在上面返回，不会到这里。
-      NoteForwardDone(v);
+      NoteForwardDone(in, v);
       for (uint64_t o = 0; o < kXbarOutNum; ++o) {
         if (((v.out_mask >> o) & 1u) == 0)
           continue;
@@ -1042,7 +1045,7 @@ private:
     if (v.head && (v.out_mask & reduce_mask) && reduce_reserve && v.msg) {
       reduce_reserve(*v.msg);
     }
-    NoteForwardDone(v);
+    NoteForwardDone(in, v);
     for (uint64_t o = 0; o < kXbarOutNum; ++o) {
       if (((v.out_mask >> o) & 1u) == 0) continue;
       taken[o] = true;
