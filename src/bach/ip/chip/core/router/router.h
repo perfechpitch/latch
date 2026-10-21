@@ -296,13 +296,25 @@ class Router {
     // 相邻下游 core 有没有一项 Stream 资源。查到就当场占坑，TS 拿到的授权与
     // Xbar 记的是同一项。
     monitor->SetCheck([this](uint64_t user, uint64_t path) {
-      uint64_t mask = StreamDirsOf(path);
-      return mask == 0 || xbar->BroadcastRoom(mask, user);
+      return StreamRoom(user, path);
     });
     monitor->SetTake([this](uint64_t user, uint64_t path) {
-      xbar->TakeStream(StreamDirsOf(path), user);
+      TakeStreamFor(user, path);
     });
   }
+
+ public:
+  // 出核那一笔要的下游 Stream 资源够不够、当场占坑。TS 授权发送前问的是这里，
+  // 与 Xbar 转发直通包时记的是同一张表。
+  bool StreamRoom(uint64_t user, uint64_t path) const {
+    uint64_t mask = StreamDirsOf(path);
+    return mask == 0 || xbar->BroadcastRoom(mask, user);
+  }
+  void TakeStreamFor(uint64_t user, uint64_t path) {
+    xbar->TakeStream(StreamDirsOf(path), user);
+  }
+
+ private:
 
   ClockPtr clk;
   RouterCfg cfg;

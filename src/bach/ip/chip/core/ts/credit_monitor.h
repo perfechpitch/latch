@@ -65,6 +65,11 @@ public:
   void AttachReissueDone(std::shared_ptr<ReissueDonePort> p) {
     reissue_done = std::move(p);
   }
+  // Router 记的下游 Stream 表。方向计数只数 TS 自己授权的发送，Xbar 直通转发
+  // 的用户也占这张表；只看计数会授权一笔下游没有坑的发送，它进了交叉开关就
+  // 堵在本核唯一的出核 VC 上。授权时查这张表并当场占坑。
+  void SetStreamCheck(CreditMonitor::ResourceCheck fn) { stream_check = std::move(fn); }
+  void SetStreamTake(CreditMonitor::ResourceTake fn) { stream_take = std::move(fn); }
 
   std::shared_ptr<StreamWritePortIf> WakePtr() const { return wake; }
   std::shared_ptr<StreamWritePortIf> RetireWrPtr() const { return retire_wr; }
@@ -134,6 +139,10 @@ protected:
           enough = false;
       if (!enough)
         continue;
+      if (stream_check && !stream_check(e.user_id, e.task_path_id))
+        continue;
+      if (stream_take)
+        stream_take(e.user_id, e.task_path_id);
       auto w = Ready(sid, e);
       w->grant_dirs = need;
       if (cfg.Task(e.task_id).task_type == TaskType::kReissueOut)
@@ -238,6 +247,8 @@ private:
   std::shared_ptr<RetirePort> retire_req;
   std::shared_ptr<StreamWritePortIf> wake, retire_wr;
   std::shared_ptr<ReissueDonePort> reissue_done;
+  CreditMonitor::ResourceCheck stream_check;
+  CreditMonitor::ResourceTake stream_take;
   std::array<std::optional<Pending>, kStreamNum> pending{};
   std::optional<RetiredToken> last_retired;
   std::array<uint64_t, 3> counts{};

@@ -172,6 +172,37 @@ TEST(BachTsCredit, InternalGrantDebitsAllRequiredDirections) {
   RT::Reset();
 }
 
+// 方向计数还够，但 Router 记的下游 Stream 表没有这个用户的坑：不授权，等坑
+// 出来才 READY，并在授权那一拍占坑。
+TEST(BachTsCredit, GrantWaitsForRouterStreamRoom) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  b.cfg->WriteTask(0, Step(true, 6, true));
+  b.cfg->WriteRouterTable(6, 3, 2);
+  b.table->AttachCfg(*b.cfg);
+  // 前 10 次查询下游没坑。
+  uint64_t checks = 0, checks_at_take = 0;
+  std::vector<std::pair<uint64_t, uint64_t>> taken;
+  b.credit->SetStreamCheck([&](uint64_t, uint64_t) { return ++checks > 10; });
+  b.credit->SetStreamTake([&](uint64_t user, uint64_t path) {
+    taken.emplace_back(user, path);
+    checks_at_take = checks;
+  });
+  CreditBench h(clk, *b.cfg, *b.table, *b.credit);
+  auto w = Sitting(0, 22, 0, TaskFsm::kWaitCredit);
+  w->entry.task_path_id = 6;
+  h.seeds = {{2, w}};
+  clk->Continue(60);
+  RT::JoinAll();
+  EXPECT_EQ(b.table->Peek(0).task_fsm, TaskFsm::kReady);
+  ASSERT_EQ(taken.size(), 1u) << "授权一次、占一次坑";
+  EXPECT_EQ(checks_at_take, 11u) << "下游没坑时不授权";
+  EXPECT_EQ(taken[0], std::make_pair(uint64_t{22}, uint64_t{6}));
+  EXPECT_EQ(b.credit->DirectionCount(0), 15u);
+  RT::Reset();
+}
+
 // Router 授予后把对应 task 置 READY，并把这一项的重发标记也置起来。
 TEST(BachTsCredit, NoRequiredDirectionBecomesReadyWithoutReissue) {
   TaskFsm fsm = TaskFsm::kIdle;

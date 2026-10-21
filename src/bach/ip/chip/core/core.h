@@ -605,6 +605,12 @@ private:
     ts->AttachRetire(router->RetireReqPtr());
     ts->AttachReduceDone(router->ReduceDonePtr());
     ts->AttachRtab(&router->Table());
+    ts->Credit().SetStreamCheck([this](uint64_t user, uint64_t path) {
+      return router->StreamRoom(user, path);
+    });
+    ts->Credit().SetStreamTake([this](uint64_t user, uint64_t path) {
+      router->TakeStreamFor(user, path);
+    });
     router->GetReduce().AttachSlotReuse(ts->Table().SlotReusePtr());
     // Router 的 CoreMem 重发完成后报给 TS，TS 据此清掉那一项的重发标记。
     ts->AttachReissueDone(router->GetReissue().DonePtr());
