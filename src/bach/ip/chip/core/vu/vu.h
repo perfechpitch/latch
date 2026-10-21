@@ -67,6 +67,19 @@ class Vu {
     route = std::make_unique<VuTailRoute>(clock, "tail", gid, false);
     dmux = std::make_unique<VuDmux>(clock, "dmux", regs, *pipe, gid, false);
     su = std::make_unique<VuSu>(clock, "su", gid, false);
+    // DMUX → SU 的一级 skid：DMUX 写入即归还上游 credit，SU 从 skid 取；
+    // skid 满时 DMUX 停收，把 SU 的反压传回去。
+    su_skid = std::make_shared<VuSuSkid>();
+    dmux->AttachSkid(su_skid);
+    su->AttachSkid(su_skid);
+    // 按分组结果通道：VEXE 分组 → DMUX 的按端口队列 → RF / SU。
+    su_result_bus = std::make_shared<VuResultBus>();
+    su_data_q = std::make_shared<VuSuDataQ>();
+    net->AttachResultBus(su_result_bus);
+    dmux->AttachResultBus(su_result_bus);
+    dmux->AttachSuData(su_data_q);
+    su->AttachSuData(su_data_q);
+    su->AttachResultBus(su_result_bus);
     retire = std::make_unique<VuRetire>(clock, "retire", *cfg_reg, *isq,
                                         *pipe, gid, false);
     profile = std::make_unique<VuProfile>(
@@ -220,6 +233,9 @@ class Vu {
   std::unique_ptr<VuSexe> sexe;
   std::unique_ptr<VuDmux> dmux;
   std::unique_ptr<VuSu> su;
+  std::shared_ptr<VuSuSkid> su_skid;
+  std::shared_ptr<VuResultBus> su_result_bus;
+  std::shared_ptr<VuSuDataQ> su_data_q;
   std::unique_ptr<VuRetire> retire;
   std::unique_ptr<VuProfile> profile;
 };

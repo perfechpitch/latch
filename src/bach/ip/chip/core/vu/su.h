@@ -48,6 +48,9 @@ class VuSu : public BachModule {
   void AttachIn(std::shared_ptr<VuFlowPort> p) { in = std::move(p); }
   VuFlowPort& Out() { return *out; }
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
+  void AttachSkid(std::shared_ptr<VuSuSkid> p) { skid = std::move(p); }
+  void AttachSuData(std::shared_ptr<VuSuDataQ> p) { dataq = std::move(p); }
+  void AttachResultBus(std::shared_ptr<VuResultBus> p) { bus = std::move(p); }
   MemPort& Cmem() { return *cmem; }
   void AttachCmem(std::shared_ptr<MemPort> p) { cmem = std::move(p); }
 
@@ -57,7 +60,8 @@ class VuSu : public BachModule {
   uint64_t StallCycles() const { return stall_cnt; }
   bool Quiescent() const override {
     return !busy && !held && done_q.empty() && wr_q.empty() &&
-           wait_q.empty();
+           wait_q.empty() && (!skid || skid->Empty()) &&
+           (!dataq || dataq->Empty());
   }
 
  protected:
@@ -66,6 +70,7 @@ class VuSu : public BachModule {
   void Step() override {
     mem_used = false;
     TakeRsp();
+    AcceptData();
     Accept();
     Issue();
     Emit();
@@ -80,14 +85,64 @@ class VuSu : public BachModule {
   }
 
  private:
+  // 完成队列深度取 16：一笔 128 B 写由 4 段拼成，CM 写响应 14T，
+  // 在途段数最多约 14，留两格余量。深度只有 2 时，一次写响应回来会
+  // 同时释放多个段，把 Accept 卡住，写间隔从理想的 4 拍被拉到平均约 6.4 拍。
+  static constexpr uint64_t kDoneQDepth = 16;
+
+  static int GroupOfSrc(uint64_t sel) {
+    switch (sel) {
+      case kSrcValu0: return 0;
+      case kSrcValu1: return 1;
+      case kSrcValu2: return 2;
+      case kSrcVsfu0: return 3;
+      case kSrcVsfu1: return 4;
+      default: return -1;
+    }
+  }
+
+  // SU 的数据通道：结果一完成就从这里进来，独立于段级退休流。
+  void AcceptData() {
+    if (!dataq || dataq->Empty()) return;
+    if (busy || done_q.size() >= kDoneQDepth) return;
+    VuResult r = dataq->Pop();
+    flow = r.f;
+    seq = ++data_seq;
+    from_data = true;
+    if (!flow->uops.cfg.su.Active()) {
+      flow->su_result_done = true;
+      if (bus) bus->Done(flow->uops.inst.seq);
+      flow = VuFlowPtr();
+      from_data = false;
+      return;
+    }
+    flow->su_in = std::move(r.data);
+    Plan();
+  }
+
   void Accept() {
     // 上一段的块还没发完就不收；发完的等着交出去，不挡下一段进来。
-    bool room = !busy && done_q.size() < 2;
+    bool room = !busy && done_q.size() < kDoneQDepth;
     in->DriveReady(room);
     if (!room) return;
     if (!in->Valid() || in->Seq() == last_seq) return;
     VuFlowPtr f = in->Flow();
     if (!f) return;
+
+    // 这一段的数据已经走结果通道；段级入口只等它写完，然后退休。
+    if (f->uops.cfg.su.Active()) {
+      int g = GroupOfSrc(f->uops.cfg.su.src1);
+      if (g >= 0 && f->result_handled[g]) {
+        if (!f->su_result_done) {
+          in->DriveReady(false);
+          return;
+        }
+        last_seq = in->Seq();
+        done_q.push_back({f, in->Seq()});
+        return;
+      }
+    }
+
     last_seq = in->Seq();
     flow = f;
     seq = in->Seq();
@@ -95,6 +150,14 @@ class VuSu : public BachModule {
     if (!f->uops.cfg.su.Active()) {
       Finish();
       return;
+    }
+    // 数据在 DMUX 已经落进 skid，credit 也在 DMUX 归还；这里只负责取走。
+    if (skid) {
+      LOGCHECK(!skid->Empty(), "VuSu: SU 收流时 DMUX→SU skid 为空");
+      f->su_in = skid->Pop();
+    } else {
+      // 没接 skid 的旧装配：仍在 SU 收下时归还 credit。
+      f->Consume(f->uops.cfg.su.src1);
     }
     Plan();
   }
@@ -236,9 +299,10 @@ class VuSu : public BachModule {
 
   // 这一段的块都发完了，记下还有几笔写没回响应，等齐了再交给下游。
   void Finish() {
-    wait_q.push_back({flow, seq, wr_open});
+    wait_q.push_back({flow, seq, wr_open, from_data});
     wr_open = 0;
     flow = VuFlowPtr();
+    from_data = false;
     Settle();
   }
 
@@ -264,7 +328,13 @@ class VuSu : public BachModule {
   // 队头那几段的写都回来了，交给下游。
   void Settle() {
     while (!wait_q.empty() && wait_q.front().left == 0) {
-      done_q.push_back({wait_q.front().f, wait_q.front().seq});
+      Wait& w = wait_q.front();
+      if (w.from_data) {
+        w.f->su_result_done = true;
+        if (bus) bus->Done(w.f->uops.inst.seq);
+      } else {
+        done_q.push_back({w.f, w.seq});
+      }
       wait_q.pop_front();
     }
   }
@@ -306,6 +376,7 @@ class VuSu : public BachModule {
     VuFlowPtr f;
     uint64_t seq = 0;
     uint64_t left = 0;
+    bool from_data = false;
   };
 
   // 攒好、等着发的一块：落在哪、块内哪一段是本条向量的。
@@ -318,6 +389,9 @@ class VuSu : public BachModule {
 
   std::shared_ptr<VuFlowPort> in, out;
   std::shared_ptr<MemPort> cmem;
+  std::shared_ptr<VuSuSkid> skid;
+  std::shared_ptr<VuSuDataQ> dataq;
+  std::shared_ptr<VuResultBus> bus;
   std::deque<Done> done_q;
   std::deque<Wait> wait_q;
   std::deque<Blk> wr_q;
@@ -332,7 +406,8 @@ class VuSu : public BachModule {
   };
   std::optional<Held> held;
   bool busy = false, mem_used = false;
-  uint64_t seq = 0, last_seq = 0;
+  bool from_data = false;
+  uint64_t seq = 0, last_seq = 0, data_seq = 0;
   uint64_t head = 0, beat_cnt = 0;
   uint64_t busy_cnt = 0, stall_cnt = 0;
   // 按块攒的那一摊：acc 从 acc_base 这个块边界起，acc_from 是块内第一个属于

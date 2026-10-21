@@ -1907,8 +1907,9 @@ TEST(Vu, SkipsInactiveMexeAndSexe) {
             numeric::BitsOf(3.0f));
   EXPECT_EQ(with_sexe.vu->Profile().Counter(VuCounter::kMexeBusyCycle), 0u);
   EXPECT_GT(with_sexe.vu->Profile().Counter(VuCounter::kSexeBusyCycle), 0u);
+  // bare 走按分组结果通道，退休比旧的段级流早 1 拍；两者只差 SEXE 的延迟。
   EXPECT_EQ(with_sexe.sink->at,
-            bare.sink->at + VuLatency::Get().Sexe(SexeOp::kFadd) + 1u);
+            bare.sink->at + VuLatency::Get().Sexe(SexeOp::kFadd));
 }
 
 // VALU0 只读 VRF，和 LU 的读同时走。VALU1 要等两路都到。VALU0 的 2 拍盖在 LU 的
@@ -1960,7 +1961,7 @@ TEST(Vu, IndependentGroupOverlapsLoad) {
   EXPECT_EQ(both_cycles, lu_cycles);
 }
 
-// 下游不收时，读请求名额不还。32 笔占满之后第 33 笔发不出，要等最早回来的那一笔
+// 下游不收时，读请求名额不还。16 笔占满之后第 17 笔发不出，要等最早回来的那一笔
 // 被消耗才放行。正常一路收的时候在途停在 14 拍附近，碰不到这道上限。
 TEST(Vu, LuReqDepthHoldsUntilConsumed) {
   EnsureSlots();

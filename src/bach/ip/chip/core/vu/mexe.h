@@ -38,6 +38,10 @@ class VuMexe : public VuExeStage {
   void Compute(VuFlow& f) override {
     VuOpReg const& r = f.uops.cfg.mexe;
     MexeOp op = MexeOp(r.opcode);
+    // MEXE 取走它的 VEXE 源，上游分组可以腾出流水槽。
+    uint64_t used = MexeSrcUsed(r.opcode);
+    if ((used & 1u) != 0) f.Consume(r.src1);
+    if ((used & 2u) != 0) f.Consume(r.src2);
     uint64_t vl = f.SegLen();
     // 源操作数 1 恒为掩码：LU 的 ld.mask bypass（不占 MRF 读端口）、VALU0 的
     // 比较 / vfclass 结果（同样不占），或 MRF_rd_p0 / p1。源操作数 2 随编码而定：

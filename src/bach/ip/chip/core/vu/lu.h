@@ -18,7 +18,7 @@
 //
 // 读请求最多同时占 kVuLuReqDepth 个名额。名额在发出那一拍占下，要等这一笔读回
 // 的数据被下游消耗才还，不是等响应回到本级。下游一直不收时，先回来的那十几笔
-// 仍占着名额，后面继续发，凑满 32 就停；空出最早那一笔，才能再发下一笔。
+// 仍占着名额，后面继续发，凑满 16 就停；空出最早那一笔，才能再发下一笔。
 //
 // 不读 LU 的执行分组不必等这次读回来。收下宏指令时把同一份微指令从 issued 口
 // 交给发射级，RF 源和只依赖 RF 的分组可以先走；读回来的段从数据口交给
@@ -68,7 +68,7 @@ class VuLu : public BachModule {
 
   uint64_t Beats() const { return beat_cnt; }
   uint64_t BusyCycles() const { return busy_cnt; }
-  // 读请求发不出去的拍数：CM 口没准备好，或 32 个名额都还被没消耗的数据占着。
+  // 读请求发不出去的拍数：CM 口没准备好，或 16 个名额都还被没消耗的数据占着。
   uint64_t StallCycles() const { return stall_cnt; }
   // 已发出、数据还没被下游消耗的读请求。
   uint64_t Outstanding() const { return occupied; }
@@ -140,8 +140,9 @@ class VuLu : public BachModule {
   // 抢到前面去。出口排队攒多了也先停一停。
   void Accept() {
     bool issuing = !ctxs.empty() && ctxs.back().sent < ctxs.back().blocks;
-    bool full = issuing || ctxs.size() >= kVuOverlap ||
-                ready_q.size() >= kReadyQDepth;
+    // 出口队列本身不再挡下一条：只要在飞请求名额还有空、且没超过
+    // 两条宏指令的重叠上限，后一条的读就可以发。
+    bool full = issuing || ctxs.size() >= kVuOverlap;
     if (!full && in->Valid() && in->Seq() != last_seq) {
       auto peek = in->Uops();
       if (peek && !peek->cfg.lu.Active() && !ctxs.empty()) full = true;
@@ -470,9 +471,6 @@ class VuLu : public BachModule {
   uint64_t beat_cnt = 0, busy_cnt = 0, stall_cnt = 0;
   // 已发出、对应数据还没被下游消耗的读请求。
   uint64_t occupied = 0;
-  // 出口排队最多攒几段就先不收下一条。跟上面那 32 个请求名额是两回事。
-  static constexpr uint64_t kReadyQDepth = 4;
-
   Logic64 beats;
 };
 

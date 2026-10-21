@@ -153,6 +153,9 @@ class VuDmux : public BachModule {
   void AttachIn(std::shared_ptr<VuFlowPort> p) { in = std::move(p); }
   VuFlowPort& Out() { return *out; }
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
+  void AttachSkid(std::shared_ptr<VuSuSkid> p) { skid = std::move(p); }
+  void AttachResultBus(std::shared_ptr<VuResultBus> p) { bus = std::move(p); }
+  void AttachSuData(std::shared_ptr<VuSuDataQ> p) { su_data = std::move(p); }
 
   uint64_t Written() const { return written.Get(); }
   bool Quiescent() const override { return !held; }
@@ -161,6 +164,7 @@ class VuDmux : public BachModule {
   void Step() override {
     Drain();
     Accept();
+    ProcessResults();
     written = write_cnt;
     TracePerCycle("hold", held ? 1 : 0);
   }
@@ -176,8 +180,16 @@ class VuDmux : public BachModule {
   }
 
   void Accept() {
-    in->DriveReady(!held);
-    if (held || !in->Valid() || in->Seq() == last_seq) {
+    // SU 的输入 skid 只有一格：还占着就不再收新流，反压 TailRoute/VEXE。
+    bool room = !held;
+    if (room && in->Valid()) {
+      VuFlowPtr f = in->Flow();
+      if (f && f->uops.cfg.su.Active() && skid && !skid->HasRoom()) {
+        room = false;
+      }
+    }
+    in->DriveReady(room);
+    if (!room || held || !in->Valid() || in->Seq() == last_seq) {
       if (!held) out->Idle();
       return;
     }
@@ -202,19 +214,24 @@ class VuDmux : public BachModule {
     for (uint64_t p = 0; p < 2; ++p) {
       uint64_t src = c.VrfWtSrc(p);
       if (src == kSrcNone) continue;
+      int g = GroupOfSrc(src);
+      if (g >= 0 && f.result_handled[g]) continue;   // 已走结果通道
       VuOperand const& v = VuSrcOf(f, src);
       if (v.vec.empty()) continue;
       regs.WriteVrf(inst.VrfWt(p) + f.seg, v.vec, inst.Bf16(), inst.Round());
       NoteEntries(inst.seq, inst.VrfWt(p) + f.seg, v.vec.size(), inst.Bf16(), true);
+      f.Consume(src);
       ++write_cnt;
     }
 
     uint64_t mrf_src = c.MrfWtSrc();
-    if (mrf_src != kSrcNone) {
+    if (mrf_src != kSrcNone && !(GroupOfSrc(mrf_src) >= 0 &&
+                                 f.result_handled[GroupOfSrc(mrf_src)])) {
       VuOperand const& m = VuSrcOf(f, mrf_src);
       if (!m.mask.empty()) {
         regs.WriteMrf(inst.MrfWt() + f.seg, m.mask, inst.Bf16());
         NoteEntries(inst.seq, inst.MrfWt() + f.seg, m.mask.size(), inst.Bf16(), false);
+        f.Consume(mrf_src);
         ++write_cnt;
       }
     }
@@ -229,11 +246,71 @@ class VuDmux : public BachModule {
       if ((en & (1u << p)) == 0) continue;
       regs.WriteSrf(inst.SrfWt(p), srf_src[p]->scalar);
       if (f.seg_last) pipe.NoteSrfWrite(inst.seq, inst.SrfWt(p));
+      // p1 虚拟写口的来源固定是 VALU1。
+      if (p == 1 && !f.result_handled[1]) f.Consume(kSrcValu1);
       ++write_cnt;
     }
 
-    // SU 的数据源由 SU_op.SRC_SEL 给，不经 RF。
-    if (c.su.Active()) f.su_in = VuSrcOf(f, c.su.src1);
+    // SU 的数据源由 SU_op.SRC_SEL 给，不经 RF。走了按分组 SU 结果通道的，
+    // 段级流不再重复；否则仍放进 DMUX→SU 的一级 skid。
+    if (c.su.Active()) {
+      int g = GroupOfSrc(c.su.src1);
+      if (!(g >= 0 && f.result_handled[g])) {
+        f.su_in = VuSrcOf(f, c.su.src1);
+        if (skid) {
+          skid->Push(f.su_in);
+          f.su_in = VuOperand();
+          f.Consume(c.su.src1);
+        }
+      }
+    }
+  }
+
+  static int GroupOfSrc(uint64_t sel) {
+    switch (sel) {
+      case kSrcValu0: return 0;
+      case kSrcValu1: return 1;
+      case kSrcValu2: return 2;
+      case kSrcVsfu0: return 3;
+      case kSrcVsfu1: return 4;
+      default: return -1;
+    }
+  }
+
+  // 结果总线：每个目的地一队，每拍各出一笔。VRF/MRF/SRF 直接写；SU 交给
+  // 独立的 SU 数据队列，等它写完再把宏级 pending 减一。
+  void ProcessResults() {
+    if (!bus) return;
+    for (uint8_t d = 0; d < kVuDestCount; ++d) {
+      if (bus->Empty(d)) continue;
+      if (d == kVuDestSu && (!su_data || !su_data->HasRoom())) continue;
+      VuResult r = bus->Pop(d);
+      VuMacroInst const& inst = r.f->uops.inst;
+      uint64_t seq = inst.seq;
+      if (d == kVuDestSu) {
+        su_data->Push(std::move(r));
+        continue;
+      }
+      if (d == kVuDestVrf0 || d == kVuDestVrf1) {
+        uint64_t p = d - kVuDestVrf0;
+        regs.WriteVrf(inst.VrfWt(p) + r.f->seg, r.data.vec,
+                      inst.Bf16(), inst.Round());
+        NoteEntries(seq, inst.VrfWt(p) + r.f->seg, r.data.vec.size(),
+                    inst.Bf16(), true);
+        ++write_cnt;
+      } else if (d == kVuDestMrf) {
+        regs.WriteMrf(inst.MrfWt() + r.f->seg, r.data.mask, inst.Bf16());
+        NoteEntries(seq, inst.MrfWt() + r.f->seg, r.data.mask.size(),
+                    inst.Bf16(), false);
+        ++write_cnt;
+      } else {
+        uint64_t p = d - kVuDestSrf0;
+        regs.WriteSrf(inst.SrfWt(p), r.data.scalar);
+        if (r.f->seg_last) pipe.NoteSrfWrite(seq, inst.SrfWt(p));
+        ++write_cnt;
+      }
+      bus->Done(seq);
+    }
   }
 
   // 这一拍写进去的元素跨几个 entry，就逐个通知记分板。凑满这一格就摘掉。
@@ -249,6 +326,9 @@ class VuDmux : public BachModule {
   VuRegfiles& regs;
   VuPipeCtrl& pipe;
   std::shared_ptr<VuFlowPort> in, out;
+  std::shared_ptr<VuSuSkid> skid;
+  std::shared_ptr<VuResultBus> bus;
+  std::shared_ptr<VuSuDataQ> su_data;
   struct Held {
     VuFlowPtr f;
     uint64_t seq = 0;
