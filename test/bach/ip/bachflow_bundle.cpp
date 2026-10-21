@@ -228,6 +228,9 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   transport << "seg_shift " << DteSegValidShift() << " template_mode "
             << ingress.GetDte().Regfile().ConfigRead(0x1048) << '\n';
   uint64_t last_desc = 0, last_rx = 0, last_error = 0;
+  // 0 = 关。MU 派发与完成总数连续这么多拍不变，就当卡死提前停钟。
+  uint64_t stall_cycles = EnvU64("BACHFLOW_STALL_CYCLES", 0);
+  uint64_t last_mu = 0, last_mu_cycle = 0;
   uint64_t inlet_count = 0;
   std::set<uint64_t> inlet_users, broadcast_users;
   auto compute_pos = std::find_if(logical.begin(), logical.end(),
@@ -286,6 +289,17 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
       transport << "progress cycle " << cycle << " insts " << instructions
                 << " mu_dispatch " << mu_dispatch << " mu_done " << mu_done << '\n';
       transport.flush();
+      // RV 核在死锁时仍会轮询，指令数照涨；只有 MU 计数停住才算不再前进。
+      if (mu_dispatch + mu_done != last_mu) {
+        last_mu = mu_dispatch + mu_done;
+        last_mu_cycle = cycle;
+      } else if (stall_cycles != 0 && cycle - last_mu_cycle >= stall_cycles) {
+        transport << "stall cycle " << cycle << " mu_frozen_since "
+                  << last_mu_cycle << '\n';
+        transport.flush();
+        harness.halted = true;
+        return;
+      }
     }
     auto &dte = ingress.GetDte();
     auto &port = dte.FromRv();

@@ -21,6 +21,7 @@ cycles="${BACHFLOW_CYCLE_LIMIT:-3000}"
 users="${BACHFLOW_USER_COUNT:-1}"
 in_flight="${BACHFLOW_MAX_IN_FLIGHT:-}"
 wall="${BACHFLOW_WALL_LIMIT:-300}"
+stall="${BACHFLOW_STALL_CYCLES:-}"
 skip_build="${LATCH_SKIP_BUILD:-0}"
 npz_dir="${BACHFLOW_NPZ_DIR:-}"
 
@@ -65,8 +66,11 @@ Optional:
                            user101.token, odd k user202.token.
   BACHFLOW_MAX_IN_FLIGHT   feed user k only after user k-N has its egress
                            output (default: unset, no limit beyond C2C credit).
-                           32 users deadlock without it; see README.
   BACHFLOW_WALL_LIMIT      timeout(1) seconds around the binary (default: 300)
+  BACHFLOW_STALL_CYCLES    stop early once the summed MU dispatch/done counts
+                           stay unchanged this many cycles (checked every
+                           256 cycles; default: unset, off). The run then
+                           fails with a "stall" line in transport.txt.
   BACHFLOW_INGRESS_CHIP/PHYS/ADDR
   BACHFLOW_EGRESS_CHIP/PHYS/ADDR
                            EP1 endpoints. Defaults: chip 0 phys 5 addr
@@ -95,6 +99,7 @@ fail() {
 [[ -z "$in_flight" || ( "$in_flight" =~ ^[0-9]+$ && "$in_flight" -ge 1 ) ]] || fail "BACHFLOW_MAX_IN_FLIGHT must be a positive integer."
 [[ "$cycles" =~ ^[0-9]+$ && "$cycles" -gt 0 ]] || fail "BACHFLOW_CYCLE_LIMIT must be a positive integer."
 [[ "$wall" =~ ^[0-9]+$ && "$wall" -gt 0 ]] || fail "BACHFLOW_WALL_LIMIT must be a positive integer."
+[[ -z "$stall" || ( "$stall" =~ ^[0-9]+$ && "$stall" -ge 1 ) ]] || fail "BACHFLOW_STALL_CYCLES must be a positive integer."
 [[ "$skip_build" == 0 || "$skip_build" == 1 ]] || fail "LATCH_SKIP_BUILD must be 0 or 1."
 
 full=0
@@ -164,6 +169,7 @@ docker run --rm \
   -e BACHFLOW_USER_COUNT="$users" \
   -e BACHFLOW_MAX_IN_FLIGHT="$in_flight" \
   -e BACHFLOW_WALL_LIMIT="$wall" \
+  -e BACHFLOW_STALL_CYCLES="$stall" \
   -e LATCH_BUILD_DIR="$build_dir" \
   -e LATCH_BUILD_JOBS="$jobs" \
   -e LATCH_SKIP_BUILD="$skip_build" \
