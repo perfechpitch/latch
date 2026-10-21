@@ -59,7 +59,6 @@ class Mu {
     reg = std::make_unique<MuRegfile>(clock, "regfile", gid, false);
     iq = std::make_unique<MuIssueQ>(clock, "issue_q", gid, false);
     ep = std::make_unique<GenEpInfo>(clock, "gen_ep", gid, false);
-    reg->AttachTopkTable(ep.get());
     token_ldq = std::make_unique<MuLdq>(clock, "token_ldq",
                                         kTokenLdqDepth, gid, false);
     weight_ldq = std::make_unique<MuLdq>(clock, "weight_ldq",
@@ -93,30 +92,38 @@ class Mu {
   GenEpInfo& EpInfo() { return *ep; }
   std::shared_ptr<DsaRdataPort> RdataPtr() const { return reg->RdataPtr(); }
 
-  // topK 里第 i 个专家在本 EP Group 内的序号。topK 直接存组内序号，读出来就是；
-  // 没配 topK 的那一档按 topK 里的先后当序号用。
+  // 槽 i 在 Matrix Mem 里的专家序号。共享专家占低地址 0..SharedSlots-1，
+  // 路由专家接在后面，序号是共享槽数加上 topK 里的组内序号。
   uint64_t LocalEpOf(MuInflight const& f, uint64_t i) const {
-    if (f.cfg.pcode && f.cfg.expert_count != 0) {
+    if (f.cfg.pcode_moe) {
       if (i == 0) return 0;
       auto t = ep->PcodeTopk(f.cfg.stream_id, 8);
       LOGCHECK(i <= t.size(), "pcode expert index exceeds topK count");
       return t[i - 1].local_ep_index + 1;
     }
+
+    uint64_t ns = f.cfg.SharedSlots();
+    if (i < ns) return i;
     std::vector<TopkEntry> const& t = TopkOf(f);
-    if (i >= t.size()) return i;
-    return t[i].local_ep_index;
+    uint64_t ri = i - ns;
+    if (ri >= t.size()) return ns + ri;
+    return ns + t[ri].local_ep_index;
   }
-  // topK 里第 i 个专家的权重。合并成一份时乘它。
+  // 共享专家没有 W_ep，合并时按 1。路由专家用 topK 里的权重。
   float WeightOf(MuInflight const& f, uint64_t i) const {
-    if (f.cfg.pcode && f.cfg.expert_count != 0) {
-      if (i == 0) return f.cfg.share_mask ? 1.0f : 0.0f;
+    if (f.cfg.pcode_moe) {
+      if (i == 0) return f.cfg.share_en_mask ? 1.0f : 0.0f;
       auto t = ep->PcodeTopk(f.cfg.stream_id, 8);
       LOGCHECK(i <= t.size(), "pcode expert index exceeds topK count");
       return t[i - 1].weight;
     }
+
+    uint64_t ns = f.cfg.SharedSlots();
+    if (i < ns) return 1.0f;
     std::vector<TopkEntry> const& t = TopkOf(f);
-    if (i >= t.size()) return 1.0f;
-    return t[i].weight;
+    uint64_t ri = i - ns;
+    if (ri >= t.size()) return 1.0f;
+    return t[ri].weight;
   }
   // 这一笔用哪一份 topK：按 stream_id 读 topK_ep_table。DTE 搬运时写进来，
   // MU 计算时与 token / weight 同时读，不再有前置串行读。
@@ -136,6 +143,29 @@ class Mu {
   uint64_t DoneCnt() const { return ctrl->DoneCnt(); }
   uint64_t DoneTask() const { return ctrl->DoneTask(); }
   uint64_t DoneUser() const { return ctrl->DoneUser(); }
+  // 真正发行进执行通路那一拍起的笔数与身份，Core 层发 dsa_task_dispatch 用。
+  uint64_t DispatchCnt() const { return ctrl->DispatchCnt(); }
+  uint64_t DispatchTask() const { return ctrl->DispatchTask(); }
+  uint64_t DispatchUser() const { return ctrl->DispatchUser(); }
+  uint64_t DispatchCfgCount() const { return ctrl->DispatchCfgCount(); }
+  // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
+  // dsa_calc_done 用。
+  uint64_t CalcStartCnt() const { return ctrl->CalcStartCnt(); }
+  uint64_t CalcStartTask() const { return ctrl->CalcStartTask(); }
+  uint64_t CalcStartUser() const { return ctrl->CalcStartUser(); }
+  uint64_t CalcStartExpert() const { return ctrl->CalcStartExpert(); }
+  uint64_t CalcStartK() const { return ctrl->CalcStartK(); }
+  uint64_t CalcStartN() const { return ctrl->CalcStartN(); }
+  uint64_t CalcStartKblock() const { return ctrl->CalcStartKblock(); }
+  uint64_t CalcStartNblock() const { return ctrl->CalcStartNblock(); }
+  uint64_t CalcStartPrimK() const { return ctrl->CalcStartPrimK(); }
+  uint64_t CalcStartPrimN() const { return ctrl->CalcStartPrimN(); }
+  uint64_t CalcStartADtype() const { return ctrl->CalcStartADtype(); }
+  uint64_t CalcStartBDtype() const { return ctrl->CalcStartBDtype(); }
+  uint64_t CalcStartOutBf16() const { return ctrl->CalcStartOutBf16(); }
+  uint64_t CalcDoneCnt() const { return ctrl->CalcDoneCnt(); }
+  uint64_t CalcDoneTask() const { return ctrl->CalcDoneTask(); }
+  uint64_t CalcDoneUser() const { return ctrl->CalcDoneUser(); }
 
   void RunStep() {
     // DTE 搬运时写进来的 topK 这一拍先收进 topK_ep_table，下面才算得到。
@@ -147,6 +177,7 @@ class Mu {
     } else {
       idle_cycles = 0;
     }
+    reg->AttachTopkTable(ep.get());
     reg->SetBusy(idle_cycles < 2);
     reg->RunStep();
     ep->RunStep();
@@ -189,9 +220,46 @@ class Mu {
     uint64_t DoneCnt() const { return done_cnt; }
     uint64_t DoneTask() const { return done_task; }
     uint64_t DoneUser() const { return done_user; }
+    // 真正发行进执行通路那一拍起的笔数与身份，Core 层发 dsa_task_dispatch 用。
+    // 判据见 Load()：这一笔的第一个 tile 开始发起访存。越界那一路也计 —— 它一样
+    // 是从这儿起的，不计的话 MU-DSA-ISQ 那一行就没有终点。
+    uint64_t DispatchCnt() const { return dispatch_cnt; }
+    uint64_t DispatchTask() const { return dispatch_task; }
+    uint64_t DispatchUser() const { return dispatch_user; }
+    // 这笔任务配置过的寄存器数，随发行那一拍带出去（Perfetto 的 MU-DSA args）。
+    uint64_t DispatchCfgCount() const { return dispatch_cfg_count; }
+    // 这一笔在矩阵执行单元里进出所跨那一段的两端，Core 层发 dsa_calc_start /
+    // dsa_calc_done 用。起点是第一个 tile 进 exe、终点是最后一个 tile 的后一拍，量的是
+    // 这笔任务的真实 MAC 时间（kblock × 专家数 × nblock 拍），不把 10 级流水深度算进去。
+    // 越界那一笔不经过正常计算，两端都不计：它没有计算阶段。
+    uint64_t CalcStartCnt() const { return calc_start_cnt; }
+    uint64_t CalcStartTask() const { return calc_start_task; }
+    uint64_t CalcStartUser() const { return calc_start_user; }
+    // 这笔任务的 GEMM 规模：专家数、K 与 N（M 恒为 1，不单列）。Core 层发
+    // dsa_calc_start_expert / k / n 用，好让 Perfetto 里 MU-DSA-CALC 的 args 带上尺寸。
+    uint64_t CalcStartExpert() const { return calc_start_expert; }
+    uint64_t CalcStartK() const { return calc_start_k; }
+    uint64_t CalcStartN() const { return calc_start_n; }
+    uint64_t CalcStartKblock() const { return calc_start_kblock; }
+    uint64_t CalcStartNblock() const { return calc_start_nblock; }
+    uint64_t CalcStartPrimK() const { return calc_start_prim_k; }
+    uint64_t CalcStartPrimN() const { return calc_start_prim_n; }
+    uint64_t CalcStartADtype() const { return calc_start_adtype; }
+    uint64_t CalcStartBDtype() const { return calc_start_bdtype; }
+    uint64_t CalcStartOutBf16() const { return calc_start_outbf16; }
+    uint64_t CalcDoneCnt() const { return calc_done_cnt; }
+    uint64_t CalcDoneTask() const { return calc_done_task; }
+    uint64_t CalcDoneUser() const { return calc_done_user; }
 
    protected:
     void Step() override {
+      // 上一拍算到最后一个 tile 时只记了身份、置 pending，这一拍开头才补 calc_done：
+      // 段长按 tile 数闭合（最后一个 tile 的后一拍 − 第一个 tile = kblock × 专家数 ×
+      // nblock），而不是少一拍。
+      if (calc_done_pending) {
+        ++calc_done_cnt;
+        calc_done_pending = false;
+      }
       // Drain 的推进排在最前：这一拍先把上一拍进的那一步走掉，外面才看得到
       // 每一步各占一拍。
       StepDrain();
@@ -235,9 +303,12 @@ class Mu {
       // 第一步就是阻塞任务下发。
       if (drain != MuDrain::kNone) return;
       if (!mu.reg->HasPending() || !mu.iq->HasRoom()) return;
-      auto task_cfg = mu.reg->TakePending();
-      if (task_cfg.pcode && task_cfg.expert_count != 0) task_cfg.expert_count = mu.ep->PcodeTopk(task_cfg.stream_id, task_cfg.expert_count).size() + 1;
-      mu.iq->Push(task_cfg);
+      auto task = mu.reg->TakePending();
+      if (task.pcode && task.expert_count) {
+        task.pcode_moe = true;
+        task.expert_count = mu.ep->PcodeTopk(task.stream_id, task.expert_count).size() + 1;
+      }
+      mu.iq->Push(task);
     }
 
     // 一笔任务按 tile 走 kblock × nblock 遍。三段各找各自那一笔，所以写回第 i
@@ -248,16 +319,28 @@ class Mu {
       MuInflight* f = mu.iq->FirstToLoad();
       if (f == nullptr) return;
       if (!mu.token_ldq->HasRoom() || !mu.weight_ldq->HasRoom()) return;
+      // 这一笔的头一个 tile 真正开始发起访存，就是它「发行」那一拍。写在越界那一路
+      // 之前：越界的任务也是从这儿起的（它只是余下 tile 作废），不计的话
+      // MU-DSA-ISQ 那一行就没有终点。
+      if (f->issued == 0) {
+        ++dispatch_cnt;
+        dispatch_task = f->cfg.task_id;
+        dispatch_user = f->cfg.user_id;
+        // 这笔任务配置过的寄存器数，随发行那一拍带出去，Perfetto 的 MU-DSA args 靠它
+        // 带上「这一笔任务配置了多少个寄存器」。
+        dispatch_cfg_count = f->cfg.cfg_count;
+      }
       MuStep s = f->agu.Next();
       // acu 查越界与对齐。查出来走 Drain & Trap，本轮只留状态位：这一笔的余下
       // tile 全部作废，直接算做完。
       if (!f->agu.CheckStep(s, mu.cfg.cmem_size, mu.cfg.mmem_size)) {
         // 越界或不对齐：这一笔余下的 tile 全部作废，进 Drain 的第一步。已经
         // 发出去的读请求的回复照常收，但不进计算，那是越界任务的数据。
+        // 这里不能把 stage 标成 Finished。Retire 见到 Finished 会直接出队，
+        // dsa_done 就丢了，TS 一直等这一个完成。等 Drain 走完再报。
         f->dropped = true;
         f->issued = f->computed = f->total;
         f->stored = f->OutTotal();
-        f->stage = MuStage::kFinished;
         drain = MuDrain::kBlock;
         return;
       }
@@ -317,12 +400,40 @@ class Mu {
       // tile 的循环顺序由内往外是 K、专家、N，所以同一列的几段与这一列的几个
       // 专家都连着算。算到最后才产出这一列的结果。
       uint64_t kb = f->Kblock();
-      uint64_t ne = f->cfg.Experts();
+      uint64_t ne = f->cfg.ExpertSlots();
       uint64_t ki = f->computed % kb;
       uint64_t ei = (f->computed / kb) % ne;
-      if (f->cfg.pcode && f->cfg.expert_count != 0 && ei == 0 && f->cfg.share_mask == 0) std::fill(weight.begin(), weight.end(), 0);
-      mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0,
-                    ki + 1 == kb, ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
+      if (f->cfg.pcode_moe && ei == 0 && !f->cfg.share_en_mask)
+        std::fill(weight.begin(), weight.end(), 0);
+      mu.exe->Issue(f->cfg, token, weight, scale, wscale, at, ki == 0, ki + 1 == kb,
+                    ei == 0, ei + 1 == ne, mu.WeightOf(*f, ei));
+      // 这一笔的头一个 tile 进执行单元，就是它「算起来了」那一拍。真实的 MAC 时间
+      // 按 tile 数走（每个 tile 一拍），不把 10 级流水深度算进去：起点取第一个 tile，
+      // 终点取最后一个 tile 的后一拍，段长就是 kblock × 专家数 × nblock 拍。
+      if (f->computed == 0) {
+        ++calc_start_cnt;
+        calc_start_task = f->cfg.task_id;
+        calc_start_user = f->cfg.user_id;
+        // 尺寸一并锁存，供波形带出去：专家数、K = PrimK × kblock、N = PrimN × nblock，
+        // M 恒为 1（一条原语就是 1×K×N）。另带原语本身的 K/N 与三处数据类型。
+        calc_start_expert = f->cfg.Experts();
+        calc_start_k = f->cfg.PrimK() * f->cfg.kblock;
+        calc_start_n = f->cfg.PrimN() * f->cfg.nblock;
+        calc_start_kblock = f->cfg.kblock;
+        calc_start_nblock = f->cfg.nblock;
+        calc_start_prim_k = f->cfg.PrimK();
+        calc_start_prim_n = f->cfg.PrimN();
+        calc_start_adtype = static_cast<uint64_t>(f->cfg.a_dtype);
+        calc_start_bdtype = static_cast<uint64_t>(f->cfg.b_dtype);
+        calc_start_outbf16 = f->cfg.out_bf16 ? 1 : 0;
+      }
+      // 最后一个 tile：这一拍只记身份、置 pending，下一个 Step() 开头再补 calc_done，
+      // 好让段长按 tile 数闭合而不是少一拍。
+      if (f->computed + 1 == f->total) {
+        calc_done_task = f->cfg.task_id;
+        calc_done_user = f->cfg.user_id;
+        calc_done_pending = true;
+      }
       ++f->computed;
       f->stage = MuStage::kComputing;
     }
@@ -352,6 +463,11 @@ class Mu {
         mu.iq->RetireFront();
         return;
       }
+      // 越界任务要等 Drain 四步走完再报完成，免得下游读到还没排空的旧结果。
+      if (f->dropped && drain != MuDrain::kNone) {
+        mu.done->Idle();
+        return;
+      }
       if (stq_idle < 2) {
         mu.done->Idle();
         return;
@@ -377,6 +493,19 @@ class Mu {
     uint64_t stq_idle = 0;
     // 宣告完成的笔数与身份，供 Core 层发波形。
     uint64_t done_cnt = 0, done_task = 0, done_user = 0;
+    // 真正发行（第一个 tile 开始发起访存）的笔数与身份，同上。
+    uint64_t dispatch_cnt = 0, dispatch_task = 0, dispatch_user = 0;
+    // 这笔任务配置过的寄存器数，随发行那一拍带出去。
+    uint64_t dispatch_cfg_count = 0;
+    // 这一笔的第一个 tile 进矩阵执行单元、最后一个 tile 后一拍那一拍的笔数与身份。
+    uint64_t calc_start_cnt = 0, calc_start_task = 0, calc_start_user = 0;
+    uint64_t calc_start_expert = 0, calc_start_k = 0, calc_start_n = 0;
+    uint64_t calc_start_kblock = 0, calc_start_nblock = 0;
+    uint64_t calc_start_prim_k = 0, calc_start_prim_n = 0;
+    uint64_t calc_start_adtype = 0, calc_start_bdtype = 0, calc_start_outbf16 = 0;
+    uint64_t calc_done_cnt = 0, calc_done_task = 0, calc_done_user = 0;
+    // 最后一个 tile 已算完、等下一拍补 calc_done 的标志。
+    bool calc_done_pending = false;
   };
 
   ClockPtr clk;

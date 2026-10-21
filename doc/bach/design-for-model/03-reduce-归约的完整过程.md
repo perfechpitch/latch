@@ -136,7 +136,7 @@
 
 第二层与第三层都在 ReduceModule 里做加法，区别在数据在哪等：第二层流经每一跳就加，第三层先在一个 core 的 Matrix Mem 里等齐，再送进 ReduceModule 加。EP 组间若也走 Router 逐跳累加，ReduceModule 的上下文盖不住 EP 之间的不均衡，任务少的组会被频繁反压，所以第三层用 Matrix Mem 做缓冲。《EP组间Reduction讨论（过程）》把“复用 TP Reduction 通路做 EP Reduction”列在放弃方案里，原话是“EP覆盖的范围远大于TP的范围，而且EP之间存在很大程度的不均衡问题……否则会频繁导致任务较少的EP被反压”。
 
-第二层还带一条对软件的硬约束：**Rmem 给一个用户 32 KiB，按 FP32 驻留算，最多 8192 个 FP32**。一笔 reduce 装不下时，软件要按这个容量把它拆成几笔，每笔在 TS 任务链上配成一项逐级 reduce 任务。《TS_通信机制》的例子是把一笔 32 KB 拆成 **4 笔 8 KB**，链上连着配 4 项。默认用例的两条归约链一笔都装得下，不用拆：一行 4 颗 chip 逐跳 reduce 进本行 R core 的那条链，一包是 16 B 软件信息加 12288 B（6144 个 BF16），在 Rmem 里驻留 6144 个 FP32；chip 内 8 个计算 core 归约部分和的那条链，一包是 16 B 软件信息加 2048 B（1024 个 BF16），驻留 1024 个 FP32。
+第二层还带一条对软件的硬约束：**Rmem 给一个用户 32 KiB，按 FP32 驻留算，最多 8192 个 FP32**。一笔 reduce 装不下时，软件要按这个容量把它拆成几笔，每笔在 TS 任务链上配成一项逐级 reduce 任务。《TS_通信机制》的例子是把一笔 32 KB 拆成 **4 笔 8 KB**，链上连着配 4 项。默认用例的两条归约链一笔都装得下，不用拆：一行 4 颗 chip 逐跳 reduce 进本行 R core 的那条链，当前模型payload为16B兼容软件前缀加12288B（6144个BF16）；目标线包另有32B包头，前缀规则待软件协议统一，在 Rmem 里驻留 6144 个 FP32；chip 内 8 个计算 core 归约部分和的那条链，当前模型payload为16B兼容前缀加2048B（1024个BF16），不是DTE固定包头格式，驻留 1024 个 FP32。
 
 ***
 
@@ -350,14 +350,14 @@ chip 内归约链一律按逻辑槽位次序 6 → 5 → 4 → 0 → 1 → 2 →
 <text x="46" y="517" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">顺序：每一跳先查 RouterTable 得到 operation / 方向 / 下一跳 VC / 精度 → 包进 ReduceModule 锁定到尾 flit → 首份建上下文、后续 RMW →</text>
 <text x="46" y="533" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">到齐后查目标 VC credit 与下游 Reduce credit → 发出 → 整笔交付后给上游 release 一次。跳间是 R2R 通路，flit 可交织。</text>
 <text x="46" y="549" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">为什么流着加：ReduceModule 是逐跳的，p0 到 core5 时不必等 core5 算完，先存进上下文；core5 的 p1 出核时再相加。链上没有同步点，这是切 K 放在 FC2 chip 间那一级的理由。</text>
-<text x="46" y="565" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 Rmem 资源由 TS 在下发前申请到，DTE 出核不查 VC credit（本地 DTE↔Router 反压由 CoreStation 的 DteReady 在 flit 层兜住），Router 上不会因为 Reduce 包堵住。</text>
+<text x="46" y="565" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#5c6370" font-weight="400" text-anchor="start">本级 Rmem 资源由 TS 在下发前申请到，DTE 出核不查 VC credit（DTE按目标VC的credit逐flit发送），Router 上不会因为 Reduce 包堵住。</text>
 </svg>
 ```
 
 以中间列 chip 的 chip 内归约链上相邻的 4 个计算 core（core6 → core5 → core0 → core1）为例，编号与图中一致：
 
 1. 每个 core 的 MU / VU 算出本 core 的部分和 `p_k`，完整长度，放在 Core Mem。
-2. TS 下发这一步之前已取得本级 Rmem 的 credit。DataOut DTE 按包头的 PathID 查自己那份 RouterTable，得知这是 Reduce 操作以及走哪个 VC，把 `p_k` 作为 Reduce 包发出（不查 VC credit，本地 DTE↔Router 反压由 CoreStation 的 DteReady 在 flit 层兜住）。
+2. TS在REDUCE_WAIT取得本SID的RMEM许可，命令携带实际PID和VCID。DTE把该分量配置为出站任务，按每VC credit发送；DTE完成ACK与后续Router RMEM空间归还是两个事件。
 3. 包进本 core 的 Router，RouterStation 按 PathID 查 RouterTable：`operation = Reduce`、目标方向、下一跳 VC、`reduce_outdata_type`。CrossBar 把它导向 ReduceModule（Data ×3 之一）。进入后锁定到尾 flit。
 4. ReduceModule 按 UserID 找上下文：第一份输入分配上下文并写入 FP32 数据；后续方向的输入读出当前值、累加、写回。链上第 k 跳到达的是 `p0 + … + p(k−1)`，与本地出核的 `p_k` 相加。
 5. 某个结果 flit 所需的各方向操作数都累加完了，这个 flit 就按 RouterTable 转成 FP32 或 BF16 发出，不等整包；包发出首 flit 后锁定到尾 flit。发送前检查目标 VC credit，`reduceNeedMask` 置位时这笔任务头一次发往该方向之前还要取得下游 Reduce credit，作为 CrossBar 的第五路输入参与仲裁后发往下一跳。
@@ -528,7 +528,7 @@ chip 内归约链一律按逻辑槽位次序 6 → 5 → 4 → 0 → 1 → 2 →
 <rect x="40" y="290" width="300" height="60" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
 <text x="48" y="305" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#2563eb" font-weight="700" text-anchor="start">TS 侧</text>
 <text x="48" y="319" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">一笔 reduce 拆成链上 N 项：每项等本用户的 Rmem credit（rmem_busy = 0），</text>
-<text x="48" y="331" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">到位即下发，Reduce Done 报回才还，下一项接着申请</text>
+<text x="48" y="331" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">REDUCE_WAIT占RMEM后READY；返回只还空间</text>
 <rect x="370" y="290" width="320" height="60" rx="5" fill="#f5f6f8" stroke="#c9ced6" stroke-width="1.3"/>
 <text x="378" y="305" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10" fill="#16181d" font-weight="700" text-anchor="start">Retire 与表项删除</text>
 <text x="378" y="319" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">core 判定任务链结束 → 广播 User Retire</text>
@@ -545,7 +545,7 @@ chip 内归约链一律按逻辑槽位次序 6 → 5 → 4 → 0 → 1 → 2 →
 
 | | 谁持有计数 | 何时扣 | 何时还 | 表项的建与删 |
 | - | - | - | - | - |
-| core 与本级 ReduceModule 之间 | TS，每个用户一份 | TS 下发一项逐级 reduce 任务时；链上连着几项时逐项下发，一项做完再发下一项 | ReduceModule 做完一笔任务、结果全部交付后经 `rmem2ts_done_ch` 向 TS 报完成 | 用户首笔 Reduce 任务进入时分配 32 KiB 分区；收到 Retire 后回收 |
+| core 与本级 ReduceModule 之间 | TS，每SID一位RMEM许可 | REDUCE_WAIT获准时占用并READY；任务双ACK完成可推进 | RMEM整包结果交付后按UID只归还空间，下一拍可再授权 | Router内部32KiB分区的分配与Retire是存储生命周期；TS许可和任务完成分别记账 |
 | ReduceModule 与相邻下游之间 | 上游 ReduceModule 的 Downstream Reduce Credit Map，按 UserID 加方向 | `reduceNeedMask` 置位时，一笔任务头一次发往该方向前取得准入；逐 flit 另查目标 VC credit | 下游做完这笔任务、结果全部交付后发一次携带 UserID 的 release，经 Router 的静态旁路返回 | ReduceModule 收到 User Retire 先记录，待相邻下游各方向在途任务的 release 都回来才删该用户映射 |
 
 Router 不维护 Reduce credit，只把 release 按 CSR 配的静态方向 Mask（`RTR_RELEASE_ROUTE`）转发，不查 RouterTable，可多播。跨 chip 时 release 经 C2C Bridge 透传；边缘的 ReduceModule 自行做精度压缩以减少跨 chip 带宽。
@@ -558,17 +558,17 @@ Router 不维护 Reduce credit，只把 release 按 CSR 配的静态方向 Mask�
 
 | 字段 | 取值 | 含义 |
 | - | - | - |
-| `TASK_TYPE` | 4 | 逐级 reduce 任务，完成只认 Router 的 Reduce Done |
+| `TASK_TYPE` | 4 | 逐级 reduce 任务，Core/DSA 双 ACK 完成，RMEM Done 独立还空间 |
 | `TASK_CREDIT_EN` | 1 | 下发前要有本级 Rmem 的 credit |
 
 TS 的动作：
 
-* 逐级 reduce 任务生成后停在 WAIT。本级 Rmem 的 credit 由 TS 为每个用户记一份（`rmem_busy`），不向 Router 申请：空闲就置 READY，下发即占掉，Reduce Done 报回来才还，链上的下一项接着申请
-* 完成只认 Router：DTE 的 RV core 与 DSA 两路完成只算搬完，不改 stream 状态；**只有 Router 的 Reduce Done 才能把逐级 reduce 任务置 FINISH**
-* 包头带 `reduce_seq`，DTE 打进包头，Router 随 Reduce Done 原样带回，TS 不用它配对
-* Reduce Done 不带 `stream_id`，TS 按 `user_id` 找到那个 stream，完成的是它的当前任务
+* Reduce 安装为 REDUCE_WAIT。每 SID 的 RMEM 许可在获准进入 READY 的同沿占用；同拍归还不能立即再占用，credit_en 不改变其资源种类。
+* Reduce 按 Core/DSA 双 ACK 完成并允许 TG 推进；RMEM Done 不设置完成位。用户退休仍须等待该 SID 的 RMEM 空闲。
+* 现有模型的 reduce_seq 为诊断／归约任务归属字段，不属于 DTE 32B 包头的已冻结位域；TS 的 RMEM 返回按 UID 处理，线格式扩展保留为待统一项。
+* RMEM Done 仅带 UID／valid，TS 匹配有效且已绑定 UID 的槽，恢复空间；不读取当前 TID，不比较 PID，不完成任何任务。
 
-DTE 的动作：DTE 中要有一份 RouterTable，按 PathID 查到 VC；本级 Rmem 资源 TS 下发前已申请到，DTE dispatch 时不查 VC credit，本地 DTE↔Router 反压由 CoreStation 的 DteReady 在 flit 层兜住。
+DTE 的动作：VCID来自TS命令的实际PID路由属性；下发只要求RD驻留空闲和WR Q有位。TX逐VC消费credit，最后flit发出及读侧drain完成后WR回写Entry，Ack按全局接纳顺序反馈TS。
 
 ***
 
@@ -2546,7 +2546,7 @@ R core 之间每行一跳：从本行 R core 的南口下到下一层最后一�
 <rect x="40" y="230" width="150" height="60" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.3"/>
 <text x="48" y="245" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="10.5" fill="#2563eb" font-weight="700" text-anchor="start">TS</text>
 <text x="48" y="259" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">链一每来一包激活一次</text>
-<text x="48" y="271" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">链二自启动，stream 复位后占满</text>
+<text x="48" y="271" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#5c6370" font-weight="400" text-anchor="start">链二首Trigger激活，完成后本地重生</text>
 <path d="M115 180 L115 229.3" stroke="#d97706" stroke-width="1.4" fill="none" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#rfar)"/>
 <text x="122" y="210" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7.5" fill="#d97706" font-weight="400" text-anchor="start">trigger</text>
 <rect x="220" y="80" width="400" height="130" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
@@ -2579,7 +2579,7 @@ R core 之间每行一跳：从本行 R core 的南口下到下一层最后一�
 <text x="444" y="301" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">本 core 的两个操作数，从 Matrix Mem</text>
 <text x="444" y="313" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">送进本级 Rmem（Core 多操作数）</text>
 <text x="444" y="325" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">链首那一行只送本行一笔</text>
-<text x="444" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">逐级 reduce 任务，由 Router 报完成</text>
+<text x="444" y="337" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">逐级reduce双ACK完成；Router返回RMEM空间</text>
 <rect x="640" y="260" width="190" height="100" rx="5" fill="#ffffff" stroke="#2563eb" stroke-width="1.3"/>
 <text x="648" y="275" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="9.5" fill="#16181d" font-weight="700" text-anchor="start">Rmem（本级 Router）</text>
 <text x="648" y="289" font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif" font-size="7" fill="#5c6370" font-weight="400" text-anchor="start">两笔相加：BF16 进、FP32 累加、BF16 出</text>
@@ -2637,14 +2637,14 @@ Share Mem 里的四样：
 | - | - | - |
 | datain | DTE | 照包头 `dst_addr` 配进核搬运（落哪一半由发方算好），搬完硬件置这一半的标志；映射表按 `user_id` 加一，不等标志；非链首到两笔、链首到一笔时把 `user_id` 写进 FIFO 尾；最后弹掉包头 |
 
-**链二：送进 Rmem 相加并送出**，自启动，stream 复位后就占满。
+**链二：送进 Rmem 相加并送出**，自启动模式，首个已接受的 Router Trigger 激活全部启用槽。
 
 | task | 执行单元 | 内容 |
 | - | - | - |
 | 0 | MU | 比较 FIFO 的头尾指针。相等就继续等；不等就弹出队头 `user_id`，再等这一槽的标志置齐（非链首两半都置、链首一半），也就是该到的几笔都落进了 Matrix Mem；然后清掉这一槽的映射计数与两半标志，把槽号写进 `RC_SLOT_OFF[stream_id]`、把 `user_id` 写回身份寄存器，向 TS 报完成（可以顺手再创建一个新 stream） |
-| 1 | DTE | 逐级 reduce 任务。按 `RC_SLOT_OFF[stream_id]` 里的槽号把两笔从 Matrix Mem 作为本 core 的两个操作数先后送进本级 Rmem；Rmem 相加后直接往下游发，不回本 core：不是链尾就送往下一行的 R core，是链尾（第 11 行）就经 PCIe Switch 送进 SNIC DPU 的 DDR，目的地址由 `(gpu_id, token_id)` 算出。Rmem 发完向 TS 报完成，任务链结束，释放 stream 与 Matrix Mem 空间 |
+| 1 | DTE | 逐级 reduce 任务。按 `RC_SLOT_OFF[stream_id]` 里的槽号把两笔从 Matrix Mem 作为本 core 的两个操作数先后送进本级 Rmem；Rmem 相加后直接往下游发，不回本 core：不是链尾就送往下一行的 R core，是链尾（第 11 行）就经 PCIe Switch 送进 SNIC DPU 的 DDR，目的地址由 `(gpu_id, token_id)` 算出。DTE/RV 双 ACK 完成该任务，RMEM 发完按 UID 归还空间；两类条件满足后才允许用户退休和软件复用槽位 |
 
-两笔都从本 core 出来，走 Router 的 Core 多操作数模式：core 方向把同一用户先后送出的两包分到 Rmem 的两路输入上（《Router》线上版：“Rmem支持一个方向来的多个操作数（需要配置特殊模式），但是不支持操作数精度不一致”）。相加按第二层同一套数值规则：BF16 进、FP32 累加、BF16 出，包头之后的 16 B 软件辅助信息不参与加法，结果照抄首笔的包头。
+两笔都从本 core 出来，走 Router 的 Core 多操作数模式：core 方向把同一用户先后送出的两包分到 Rmem 的两路输入上（《Router》线上版：“Rmem支持一个方向来的多个操作数（需要配置特殊模式），但是不支持操作数精度不一致”）。相加按第二层同一套数值规则：BF16 进、FP32 累加、BF16 出，32B包头中的sw_aux不参与数值累加，结果保存需要的软件字段；当前模型另有payload前缀，迁移范围在缺口文档登记。
 
 两条链用的不是同一套 stream_id；链一的两个方向也分别对应两个不同的 stream。
 
@@ -2880,7 +2880,7 @@ bit 级一致性：Router reduce 按到达顺序 FP32 累加，MU 的 CSA 树按
 | 本行没有激活专家时 R core 怎么知道 | 这一行的 R core 只转发上一行的结果，不相加 | 判断方式待定，见第 8 章 |
 | R core 求和做在哪 | 链二的 DTE 把两笔从 Matrix Mem 送进本级 Rmem 相加（《EP组间Reduction讨论（过程）》“Reduction计算通路”末尾：“可以选择不在VU做reduction计算，在Router进行计算，数据先来在Matrix Mem存储，用户的另一个累加数据到达后通知DTE将数据搬运到Router计算后直接向下游输出”） | 《软件计算流程详细评估》“各行间FC2 psum reduction”：“使用VU完成两行间redcution”；同文与“core 内调度机制”的 R core 示例链是四步（MU 查、DTE 搬进 Core Mem、VU 求和、DTE 搬出）。按用户决定取前者，见第 8 章 |
 | R core 在哪个 core | 最后一列每颗 chip 的 `core9`，也就是 chip 的南口；每行一个，共 12 个 | 《编译器设计构想》给的候选是最后一列 chip 的 core4、core9，两个都不在该 chip 的 8 个计算 core 里，EP 组切分不受影响 |
-| reduce 任务的拆分 | 一笔 32 KB 的 reduce 拆成链上几项 8 KB 的逐级 reduce 任务，一项做完再发下一项（TS MAS 与 TS LLD） | 《软件计算流程详细评估》：TS 并行发射多笔，以保证 reduce 的计算延迟 |
+| reduce 任务的拆分 | 一笔 32 KB 的 reduce 拆成链上几项 8 KB 的逐级 reduce 任务，每项双ACK完成后可推进；下一Reduce仍须等本SID的RMEM归还（TS详设） | 《软件计算流程详细评估》：TS 并行发射多笔，以保证 reduce 的计算延迟 |
 | dispatcher 是谁 | Bach core，顺序调度 | slave CPU 做 dispatcher 可乱序，需 CPU 管理每组 reduction 资源 |
 | PPTP 下 silu · dot · 量化落在哪段 chip | `pptp_fc3_nk_dot_core` 在 FC3 chip | 软件流程梳理：FC1 / FC3 的 reduce 结果都落到 FC2 段 chip 的 core 0 |
 
@@ -2905,9 +2905,9 @@ bit 级一致性：Router reduce 按到达顺序 FP32 累加，MU 的 CSA 树按
 
 配图：
 
-* [EP 组间 Reduction 讨论 10 张](<Bach/02_二、需求分析/04_第二阶段需求分析（功能扩展）/02_EP组间Reduction讨论（过程）>)（`d08` Reduction 传输通路、`d09` core 内计算流程、卡死场景、解卡死机制、派遣机制）
-* [Router 12 张](<Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)（`05` Core 出 Reduce、`06` ReduceModule 之间、`11` Reduce Module 数据通路与 Credit 职责边界）
-* [core 内调度机制](<Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制>)（`d40` R core 的 task_chain 四步）
+* [EP 组间 Reduction 讨论 10 张](</home/colin/develop/perfechpitch/Bach/02_二、需求分析/04_第二阶段需求分析（功能扩展）/02_EP组间Reduction讨论（过程）>)（`d08` Reduction 传输通路、`d09` core 内计算流程、卡死场景、解卡死机制、派遣机制）
+* [Router 12 张](</home/colin/develop/perfechpitch/Bach/04_四、MAS（Micro Architecture SPEC）/04_Router>)（`05` Core 出 Reduce、`06` ReduceModule 之间、`11` Reduce Module 数据通路与 Credit 职责边界）
+* [core 内调度机制](</home/colin/develop/perfechpitch/Bach/02_二、需求分析/06_第四阶段需求分析（Core Level需求分析）/04_core内调度机制>)（`d40` R core 的 task_chain 四步）
 
 来源：
 

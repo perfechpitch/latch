@@ -4,9 +4,9 @@
 // 把编译器产的那份 bundle 装进模型。
 //
 // 一套 bundle 占 `bundle/<拓扑名>/` 一个目录，里面两样：一份 .bachir 与三份
-// kernel 镜像。前者一行一条记录，装的是每颗 chip 的 core_bad_mask、算好的路由表、
-// 任务链与各 core 的全局项；后者是三个 RV core 的镜像。每套自己带全，装载只看
-// 自己这个目录。
+// kernel 镜像。前者一行一条记录，装的是每颗 chip 的
+// core_bad_mask、算好的路由表、 任务链与各 core 的全局项；后者是三个 RV core
+// 的镜像。每套自己带全，装载只看 自己这个目录。
 //
 // 真机上这是 SCP 的活：boot 期经 ctrl_noc 把每张表写进各 IP。这里走的是同一批
 // 配置口，只是直接调方法而不过 ctrl_noc，写入顺序照《SCP 工作流程》那一节：
@@ -20,18 +20,20 @@
 // 记录的字段顺序与 compiler/hwconfig/bachir.py 的 render_plan 一一对应，改一边
 // 要一起改。
 
-#include <fstream>
 #include <array>
-#include <tuple>
+#include <fstream>
+#include <iomanip>
+#include <algorithm>
 #include <map>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "base/log.h"
 #include "bach/ip/chip/chip.h"
 #include "bach/ip/lpu_grid.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
@@ -46,11 +48,15 @@ struct BundleStat {
 
 namespace bundle_detail {
 
-using CoreKey = std::pair<uint64_t, uint64_t>;   // (chip 号, 片内 core 号)
+using CoreKey = std::pair<uint64_t, uint64_t>; // (chip 号, 片内 core 号)
 
 // 一个 core 上要装的全部东西，读完再一起应用：TS 的合规性检查在写
 // TS_INIT_FINISH 那一步做，任务链得先写全。
+struct FileSpan { std::string segment, file; uint64_t dest, offset, bytes; };
 struct CorePlan {
+  std::vector<FileSpan> spans;
+  bool bachflow_abi=false, nk=false, explicit_init=false, init=false;
+  int64_t logical=-1;
   bool has_role = false;
   CoreRole role = CoreRole::kSpare;
   uint64_t stream_num = 1;
@@ -61,27 +67,30 @@ struct CorePlan {
   std::map<uint64_t, TaskEntry> chain;
   std::map<uint64_t, RouteEntry> rtab;
   std::vector<uint64_t> dte_rtab;
-  std::map<uint64_t, uint64_t> path_task;          // DTE 那一份 path_task_map
-  std::map<uint64_t, std::pair<uint64_t, uint64_t>> ts_route;  // PID → {方向, VCID}
-  std::map<uint64_t, uint64_t> release_route;   // 入口方向 → Release 路由的出方向掩码
+  std::map<uint64_t, uint64_t> path_task; // DTE 那一份 path_task_map
+  std::map<uint64_t, std::pair<uint64_t, uint64_t>>
+      ts_route; // PID → {方向, VCID}
+  std::map<uint64_t, uint64_t>
+      release_route; // 入口方向 → Release 路由的出方向掩码
   uint64_t datain_pc = 0;
   bool datain_weights = false;
   bool has_datain = false;
-  Route dtein_route = Route::kRouterToCm;        // DTEIN 声明的落点，只用于角色校验
+  Route dtein_route = Route::kRouterToCm; // DTEIN 声明的落点，只用于角色校验
   bool has_dtein = false;
   std::vector<std::pair<uint64_t, uint64_t>> vu_static;  // (vu_off, data)
-  std::array<std::string, 3> kernels{};
-  std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> dsa_regs;
-  std::map<uint64_t, uint64_t> smem;
+  std::array<std::string, 3> images{};  // KERNELCORE：按 RV 号覆盖全局 KERNEL
+  std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> dsa_regs;  // unit, off, val
+  std::vector<std::pair<uint64_t, uint64_t>> smem;  // off, val
 };
 
-inline uint64_t Num(std::string const& s) {
+inline uint64_t Num(std::string const &s) {
   return uint64_t(std::stoull(s, nullptr, 0));
 }
 
 // 检查不过时报出是哪个 core、哪一条。
-inline void Require(bool ok, CoreKey const& key, char const* what) {
-  if (ok) return;
+inline void Require(bool ok, CoreKey const &key, char const *what) {
+  if (ok)
+    return;
   spdlog::error("LoadBundle: chip {} core {}：{}", key.first, key.second, what);
   LOGCHECK(false, "LoadBundle: 装载检查没过。");
 }
@@ -90,7 +99,8 @@ inline void Require(bool ok, CoreKey const& key, char const* what) {
 inline void CheckBadMask(uint64_t chip, uint64_t mask) {
   uint64_t row_bad[2] = {0, 0};
   for (uint64_t c = 0; c < kChipCoreNum; ++c) {
-    if ((mask >> c) & 1u) ++row_bad[c / kChipCols];
+    if ((mask >> c) & 1u)
+      ++row_bad[c / kChipCols];
   }
   if (mask < (1ull << kChipCoreNum) && row_bad[0] <= 1 && row_bad[1] <= 1) {
     return;
@@ -101,55 +111,58 @@ inline void CheckBadMask(uint64_t chip, uint64_t mask) {
 
 // 坏 core：不派角色，只有 RTAB 与 RELROUTE 两种记录，RTAB 表项一律不进 core、
 // op_type 为 transfer、不查 stream 表、不转存。
-inline void CheckBadCore(CoreKey const& key, CorePlan const& c) {
+inline void CheckBadCore(CoreKey const &key, CorePlan const &c) {
   Require(c.role == CoreRole::kSpare, key, "坏 core 的角色要是不派角色");
   Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
               c.ts_route.empty() && c.dte_rtab.empty() && c.path_task.empty() &&
-              c.vu_static.empty(),
+              c.vu_static.empty() && c.dsa_regs.empty() && c.smem.empty() &&
+              c.images[0].empty() && c.images[1].empty() && c.images[2].empty(),
           key, "坏 core 上只能有 RTAB 与 RELROUTE");
-  for (auto const& one : c.rtab) {
-    RouteEntry const& e = one.second;
+  for (auto const &one : c.rtab) {
+    RouteEntry const &e = one.second;
     Require(e.path_core_bypass && e.op_type == OpType::kTransfer &&
                 e.stream_need == 0 && !e.stall_way,
-            key, "坏 core 的 RTAB 表项只能转发：不进 core、transfer、不查 stream "
-                 "表、留在 VC 等");
+            key,
+            "坏 core 的 RTAB 表项只能转发：不进 core、transfer、不查 stream "
+            "表、留在 VC 等");
   }
 }
 
 // 好 core：角色与体现角色的那几项配置对得上。
-inline void CheckRole(CoreKey const& key, CorePlan const& c) {
+inline void CheckRole(CoreKey const &key, CorePlan const &c) {
   bool b = c.role == CoreRole::kBroadcast;
   bool r = c.role == CoreRole::kReduce;
   Require(c.bcast_dirs == 0 || b, key, "只有 B core 的 B_CORE_DIRECTION 非 0");
   switch (c.role) {
-    case CoreRole::kCompute:
-      Require(!c.self_start, key, "计算 core 的 SELF_START 要是 0");
-      Require(c.has_dtein && c.dtein_route == Route::kRouterToCm, key,
-              "计算 core 的 DTEIN 要落 Core Mem");
-      break;
-    case CoreRole::kBroadcast:
-    case CoreRole::kReduce:
-      Require(c.has_cfg && c.self_start, key,
-              b ? "B core 的 SELF_START 要是 1" : "R core 的 SELF_START 要是 1");
-      Require(c.has_dtein && c.dtein_route == Route::kRouterToMm, key,
-              r ? "R core 的 DTEIN 要落 Matrix Mem"
-                : "B core 的 DTEIN 要落 Matrix Mem");
-      break;
-    case CoreRole::kSpare:
-      Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
-                  c.vu_static.empty(),
-              key, "不派角色的 core 不能有 CFGMISC、TCHAIN、DATAIN、DTEIN、"
-                   "VUSTATIC");
-      break;
+  case CoreRole::kCompute:
+    Require(!c.self_start, key, "计算 core 的 SELF_START 要是 0");
+    Require(c.has_dtein && c.dtein_route == Route::kRouterToCm, key,
+            "计算 core 的 DTEIN 要落 Core Mem");
+    break;
+  case CoreRole::kBroadcast:
+  case CoreRole::kReduce:
+    Require(c.has_cfg && c.self_start, key,
+            b ? "B core 的 SELF_START 要是 1" : "R core 的 SELF_START 要是 1");
+    Require(c.has_dtein && c.dtein_route == Route::kRouterToMm, key,
+            r ? "R core 的 DTEIN 要落 Matrix Mem"
+              : "B core 的 DTEIN 要落 Matrix Mem");
+    break;
+  case CoreRole::kSpare:
+    Require(!c.has_cfg && c.chain.empty() && !c.has_datain && !c.has_dtein &&
+                c.vu_static.empty(),
+            key,
+            "不派角色的 core 不能有 CFGMISC、TCHAIN、DATAIN、DTEIN、"
+            "VUSTATIC");
+    break;
   }
 }
 
-}  // namespace bundle_detail
+} // namespace bundle_detail
 
 // 装一套 bundle。root 是 bundle 根目录，name 是拓扑名：这一套在 root/name/ 下，
 // 配置是 name.bachir，kernel 镜像按记录里的文件名从同一个目录取。
-inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
-                             std::string const& root, std::string const& name) {
+inline BundleStat LoadBundle(std::vector<Chip *> const &chips,
+                             std::string const &root, std::string const &name) {
   using bundle_detail::CoreKey;
   using bundle_detail::CorePlan;
   using bundle_detail::Num;
@@ -164,31 +177,42 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
   }
 
   std::map<CoreKey, CorePlan> plan;
-  std::map<uint64_t, uint64_t> bad_mask;   // chip 号 → core_bad_mask
-  std::vector<std::string> images;   // 三个 RV core 各一份，按 RV core 号排
+  std::map<uint64_t, uint64_t> bad_mask; // chip 号 → core_bad_mask
+  std::vector<std::string> images;       // 三个 RV core 各一份，按 RV core 号排
   images.resize(3);
   BundleStat stat;
 
   std::string line;
   bool head_ok = false;
   bool pcode = false;
+  bool packed = false;
   while (std::getline(fp, line)) {
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
     std::istringstream ss(line);
     std::vector<std::string> tok;
     std::string one;
-    while (ss >> one) tok.push_back(one);
-    if (tok.empty()) continue;
-    std::string const& tag = tok[0];
+    while (ss >> std::quoted(one))
+      tok.push_back(one);
+    if (tok.empty())
+      continue;
+    std::string const &tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && (tok[1] == "10" || tok[1] == "11"),
-               "LoadBundle: unsupported BACHIR version.");
+      LOGCHECK(tok.size() == 2 && (tok[1] == "10" || tok[1] == "11" || tok[1] == "12"),
+               "LoadBundle: only BACHIR 10, 11 and 12 are supported.");
       pcode = tok[1] == "11";
+      packed = tok[1] == "12";
+      DtePcodeFormat() = pcode;
+      DtePayloadAuxBytes() = (pcode || packed) ? 0 : kReduceSwHeaderBytes;
+      DteSegValidShift() =
+          tok[1] == "11" ? kDteSegValidShiftPcode : kDteSegValidShift;
+      DteInboundDropsTail() = false;
       head_ok = true;
       continue;
     }
-    if (tag == "SOURCE" || tag == "NAME") continue;
+    if (tag == "SOURCE" || tag == "NAME")
+      continue;
     if (tag == "CHIP") {
       LOGCHECK(tok.size() == 3, "LoadBundle: CHIP 记录要两个字段。");
       bad_mask[Num(tok[1])] = Num(tok[2]);
@@ -209,19 +233,23 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     }
     CoreKey key(Num(tok[1]), Num(tok[2]));
     LOGCHECK(key.second < kChipCoreNum, "LoadBundle: core 号越界。");
-    CorePlan& c = plan[key];
+    CorePlan &c = plan[key];
 
-    if (tag == "KERNELCORE") {
-      LOGCHECK(pcode && tok.size() == 5 && Num(tok[3]) < 3,
-               "LoadBundle: invalid KERNELCORE.");
-      c.kernels[Num(tok[3])] = tok[4];
-    } else if (tag == "DSAREG") {
-      LOGCHECK(pcode && tok.size() == 6 && Num(tok[3]) < 3,
-               "LoadBundle: invalid DSAREG.");
-      c.dsa_regs.emplace_back(Num(tok[3]), Num(tok[4]), Num(tok[5]));
-    } else if (tag == "SMEM") {
-      LOGCHECK(pcode && tok.size() == 5, "LoadBundle: invalid SMEM.");
-      c.smem[Num(tok[3])] = Num(tok[4]);
+    if (tag == "COREMAP") {
+      LOGCHECK(packed && tok.size()==4,"invalid COREMAP");
+      c.logical=std::stoll(tok[3]); LOGCHECK(c.logical>=-1 && c.logical<=8,"COREMAP logical out of range");
+    } else if(tag == "ABI") {
+      LOGCHECK(packed && tok.size()==4 && tok[3]=="bachflow","unsupported ABI"); c.bachflow_abi=true;
+    } else if(tag == "FORMAT") {
+      LOGCHECK(packed && tok.size()==4 && tok[3]=="nk","unsupported matrix format"); c.nk=true;
+    } else if(tag == "INITFINISH") {
+      LOGCHECK(packed && tok.size()==4 && Num(tok[3])<=1,"invalid INITFINISH"); c.explicit_init=true; c.init=Num(tok[3]);
+    } else if(tag == "FILESPAN") {
+      LOGCHECK(packed && tok.size()==8,"invalid FILESPAN");
+      c.spans.push_back({tok[3],tok[5],Num(tok[4]),Num(tok[6]),Num(tok[7])});
+    } else if (tag == "RNET") {
+      LOGCHECK(tok.size()==5 && Num(tok[3])<kPathNum && Num(tok[4])<kPathNum, "invalid RNET");
+      c.rtab[Num(tok[3])].reduce_task_path=Num(tok[4]);
     } else if (tag == "CORE") {
       LOGCHECK(tok.size() == 4, "LoadBundle: CORE 记录要三个字段。");
       uint64_t role = Num(tok[3]);
@@ -242,8 +270,9 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       TaskEntry e;
       e.task_pc = Num(tok[4]);
       e.send_unit = SendUnit(Num(tok[5]));
-      LOGCHECK(Num(tok[6]) <= 2,
-               "LoadBundle: TCHAIN 的 recv_unit 只有 0 RV、1 DSA、2 RV 与 DSA。");
+      LOGCHECK(
+          Num(tok[6]) <= 2,
+          "LoadBundle: TCHAIN 的 recv_unit 只有 0 RV、1 DSA、2 RV 与 DSA。");
       e.recv_unit = RecvUnit(Num(tok[6]));
       e.wait_wake = Num(tok[7]) != 0;
       e.task_type = TaskType(Num(tok[8]));
@@ -261,11 +290,13 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     } else if (tag == "DTEIN") {
       LOGCHECK(tok.size() == 7, "LoadBundle: DTEIN 记录要六个字段。");
       uint64_t route = Num(tok[3]);
-      LOGCHECK(route <= 1,
-               "LoadBundle: DTEIN 的 route 只有 0 落 Core Mem、1 落 Matrix Mem。");
+      LOGCHECK(
+          route <= 1,
+          "LoadBundle: DTEIN 的 route 只有 0 落 Core Mem、1 落 Matrix Mem。");
       c.dtein_route = route == 0 ? Route::kRouterToCm : Route::kRouterToMm;
-      // tok[4] 是旧的 no_ack 位、tok[5]/tok[6] 是旧的 flag_base / flag_entry_bytes，
-      // 回不回 Ack 与落点/标志表现在都由 kernel 配 CFG 表达，这三个字段读进来就丢。
+      // tok[4] 是旧的 no_ack 位、tok[5]/tok[6] 是旧的 flag_base /
+      // flag_entry_bytes， 回不回 Ack 与落点/标志表现在都由 kernel 配 CFG
+      // 表达，这三个字段读进来就丢。
       c.has_dtein = true;
     } else if (tag == "TSRTAB") {
       LOGCHECK(tok.size() == 6, "LoadBundle: TSRTAB 记录要五个字段。");
@@ -282,6 +313,19 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
     } else if (tag == "VUSTATIC") {
       LOGCHECK(tok.size() == 5, "LoadBundle: VUSTATIC 记录要四个字段。");
       c.vu_static.push_back({Num(tok[3]), Num(tok[4])});
+    } else if (tag == "KERNELCORE") {
+      LOGCHECK(tok.size() == 5, "LoadBundle: KERNELCORE 记录要四个字段。");
+      uint64_t rv = Num(tok[3]);
+      LOGCHECK(rv < c.images.size(), "LoadBundle: KERNELCORE 的 RV core 号越界。");
+      c.images[rv] = tok[4];
+    } else if (tag == "DSAREG") {
+      LOGCHECK(tok.size() == 6, "LoadBundle: DSAREG 记录要五个字段。");
+      uint64_t unit = Num(tok[3]);
+      LOGCHECK(unit <= 2, "LoadBundle: DSAREG 的 unit 只有 0 DTE、1 MU、2 VU。");
+      c.dsa_regs.push_back({unit, Num(tok[4]), Num(tok[5])});
+    } else if (tag == "SMEM") {
+      LOGCHECK(tok.size() == 5, "LoadBundle: SMEM 记录要四个字段。");
+      c.smem.push_back({Num(tok[3]), Num(tok[4])});
     } else if (tag == "RTAB") {
       LOGCHECK(tok.size() == 31, "LoadBundle: RTAB 记录要三十个字段。");
       RouteEntry e;
@@ -322,16 +366,17 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
   }
 
   // ── 装载检查 ──
-  for (auto const& it : bad_mask) {
+  for (auto const &it : bad_mask) {
     LOGCHECK(it.first < chips.size(), "LoadBundle: chip 号越界。");
     bundle_detail::CheckBadMask(it.first, it.second);
     for (uint64_t core = 0; core < kChipCoreNum; ++core) {
       auto found = plan.find(CoreKey(it.first, core));
       Require(found != plan.end() && found->second.has_role,
-              CoreKey(it.first, core), "每颗 chip 的 10 个 core 都要有 CORE 记录");
+              CoreKey(it.first, core),
+              "每颗 chip 的 10 个 core 都要有 CORE 记录");
     }
   }
-  for (auto const& it : plan) {
+  for (auto const &it : plan) {
     auto chip_it = bad_mask.find(it.first.first);
     Require(chip_it != bad_mask.end(), it.first, "所在的 chip 没有 CHIP 记录");
     bool bad = ((chip_it->second >> it.first.second) & 1u) != 0;
@@ -343,56 +388,114 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
   }
 
   // ── 装：先 core_bad_mask，再 Router 那两样，好 core 最后写 TS_INIT_FINISH ──
-  for (auto const& it : bad_mask) {
+  for (auto const &it : bad_mask) {
     chips[it.first]->SetCoreBadMask(it.second);
   }
-  for (auto const& it : plan) {
-    CorePlan const& c = it.second;
-    Core& core = chips[it.first.first]->GetCore(it.first.second);
+  for (auto const &it : plan) {
+    CorePlan const &c = it.second;
+    Core &core = chips[it.first.first]->GetCore(it.first.second);
 
-    for (auto const& one : c.rtab) {
+    for (auto const &one : c.rtab) {
       core.GetRouter().Preload(one.first, one.second);
     }
-    for (auto const& one : c.release_route) {
+    for (auto const &one : c.release_route) {
       core.GetRouter().SetCreditBypass(one.first, one.second);
     }
-    if (core.Bad()) continue;
-
+    if (core.Bad())
+      continue;
     core.SetPcodeMode(pcode);
-    // pcode kernels receive identity from TS and header context via DTE into
-    // Hmem (compute) or Cmem (B/R); none reads the legacy Router header FIFO.
-    core.GetRouter().GetCoreStation().SetSoftwareHeaderQueue(!pcode);
-    core.GetMu().Regfile().SetPcodeMode(pcode);
-    core.GetDte().Regfile().SetPcodeMode(pcode);
-    for (auto const& r : c.dsa_regs) {
-      uint64_t u = std::get<0>(r), off = std::get<1>(r), v = std::get<2>(r);
-      if (u == 0) core.GetDte().Regfile().CfgWrite(off, v);
-      if (u == 1) core.GetMu().Regfile().CfgWrite(off, v);
-      if (u == 2) core.GetVu().Preload(off, v);
+
+    if(c.bachflow_abi) for(uint64_t i=0;i<3;++i) core.Rv(i).Exec().SetBachflowAbi();
+    for (uint64_t i = 0; i < images.size(); ++i) {
+      std::string const& img = c.images[i].empty() ? images[i] : c.images[i];
+      if (!img.empty()) core.Rv(i).LoadImage(dir + "/" + img);
     }
-    for (auto const& r : c.smem) {
-      std::vector<uint8_t> bytes(4);
-      for (int k = 0; k < 4; ++k) bytes[k] = uint8_t(r.second >> (8 * k));
-      core.Smem().Poke(r.first, bytes);
+    for (auto const& one : c.dsa_regs) {
+      uint64_t unit = std::get<0>(one), off = std::get<1>(one),
+               val = std::get<2>(one);
+      if (unit == 0) core.GetDte().Regfile().ConfigWrite(off, val);
+      else if (unit == 1) core.GetMu().Regfile().CfgWrite(off, val);
+      else core.GetVu().Preload(off, val);
+    }
+    for (auto const& one : c.smem) core.PokeSmemWord(one.first, one.second);
+    std::vector<std::pair<bundle_detail::FileSpan,ByteBlock>> raw;
+    for(auto const& span:c.spans) {
+      LOGCHECK(span.bytes<=64ull*1024*1024,"FILESPAN excessive length");
+      std::string file=span.file;
+      if(file.empty() || file[0]!='/') file=dir+"/"+file;
+      std::ifstream input(file,std::ios::binary);
+      LOGCHECK(input.good(),"FILESPAN source missing");
+      input.seekg(0,std::ios::end); auto length=input.tellg();
+      LOGCHECK(length>=0 && span.offset<=uint64_t(length) && span.bytes<=uint64_t(length)-span.offset,"FILESPAN source out of bounds");
+      input.seekg(span.offset); ByteBlock data(span.bytes);
+      if(span.bytes) input.read(reinterpret_cast<char*>(data.data()),span.bytes);
+      LOGCHECK(!span.bytes || input.good(),"FILESPAN short read");
+      if(span.segment.rfind("itcm.",0)==0 || span.segment.rfind("dtcm.",0)==0) {
+        auto unit=span.segment.substr(5); uint64_t u=unit=="dte"?0:unit=="mu"?1:unit=="vu"?2:3;
+        LOGCHECK(u<3,"FILESPAN unknown RV unit");
+        if(span.segment[0]=='i') core.Rv(u).PokeItcm(span.dest,data);
+        else core.Rv(u).Exec().PokeDtcm(span.dest,data);
+      } else if(span.segment=="smem") core.Smem().Poke(span.dest,data);
+      else if(span.segment=="mmem" || span.segment=="mmem_sf") raw.push_back({span,std::move(data)});
+      else LOGCHECK(false,"FILESPAN unsupported segment");
+    }
+    auto byte_at=[&raw](std::string const& segment,uint64_t address)->uint8_t {
+      for(auto const& item:raw) if(item.first.segment==segment && address>=item.first.dest && address-item.first.dest<item.second.size()) return item.second[address-item.first.dest];
+      LOGCHECK(false,"NK image misses a referenced data/scale byte"); return 0;
+    };
+    if(c.nk && !raw.empty()) {
+      // The packed checkpoint is compact NK with padded SF rows. Convert the
+      // representation once at boot; all later accesses use normal SRAM ports.
+      std::map<uint64_t,std::array<uint64_t,10>> templates;
+      for(auto const& reg:c.dsa_regs) {
+        auto u=std::get<0>(reg),off=std::get<1>(reg);
+        if(u==1 && off>=0x1000 && off<0x1200 && (off-0x1000)%128<40)
+          templates[(off-0x1000)/128][((off-0x1000)%128)/4]=std::get<2>(reg);
+      }
+      std::set<uint64_t> loaded;
+      for(auto const& pair:templates) {
+        auto const& t=pair.second; uint64_t mode=t[9],pk=(mode&1)?64:128,pn=(mode&1)?128:64;
+        uint64_t n=(t[0]&65535)*pn,k=(t[0]>>16)*pk,base=MuStripDocBase(t[6]),stride=t[7];
+        if(!n || !k || !stride) continue;
+        LOGCHECK(((mode>>5)&3)==1,"NK loader currently requires MXFP8 weights");
+        for(auto const& source:raw) if(source.first.segment=="mmem") {
+          uint64_t first=source.first.dest>base ? (source.first.dest-base+stride-1)/stride : 0;
+          for(uint64_t slot=first; base+slot*stride<source.first.dest+source.second.size();++slot) {
+            uint64_t at=base+slot*stride;
+            if(at<source.first.dest || at+n*k>source.first.dest+source.second.size() || !loaded.insert(at).second) continue;
+            ByteBlock data(n*k),scales(n*k/32);
+            for(uint64_t ni=0;ni<n/pn;++ni) for(uint64_t ki=0;ki<k/pk;++ki) for(uint64_t row=0;row<pn;++row) {
+              uint64_t src=at+(ni*pn+row)*k+ki*pk, dst=((ni*(k/pk)+ki)*pn+row)*pk;
+              for(uint64_t col=0;col<pk;++col) data[dst+col]=byte_at("mmem",src+col);
+              for(uint64_t col=0;col<pk/32;++col) {
+                uint64_t addr=src+col*32,block=addr-addr%128;
+                uint64_t sf=(block%(16*1024*1024))/128*32+(block>=16*1024*1024?16:0)+(addr%128)/32;
+                scales[dst/32+col]=byte_at("mmem_sf",sf);
+              }
+            }
+            core.Mmem().Poke(at,data); core.Mmem().PokeScale(at,scales);
+          }
+        }
+      }
+      LOGCHECK(!loaded.empty(),"NK image has no complete matrix for a configured MU template");
+    } else for(auto const& item:raw) {
+      LOGCHECK(item.first.segment=="mmem","raw mmem_sf requires FORMAT nk");
+      core.Mmem().Poke(item.first.dest,item.second);
     }
 
-    for (uint64_t i = 0; i < images.size(); ++i) {
-      std::string const& image = c.kernels[i].empty() ? images[i] : c.kernels[i];
-      if (!image.empty()) core.Rv(i).LoadImage(dir + "/" + image);
-    }
     for (uint64_t path_id : c.dte_rtab) {
       auto found = c.rtab.find(path_id);
       LOGCHECK(found != c.rtab.end(),
                "LoadBundle: RTABDTE 指的 path 在 RTAB 里没有。");
       core.GetDte().Tables().PreloadRtab(path_id, found->second);
     }
-    for (auto const& one : c.path_task) {
+    for (auto const &one : c.path_task) {
       core.GetDte().Tables().PreloadPathTask(one.first, one.second);
     }
-    for (auto const& one : c.vu_static) {
+    for (auto const &one : c.vu_static) {
       core.GetVu().Preload(one.first, one.second);
     }
-    for (auto const& one : c.ts_route) {
+    for (auto const &one : c.ts_route) {
       core.GetTs().Cfg().WriteRouterTable(one.first, one.second.first,
                                           one.second.second);
     }
@@ -402,19 +505,22 @@ inline BundleStat LoadBundle(std::vector<Chip*> const& chips,
       core.GetTs().Cfg().SetBCoreDirection(c.bcast_dirs);
       core.GetTs().Cfg().SetTriggerChainEn(c.trigger_chain_en);
     }
-    for (auto const& one : c.chain) {
+    for (auto const &one : c.chain) {
       core.GetTs().Cfg().WriteTask(one.first, one.second);
     }
     if (c.has_datain) {
       core.GetTs().Cfg().WriteDatainTask(c.datain_pc, c.datain_weights);
     }
     // 写 TS_INIT_FINISH：查整张配置表，自启动的 core 随即建满表项。
-    core.GetTs().InitFinish();
+    if (core.GetTs().Cfg().HasTask() && (!c.explicit_init || c.init)) {
+      core.GetTs().InitFinish();
+      core.GetDte().Resume();
+    }
   }
   return stat;
 }
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

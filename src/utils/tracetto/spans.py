@@ -1,4 +1,4 @@
-"""从波形里推出每个 core 的十条派生行。
+"""从波形里推出每个 core 的十三条派生行。
 
 波形是逐拍采样的，一个信号只在值变化时记一笔。所以“某一位连续为 1”就是它相邻两笔之间
 的那段，段的拍数是两个时间戳之差。段的形状统一是 `[t0, t1, user, task]`，`user` / `task`
@@ -10,9 +10,14 @@
 各家把完成报回去那一拍。一条边沿事件带 8 bit 的 task 与 16 bit 的 user，本拍没有事件
 的那一路填占位（0xFF / 0xFFFF），与 `ts_task` / `ts_user` 同一套打包。
 
-TS 那三行不是一对边沿：DTE 仍是「下发 → DTE DSA 完成」，MU / VU 换成了「TaskCtrl 把
-这一步装进 stream → 这一路的 RV core 接下它」—— 后者两端来自形状完全不同的两种信号
-（起点是单调计数器 + 标量身份，终点是位掩码 + 按位打包），所以配对按 (user, task)。
+TS 那一族（TS-DTE-DATAIN / TS-DTE / TS-MU / TS-VU）量的都是**「这一步在 TS 里等了多久」**：
+终点都是这一路的 RV core 接下它（`rv_start`）。DTE 的起点是 `ts_install` 那一拍
+（计数器看见 accepted）；TS-MU / TS-VU 再往前一拍，落在表收下后继的那一拍，见
+`step_chain()`。DTE 那一路有两类任务（主线 + Router 触发的搬入），所以拆成两行 ——
+主线那刻是「装进 stream」，搬入那刻是「被下发」，见 `dte_spans()`。
+
+起点那一侧是**单调计数器 + 标量身份**（不是位掩码），终点那一侧是位掩码 + 按位打包，
+形状完全不同，所以配对一律按 (user, task)。
 """
 
 from __future__ import annotations
@@ -55,64 +60,208 @@ SIG_DSA_START_USER = "dsa_start_user"
 SIG_DSA_DONE = "dsa_done"
 SIG_DSA_DONE_TASK = "dsa_done_task"
 SIG_DSA_DONE_USER = "dsa_done_user"
-# VU 那条 task 起点宏指令的两端，比 DSA 那对更靠前：起点是 config_register 收下
-# trigger 那一拍，终点是同一条真正发行进执行流水那一拍。只有 VU 有，位掩码上只抬
-# bit2，另两位恒 0。
+# 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）：自启动 core 的 Bypass DataIn（链一，
+# 保留号 63）与权重加载阶段的 datain。只有 DTE 抬 bit0。与上面那对**互斥** —— 一个完成
+# 只走一支，所以两条流不相交，DTE-DSA 的终点直接并起来当一条流用即可。
+SIG_DSA_NOACK = "dsa_done_noack"
+SIG_DSA_NOACK_TASK = "dsa_done_noack_task"
+SIG_DSA_NOACK_USER = "dsa_done_noack_user"
+# 一笔任务在单元里的两端，比 DSA 那对更靠前：起点是单元把它收进自己的配置入口那一拍
+# （MU 写 TASK_TRIGGER 被 regfile 锁成一笔、VU 被 config_register 收下 trigger），
+# 终点是它真正发行进执行通路那一拍（MU 第一个 tile 开始发起访存、VU 宏指令进流水）。
+# MU 抬 bit1、VU 抬 bit2，DTE 恒 0。
 SIG_TASK_TRIG = "dsa_task_trigger"
 SIG_TASK_TRIG_TASK = "dsa_task_trigger_task"
 SIG_TASK_TRIG_USER = "dsa_task_trigger_user"
 SIG_TASK_DISP = "dsa_task_dispatch"
 SIG_TASK_DISP_TASK = "dsa_task_dispatch_task"
 SIG_TASK_DISP_USER = "dsa_task_dispatch_user"
+# 一笔任务在矩阵执行单元里进出所跨那一段的两端。只有 MU 有（恒抬 bit1）：起点是
+# 第一个 tile 进 exe、终点是最后一个 tile 的后一拍，量的是这笔任务的真实 MAC 时间
+# （kblock × 专家数 × nblock 拍），不把 10 级流水深度算进去。
+SIG_CALC_START = "dsa_calc_start"
+SIG_CALC_START_TASK = "dsa_calc_start_task"
+SIG_CALC_START_USER = "dsa_calc_start_user"
+SIG_CALC_DONE = "dsa_calc_done"
+SIG_CALC_DONE_TASK = "dsa_calc_done_task"
+SIG_CALC_DONE_USER = "dsa_calc_done_user"
+# CALC 起点的尺寸与数据类型（标量，只有 MU 有）：专家数 / K / N（M 恒为 1，不存）、
+# K/N 各分几块、原语本身的 K/N、token/weight 的 dtype 码、输出是否 BF16。在 calc_start
+# 那一拍与 task / user 一起锁存（mu.h Ctrl::Compute），Perfetto 的 MU-DSA-CALC args
+# 靠它们带上 expert_num 与 M×K×N 等 GEMM 规模。
+SIG_CALC_START_EXPERT = "dsa_calc_start_expert"
+SIG_CALC_START_K = "dsa_calc_start_k"
+SIG_CALC_START_N = "dsa_calc_start_n"
+SIG_CALC_START_KBLOCK = "dsa_calc_start_kblock"
+SIG_CALC_START_NBLOCK = "dsa_calc_start_nblock"
+SIG_CALC_START_PRIM_K = "dsa_calc_start_prim_k"
+SIG_CALC_START_PRIM_N = "dsa_calc_start_prim_n"
+SIG_CALC_START_ADTYPE = "dsa_calc_start_adtype"
+SIG_CALC_START_BDTYPE = "dsa_calc_start_bdtype"
+SIG_CALC_START_OUTBF16 = "dsa_calc_start_outbf16"
 
 # 三对边沿，每组六条：起点的位掩码 / task / user，终点的位掩码 / task / user。
 RV_EDGE = (SIG_RV_START, SIG_RV_START_TASK, SIG_RV_START_USER,
            SIG_RV_DONE, SIG_RV_DONE_TASK, SIG_RV_DONE_USER)
 DSA_EDGE = (SIG_DSA_START, SIG_DSA_START_TASK, SIG_DSA_START_USER,
             SIG_DSA_DONE, SIG_DSA_DONE_TASK, SIG_DSA_DONE_USER)
-# VU 那一对：trigger 收下 → 真正发行。
+# DTE-DSA 的**另一个**终点：完成了但不报的那一批。它不是一对边沿（起点的另一半），
+# 而是与 DSA_EDGE 的后三条**并列**的另一条完成流。
+NOACK_EDGE = (SIG_DSA_NOACK, SIG_DSA_NOACK_TASK, SIG_DSA_NOACK_USER)
+# MU / VU 那一对：收下 → 真正发行。
 TASK_START_EDGE = (SIG_TASK_TRIG, SIG_TASK_TRIG_TASK, SIG_TASK_TRIG_USER,
                    SIG_TASK_DISP, SIG_TASK_DISP_TASK, SIG_TASK_DISP_USER)
+# MU 那一对：第一个 tile 进执行单元 → 最后一个 tile 后一拍。**这不是一段的切分，而是
+# 嵌在 MU-DSA 里的子区间** —— 画面上它整段落在 MU-DSA 里面。
+CALC_EDGE = (SIG_CALC_START, SIG_CALC_START_TASK, SIG_CALC_START_USER,
+             SIG_CALC_DONE, SIG_CALC_DONE_TASK, SIG_CALC_DONE_USER)
 
 # 「装进 stream」那两条：也是六条，但是计数器不是位掩码，凑不成一对边沿，单独成组。
 STEP_SIGS = (SIG_TS_CREATE, SIG_TS_CREATE_TASK, SIG_TS_CREATE_USER,
              SIG_TS_INSTALL, SIG_TS_INSTALL_TASK, SIG_TS_INSTALL_USER)
+# CALC 起点的尺寸与数据类型（标量）。老波形没有，缺了 MU-DSA-CALC 的 args 里就没有尺寸。
+CALC_DIM_SIGS = (SIG_CALC_START_EXPERT, SIG_CALC_START_K, SIG_CALC_START_N,
+                 SIG_CALC_START_KBLOCK, SIG_CALC_START_NBLOCK,
+                 SIG_CALC_START_PRIM_K, SIG_CALC_START_PRIM_N,
+                 SIG_CALC_START_ADTYPE, SIG_CALC_START_BDTYPE,
+                 SIG_CALC_START_OUTBF16)
+# MU 发行那一拍的配置寄存器数（标量，只有 MU 有）。在 dsa_task_dispatch 同一拍锁存，
+# Perfetto 的 MU-Core args 靠它带上「这笔任务配置了多少个寄存器」。
+SIG_DISP_CFG_COUNT = "dsa_dispatch_cfg_count"
+
+# ── DTE 十条轨道的信号（挂在 chip<i>.core<j>.dte.<regfile|lane<k>> 下，不在 core
+#    级的 RE_CORE 里，所以由 dte_signal_paths 单独扫）──
+# 写 trigger 那一拍带身份，标量 dsa_trigger_cfg_count 在同一拍锁存「这笔任务配置过
+# 多少个寄存器」，Python 侧按 (user, task) 挂到 DTE-Core 那一行的 args。原来还有一条
+# 「配置 → trigger」的 dte_rvcore 轨道，已删（dsa_cfg_start 那条信号 C++ 里还照发，
+# 只是 Python 不再读它）。
+SIG_DTE_TRIGGER = "dsa_trigger"
+SIG_DTE_TRIGGER_TASK = "dsa_trigger_task"
+SIG_DTE_TRIGGER_USER = "dsa_trigger_user"
+# 写 trigger 那一拍的配置寄存器数（标量，与 dsa_trigger 同一拍锁存）。Perfetto 的
+# DTE-Core args 靠它带上「这笔任务配置了多少个寄存器」。
+SIG_DTE_TRIGGER_CFG_COUNT = "dsa_trigger_cfg_count"
+# 每条 lane 拆读/写两条轨道，两端都用这一半自己的「激活 → 做完」，身份取 desc 的
+# task_id / user_id：
+#   读轨道 = rd_start（RD 半激活）→ rd_done（RD 半读完，数据全回来）
+#   写轨道 = wr_start（WR 半激活）→ wr_done（发完最后一拍）
+SIG_DTE_RD_START = "rd_start"
+SIG_DTE_RD_START_TASK = "rd_start_task"
+SIG_DTE_RD_START_USER = "rd_start_user"
+SIG_DTE_RD_DONE = "rd_done"
+SIG_DTE_RD_DONE_TASK = "rd_done_task"
+SIG_DTE_RD_DONE_USER = "rd_done_user"
+SIG_DTE_WR_START = "wr_start"
+SIG_DTE_WR_START_TASK = "wr_start_task"
+SIG_DTE_WR_START_USER = "wr_start_user"
+SIG_DTE_WR_DONE = "wr_done"
+SIG_DTE_WR_DONE_TASK = "wr_done_task"
+SIG_DTE_WR_DONE_USER = "wr_done_user"
+# rd_start / wr_start 那一拍的四份内容（head/data/scale/topk）各多少字节。head 是
+# 固定 48 B 的包头上下文（段 0 恒参与），写这一半 MM→CM 不落包头记 0。
+SIG_DTE_RD_START_HEAD = "rd_start_head"
+SIG_DTE_RD_START_DATA = "rd_start_data"
+SIG_DTE_RD_START_SCALE = "rd_start_scale"
+SIG_DTE_RD_START_TOPK = "rd_start_topk"
+SIG_DTE_WR_START_HEAD = "wr_start_head"
+SIG_DTE_WR_START_DATA = "wr_start_data"
+SIG_DTE_WR_START_SCALE = "wr_start_scale"
+SIG_DTE_WR_START_TOPK = "wr_start_topk"
+# 同一拍各份内容从哪里读（rd）/写到哪（wr）的位置编码，见 lane.h 的 DteLoc：
+# 0 = none，1 = Hmem，2 = Core Mem，3 = Matrix Mem，4 = Router，5 = MU（topK_ep_table）。
+SIG_DTE_RD_START_HEAD_LOC = "rd_start_head_loc"
+SIG_DTE_RD_START_DATA_LOC = "rd_start_data_loc"
+SIG_DTE_RD_START_SCALE_LOC = "rd_start_scale_loc"
+SIG_DTE_RD_START_TOPK_LOC = "rd_start_topk_loc"
+SIG_DTE_WR_START_HEAD_LOC = "wr_start_head_loc"
+SIG_DTE_WR_START_DATA_LOC = "wr_start_data_loc"
+SIG_DTE_WR_START_SCALE_LOC = "wr_start_scale_loc"
+SIG_DTE_WR_START_TOPK_LOC = "wr_start_topk_loc"
+
+DTE_RD_EDGE = (SIG_DTE_RD_START, SIG_DTE_RD_START_TASK, SIG_DTE_RD_START_USER,
+               SIG_DTE_RD_DONE, SIG_DTE_RD_DONE_TASK, SIG_DTE_RD_DONE_USER)
+DTE_WR_EDGE = (SIG_DTE_WR_START, SIG_DTE_WR_START_TASK, SIG_DTE_WR_START_USER,
+               SIG_DTE_WR_DONE, SIG_DTE_WR_DONE_TASK, SIG_DTE_WR_DONE_USER)
+DTE_RD_BYTE = (SIG_DTE_RD_START_HEAD, SIG_DTE_RD_START_DATA,
+               SIG_DTE_RD_START_SCALE, SIG_DTE_RD_START_TOPK)
+DTE_WR_BYTE = (SIG_DTE_WR_START_HEAD, SIG_DTE_WR_START_DATA,
+               SIG_DTE_WR_START_SCALE, SIG_DTE_WR_START_TOPK)
+DTE_RD_LOC = (SIG_DTE_RD_START_HEAD_LOC, SIG_DTE_RD_START_DATA_LOC,
+              SIG_DTE_RD_START_SCALE_LOC, SIG_DTE_RD_START_TOPK_LOC)
+DTE_WR_LOC = (SIG_DTE_WR_START_HEAD_LOC, SIG_DTE_WR_START_DATA_LOC,
+              SIG_DTE_WR_START_SCALE_LOC, SIG_DTE_WR_START_TOPK_LOC)
+
+# ── Router 四个入口站（st_mid / st_left / st_right / st_core）的 flit 信号，挂在
+#    chip<i>.core<j>.router.st_<dir> 下，由 router_ingress_paths 单独扫。每个 flit
+#    进站那一拍记：是不是包头/包尾、user_id、path_id、包 size（数据通道字节数，含
+#    topK）。Perfetto 的 router 入口轨道按它折「收包头 → 收完包尾」一段。
+SIG_RTR_FLIT_HEAD = "flit_head"
+SIG_RTR_FLIT_TAIL = "flit_tail"
+SIG_RTR_FLIT_USER = "flit_user"
+SIG_RTR_FLIT_PATH = "flit_path"
+SIG_RTR_FLIT_SIZE = "flit_size"
+RTR_FLIT_SIGS = (SIG_RTR_FLIT_HEAD, SIG_RTR_FLIT_TAIL, SIG_RTR_FLIT_USER,
+                 SIG_RTR_FLIT_PATH, SIG_RTR_FLIT_SIZE)
+# 四个入口方向，与 router.h 的 kStationName 同一套顺序。
+ROUTER_DIRS = ("mid", "left", "right", "core")
+
+# Reduce 模块三路入口 + 一路出口的 flit 信号，挂在 chip<i>.core<j>.router.reduce 下
+# （信号名 mid/left/right/out 由 reduce_module.h 的 TraceReduceFlit 定）。字段名与
+# RTR_FLIT_SIGS 同一套（flit_head/tail/user/path/size）。入口是「收包头 → 收完包尾」，
+# 出口是「写包头 → 写完包尾」。三路入口与 reduce_in_mask 三位同一套编号：mid/left/right。
+REDUCE_SIDES = ("mid", "left", "right", "out")
 
 READ_SIGS = ((SIG_TS_UNIT, SIG_TS_TASK, SIG_TS_USER, SIG_TS_DONE) + RV_EDGE +
-             DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
-# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那六条也在
-# 这里 —— TS-MU / TS-VU 现在要读它们，老波形缺了那两行就是空的，得让人看见。
-NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS)
+             DSA_EDGE + TASK_START_EDGE + STEP_SIGS + CALC_EDGE + NOACK_EDGE +
+             CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,))
+# 2026-09 之后加的：比这更早的波形里一个都没有，认出来好把话说清楚。末尾那些也在
+# 这里 —— TS-MU / TS-VU 与 MU-DSA-CALC 现在要读它们，老波形缺了那些行就是空的。
+NEW_SIGS = ((SIG_TS_USER,) + RV_EDGE + DSA_EDGE + TASK_START_EDGE + STEP_SIGS +
+            CALC_EDGE + NOACK_EDGE + CALC_DIM_SIGS + (SIG_DISP_CFG_COUNT,))
 
-# 索引里一个 core 的十条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
+# 索引里一个 core 的十三条通道：(通道名, core_spans 里的那一组, 单元在位掩码里的位序)。
 # 顺序就是通道号的顺序 —— 定死，别改（改了索引与前端都要跟着动）。新加的通道一律
-# 追加在末尾，前面九条的通道号才不动（旧波形、旧断言都按号认）。
+# 追加在末尾，前面十二条的通道号才不动（旧波形、旧断言都按号认）。注意**通道号与行号
+# 不是一回事**：行序是纯呈现层，见下面的 ROWS。十三条通道都有对应的行。
 LANES = (
     ("TS · DTE", "chain", 0), ("TS · MU", "chain", 1), ("TS · VU", "chain", 2),
     ("DTE_Core", "core", 0), ("VU_Core", "core", 2), ("MU_Core", "core", 1),
     ("DTE_DSA", "dsa", 0), ("VU_DSA", "dsa", 2), ("MU_DSA", "dsa", 1),
     ("VU_DSA_ISQ", "vuisq", 2),
+    ("DTE_DATAIN", "datain", 0),
+    ("MU_DSA_ISQ", "muisq", 1),
+    ("MU_DSA_CALC", "calc", 1),
 )
 LANES_PER_CORE = len(LANES)
 
-# 画面上一个 core 的十行：(显示名, ((通道号, 颜色号), ...))。颜色一共十种。
+# 画面上一个 core 的十三行：(显示名, ((通道号, 颜色号), ...))。颜色一共十三种，
+# 每条通道一个颜色槽，槽表 SLOT_UNITS 按颜色号索引。
 #
-# TS 按设计文档拆成三行，DTE / MU / VU 各取一条通道。拆开之前是三条通道叠在同一
-# 格里靠颜色分 —— 那靠的是“实测三者在时间上从不重叠”（moe_lpu 全波形 1531756 个
-# 忙拍里 0 拍重叠）；即便如此，一眼答“哪一路在忙”仍要先认色，分开画就不用。其余
-# 六行各取一条通道，现在每行都只有一条 —— 多通道叠一行的机制（row_parts 一行列多
-# 个 part）留着，索引与前端都不用动它。
+# TS 那一族行都量「这一步在 TS 里等了多久」，按起点分：DTE 拆成主线（TS-DTE）与
+# Router 触发的搬入（TS-DTE-DATAIN）两行，MU / VU 各一行。DTE-DATAIN 摆在 TS-DTE
+# **正上方**，读起来连得上。拆开之前是几条通道叠在同一格里靠颜色分 —— 那靠的是
+# “实测它们在时间上从不重叠”；即便如此，一眼答“哪一路在忙”仍要先认色，分开画就不
+# 用。其余几行各取一条通道，现在每行都只有一条 —— 多通道叠一行的机制（row_parts
+# 一行列多个 part）留着，索引与前端都不用动它。
 #
 # 颜色只按“行”与“单元”分，与 user 无关：同一个颜色下可以有很多个 user，谁是谁
 # 靠段上的 User_id 字认。用户数上千，按 user 上色必然撞色，撞了反而更认不出来。
 ROWS = (
+    # 摆在 TS-DTE 上方：同一族里先看「Router 送来的」再看「主线自己的」。
+    ("TS-DTE-DATAIN", ((10, 10),)),
     ("TS-DTE", ((0, 0),)),
     ("TS-MU", ((1, 1),)),
     ("TS-VU", ((2, 2),)),
     ("DTE-Core", ((3, 3),)),
     ("DTE-DSA", ((6, 4),)),
     ("MU-Core", ((5, 5),)),
+    # MU 的 DSA 那一行也拆成两段：MU-DSA-ISQ 是「被 regfile 收下 → 真正发行进执行
+    # 通路」，MU-DSA 是「真正发行 → 完成」。与 VU 那两行同构。
+    ("MU-DSA-ISQ", ((11, 11),)),
     ("MU-DSA", ((8, 6),)),
+    # 与上面几行不同：**这不是切分，是嵌在 MU-DSA 里面的子区间** —— 量的是这笔任务的
+    # tile 在矩阵执行单元里进出所跨的那一段（真实 MAC 时间），整段落在 MU-DSA 里面。
+    ("MU-DSA-CALC", ((12, 12),)),
     ("VU-Core", ((4, 7),)),
     # VU 的 DSA 那一行拆成两段：VU-DSA-ISQ 是「trigger 收下 → 真正发行进执行流水」，
     # VU-DSA 是「真正发行 → EVENT_EN 退休」。两行首尾相接，起点那一拍是同一个。
@@ -125,11 +274,11 @@ ROW_NAMES = tuple(name for name, _ in ROWS)
 # 段上印的单元名：把“哪一行”也写进去（TS-DTE / CORE-DTE / DSA-DTE …）。
 #
 # 不只是好看：Perfetto 那种按名字上色的工具，名字一样就同一个颜色。原来 TS 那一行
-# 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后九个槽的
-# 名字两两不同。顺序与 ROWS 里的颜色槽一致。
+# 的 DTE 段与 DTE-Core 那一行的段都叫 `… DTE …`，于是同色；带上行名之后十三个槽
+# 名字两两不同。顺序与 ROWS 里的颜色槽一致（按颜色号索引，不是按行序）。
 SLOT_UNITS = ("TS-DTE", "TS-MU", "TS-VU",
               "CORE-DTE", "DSA-DTE", "CORE-MU", "DSA-MU", "CORE-VU", "DSA-VU",
-              "DSA-ISQ-VU")
+              "DSA-ISQ-VU", "DATAIN-DTE", "DSA-ISQ-MU", "DSA-CALC-MU")
 
 
 def row_parts() -> List[List[dict]]:
@@ -142,6 +291,12 @@ def row_parts() -> List[List[dict]]:
     return out
 
 RE_CORE = re.compile(r"^chip(\d+)\.core(\d+)\.(\w+)$")
+RE_DTE_REGFILE = re.compile(r"^chip(\d+)\.core(\d+)\.dte\.regfile\.(\w+)$")
+RE_DTE_LANE = re.compile(r"^chip(\d+)\.core(\d+)\.dte\.lane(\d+)\.(\w+)$")
+RE_ROUTER_STATION = re.compile(
+    r"^chip(\d+)\.core(\d+)\.router\.st_(mid|left|right|core)\.(\w+)$")
+RE_REDUCE = re.compile(
+    r"^chip(\d+)\.core(\d+)\.router\.reduce\.(mid|left|right|out)_(flit_\w+)$")
 
 
 def val_at(ts: list, vs: list, t: int) -> int:
@@ -154,22 +309,26 @@ def val_at(ts: list, vs: list, t: int) -> int:
 
 def issue_events(unit_ts: list, unit_vs: list, task_ts: list, task_vs: list,
                  user_ts: list, user_vs: list, bit: int) -> List[dict]:
-    """某一位上 0→1 的事件，带上那一拍该路的 task 与 user。
+    """某一位上的事件，带上那一拍该路的 task 与 user。
 
     `ts_unit` 与两条打包信号都是“本拍这一路有没有”的形状，所以下发、RV 起、RV 完、
     DSA 起、DSA 完这五种事件都走这一个函数。
+
+    这些位掩码是**一拍一笔的脉冲**（各家 `EmitXxx` 里每拍从 0 重新算、只在笔数变了的
+    那一拍置位）：同一路连着两拍都有完成时，掩码两拍同值（都是 1）、波形上只有一段，
+    按 0→1 边沿只数得到第一笔，第二笔会被并进上一笔，段就一直延到波形末。身份信号
+    task / user 每拍跟着变，把它们的时间点并进来就能把这一段展开成一拍一笔
+    （moe_lpu_tokens 上 DTE-DSA 那 2032 段正是这么漏的）。
     """
     out: List[dict] = []
-    prev = 0
-    for t, v in zip(unit_ts, unit_vs):
-        on = (v >> bit) & 1
-        if on and not prev:
+    times = sorted(set(unit_ts) | set(task_ts) | set(user_ts))
+    for t in times:
+        if (val_at(unit_ts, unit_vs, t) >> bit) & 1:
             out.append({
                 "t": t,
                 "task": (val_at(task_ts, task_vs, t) >> (8 * bit)) & 0xFF,
                 "user": (val_at(user_ts, user_vs, t) >> (16 * bit)) & 0xFFFF,
             })
-        prev = on
     return out
 
 
@@ -272,11 +431,14 @@ def user_spans(starts: List[dict], dones: List[dict],
 
 def step_chain(load: List[dict], issue: List[dict],
                rv_starts: List[dict], t_end: int) -> List[List[int]]:
-    """TS-MU / TS-VU 那一行：一步从「TaskCtrl 把它装进 stream」到「这一路的 RV core
-    接下它」。
+    """TS-MU / TS-VU 那一行：一步从「表收下后继」到「这一路的 RV core 接下它」。
 
-    量的是这一步在 TS 里等的时间 —— 等 credit、等发射通路空出来、等前一笔从 RV core
-    那边腾出槽位。不含 RV core 与 DSA 的任何时间。
+    量的是这一步在 TS 里等的时间 —— 等快照翻过来、等 credit、等发射通路空出来、等前
+    一笔从 RV core 那边腾出槽位。不含 RV core 与 DSA 的任何时间。
+
+    `ts_install` 在 TaskCtrl 看见 accepted 的那一拍才加一，表是上一拍收下的。认领仍
+    用计数器那一拍（它不晚于下发），画出来的起点减 1。减在这里，不改传给 `dte_spans`
+    的那份 `load`，TS-DTE 仍从计数器那一拍起算。
 
     三条流的形状各不相同：`load` 是装进 stream（整核一份的单调计数器），`issue` 是
     下发到本单元（`ts_unit` 的这一位），`rv_starts` 是本单元 RV core 接下。
@@ -298,45 +460,63 @@ def step_chain(load: List[dict], issue: List[dict],
     for e in issue:
         q = queues.get((e["user"], e["task"]))
         if q and q[0] <= e["t"]:
-            started.append({"t": q.pop(0), "user": e["user"],
+            # 计数器比表收下晚一拍。0 不再往前：波形开头没有更早的一拍。
+            t0 = q.pop(0)
+            started.append({"t": t0 - 1 if t0 else 0, "user": e["user"],
                             "task": e["task"]})
     return user_spans(started, rv_starts, t_end)
 
 
-def pair_chain(spans: List[Tuple[int, int]],
-               events: List[dict]) -> List[List[int]]:
-    """**现在只剩 TS-DTE 这一行在用**：每笔从下发到它做完 DSA 的全程，所以段起点
-    前移到配对的下发那一刻。TS-MU / TS-VU 已经换成「装进 stream → rv_start」，不走
-    这里 —— 那两行的起点是 TaskCtrl 装进去那一拍，直接按身份配对，不需要贪心认领。
+def dte_spans(load: List[dict], issue: List[dict], rv_starts: List[dict],
+              t_end: int) -> Tuple[List[List[int]], List[List[int]]]:
+    """TS-DTE 那两行：一趟队列把 DTE 的下发分成主线与 Router 触发的搬入。
 
-    一笔 task 的 DSA 活儿会碎成好几段 —— 真波形上这是常态。所以认领不是“一段对一
-    笔”：按时间序贪心，每个下发事件认领“起点不早于它、还没被认领的”第一个段，
-    再把“下一个下发之前”起头的后续段一并吃进同一段，段 =
-    [下发那一刻, 最后吃进来那一段的末)。认领不上的下发事件丢掉（有的 task 不经过
-    DSA）；没被认领的段退回原区间并标 -1 —— 下发之前就有的那些走这一支。不按下发
-    序号与 ts_done 硬配 —— ts_done 不分路，几笔并发时分不清哪次完成是哪一笔的。
+      主线（TS-DTE）        [TaskCtrl 把它装进 stream 那一刻, 这一路的 rv_start]
+      搬入（TS-DTE-DATAIN） [Router 的数据到了、它被下发那一刻, 这一路的 rv_start]
+
+    **怎么分**：搬入任务（chain 里的 wait_wake 项）是 Router 的数据一到就下发，与主线
+    走到哪无关（`test/bach/README.md`），所以它在**下发那一刻**在 stream 里认领不到自己
+    那一笔；主线任务则必然先装进 stream、再下发。于是走一遍 `load` 的队列、按“认领得上
+    / 认领不上”分就够了。认领规则要求 `load <= 下发`，所以主线那一边的起点天然早于终点，
+    不会出现反向段。
+
+    量的是这一步在 TS 里等的时间（等 credit、等发射通路空出来、等前一笔从 RV core 那边
+    腾出槽位），不含 RV core 与 DSA 的任何时间。
+
+    **配对不能用两次 `user_spans`** —— 那会把同一批 `rv_start` 认领两遍。所以一笔下发
+    只认领一个 `rv_start`，认完再按上面那条分左右。两个队列都**按位置对齐**（同一身份
+    的第 i 次下发对第 i 笔 load / 第 i 个 rv_start），不是“取最早那个还没用掉的” ——
+    后者会漂：一笔 load 若被自己那次下发跳过（晚到），它会一直挂在队首，被很远以后的
+    同身份下发认走，画出一根几千拍的长条。实测 `synth_scaled` 上就这样漂出 909 拍的段。
+
+    配不上下发的 `rv_start`（实测 557 笔）不画在这两行上，它们仍在 `DTE-Core` 那一行里；
+    配不上 `rv_start` 的下发（实测 0 笔）延到波形末，那笔确实还在等。
     """
-    out: List[List[int]] = []
-    used = [False] * len(spans)
-    for i, e in enumerate(events):
-        # 下一笔下发的那一刻就是这一笔的吸收上界：它之后起头的碎段归下一笔。
-        nxt = events[i + 1]["t"] if i + 1 < len(events) else None
-        end = None
-        for j, (t0, t1) in enumerate(spans):
-            if used[j] or t0 < e["t"]:
-                continue
-            # 段按起点升序，撞上下一笔那一刻之后就不用再看了：后面都归下一笔。
-            if nxt is not None and t0 >= nxt:
-                break
-            used[j] = True
-            end = t1
-        if end is not None:
-            out.append([e["t"], end, e["user"], e["task"]])
-    for j, (t0, t1) in enumerate(spans):
-        if not used[j]:
-            out.append([t0, t1, -1, -1])
-    out.sort(key=lambda s: s[0])
-    return out
+    loads: Dict[Tuple[int, int], List[int]] = {}
+    for e in load:
+        loads.setdefault((e["user"], e["task"]), []).append(e["t"])
+    rvs: Dict[Tuple[int, int], List[int]] = {}
+    for e in rv_starts:
+        rvs.setdefault((e["user"], e["task"]), []).append(e["t"])
+
+    main: List[List[int]] = []
+    datain: List[List[int]] = []
+    for e in issue:
+        key = (e["user"], e["task"])
+        rq = rvs.get(key)
+        while rq and rq[0] < e["t"]:
+            rq.pop(0)          # 早于这次下发的（波形开头就在飞）不认
+        end = rq.pop(0) if rq else t_end
+        lq = loads.get(key)
+        t0 = lq.pop(0) if lq else None
+        if t0 is not None and t0 <= e["t"]:
+            main.append([t0, end, _user_tag(e["user"]), _task_tag(e["task"])])
+        else:
+            datain.append([e["t"], end, _user_tag(e["user"]),
+                           _task_tag(e["task"])])
+    main.sort(key=lambda s: (s[0], s[1]))
+    datain.sort(key=lambda s: (s[0], s[1]))
+    return main, datain
 
 
 def delta_ticks(ts: list, vs: list) -> List[int]:
@@ -403,8 +583,9 @@ def trace_t_end(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> int
 
 def core_spans(reader: TraceReader, sigs: Dict[str, int],
                t_end: int) -> Dict[str, List[List[List[int]]]]:
-    """一个 core 的十条行。键是 `core` / `dsa` / `chain` / `vuisq`，各三个单元一个
-    list（`vuisq` 只有 VU 那条有数据，另两条恒空）。"""
+    """一个 core 的十三条行。键是 `core` / `dsa` / `chain` / `datain` / `vuisq` /
+    `muisq` / `calc`，各三个单元一个 list（`vuisq` 只有 VU 那条、`muisq` 与 `calc`
+    只有 MU 那条、`datain` 只有 DTE 那条有数据，其余恒空）。"""
 
     def ev(name: str) -> Tuple[list, list]:
         sid = sigs.get(name)
@@ -436,39 +617,407 @@ def core_spans(reader: TraceReader, sigs: Dict[str, int],
     core_rows: List[List[List[int]]] = []
     dsa_rows: List[List[List[int]]] = []
     chain_rows: List[List[List[int]]] = []
+    datain_rows: List[List[List[int]]] = []
     vuisq_rows: List[List[List[int]]] = []
+    muisq_rows: List[List[List[int]]] = []
+    calc_rows: List[List[List[int]]] = []
     for u in range(len(UNITS)):
         rv_starts, rv_dones = ends_of(RV_EDGE, u)
         dsa_starts, dsa_dones = ends_of(DSA_EDGE, u)
         # 一个核上可以同时压着几个用户。Core 与 DSA 都按用户各画一段，不并成
         # 最早那笔的长段。
         core_rows.append(user_spans(rv_starts, rv_dones, t_end))
+        # DTE 那一路的 DSA 有**两个**终点：`dsa_done`（报给 TS 的）与 `dsa_done_noack`
+        # （完成了但不报的，链一/自启动 Bypass 走这条）。两者互斥，所以按时间并成一条
+        # 完成流就完事 —— 不并的话那 1279 笔只能延到波形末。
+        if u == 0:
+            na = issue_events(*ev(SIG_DSA_NOACK), *ev(SIG_DSA_NOACK_TASK),
+                              *ev(SIG_DSA_NOACK_USER), 0)
+            dsa_dones = sorted(dsa_dones + na, key=lambda e: e["t"])
         dsa = user_spans(dsa_starts, dsa_dones, t_end)
         issue = issue_events(ut, uv, tt, tv, xt, xv, u)
-        # TS 这一行：MU / VU 从「TaskCtrl 把这一步装进 stream」到「这一路的 RV core
-        # 接下它」；DTE 仍是旧口径 [下发, DTE DSA 完成]（用 DSA 段去认下发），这次
-        # 没动它。两者的配对方式也不同 —— 前者两端都带身份，后者要贪心认领。
+        # TS 那几行都是「这一步在 TS 里等了多久」，终点都是 rv_start。DTE 的起点是
+        # ts_install 那一拍，并按主线 / Router 触发的搬入拆成两行。MU / VU 只有主线，
+        # 起点在 step_chain 里再往前一拍，落在表收下后继的那一拍。
         if u == 0:
-            chain_rows.append(pair_chain([(s[0], s[1]) for s in dsa], issue))
+            dte_main, dte_datain = dte_spans(load, issue, rv_starts, t_end)
+            chain_rows.append(dte_main)
+            datain_rows.append(dte_datain)
         else:
             chain_rows.append(step_chain(load, issue, rv_starts, t_end))
-        if u != 2:
+            datain_rows.append([])
+        # MU / VU 的 DSA 那一行都拆成两段：起点从各家「过门槛」后移到「真正发行进
+        # 执行通路」，被切掉的那一截（单元把这一笔收下 → 发行）归 `muisq` / `vuisq`
+        # 那一行。发行那对边沿既是新行的终点，也是 DSA 行的新起点，两行首尾相接。
+        # MU 收下的是写 trigger 被 regfile 锁成的那一笔，VU 是 config_register 收到
+        # 的那条宏指令；DTE（u == 0）没有这一层，仍从过门槛那一拍起算。
+        if u == 0:
             dsa_rows.append(dsa)
             vuisq_rows.append([])
+            muisq_rows.append([])
+            calc_rows.append([])
             continue
-        # VU 这一路拆成两段：起点从「ISQ 收下」后移到「真正发行进执行流水」，被切掉
-        # 的那一截（trigger 收下 → 发行）归 `vuisq` 那一行。发行那对边沿既是新行的
-        # 终点，也是 DSA 行的新起点，两行因此首尾相接。
         trig_starts, disp_starts = ends_of(TASK_START_EDGE, u)
-        vuisq_rows.append(user_spans(trig_starts, disp_starts, t_end))
+        isq = user_spans(trig_starts, disp_starts, t_end)
+        if u == 1:
+            muisq_rows.append(isq)
+            vuisq_rows.append([])
+        else:
+            vuisq_rows.append(isq)
+            muisq_rows.append([])
         dsa_rows.append(user_spans(disp_starts, dsa_dones, t_end))
+        # MU 另有「这笔任务的 prim 在矩阵执行单元里进出所跨的那一段」。**它不是切分**
+        # ——整段落在上面那个 MU-DSA 段里面（起点比它晚、终点比它早），只有 MU 有。
+        if u == 1:
+            calc_starts, calc_dones = ends_of(CALC_EDGE, u)
+            calc_rows.append(user_spans(calc_starts, calc_dones, t_end))
+        else:
+            calc_rows.append([])
     return {"core": core_rows, "dsa": dsa_rows, "chain": chain_rows,
-            "vuisq": vuisq_rows}
+            "datain": datain_rows, "vuisq": vuisq_rows, "muisq": muisq_rows,
+            "calc": calc_rows}
 
 
 def lanes_of(spans: Dict[str, List[List[List[int]]]]) -> List[List[List[int]]]:
-    """core_spans 的产物 → 一个 core 的十条通道，顺序与 `LANES` 一致。"""
+    """core_spans 的产物 → 一个 core 的十三条通道，顺序与 `LANES` 一致。"""
     return [spans[group][u] for _, group, u in LANES]
+
+
+def calc_dims(reader: TraceReader, sigs: Dict[str, int]) -> Dict[int, Dict[str, int]]:
+    """每个 CALC 起点那一拍的尺寸字典，键是起点时间。M 恒为 1，不存。
+
+    这些是标量信号：只在某笔任务 calc_start（mu.h Ctrl::Compute 的 computed == 0）
+    那一拍锁存一次，所以起点那拍 `val_at` 取到的正好是这笔的值；相邻两笔尺寸相同也
+    不会再记一笔，`val_at` 仍取到上一次的值。老波形缺这几条时返回空 dict。
+    """
+    out: Dict[int, Dict[str, int]] = {}
+
+    def ev(name: str) -> Tuple[list, list]:
+        sid = sigs.get(name)
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    st, sv = ev(SIG_CALC_START)
+    fields = {
+        "expert": ev(SIG_CALC_START_EXPERT),
+        "k": ev(SIG_CALC_START_K),
+        "n": ev(SIG_CALC_START_N),
+        "kblock": ev(SIG_CALC_START_KBLOCK),
+        "nblock": ev(SIG_CALC_START_NBLOCK),
+        "prim_k": ev(SIG_CALC_START_PRIM_K),
+        "prim_n": ev(SIG_CALC_START_PRIM_N),
+        "a_dtype": ev(SIG_CALC_START_ADTYPE),
+        "b_dtype": ev(SIG_CALC_START_BDTYPE),
+        "out_bf16": ev(SIG_CALC_START_OUTBF16),
+    }
+    if any(not ts for ts, _ in fields.values()):
+        return out
+    prev = 0
+    for t, v in zip(st, sv):
+        on = (v >> 1) & 1          # bit1 = MU
+        if on and not prev:
+            out[t] = {name: val_at(ts, vs, t) for name, (ts, vs) in fields.items()}
+        prev = on
+    return out
+
+
+def mu_cfg_count(reader: TraceReader, sigs: Dict[str, int]) -> Dict[Tuple[int, int], int]:
+    """每个 MU 任务配置过的寄存器数，键是 (user, task)。发行那一拍（dsa_task_dispatch
+    bit1 = MU）带身份，标量 `dsa_dispatch_cfg_count` 在同一拍锁存。键按 (user, task)
+    而不是时间 —— Perfetto 里它挂到 MU-Core 那一行（rv_start → rv_done），那一段的
+    起点不是发行拍，只能靠 user/task 对上。老波形缺这条时返回空 dict。
+    """
+    out: Dict[Tuple[int, int], int] = {}
+    sid = sigs.get(SIG_DISP_CFG_COUNT)
+    disp_sid = sigs.get(SIG_TASK_DISP)
+    disp_task_sid = sigs.get(SIG_TASK_DISP_TASK)
+    disp_user_sid = sigs.get(SIG_TASK_DISP_USER)
+    if None in (sid, disp_sid, disp_task_sid, disp_user_sid):
+        return out
+    cts, cvs = reader.events(sid)
+    disp = issue_events(*reader.events(disp_sid), *reader.events(disp_task_sid),
+                        *reader.events(disp_user_sid), 1)          # bit1 = MU
+    for e in disp:
+        out[(e["user"], e["task"])] = val_at(cts, cvs, e["t"])
+    return out
+
+
+def dte_cfg_count(reader: TraceReader, sigs: Dict) -> Dict[Tuple[int, int], int]:
+    """每个 DTE 任务配置过的寄存器数，键是 (user, task)。写 trigger 那一拍带身份，
+    标量 `dsa_trigger_cfg_count` 在同一拍锁存。`sigs` 是 `dte_signal_paths()` 里一个
+    core 的整份（`regfile` + `lane`），这里只用 `regfile` 那张。老波形缺这条时返回空
+    dict。
+    """
+    out: Dict[Tuple[int, int], int] = {}
+    flat = sigs.get("regfile", {})
+    sid = flat.get(SIG_DTE_TRIGGER_CFG_COUNT)
+    trig_sid = flat.get(SIG_DTE_TRIGGER)
+    trig_task_sid = flat.get(SIG_DTE_TRIGGER_TASK)
+    trig_user_sid = flat.get(SIG_DTE_TRIGGER_USER)
+    if None in (sid, trig_sid, trig_task_sid, trig_user_sid):
+        return out
+    cts, cvs = reader.events(sid)
+    trig = issue_events(*reader.events(trig_sid), *reader.events(trig_task_sid),
+                        *reader.events(trig_user_sid), 0)          # dsa_trigger 单 bit
+    for e in trig:
+        out[(e["user"], e["task"])] = val_at(cts, cvs, e["t"])
+    return out
+
+
+def lane_user_spans(starts: List[dict], dones: List[dict],
+                    t_end: int) -> List[List[int]]:
+    """`user_spans` 的 lane 版：段多带起点那一拍四份内容（head/data/scale/topk）的
+    字节数与位置，形状
+    `[t0, t1, user, task, head, data, scale, topk, head_loc, data_loc, scale_loc,
+    topk_loc]`。配对规则同 `user_spans`。
+
+    `*_loc` 是这份内容从哪里读（rd）/写到哪（wr）的位置编码（见 lane.h 的 DteLoc）：
+    0 = none（这一半不搬这份内容，长度 0），1 = Hmem，2 = Core Mem，3 = Matrix Mem，
+    4 = Router，5 = MU（topK_ep_table）。
+    """
+    def content(e) -> List[int]:
+        return [e.get(n, 0) for n in
+                ("head", "data", "scale", "topk",
+                 "head_loc", "data_loc", "scale_loc", "topk_loc")]
+
+    ev = [(e["t"], 1, e) for e in starts] + [(e["t"], 0, e) for e in dones]
+    ev.sort(key=lambda x: (x[0], x[1]))
+    pending: Dict[Tuple[int, int], List[dict]] = {}
+    out: List[List[int]] = []
+    for t, kind, e in ev:
+        key = (e["user"], e["task"])
+        if kind == 1:
+            pending.setdefault(key, []).append(e)
+            continue
+        q = pending.get(key)
+        if not q:
+            out.append([t, t + 1, _user_tag(e["user"]), _task_tag(e["task"])]
+                       + content(e))
+            continue
+        s0 = q.pop(0)
+        out.append([s0["t"], t, _user_tag(e["user"]), _task_tag(e["task"])]
+                   + content(s0))
+    for (user, task), evs in pending.items():
+        for s0 in evs:
+            out.append([s0["t"], t_end, _user_tag(user), _task_tag(task)]
+                       + content(s0))
+    out.sort(key=lambda s: (s[0], s[1]))
+    return out
+
+
+def dte_signal_paths(reader: TraceReader) -> Dict[str, Dict]:
+    """扫模块树，找出 DTE 十条轨道要的信号。
+
+    返回 `{"chip.core": {"regfile": {sig: id}, "lane": [{sig: id} × 5]}}`。DTE 每个
+    core 都有这一组信号，但没派角色的 core 一整场都不动、信号全是常数，读回来也是
+    空；路径这里仍收进来，有没有段由调用方折段时看。
+    """
+    paths = reader.tree_paths()
+    out: Dict[str, Dict] = {}
+    for sig_id in reader.signals():
+        name = paths.get(sig_id)
+        if not name:
+            continue
+        m = RE_DTE_REGFILE.match(name)
+        if m:
+            c, k, leaf = int(m.group(1)), int(m.group(2)), m.group(3)
+            key = f"{c}.{k}"
+            out.setdefault(key, {"regfile": {}, "lane": [{} for _ in range(5)]})
+            out[key]["regfile"][leaf] = sig_id
+            continue
+        m = RE_DTE_LANE.match(name)
+        if m:
+            c, k, ln, leaf = (int(m.group(1)), int(m.group(2)),
+                              int(m.group(3)), m.group(4))
+            key = f"{c}.{k}"
+            out.setdefault(key, {"regfile": {}, "lane": [{} for _ in range(5)]})
+            out[key]["lane"][ln][leaf] = sig_id
+    return out
+
+
+def dte_lane_spans(reader: TraceReader, sigs: Dict, t_end: int):
+    """一个 core 的 DTE 十条轨道。`sigs` 是 `dte_signal_paths()` 里那一个 core 的值。
+
+    返回 `([读段 × 5], [写段 × 5])`。每条 lane 拆读/写两条（读 = rd_start → rd_done，
+    写 = wr_start → wr_done），段形状
+    `[t0, t1, user, task, head, data, scale, topk, head_loc, data_loc, scale_loc,
+    topk_loc]`，后面八项是起点那一拍四份内容的字节数与位置（从哪读/写到哪）。原来
+    还有一条「配置 → trigger」的 dte_rvcore 轨道，已删；配置寄存器数改挂到 DTE-Core
+    那一行的 args（见 `dte_cfg_count`）。
+    """
+
+    def ev(sid):
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    def ends(group: Tuple[str, ...], flat: Dict, bit: int = 0):
+        starts = issue_events(*ev(flat.get(group[0])), *ev(flat.get(group[1])),
+                              *ev(flat.get(group[2])), bit)
+        dones = issue_events(*ev(flat.get(group[3])), *ev(flat.get(group[4])),
+                             *ev(flat.get(group[5])), bit)
+        return starts, dones
+
+    def ends_bytes(group: Tuple[str, ...], flat: Dict,
+                   byte_group: Tuple[str, ...], loc_group: Tuple[str, ...]):
+        starts, dones = ends(group, flat)
+        for name, bname, lname in zip(
+                ("head", "data", "scale", "topk"), byte_group, loc_group):
+            bts, bvs = ev(flat.get(bname))
+            lts, lvs = ev(flat.get(lname))
+            for s in starts:
+                s[name] = val_at(bts, bvs, s["t"])
+                s[name + "_loc"] = val_at(lts, lvs, s["t"])
+        return starts, dones
+
+    rd_lanes, wr_lanes = [], []
+    for k in range(5):
+        rd_starts, rd_dones = ends_bytes(DTE_RD_EDGE, sigs["lane"][k],
+                                         DTE_RD_BYTE, DTE_RD_LOC)
+        wr_starts, wr_dones = ends_bytes(DTE_WR_EDGE, sigs["lane"][k],
+                                         DTE_WR_BYTE, DTE_WR_LOC)
+        rd_lanes.append(lane_user_spans(rd_starts, rd_dones, t_end))
+        wr_lanes.append(lane_user_spans(wr_starts, wr_dones, t_end))
+    return rd_lanes, wr_lanes
+
+
+def router_ingress_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, int]]]:
+    """扫模块树，找出每个 core 的 router 四个入口站的 flit 信号。
+
+    返回 `{"chip.core": {"mid": {sig: id}, "left": {...}, "right": {...},
+    "core": {...}}}`。router 每个 core 都有这四个站，但没派角色的 core 一整场都不
+    动、信号全是常数，读回来也是空；有没有段由调用方折段时看。
+    """
+    paths = reader.tree_paths()
+    out: Dict[str, Dict[str, Dict[str, int]]] = {}
+    for sig_id in reader.signals():
+        name = paths.get(sig_id)
+        if not name:
+            continue
+        m = RE_ROUTER_STATION.match(name)
+        if not m:
+            continue
+        c, k, d, leaf = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+        if leaf not in RTR_FLIT_SIGS:
+            continue
+        key = f"{c}.{k}"
+        out.setdefault(key, {d: {} for d in ROUTER_DIRS})
+        out[key][d][leaf] = sig_id
+    return out
+
+
+def reduce_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, int]]]:
+    """扫模块树，找出每个 core 的 ReduceModule 三路入口 + 一路出口的 flit 信号。
+
+    返回 `{"chip.core": {"mid": {sig: id}, "left": {...}, "right": {...},
+    "out": {...}}}`。reduce 每个 core 都有，但没派角色的 core 一整场都不动、信号全
+    是常数，读回来也是空；有没有段由调用方折段时看。
+    """
+    paths = reader.tree_paths()
+    out: Dict[str, Dict[str, Dict[str, int]]] = {}
+    for sig_id in reader.signals():
+        name = paths.get(sig_id)
+        if not name:
+            continue
+        m = RE_REDUCE.match(name)
+        if not m:
+            continue
+        c, k, side, leaf = int(m.group(1)), int(m.group(2)), m.group(3), m.group(4)
+        if leaf not in RTR_FLIT_SIGS:
+            continue
+        key = f"{c}.{k}"
+        out.setdefault(key, {s: {} for s in REDUCE_SIDES})
+        out[key][side][leaf] = sig_id
+    return out
+
+
+def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
+    """head/tail flit 事件折成段 `[t0, t1, user, path, size]`。
+
+    `evts` 里的元素是 `(t, is_head, is_tail, user, path, size)`。同一 `(user, path)`
+    的 head 与 tail 先到先配；`head && tail` 的单 flit 包直接成 `[t, t+1]`。配不上
+    head 的 tail 只记 `[t, t+1]`（波形从中间开始记），配不上 tail 的 head 延到波形
+    末（确实还没收完）。配对语义同 `user_spans`。
+    """
+    pending: Dict[Tuple[int, int], List[tuple]] = {}
+    out: List[List[int]] = []
+    for t, head, tail, user, path, size in evts:
+        if head and tail:
+            out.append([t, t + 1, user, path, size])
+            continue
+        key = (user, path)
+        if head:
+            pending.setdefault(key, []).append((t, size))
+            continue
+        q = pending.get(key)
+        if q:
+            t0, sz = q.pop(0)
+            out.append([t0, t, user, path, sz])
+        else:
+            out.append([t, t + 1, user, path, size])
+    for (user, path), lst in pending.items():
+        for t0, sz in lst:
+            out.append([t0, t_end, user, path, sz])
+    out.sort(key=lambda s: (s[0], s[1]))
+    return out
+
+
+def _flit_spans(reader: TraceReader, flat: Dict[str, int],
+                t_end: int) -> List[List[int]]:
+    """一路（router 一个方向 / reduce 一个 side）的 flit 段。`flat` 是 {sig: id}。
+
+    段形状 `[t0, t1, user, path, size]`：t0 是包头 flit 进站（或写出）那一拍，t1 是
+    包尾 flit 进站（或写完）那一拍。事件时间取 head/tail/user/path/size 五条信号时间
+    点的并集 —— 只取 head/tail 的话，同一 user/path 的连续两拍 head 被 `TracePerCycle`
+    压成一段（值没变），第二笔会被漏掉；user/path/size 逐 flit 变，把它们的时间点并
+    进来才展开成一拍一笔。
+    """
+
+    def ev(sid):
+        if sid is None:
+            return [], []
+        return reader.events(sid)
+
+    ht, hv = ev(flat.get(SIG_RTR_FLIT_HEAD))
+    tt, tv = ev(flat.get(SIG_RTR_FLIT_TAIL))
+    ut, uv = ev(flat.get(SIG_RTR_FLIT_USER))
+    pt, pv = ev(flat.get(SIG_RTR_FLIT_PATH))
+    st, sv = ev(flat.get(SIG_RTR_FLIT_SIZE))
+    evts = []
+    for t in sorted(set(ht) | set(tt) | set(ut) | set(pt) | set(st)):
+        head = val_at(ht, hv, t) == 1
+        tail = val_at(tt, tv, t) == 1
+        if not (head or tail):
+            continue
+        evts.append((t, head, tail, val_at(ut, uv, t), val_at(pt, pv, t),
+                     val_at(st, sv, t)))
+    return fold_flits(evts, t_end)
+
+
+def router_ingress_spans(reader: TraceReader,
+                         sigs: Dict[str, Dict[str, int]],
+                         t_end: int) -> Dict[str, List[List[int]]]:
+    """一个 core 的 router 四个入口站各自的 flit 段。`sigs` 是 `router_ingress_paths`
+    里那一个 core 的值（按方向分的信号表）。
+
+    返回 `{"mid": [...], "left": [...], "right": [...], "core": [...]}`，段形状
+    `[t0, t1, user, path, size]`：t0 是包头 flit 进站那一拍，t1 是包尾 flit 进站那
+    一拍。
+    """
+    return {d: _flit_spans(reader, sigs.get(d, {}), t_end) for d in ROUTER_DIRS}
+
+
+def reduce_spans(reader: TraceReader, sigs: Dict[str, Dict[str, int]],
+                 t_end: int) -> Dict[str, List[List[int]]]:
+    """一个 core 的 ReduceModule 三路入口 + 一路出口各自的 flit 段。`sigs` 是
+    `reduce_paths` 里那一个 core 的值（按 side 分的信号表）。
+
+    返回 `{"mid": [...], "left": [...], "right": [...], "out": [...]}`，段形状
+    `[t0, t1, user, path, size]`：入口 t0 是包头 flit 进站那一拍、t1 是包尾 flit 进
+    站那一拍；出口 t0 是包头 flit 写出那一拍、t1 是包尾 flit 写完那一拍。
+    """
+    return {s: _flit_spans(reader, sigs.get(s, {}), t_end) for s in REDUCE_SIDES}
 
 
 def missing_signals(reader: TraceReader, core_sig: Dict[str, Dict[str, int]]) -> List[str]:

@@ -7,16 +7,16 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
-#include <sstream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/common/numeric/formats.h"
 #include "bach/ip/chip/core/core.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -32,12 +32,14 @@ std::string KernelDir() {
   return std::string(LATCH_SOURCE_DIR) + "/src/bach/compiler/kernel/build/";
 }
 
-// 从 nm 导出的符号表里取一个 task 的入口地址，task_chain 的 TASK_PC 填的就是它。
-uint64_t SymbolOf(std::string const& name, std::string const& kind = "dte") {
+// 从 nm 导出的符号表里取一个 task 的入口地址，task_chain 的 TASK_PC
+// 填的就是它。
+uint64_t SymbolOf(std::string const &name, std::string const &kind = "dte") {
   std::ifstream f(KernelDir() + "kernel_" + kind + ".sym");
   std::string addr, type, sym;
   while (f >> addr >> type >> sym) {
-    if (sym == name) return std::stoull(addr, nullptr, 16);
+    if (sym == name)
+      return std::stoull(addr, nullptr, 16);
   }
   return 0;
 }
@@ -47,11 +49,13 @@ bool KernelBuilt() {
   return f.good();
 }
 
-// 一个 token 是 128 个 MXFP8，与 kernel 里的 E2E_TOKEN_BYTES 同一个数：出核那一笔
-// 搬运按它配 data_len，进来的与出去的长度对不上就不是同一份数据。
+// 一个 token 是 128 个 MXFP8，与 kernel 里的 E2E_TOKEN_BYTES
+// 同一个数：出核那一笔 搬运按它配
+// data_len，进来的与出去的长度对不上就不是同一份数据。
 constexpr uint64_t kTokenBytes = 128;
 
-// 一个 token 的包：数据后面接 4 个 scale，逐字节可辨，落到 Core Mem 后按它比对。
+// 一个 token 的包：数据后面接 4 个 scale，逐字节可辨，落到 Core Mem
+// 后按它比对。
 MessagePtr MakeToken(uint64_t path, uint64_t user) {
   auto m = std::make_shared<Message>();
   m->path_id = path;
@@ -82,38 +86,41 @@ RouteEntry EnterCore() {
 // 灌包、驱动、读出口放在同一个协程里，是因为出口上的 flit 是单拍脉冲：分成两个
 // 协程的话谁先跑不定，读的那一侧可能整拍都错过。
 class CoreHarness : public BachModule {
- public:
-  CoreHarness(ClockPtr c, Core& target, uint64_t at, MessagePtr m)
-      : BachModule(c, "harness"), core(target), fire_at(at),
-        msg(std::move(m)) {}
+public:
+  CoreHarness(ClockPtr c, Core &target, uint64_t at, MessagePtr m)
+      : BachModule(c, "harness"), core(target), fire_at(at), msg(std::move(m)) {
+  }
 
   uint64_t out_flits = 0;
   std::vector<MessagePtr> out_msgs;
 
- protected:
+protected:
   void Step() override {
     LinkEndPtr in = core.InWire(kLeft);
     if (CycleNow() == fire_at && msg) {
-      in->flit.Drive(0, true, true, msg->size, msg);
+      in->flit.Drive(0, true, true, msg->TotalBytes(), msg);
     } else {
       in->flit.Idle();
     }
     // 只驱动上游那两根：数据进来的 in_wire 与下游还 credit 的 back_wire。
     // out_wire、up_back_wire、up_release_wire 是 core 自己写的，外面只读。
-    for (uint64_t d = 0; d < 3; ++d) core.BackWire(d)->flit.Idle();
+    for (uint64_t d = 0; d < 3; ++d)
+      core.BackWire(d)->flit.Idle();
 
     core.RunStep();
 
     for (uint64_t d = 0; d < 3; ++d) {
       FlitView f = ReadFlit(core.OutWire(d)->flit);
-      if (!f.valid) continue;
+      if (!f.valid)
+        continue;
       ++out_flits;
-      if (f.msg) out_msgs.push_back(f.msg);
+      if (f.msg)
+        out_msgs.push_back(f.msg);
     }
   }
 
- private:
-  Core& core;
+private:
+  Core &core;
   uint64_t fire_at;
   MessagePtr msg;
 };
@@ -121,8 +128,8 @@ class CoreHarness : public BachModule {
 // 一路上的关键量在协程里抄下来，用例末尾取。那几个都是 Logic64 或模块内部的
 // 计数，主线程直接读会读到 t=0 的值。
 class CoreProbe : public BachModule {
- public:
-  CoreProbe(ClockPtr c, Core& target) : BachModule(c, "probe"), core(target) {}
+public:
+  CoreProbe(ClockPtr c, Core &target) : BachModule(c, "probe"), core(target) {}
 
   uint64_t triggers = 0, cs_used = 0, streams_valid = 0;
   uint64_t rv_insts = 0, dte_cmds = 0, dsa_writes = 0;
@@ -134,7 +141,7 @@ class CoreProbe : public BachModule {
   uint64_t mu_dones = 0, vu_dones = 0;
   uint64_t cmem_grants = 0, head = 0, tail = 0, out_sent = 0;
 
- protected:
+protected:
   void Step() override {
     triggers = core.GetRouter().GetCoreStation().Triggers();
     cs_used = core.GetRouter().GetXbar().StreamUsed(kOutCore);
@@ -143,7 +150,8 @@ class CoreProbe : public BachModule {
     tail = core.GetTs().Table().TailPtr();
     uint64_t v = 0;
     for (uint64_t i = 0; i < kStreamNum; ++i) {
-      if (core.GetTs().Table().Peek(i).valid) ++v;
+      if (core.GetTs().Table().Peek(i).valid)
+        ++v;
     }
     streams_valid = v;
     // 一次握手最少两拍，同一笔会连着两拍出现在端口上，按“valid 从低变高”认它。
@@ -163,8 +171,8 @@ class CoreProbe : public BachModule {
     out_sent = core.GetDte().OutArb().Sent();
   }
 
- private:
-  static void Count(bool valid, bool* hold, uint64_t* cnt) {
+private:
+  static void Count(bool valid, bool *hold, uint64_t *cnt) {
     if (valid && !*hold) {
       ++*cnt;
       *hold = true;
@@ -173,14 +181,14 @@ class CoreProbe : public BachModule {
     }
   }
 
-  Core& core;
+  Core &core;
   bool cmd_hold = false, cfg_hold = false, done_hold = false;
   bool mu_hold = false, vu_hold = false;
 };
 
 // 一条 datain 链：Router 送来的包由 DTE 自己搬进 Core Mem，RV core 那一笔只
 // 处理软件包头。
-void WriteDatainChain(Core& core) {
+void WriteDatainChain(Core &core) {
   TaskEntry t;
   t.send_unit = SendUnit::kDte;
   t.recv_unit = RecvUnit::kDsa;
@@ -190,14 +198,16 @@ void WriteDatainChain(Core& core) {
   t.task_pc = SymbolOf("task_dte_user_init");
   core.GetTs().Cfg().WriteTask(0, t);
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
-}  // namespace
+} // namespace
 
 // 步 11 的判据（单 core 那一半）：一个 token 进来，走完整条链并退休。
 TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   uint64_t triggers = 0, cmds = 0, insts = 0, regw = 0, trigs = 0;
   uint64_t admits = 0, dones = 0, grants = 0, head = 0, tail = 0;
   uint64_t streams = 0, cs_used = 0;
@@ -231,25 +241,26 @@ TEST(BachCoreE2e, OneTokenWalksTheWholeCore) {
     cs_used = probe.cs_used;
   }
   RT::Reset();
-  EXPECT_EQ(triggers, 1u);   // Router 收下包并通知了 TS
-  EXPECT_EQ(cmds, 1u);       // TS 下发了这一笔给 DTE RV core
-  EXPECT_GT(insts, 0u);      // RV core 真的跑了 kernel
-  // 本核第一个任务先配八套 DTE 模板（60 笔）；datain 本身照包头配一笔带 scale 的
-  // 进核搬运：段 0 包头一项、段 1、段 2 各三项，TRANS_MODE，trigger（9 笔）
-  EXPECT_EQ(regw, 69u);
-  EXPECT_EQ(trigs, 1u);      // datain 自己起一笔进核搬运
-  EXPECT_EQ(admits, 1u);     // 搬运只起了一笔
-  EXPECT_GT(grants, 0u);     // 数据真的落进了 Core Mem
-  EXPECT_EQ(dones, 1u);      // DTE 向 TS 报了一次完成
-  EXPECT_EQ(head, tail);     // 表空了：这个用户退休了
+  EXPECT_EQ(triggers, 1u); // Router 收下包并通知了 TS
+  EXPECT_EQ(cmds, 1u);     // TS 下发了这一笔给 DTE RV core
+  EXPECT_GT(insts, 0u);    // RV core 真的跑了 kernel
+  // 本核第一个任务先配八套 DTE 模板（60 笔）；datain 本身照包头配一笔带 scale
+  // 的 进核搬运：段 0 包头一项、段 1、段 2 各三项，TRANS_MODE，trigger（9 笔）
+  EXPECT_EQ(regw, 87u);
+  EXPECT_EQ(trigs, 1u);  // datain 自己起一笔进核搬运
+  EXPECT_EQ(admits, 1u); // 搬运只起了一笔
+  EXPECT_GT(grants, 0u); // 数据真的落进了 Core Mem
+  EXPECT_EQ(dones, 1u);  // DTE 向 TS 报了一次完成
+  EXPECT_EQ(head, tail); // 表空了：这个用户退休了
   EXPECT_EQ(streams, 0u);
-  EXPECT_EQ(cs_used, 0u);    // Router 那一侧的 stream 表项也释放了
+  EXPECT_EQ(cs_used, 0u); // Router 那一侧的 stream 表项也释放了
 }
 
 // 搬进 Core Mem 的字节与注入的 payload 逐字节相等：数据那一段落数据地址，包尾
 // 的 scale 落同一段地址的 scale 旁带。
 TEST(BachCoreE2e, PayloadLandsByteForByte) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   MessagePtr token = MakeToken(3, 42);
   std::vector<uint8_t> landed, scale;
   {
@@ -283,7 +294,8 @@ TEST(BachCoreE2e, PayloadLandsByteForByte) {
 // 两个 token 属于两个用户：Retire 发出后 Router 上不得再出现该用户的包，所以
 // 同一个用户不会在退休之后又来一笔。第二个用户拿到的是环形分配的下一个槽位。
 TEST(BachCoreE2e, NextUserRunsAfterRetire) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   uint64_t triggers = 0, dones = 0, head = 0, tail = 0;
   {
     EnsureSlots();
@@ -295,10 +307,10 @@ TEST(BachCoreE2e, NextUserRunsAfterRetire) {
     WriteDatainChain(core);
 
     class TwoTokens : public BachModule {
-     public:
-      TwoTokens(ClockPtr c, Core& t) : BachModule(c, "harness"), core(t) {}
+    public:
+      TwoTokens(ClockPtr c, Core &t) : BachModule(c, "harness"), core(t) {}
 
-     protected:
+    protected:
       void Step() override {
         uint64_t now = CycleNow();
         LinkEndPtr in = core.InWire(kLeft);
@@ -306,16 +318,17 @@ TEST(BachCoreE2e, NextUserRunsAfterRetire) {
           MessagePtr m = MakeToken(3, now == 2 ? 42 : 43);
           // 前一个退休后 head 推进一格，下一个用户落在槽位 1。
           m->stream_id = now == 2 ? 0 : 1;
-          in->flit.Drive(0, true, true, m->size, m);
+          in->flit.Drive(0, true, true, m->TotalBytes(), m);
         } else {
           in->flit.Idle();
         }
-        for (uint64_t d = 0; d < 3; ++d) core.BackWire(d)->flit.Idle();
+        for (uint64_t d = 0; d < 3; ++d)
+          core.BackWire(d)->flit.Idle();
         core.RunStep();
       }
 
-     private:
-      Core& core;
+    private:
+      Core &core;
     };
     TwoTokens harness(clk, core);
     CoreProbe probe(clk, core);
@@ -329,13 +342,13 @@ TEST(BachCoreE2e, NextUserRunsAfterRetire) {
   RT::Reset();
   EXPECT_EQ(triggers, 2u);
   EXPECT_EQ(dones, 2u);
-  EXPECT_EQ(head, tail);   // 两笔都退休了
+  EXPECT_EQ(head, tail); // 两笔都退休了
 }
 
 namespace {
 
 // 两步链：第一步 datain 把包搬进 Core Mem，第二步把它从 Core Mem 发回 Router。
-void WriteTwoStepChain(Core& core) {
+void WriteTwoStepChain(Core &core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -353,14 +366,16 @@ void WriteTwoStepChain(Core& core) {
   core.GetTs().Cfg().WriteTask(1, out);
 
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
-}  // namespace
+} // namespace
 
 // 出核那一半：数据从 Core Mem 发回 Router，出口上收到的包与注入的逐字节相等。
 TEST(BachCoreE2e, TokenLeavesTheCore) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   MessagePtr token = MakeToken(3, 42);
   std::vector<MessagePtr> got;
   uint64_t dones = 0, head = 0, tail = 0, sent_beats = 0;
@@ -391,14 +406,18 @@ TEST(BachCoreE2e, TokenLeavesTheCore) {
     sent_beats = probe.out_sent;
   }
   RT::Reset();
-  EXPECT_EQ(sent_beats, 2u); // 数据 128 B 一拍，scale 4 B 另一拍
+  EXPECT_EQ(sent_beats, 1u); // 数据 128 B 一拍，scale 4 B 另一拍
   EXPECT_EQ(dones, 2u);      // 两步各报一次完成
   EXPECT_EQ(head, tail);     // 走到链尾退休了
   ASSERT_FALSE(got.empty()) << "出口上一个包都没有";
   MessagePtr sent = got.front();
   EXPECT_EQ(sent->user_id, token->user_id);
   EXPECT_EQ(sent->scale_valid, 1u);
-  ASSERT_EQ(sent->payload.size(), token->payload.size());
+  ASSERT_EQ(sent->payload.size(), token->TotalBytes());
+  EXPECT_EQ(sent->PacketLength(), 168u);
+  EXPECT_EQ(sent->DataBytes(), 128u);
+  for (uint64_t i = token->payload.size(); i < sent->payload.size(); ++i)
+    EXPECT_EQ(sent->payload[i], 0u);
   for (uint64_t i = 0; i < token->payload.size(); ++i) {
     ASSERT_EQ(sent->payload[i], token->payload[i]) << "第 " << i << " 个字节";
   }
@@ -407,7 +426,7 @@ TEST(BachCoreE2e, TokenLeavesTheCore) {
 namespace {
 
 // 三步链：datain 搬进 Core Mem、MU 算一笔、把结果发回 Router。
-void WriteComputeChain(Core& core) {
+void WriteComputeChain(Core &core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -431,14 +450,16 @@ void WriteComputeChain(Core& core) {
   core.GetTs().Cfg().WriteTask(2, out);
 
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
-}  // namespace
+} // namespace
 
 // 三个单元接力：DTE 搬进来、MU 算、DTE 再搬出去，三步各报一次完成后退休。
 TEST(BachCoreE2e, ThreeUnitsRelayOneToken) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   uint64_t dte_dones = 0, mu_dones = 0, head = 0, tail = 0, out_beats = 0;
   {
     EnsureSlots();
@@ -467,16 +488,16 @@ TEST(BachCoreE2e, ThreeUnitsRelayOneToken) {
     out_beats = harness.out_flits;
   }
   RT::Reset();
-  EXPECT_EQ(dte_dones, 2u);   // 搬进来一次、搬出去一次
-  EXPECT_EQ(mu_dones, 1u);    // MU 算了一笔
-  EXPECT_GT(out_beats, 0u);   // 结果出了 core
-  EXPECT_EQ(head, tail);      // 走到链尾退休了
+  EXPECT_EQ(dte_dones, 2u); // 搬进来一次、搬出去一次
+  EXPECT_EQ(mu_dones, 1u);  // MU 算了一笔
+  EXPECT_GT(out_beats, 0u); // 结果出了 core
+  EXPECT_EQ(head, tail);    // 走到链尾退休了
 }
 
 namespace {
 
 // 四步链：datain 搬进 Core Mem、MU 算、VU 算、把结果发回 Router。
-void WriteFullChain(Core& core) {
+void WriteFullChain(Core &core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -506,15 +527,17 @@ void WriteFullChain(Core& core) {
   core.GetTs().Cfg().WriteTask(3, out);
 
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
-}  // namespace
+} // namespace
 
 // 一条 FFN 形状的链走完：DTE 搬进来、MU 与 VU 各算一笔、DTE 搬出去，四步各报
 // 一次完成后退休。
 TEST(BachCoreE2e, FullChainRunsFourSteps) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   uint64_t dte_dones = 0, mu_dones = 0, vu_dones = 0;
   uint64_t head = 0, tail = 0, out_beats = 0;
   {
@@ -564,7 +587,7 @@ struct E2eCase {
   std::vector<float> out;
 };
 
-std::vector<uint8_t> HexBytes(std::string const& s) {
+std::vector<uint8_t> HexBytes(std::string const &s) {
   std::vector<uint8_t> out;
   for (size_t i = 0; i + 1 < s.size(); i += 2) {
     out.push_back(uint8_t(std::stoul(s.substr(i, 2), nullptr, 16)));
@@ -579,21 +602,30 @@ E2eCase ReadE2eCase() {
   std::string line;
   while (std::getline(f, line)) {
     // 按行读：注释行里的中文按空白拆出来是奇数个词，成对读会把后面的键值错位。
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
     std::istringstream ls(line);
     std::string key, val;
-    if (!(ls >> key >> val)) continue;
-    if (key == "token") c.token = HexBytes(val);
-    else if (key == "token_scale") c.token_scale = HexBytes(val);
-    else if (key == "weight") c.weight = HexBytes(val);
-    else if (key == "weight_scale") c.weight_scale = HexBytes(val);
-    else if (key == "out_bytes") c.out_bytes = HexBytes(val);
-    else if (key == "act_bytes") c.act_bytes = HexBytes(val);
+    if (!(ls >> key >> val))
+      continue;
+    if (key == "token")
+      c.token = HexBytes(val);
+    else if (key == "token_scale")
+      c.token_scale = HexBytes(val);
+    else if (key == "weight")
+      c.weight = HexBytes(val);
+    else if (key == "weight_scale")
+      c.weight_scale = HexBytes(val);
+    else if (key == "out_bytes")
+      c.out_bytes = HexBytes(val);
+    else if (key == "act_bytes")
+      c.act_bytes = HexBytes(val);
     else if (key == "out_bits") {
       std::istringstream is(val);
       std::string tok;
       while (std::getline(is, tok, ',')) {
-        c.out.push_back(numeric::FloatOf(uint32_t(std::stoul(tok, nullptr, 16))));
+        c.out.push_back(
+            numeric::FloatOf(uint32_t(std::stoul(tok, nullptr, 16))));
       }
     }
   }
@@ -601,8 +633,8 @@ E2eCase ReadE2eCase() {
 }
 
 // 参考实现用的那份 token：数据后面接 scale。
-MessagePtr RefToken(std::vector<uint8_t> const& data,
-                    std::vector<uint8_t> const& scale, uint64_t user) {
+MessagePtr RefToken(std::vector<uint8_t> const &data,
+                    std::vector<uint8_t> const &scale, uint64_t user) {
   auto m = std::make_shared<Message>();
   m->path_id = 3;
   m->user_id = user;
@@ -616,7 +648,7 @@ MessagePtr RefToken(std::vector<uint8_t> const& data,
 }
 
 // 三步链：datain 把 token 搬进 Core Mem、MU 算一条原语、把结果搬出去。
-void WriteGemmChain(Core& core) {
+void WriteGemmChain(Core &core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -640,10 +672,11 @@ void WriteGemmChain(Core& core) {
   core.GetTs().Cfg().WriteTask(2, out);
 
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
-}  // namespace
+} // namespace
 
 // 步 11 的判据：注入一个 token，收到一个结果，与参考实现逐 bit 相等。
 //
@@ -651,7 +684,8 @@ void WriteGemmChain(Core& core) {
 // 读它、从 Matrix Mem 读权重、算完写回 Core Mem，DTE 再把结果搬出 core。收到的
 // 字节要与 reference/ 那一份 Python 参考实现算出来的逐 bit 相同。
 TEST(BachCoreE2e, TokenInResultOutMatchesReference) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   E2eCase want = ReadE2eCase();
   ASSERT_FALSE(want.token.empty())
       << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
@@ -695,13 +729,12 @@ TEST(BachCoreE2e, TokenInResultOutMatchesReference) {
     landed = core.Cmem().Peek(0x8000, want.out_bytes.size());
   }
   RT::Reset();
-  EXPECT_EQ(mu_dones, 1u);   // MU 算了一笔
-  EXPECT_EQ(head, tail);     // 走到链尾退休了
+  EXPECT_EQ(mu_dones, 1u); // MU 算了一笔
+  EXPECT_EQ(head, tail);   // 走到链尾退休了
   // MU 写回 Core Mem 的那一段与参考实现逐字节相同。
   ASSERT_EQ(landed.size(), want.out_bytes.size());
   for (size_t i = 0; i < landed.size(); ++i) {
-    ASSERT_EQ(landed[i], want.out_bytes[i])
-        << "Core Mem 第 " << i << " 个字节";
+    ASSERT_EQ(landed[i], want.out_bytes[i]) << "Core Mem 第 " << i << " 个字节";
   }
   ASSERT_FALSE(got.empty()) << "出口上一个包都没有";
   MessagePtr result = got.front();
@@ -715,7 +748,7 @@ TEST(BachCoreE2e, TokenInResultOutMatchesReference) {
 namespace {
 
 // 四步链：datain、MU 算一条原语、VU 逐元素平方、把结果搬出去。
-void WriteGemmActChain(Core& core) {
+void WriteGemmActChain(Core &core) {
   TaskEntry in;
   in.send_unit = SendUnit::kDte;
   in.recv_unit = RecvUnit::kDsa;
@@ -745,14 +778,15 @@ void WriteGemmActChain(Core& core) {
   core.GetTs().Cfg().WriteTask(3, out);
 
   core.GetTs().InitFinish();
+  core.GetDte().Resume();
   core.GetDte().Tables().PreloadPathTask(3, 0);
 }
 
 // VU 的第 0 组静态配置：LU 读 BF16，VALU0 逐元素平方，SU 按 BF16 写回。
 //
 // 地址与长度由 kernel 写进动态参数寄存器，这里只配算什么。
-void PreloadVuSquare(Core& core, uint64_t vl) {
-  Vu& vu = core.GetVu();
+void PreloadVuSquare(Core &core, uint64_t vl) {
+  Vu &vu = core.GetVu();
   auto st = [&](uint64_t off, uint64_t data) {
     vu.Preload(kVuStaticBase + 0 * kVuStaticStride + off, data);
   };
@@ -765,7 +799,7 @@ void PreloadVuSquare(Core& core, uint64_t vl) {
      vl | (uint64_t(numeric::RoundMode::kRne) << 17));
 }
 
-}  // namespace
+} // namespace
 
 // 步 11 的判据加一步计算：注入一个 token，MU 与 VU 各算一遍，收到的结果与参考
 // 实现逐 bit 相等。
@@ -773,7 +807,8 @@ void PreloadVuSquare(Core& core, uint64_t vl) {
 // VU 那一步是逐元素平方而不是 silu：超越函数硬件用查表加插值，拟合方式设计
 // 未给，两侧各用各的标准库算出来会差一个 ulp，拿它做逐 bit 判据立不住。
 TEST(BachCoreE2e, GemmThenActivationMatchesReference) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   E2eCase want = ReadE2eCase();
   ASSERT_FALSE(want.act_bytes.empty())
       << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
@@ -846,12 +881,16 @@ BatchCase ReadBatchCase() {
   std::string line;
   std::map<uint64_t, std::vector<uint8_t>> tok, tsc, out;
   while (std::getline(f, line)) {
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
     std::istringstream ls(line);
     std::string key, val;
-    if (!(ls >> key >> val)) continue;
-    if (key == "weight") c.weight = HexBytes(val);
-    else if (key == "weight_scale") c.weight_scale = HexBytes(val);
+    if (!(ls >> key >> val))
+      continue;
+    if (key == "weight")
+      c.weight = HexBytes(val);
+    else if (key == "weight_scale")
+      c.weight_scale = HexBytes(val);
     else if (key.rfind("token_scale", 0) == 0 && key.size() > 11) {
       tsc[std::stoull(key.substr(11))] = HexBytes(val);
     } else if (key.rfind("token", 0) == 0 && key.size() > 5 &&
@@ -861,13 +900,16 @@ BatchCase ReadBatchCase() {
       out[std::stoull(key.substr(9))] = HexBytes(val);
     }
   }
-  for (auto const& kv : tok) c.token.push_back(kv.second);
-  for (auto const& kv : tsc) c.token_scale.push_back(kv.second);
-  for (auto const& kv : out) c.out.push_back(kv.second);
+  for (auto const &kv : tok)
+    c.token.push_back(kv.second);
+  for (auto const &kv : tsc)
+    c.token_scale.push_back(kv.second);
+  for (auto const &kv : out)
+    c.out.push_back(kv.second);
   return c;
 }
 
-}  // namespace
+} // namespace
 
 // 步 11 的后半：放大到 N 个。几个 token 连着进来各占一个 stream 槽位，各自走完
 // 整条链，出来的 N 个结果各自与参考实现逐 bit 相等。
@@ -875,7 +917,8 @@ BatchCase ReadBatchCase() {
 // 一个 token 一个用户：Retire 发出后 Router 上不得再出现该用户的包，所以同一个
 // 用户不会在退休之后又来一笔。
 TEST(BachCoreE2e, FourTokensEachMatchReference) {
-  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  if (!KernelBuilt())
+    GTEST_SKIP() << "kernel 还没编";
   BatchCase want = ReadBatchCase();
   ASSERT_EQ(want.token.size(), 4u)
       << "比对向量没生成，先跑 src/bach/compiler/reference/vectors.py";
@@ -902,13 +945,13 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
 
     // 四个 token 隔几拍一个地灌进来，各占一个 stream 槽位。
     class Feeder : public BachModule {
-     public:
-      Feeder(ClockPtr c, Core& t, BatchCase const& w)
+    public:
+      Feeder(ClockPtr c, Core &t, BatchCase const &w)
           : BachModule(c, "harness"), core(t), want(w) {}
 
       std::vector<MessagePtr> out_msgs;
 
-     protected:
+    protected:
       void Step() override {
         uint64_t now = CycleNow();
         LinkEndPtr in = core.InWire(kLeft);
@@ -918,23 +961,25 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
               RefToken(want.token[idx], want.token_scale[idx], 100 + idx);
           // 槽位按到达顺序环形分配，第 i 个用户落在第 i 格。
           m->stream_id = idx;
-          in->flit.Drive(0, true, true, m->size, m);
+          in->flit.Drive(0, true, true, m->TotalBytes(), m);
         } else {
           in->flit.Idle();
         }
-        for (uint64_t d = 0; d < 3; ++d) core.BackWire(d)->flit.Idle();
+        for (uint64_t d = 0; d < 3; ++d)
+          core.BackWire(d)->flit.Idle();
 
         core.RunStep();
 
         for (uint64_t d = 0; d < 3; ++d) {
           FlitView f = ReadFlit(core.OutWire(d)->flit);
-          if (f.valid && f.msg) out_msgs.push_back(f.msg);
+          if (f.valid && f.msg)
+            out_msgs.push_back(f.msg);
         }
       }
 
-     private:
-      Core& core;
-      BatchCase const& want;
+    private:
+      Core &core;
+      BatchCase const &want;
     };
     Feeder feeder(clk, core, want);
     CoreProbe probe(clk, core);
@@ -946,8 +991,8 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
     tail = probe.tail;
   }
   RT::Reset();
-  EXPECT_EQ(mu_dones, 4u);   // MU 算了四笔
-  EXPECT_EQ(head, tail);     // 四个用户都退休了
+  EXPECT_EQ(mu_dones, 4u); // MU 算了四笔
+  EXPECT_EQ(head, tail);   // 四个用户都退休了
   ASSERT_EQ(got.size(), want.out.size()) << "出口上收到的包数不对";
   for (size_t i = 0; i < got.size(); ++i) {
     uint64_t idx = got[i]->user_id - 100;
@@ -958,4 +1003,106 @@ TEST(BachCoreE2e, FourTokensEachMatchReference) {
           << "user=" << idx << " 第 " << b << " 个字节";
     }
   }
+}
+
+namespace {
+
+// 本地计算停在 task 9，注入上游已经发来的 task 14 分量。
+// 用独立建表口控制任务边界，其余接收路径使用完整 Core 装配。
+ReduceModule::State ProbeFutureReduce(bool earlier_done, bool earlier_busy,
+                                     uint64_t incoming_user = 42) {
+  ReduceModule::State state;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    CoreContext context;
+    Core core(clk, "core", context);
+    char const *kinds[] = {"dte", "mu", "vu"};
+    for (uint64_t unit = 0; unit < 3; ++unit)
+      core.Rv(unit).LoadImage(KernelDir() + "kernel_" + kinds[unit] + ".hex");
+    TaskEntry reduce;
+    reduce.task_type = TaskType::kReduce;
+    reduce.path_id = 3;
+    core.GetTs().Cfg().WriteTask(2, reduce);
+    TaskEntry compute;
+    compute.wait_wake = true;
+    core.GetTs().Cfg().WriteTask(9, compute);
+    reduce.path_id = 7;
+    reduce.end = true;
+    core.GetTs().Cfg().WriteTask(14, reduce);
+    core.GetTs().InitFinish();
+    RouteEntry route;
+    route.op_type = OpType::kReduce;
+    route.operation = Operation::kReduce1;
+    route.path_core_bypass = true;
+    route.reduce_in_mask = 0b011;
+    route.reduce_data_type = route.reduce_outdata_type = kReduceFp32;
+    core.GetRouter().Preload(7, route);
+    auto message = std::make_shared<Message>();
+    message->user_id = incoming_user;
+    message->path_id = 7;
+    message->reduce_seq = 14;
+    message->payload.resize(kReduceSwHeaderBytes + 4);
+    message->size = message->payload.size();
+    auto write = std::make_shared<StreamWrite>();
+    write->valid = write->whole = true;
+    auto &entry = write->entry;
+    entry.valid = entry.user_id_vld = true;
+    entry.user_id = 42;
+    entry.task_id = 9;
+    entry.task_fsm = TaskFsm::kWait;
+    entry.done_bitmap = earlier_done ? 1ull << 2 : 0;
+    entry.rmem_busy = earlier_busy;
+    entry.rmem_task = 2;
+    entry.rmem_pid = 3;
+    auto port = std::make_shared<StreamWritePortIf>(clk);
+    core.GetTs().Table().Rebind(kWrCreate, port);
+    class AdmissionHarness : public CoreHarness {
+    public:
+      AdmissionHarness(ClockPtr clock, Core &target, MessagePtr packet,
+                       std::shared_ptr<StreamWritePortIf> create,
+                       std::shared_ptr<StreamWrite> initial)
+          : CoreHarness(clock, target, 20, std::move(packet)),
+            create_port(std::move(create)), initial_entry(std::move(initial)) {}
+    protected:
+      void Step() override {
+        if (CycleNow() == 2)
+          create_port->Drive(initial_entry);
+        else
+          create_port->Idle();
+        CoreHarness::Step();
+      }
+    private:
+      std::shared_ptr<StreamWritePortIf> create_port;
+      std::shared_ptr<StreamWrite> initial_entry;
+    } harness(clk, core, message, port, write);
+    clk->Continue(100 * kPeriod);
+    RT::JoinAll();
+    EXPECT_EQ(core.GetTs().Table().Peek(0).task_id, 9u);
+    state = core.GetRouter().GetReduce().Inspect();
+  }
+  RT::Reset();
+  return state;
+}
+
+} // namespace
+
+TEST(BachCoreE2e, LaterReduceCanReceiveWhileLocalComputeIsWaiting) {
+  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  auto state = ProbeFutureReduce(true, false);
+  ASSERT_EQ(state.tasks.size(), 1u);
+  EXPECT_EQ(state.tasks[0].user_id, 42u);
+  EXPECT_EQ(state.tasks[0].reduce_seq, 14u);
+  EXPECT_EQ(state.tasks[0].in_done_mask, 0b010u);
+}
+
+TEST(BachCoreE2e, FutureReducePreservesAdmissionAndEarlierLease) {
+  if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
+  EXPECT_TRUE(ProbeFutureReduce(false, false).tasks.empty());
+  EXPECT_TRUE(ProbeFutureReduce(true, true).tasks.empty());
+  // Router MAS F-029 allocates a free PhyMemTable entry for a new user;
+  // its first network operand may arrive before the local stream is created.
+  auto early=ProbeFutureReduce(true,false,99);
+  ASSERT_EQ(early.tasks.size(),1u);
+  EXPECT_EQ(early.tasks[0].user_id,99u);
 }

@@ -47,7 +47,7 @@
 | core | Router：RouterTable 与 CSR、RouterStation ×3、Xbar、CoreStation、CoreMem 重发、ReduceModule、Retire、CoreMemCreditMonitor | 第 3 章 Router | 模块 ×8 | [`chip/core/router.md`](07-units/chip/core/router.md) |
 | core | TS：User_Match、CFG_REG、DataIn_task_table、Stream_table、Task_ctrl、DTE_Arb、MU_Arb、VU_Arb、Except Check | 第 3 章 TS 任务调度器 | 模块 ×9 | [`chip/core/ts.md`](07-units/chip/core/ts.md) |
 | core | RV core ×3：task_queue、指令执行器（`src/rv32`）、dsa_iss、访存（sm_lsq / cm_lsq）、CSR | 第 3 章 RV Core | 模块 ×3 | [`chip/core/rv-core.md`](07-units/chip/core/rv-core.md) |
-| core | DTE：Header Parser、Commit、TaskQueue ×4、Lane ×4（含 AGCU）、中间 Buffer、Completion RS、Hmem 与 LUT、topK 与 shareMem 写 | 第 4 章 DTE DSA | 模块 ×8 | [`chip/core/dte.md`](07-units/chip/core/dte.md) |
+| core | DTE：Config/Status、全局TaskQ及五路下发、五Channel十lane、Buffer/Outstanding、HeaderTable及SM/Ack退休 | 第 4 章 DTE DSA | 模块 ×8 | [`chip/core/dte.md`](07-units/chip/core/dte.md) |
 | core | MU：regfile、issue_q、gen_ep_info、agu ×3、ldq ×2、matrix exe、stq | 第 4 章 MU DSA | 模块 ×7 | [`chip/core/mu.md`](07-units/chip/core/mu.md) |
 | core | VU：config_register、ISQ、pipe_ctrl 与 Scoreboard、LU、SU、SMUX / DMUX、VALU0 / VALU1 / VALU2 / VSFU、MEXE、SEXE、VRF / MRF / SRF、Profile | 第 4 章 VU DSA | 模块 ×11 | [`chip/core/vu.md`](07-units/chip/core/vu.md) |
 | core | Core Mem、Matrix Mem、Share Mem 及各自的仲裁器 | 第 4 章存储子系统 | 模块 ×3 | [`chip/core/memory.md`](07-units/chip/core/memory.md) |
@@ -125,8 +125,8 @@
   <path d="M676 272 L676 250 L676 250" fill="none" stroke="#94a3b8"/>
   <rect x="676" y="284" width="460" height="72" fill="#f8fafc" stroke="#374151" rx="4"/>
   <text x="688" y="304" font-size="11.5" fill="#111827">DTE DSA</text>
-  <text x="688" y="320" font-size="9" fill="#475569">Header Parser · Commit · TaskQueue ×4</text>
-  <text x="688" y="334" font-size="9" fill="#475569">5 个物理通道（AGCU）· 中间 Buffer · Completion RS · Hmem 与 Fast LUT（待评估）</text>
+  <text x="688" y="320" font-size="9" fill="#475569">Config／Status · 全局TaskQ16 · 五Channel</text>
+  <text x="688" y="334" font-size="9" fill="#475569">五Channel十lane · 全局TaskQ · HeaderTable800B</text>
   <text x="688" y="348" font-size="9" fill="#475569">topK 与 shareMem 写</text>
   <text x="1124" y="304" font-size="9" fill="#9ca3af" text-anchor="end">模块 ×8</text>
   <text x="1124" y="347" font-size="8.5" fill="#9ca3af" text-anchor="end">chip/core/dte.md</text>
@@ -194,9 +194,9 @@ Bach core 里的 TS 按 stream 年龄仲裁发射、三块存储按 bank 仲裁�
 
 | 单元 | 等待点 | 状态机 |
 | - | - | - |
-| TS | 等前序 task 完成、等 datain、等 credit、等 RV core 空闲、等 `raw ACCEPT` | 每个 stream 表项一个 `task_fsm`：IDLE → WAIT → RDY → INFLY → FINISH |
+| TS | 等ACK/DataIn、新方向、RMEM、Core接受及Head退休 | 每槽WAIT/WAIT_CREDIT/REDUCE_WAIT/READY/INFLY/FINISH；入口和TG token及Fire Hold独立保持 |
 | RV core | 等 task、等源 gpr 就绪（DSA 读、访存返回）、等 lsq 与 dsa_iss 有空 | 执行状态加 gpr 就绪表 |
-| DTE | 等 Commit 配对资源、等 Lane 激活、等访存返回、逐拍搬运、等 Router 反压解除、等 Completion RS 的 Join | 每条 Lane 一个 Active Context 状态机，每个任务一个完成状态（queued → active → issue_done → drained → join_done → task_done） |
+| DTE | 等Channel驻留/WR Q、Buffer预留、端点响应、TX credit、SM bresp及Ack队头 | 全局Entry状态加lane Active/Hold，SM/Ack按序推进；资源不在dispatch提前释放 |
 | MU | 等 issue_q 出队、等 Matrix Mem / Core Mem 返回、流水推进、等 stq 拼满 | 原语状态机，按 lane 深度与 outstanding 计拍 |
 | VU | ISQ 排队、pipe_ctrl 合法性检查、Scoreboard 依赖、等 CM Load / Store 返回、宏指令重叠 | 宏指令状态机，最多两条相邻在飞 |
 | Router | 等 VC credit、等 Stream 坑、等 Reduce credit、多播原子准入、Reduce 累加、AbsorbReissue | Message 状态机：Idle → Lookup → DeliverLocal / Forward / ReduceAccum / AbsorbReissue |
@@ -281,11 +281,11 @@ src/bach/
         ts/
           cfg_reg.h                task_chain 64 项、datain_task、ROUTER_TABLE、配置检查、按 PID 找搬入任务
           user_match.h             判用户、找搬入任务、定跳过，含 DataIn_task_table
-          stream_table.h           16 项 FIFO、task_fsm、十四个写口
+          stream_table.h           16槽、claimed与完成位图、按字段同拍合并
           task_ctrl.h              按完成位图一拍找后继、原子安装
           dte_arb.h  mu_vu_arb.h
           credit_monitor.h         credit 申请与唤醒、Rmem credit、Head-only 退休
-          task_done.h              七路完成合流
+          task_done.h              六路ACK分类／FIFO，RMEM独立返回
         rv_core/
           rv_core.h                驱动 src/rv32 的 SystemRv32 逐条执行；task_queue、dsa_iss、dsa_rq、lsq、gpr 就绪表、自定义 CSR
           exec.h                   自定义指令（dsar、dsari、dsaw、dsawi、task_done、loop）的译码接入点，指令体走 DSA IO 与 task 控制区那两条通路
@@ -391,7 +391,7 @@ LPU 与 Core 是纯装配容器，没有自己的一拍工作，第 5、6 两章
 | kernel 镜像 | 每类 core 一个 RV32 ELF（代码段进 ITCM、数据段进 DTCM），与 task_pc → kernel 入口地址表 | 编译侧 |
 | 数据 | 每 core 的权重分片与落 Matrix Mem 的地址（真实部署每 core 27 MiB，含共享专家；默认用例 EPTP-NK 下每 core 两个专家的 W1、W3、W2，MXFP8 带 scale，约 1.2 MiB）；注入表（每 token 的 6368 B 级联包与注入拍：6144 B MXFP8 数据、192 B scale、32 B 软件信息）；参考实现的期望输出 | 编译侧 + `reference/` |
 
-编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、每 chip 的 `core_bad_mask` 与角色分配、每 core 业务模式下进核那一笔的配置、`CreditCounter[path_id][stream_id]` 初值（广播 = 目的 core 数，P2P = 1）。
+编译侧产物里必须有、不能反推的几样：每个 core 的 RouterTable（同一 path_id 在不同 core 上表项不同）、每个 core 的 task_chain 与 datain_task、每 core 的权重分片与角色、每 chip 的 `core_bad_mask` 与角色分配、每 core 业务模式下进核那一笔的配置、TS的STREAM_NUM（成功提交派生三方向各N份许可；不另配置PID计数表）。
 
 参数表 `common/params.h` 是全部拍数、带宽、深度的唯一出处，每个值标注来历：MAS 给的、性能需求规格说明书给的、第 8 章冲突项按“建议”取的、本章“待定”默认值。
 
@@ -471,7 +471,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 
 | 类 | reason |
 | - | - |
-| 依赖 | 等前序 task 完成、等 datain 数据到达、等 Router `reduce_done`、等 DSA 读寄存器返回、等 Completion RS 的 Join、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的用户 FIFO 头尾不等 |
+| 依赖 | 等前序 task 完成、等 datain 数据到达、等执行双ACK或RMEM空间归还（分别统计）、等 DSA 读寄存器返回、等WR drain/Finish及全局SM/Ack退休、等 Scoreboard 依赖、等 B core 的 head ≠ tail、等 R core 的用户 FIFO 头尾不等 |
 | 资源 | 等 stream 坑、等 VC credit、等 Reduce credit、等入口桩的 grant、等 TaskQueue / ISQ / issue_q 项、等 Lane、等 bank 端口、等 RV core 空闲、等 dsa_iss 通道、等 DTE Buffer credit、等 Xbar 出口、等 ReduceModule 上下文 |
 
 瓶颈由此能定位到具体资源而不只是慢，而且只有资源那一半是改参数动得了的。
@@ -505,8 +505,8 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 3 | 三块存储与它们的 bank 仲裁器 | 各 master 端口的端到端拍数等于参数表；同 bank 冲突按优先级授予 |
 | 4 | Router 的八个模块 | Router 单测跑 A2、A5、A15、A16、A17 五个场景；credit 守恒 |
 | 5 | RV core（接 `src/rv32`）与三块存储、Router I/O reg 的连接 | 一个只做标量活的 kernel 跑完并向 TS 报完成 |
-| 6 | TS 的九个模块 | 单 stream 单 task 从 trigger 到 retire 走完；各写口的冲突用例 |
-| 7 | DTE 的八个模块 | 五个搬运方向各一个用例；Commit 配对接纳与 Join 的用例 |
+| 6 | TS配置、DataIn、TG×16、ACK FIFO、Credit Ctrl、Map与三路Arbiter | claimed/Future、同SID合并、RMEM解耦、首次启动和本地重生 |
+| 7 | DTE全局Q、五Channel十lane及端点适配 | 五Route、Core内两形态、窗口、32B头、写bresp和SM/Ack全局保序 |
 | 8 | MU 与 VU | 逐条计算原语与参考实现逐 bit 比对 |
 | 9 | Core 装配、Chip 装配（含 SCP 桩、ctrl_noc 端点、C2C Bridge） | 单 chip 上 boot 走完六步，`ready` 全高 |
 | 10 | LPU 装配与静态表读入 | 48 chip 构造出来，拓扑结构那一类检查全过 |
@@ -529,11 +529,11 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 | 2 | 相互依赖的数据流分到不同 VC，避免循环等待 | `RouterTable.nxt_vc` 的填法，编译侧保证 |
 | 3 | credit 不足的 VC 被跳过，同一 input port 的其他 VC 不受影响 | RouterStation 的 VA |
 | 4 | 多播全有或全无。只发一半会让同一 User 的数据在不同分支上错位，已发方向占了资源却完不成整体传输 | RouterStation 与 Xbar |
-| 5 | Router 的进 core 表与 TS 内部的 Stream 表按完全一致的逻辑分配空项，因此“Router 通知 TS 的包一定能被 TS 接收” | Router 的 CoreMemCreditMonitor 与 TS 的 `task_state_update.credit` |
+| 5 | Router入口资源和TS启用N槽容量一致；TS自行维护三个方向N份许可，DataIn Pending/Prepare保护分配生命周期 | TS Stream Map/Credit Ctrl与Router返回接口；旧请求/Grant桥接待统一 |
 | 6 | 拿不到下游资源时二选一：留在 VC 等，或转 Core Mem 重发。选后者必须为它预留 Core Mem 空间并在任务链里安排 reissue 任务；坏 core 的 Router 在透传档，不做溢流转存，只能留在 VC，因此 path 规划要保证这一段不会长期阻塞 | `RouterTable.stall_way` 与 CoreMem 重发 |
 | 7 | P2P 传输阻塞时把数据落进 Core Mem 的 P2P 阻塞缓冲，下游 credit 释放后再续传 | TS 的 P2P 阻塞缓冲映射表 |
-| 8 | DTE 的 Commit 配对接纳：RD、WR 两个 TaskQueue 项与 Completion RS 项同时拿到才收，不产生读已开始、写没有落脚点的半任务 | DTE 的 Commit |
-| 9 | DTE 的出核任务先进中央 TaskQueue，dispatch 时才一起去 Commit 申请那三样（Lane 读/写 TaskQueue + Completion RS），等在队列里的任务不占 Completion RS | DTE 的 Commit 中央 TaskQueue |
+| 8 | DTE下发条件为RD AGCU驻留空闲且WR Q有位，两侧同拍接纳 | 全局TaskQ的五个Ch Ptr和Channel接口 |
+| 9 | 全局TaskQ Entry直到Ack退休才释放；WR完成、SM响应、TS报告分别计状态，队满反压所有配置访问 | 全局16Entry、SM Ptr、Ack Ptr |
 | 10 | EP 组间派遣：所有 R core 都有余量才派遣一个用户，派时各减一，链尾返回后各加一 | 入口桩的 LPU Dispatch |
 | 11 | 一条“广播 + P2P + 广播”的路径上，各 core 的 Core Mem 能容纳的用户数**沿数据流方向不能变少**：一致或前窄后宽。满足这一条时 User N 的回程一定排在 User N+4 的去程之前，不会成环 | 编译侧的 `cmem_part` 分配，模型在 boot 期校验 |
 | 12 | ReduceBuffer 不得当流控缓存用。Reduce 结果发不出去时进本 core 的 Core Mem，不许压在 ReduceBuffer 里 | ReduceModule 的输出准入 |
@@ -592,7 +592,7 @@ latch 的 `Time` 有效范围是 32 位，1 T 一拍下约 4.29e9 拍。一层 F
 四条不变量：
 
 1. **credit 守恒**：一轮跑完后，所有方向、所有类型的 credit 计数回到初值。
-2. **相同 `task_id` 在不同 user 之间时序无交叠**。
+2. **同一TID允许不同用户并行，身份以SID和当前生命周期区分；单个SID/TID不能重复下发或完成**。
 3. **每个目的 core 对同一个 user 的同一份数据只落一次**。
 4. **注入 N 个 token，出口收到 N 个结果**，且逐 bit 等于参考实现。
 
@@ -603,18 +603,18 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | A2 | bypass 中间核不占用户坑 |
 | A5 | 同用户二次发送余额不减 |
 | A15 / A16 | 单个与多个坏 core 串联时，透传档的 credit 透传 |
-| A17 | reduce 完成 Ack 归 Router；缺 Ack 时任务链停在 reduce 处不前进 |
+| A17 | Reduce双ACK完成任务；RMEM返回只还空间，缺返回不能再次Reduce或退休 |
 
 ### 最容易实现错的几条
 
-1. **Reduce 任务的完成判定**：DTE ACK 只代表搬运完成，**只有 Router Reduce Done 才能把任务置 FINISH**，且两者可任意顺序到达。判错会让 reduce 链提前推进。
+1. **Reduce任务与RMEM空间分别记账**：Core/DSA双ACK完成任务；RMEM Done只按UID还空间。返回与完成任意先后均合法，退休须两类条件同时满足。
 2. **异步 datain 只更新 done_bitmap，不推进 task_id**。这是任务链能乱序完成又保持顺序语义的关键。
 3. **Retire 的三方时序**：Core 保证不再有该 user 的搬运 → Router 立即删表项 → ReduceModule 延迟到 credit 全恢复才删。
 4. **多播原子准入**：多播的每个 flit 必须同时取得所有目标方向资源才能发，任一方向不足则所有分支统一等待。不能让分支独立前进。
 5. **进 core 后锁定到尾 flit**，而 Router-to-Router 可以在 flit 边界切换 Packet。两种粒度不能混用。
 6. **Mmem 同 bank 不能有两个 master**，冲突时只执行 MU。
 7. **VU 的 CM 访存冲突硬件不追踪**，靠软件的 `MACRO_INST_FENCE`。建模时若默认硬件会挡，结果会偏乐观。
-8. **DTE 的配对接纳**：RD、WR 两个 TaskQueue 与 Completion RS 三项同时可用才接纳，不产生半任务。
+8. **DTE的原子下发**：全局Entry保留至Ack退休；RD驻留空闲且WR Q有位时同拍下发，不产生半任务；五路WR完成并行回写，SM/Ack全局有序。
 9. **bit 级的累加顺序**：MU 的 CSA 树按 scale block 分组累加、Router reduce 按到达顺序 FP32 累加、VU 归约按 LANES 内归约再 ⌈log2 SEG⌉ 级累加。参考实现必须用同一顺序。
 
 ### 测试写法
@@ -628,7 +628,7 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 ### 简化
 
 * **RV core 不建流水线**：kernel 是真实 RV32 程序，双发射顺序执行、一拍最多两条，访存与 DSA 读的延迟记在 gpr 就绪表上；分支预测、流水冲刷、乘除多拍、DTCM bank 冲突、gpr 端口竞争不体现。
-* **异常、ECC、看门狗、功耗类机制不建**：各单元留状态位与接口名。
+* **目标建模范围**：TS配置失败／重试、DTE合法性和结构化Except、有序首错、STOP/RUN/ERROR、状态回读和写响应等待需要实现；ECC需可注入端点不可纠正错误。看门狗／功耗及未冻结的异常位域、Flush终止细节保留TBD。当前代码未实现这些目标能力。
 * **TS 直接启动 DTE、DTE 的 3 Lane 方案、DSA-RF 调试通路不建**。
 * **Router 的输出移位拼接不建**：flit 定长 256 B，尾 flit 带有效字节数。
 * **一个 token、每个 EP 组内两个激活专家，默认按 EPTP-NK 切**：分片的方向与尺寸都照真实的来。每个专家的权重完整形状是 6144×2048（W2 是 2048×6144），FC1、FC3 chip 间切 N、chip 内切 K，每 core 的 W1、W3 是 K768×N256，W2 是 K256×N768。token 与权重用 MXFP8，MU 原语是 1×K128×N64 与 1×K64×N128，MU 输出与 Router reduce 的输入输出用 BF16。每 core 装两个专家的 W1 / W3 / W2 约 1.2 MiB。共享专家、多个 token 连着跑与派遣那一档不在里面。
@@ -648,11 +648,11 @@ Router 的验收场景 A1～A17 逐条列在 Router 那一份文档的“验收�
 | Xbar 与 ReduceModule 三路输入的仲裁算法 | 轮询 |
 | ReduceModule bank 数、RMW 拍数、每路输入缓冲深度 | 4、2、32 flit（每路输入缓冲取 DATA_NOC HAS 面积预算的每口 32 flit，与同一份 HAS ASM-07 的 128 flit 没对齐） |
 | CoreStation HeaderFIFO、OutputBuffer 深度 | 16、60 flit（OutputBuffer 取 DATA_NOC HAS 的 DTE-local 桥接 Router→DTE 60 flits；HeaderFIFO 无出处，16 这个值与 60 flit 装得下的包数不匹配）|
-| DTE Buffer、Completion RS、Done Pending 深度 | 16 × 256 B × 2、16、16 |
+| DTE已明确资源与剩余参数 | 全局Q16、WR Q4/RD驻留1、每Channel Buffer32×256B、HeaderTable800B；其余保留站深度TBD |
 | VU ISQ 深度 | 8 |
 | Share Mem 四个 master 的仲裁算法 | 轮询 |
 | RV core task_queue 深度、dsa_iss 收请求的队列深度 | 2、3（执行器按上一拍的 req_ready 决定发不发，req_ready 拉高后路上最多还有两笔，队列留出这两笔的位置） |
-| TS stream_table 各写口的优先级 | retire > done × 7 > install > issue × 3 > wake > create |
+| TS Stream Map更新 | 按字段合并Completion/Skip，TG目标冲突取消，Issue/Grant无重试；生命周期优先保护 |
 | `reduce_in_mask` 的逐核取值 | 按 path 图推导；中间列 chip 坏 core 那个例子里的逐核取值还没回填 |
 | Core Mem 后三个 master 的优先级 | 三者平级，先到先得（前两档 MU > VU = DTE 由设计给定） |
 | `dsar` 与 `dsari` 的区分位 | 《ISA 描述表》给了九条自定义指令的完整编码，逐条见 RV core 那一份文档。只有这两条的编码在表里完全相同，模型按其余四条的规律用 bit31 区分 |

@@ -83,7 +83,8 @@ inline bool GenerateMoeLpuTokens(std::string const& name, uint64_t count) {
 }
 
 inline void RunTokens(uint64_t count, uint64_t trace_chips,
-                      std::string const& name, uint64_t max_cycles) {
+                      std::string const& name, uint64_t max_cycles,
+                      double max_middle_cycles = 0) {
   if (!KernelBuilt()) GTEST_SKIP() << "kernel 还没编";
   Vectors want = ReadVectors(name + ".txt");
   if (want.Empty()) {
@@ -151,6 +152,12 @@ inline void RunTokens(uint64_t count, uint64_t trace_chips,
     PrintMiddleOutputStats(out_at);
   }
   ASSERT_EQ(got.size(), count) << "出口上要收到每个 token 一包结果";
+  if (max_middle_cycles > 0) {
+    ASSERT_GE(out_at.size(), 64u);
+    size_t first = (out_at.size() - 64) / 2;
+    double average = double(out_at[first + 63] - out_at[first]) / 63;
+    EXPECT_LE(average, max_middle_cycles) << "中间 64 个输出的吞吐退化";
+  }
   std::set<uint64_t> seen;
   for (MessagePtr const& m : got) {
     uint64_t k = m->user_id;

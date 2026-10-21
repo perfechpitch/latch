@@ -54,6 +54,13 @@ def check_one(path):
             return f"{tok[0]} 的字段数不一致：{widths[tok[0]]} 与 {len(tok)}"
         widths[tok[0]] = len(tok)
 
+    for key, routes in plan.ts_routes().items():
+        for pid, (directions, unused_vc) in routes.items():
+            entry = plan.entries.get(key, {}).get(pid)
+            needed = entry.stream_need & moe.FLOW_ALL_DIR if entry else 0
+            if directions & moe.FLOW_ALL_DIR != needed:
+                return f"{key} PID {pid} 的TS许可方向包含无需业务资源的转发方向"
+
     if build_topo(path)[1] != lines:
         return "两次跑出来不一致"
 
@@ -70,7 +77,7 @@ def check_one(path):
         row = plan.chains[key][-1]
         if (row.idx != moe.DOT_ROW_TASK or row.path_id != moe.ROW_PATH or
                 row.sym != ("dte", "task_dte_send_row") or
-                row.task_type != "REDUCE" or not row.credit_en):
+                row.task_type != "REDUCE" or row.credit_en or row.recv_unit != "RV_DSA"):
             return f"{key} 行链任务边界或本地发包配置不一致"
     return None
 

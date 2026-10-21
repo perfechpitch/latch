@@ -406,18 +406,18 @@ TEST(BachCoreStation, HeaderIsReadThenPopped) {
   EXPECT_EQ(depth_at_end, 1u) << "两个进来、弹出一个，还剩一个";
 }
 
-// 包头队列快满时准入电平拉低，进核的数据压在 Xbar 那一侧，不静默丢：丢一个包头
-// 就等于丢一个 token 的搬运任务。没人来读包头，队列就一直满着，剩下的一直压着。
+// 包头队列深度检查暂时拿掉：超过 16 仍收下，准入电平不因此拉低。
+// 数据缓冲没满时这些单拍包全部进核。
 TEST(BachCoreStation, FullHeaderFifoBackpressures) {
   uint64_t depth = 0, admitted = 0, fed = 0, held = 0;
-  bool ready = true;
+  bool ready = false;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
     StationHarness h(clk, *b.cs, b.in_wire, b.out_wire);
     h.honor_level = true;
-    // 灌 20 个单拍包，队列只有 16 个位置。
+    // 灌 20 个单拍包。深度检查拿掉之前，16 深会把多出来的压在上游。
     for (uint64_t i = 0; i < 20; ++i) {
       h.in_jobs.push_back({1 + i * 2, MakeMsg(100 + i, 3), true, true, 0});
     }
@@ -430,11 +430,11 @@ TEST(BachCoreStation, FullHeaderFifoBackpressures) {
     ready = b.cs->CoreReady();
   }
   RT::Reset();
-  EXPECT_FALSE(ready) << "包头队列满着，电平要低";
-  EXPECT_LE(depth, kHeaderFifoDepth) << "最多装这么多";
+  EXPECT_TRUE(ready) << "数据缓冲没满，包头深度不再把电平拉低";
+  EXPECT_EQ(depth, 20u) << "20 个包头都留下了";
   EXPECT_EQ(admitted, fed) << "发进去的一笔不少地收下了，没有静默丢";
-  EXPECT_EQ(fed + held, 20u) << "剩下的压在上游，不是丢了";
-  EXPECT_GT(held, 0u) << "电平低下来之后确实压住了";
+  EXPECT_EQ(fed, 20u);
+  EXPECT_EQ(held, 0u) << "不再因为包头深度把后续包压在上游";
 }
 
 TEST(BachCoreStation, HardwareHeadersDoNotFillSoftwareFifo) {

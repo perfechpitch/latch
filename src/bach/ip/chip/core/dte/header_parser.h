@@ -1,159 +1,93 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_DTE_HEADER_PARSER_
 #define _LATCH_BACH_IP_CHIP_CORE_DTE_HEADER_PARSER_
-
-// Header Parser：Router 入站帧的数据通路单元。
-//
-// 对齐飞书《DTE DSA》：进核是配置驱动——任务由 RV core 配 CFG 寄存器 + trigger 起，
-// 落点由软件配 CFG_ADDRx_DST；Header Parser 只在包头阶段使能，负责帧边界判定、
-// 合法性检查，把包头上下文（core_mask / Hardware Used / 软件包头 / gpu_id /
-// token_id）随 Message 一起转发给进核通道的读侧，由 Lane 按段 0 端点落库（计算
-// core 落 Hmem、B/R core 落 Core Mem）。它不再生成 Descriptor，也不再直接写表。
-//
-// 首拍固定是 Header，靠“上一帧 TLAST 已接受”判断下一拍是新 Header，不依赖
-// Start-of-Frame 信号。一帧一任务，不允许任务间交织。TLAST 标识最后一个 Payload
-// beat；byte_count 为 0 时可由 Header beat 同时携带 TLAST。
-//
-// 非法 Header 在模型里直接断言。进核任务与数据包按到达顺序一一配对，CoreStation
-// 每收一个包头就起一笔 datain，kernel 为它配一笔进核任务；丢掉一帧，之后的配对
-// 就整体错开一位。
-
-#include <memory>
-#include <string>
-
-#include "base/log.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/module_base.h"
-
+#include <deque>
+#include <memory>
+#include <string>
 namespace latch {
 namespace bach {
-
+// Elastic RX bridge absorbs the registered ready delay. It retains each
+// parsed beat until Lane acknowledges its sequence, including the first beat.
 class HeaderParser : public BachModule {
- public:
-  HeaderParser(ClockPtr clock, const std::string& name,
-               uint64_t parent = 0, bool tick = true)
+public:
+  HeaderParser(ClockPtr clock, const std::string &name, uint64_t parent = 0,
+               bool tick = true)
       : BachModule(clock, name, parent, tick),
         from_router(std::make_shared<CoreDataPort>(clock)),
-        payload(std::make_shared<PayloadPort>(clock)),
-        parsed(clock),
+        payload(std::make_shared<PayloadPort>(clock)), parsed(clock),
         beats(clock) {}
-
-  CoreDataPort& FromRouter() { return *from_router; }
+  CoreDataPort &FromRouter() { return *from_router; }
   void AttachFromRouter(std::shared_ptr<CoreDataPort> p) {
     from_router = std::move(p);
   }
-
-  // Payload 那些拍交给进核通道的 RD 侧，由它写进 inbound buffer。走端口，不直接碰
-  // 对方的容器。
   std::shared_ptr<PayloadPort> PayloadPtr() const { return payload; }
-
   uint64_t Parsed() const { return parsed.Get(); }
   uint64_t Beats() const { return beats.Get(); }
+  bool Quiescent() const override {
+    return !in_frame && queue.empty() && !pending;
+  }
 
-  bool Quiescent() const override { return !in_frame; }
-
- protected:
+protected:
   void Step() override {
-    payload_driven = false;
-    Handle();
-    if (!payload_driven) payload->Idle();
-    Commit();
-  }
-
- private:
-  void Commit() {
-    parsed = parse_pending;
-    beats = beat_pending;
-    TracePerCycle("parsed", parse_pending);
-  }
-
-  void Handle() {
-    CoreDataView d = ReadCoreData(*from_router);
-    if (!d.valid) {
-      from_router->DriveReady(true);
-      return;
+    if (pending && payload->accepted_seq.Get() == pending)
+      pending = 0;
+    auto beat = ReadCoreData(*from_router);
+    if (beat.valid && beat.seq != seen) {
+      LOGCHECK(queue.size() < 4, "HeaderParser: RX bridge overflow");
+      seen = beat.seq;
+      queue.push_back(beat);
     }
-    // 同一拍数据会连着两拍出现在端口上，按序号认它。
-    if (d.seq == last_seq) {
-      from_router->DriveReady(true);
-      return;
-    }
-
-    // Buffer 满时通过 TREADY 向 Router 反压，本拍不收。这一步要排在
-    // “记下已见过这一笔”之前，否则这一笔会被当成收过了，上游换下一笔，
-    // 数据就丢了。下游收不下由 payload 口的 ready 反映。
-    if (in_frame && !payload->Ready()) {
-      from_router->DriveReady(false);
-      return;
-    }
-
-    last_seq = d.seq;
-    ++beat_pending;
-
-    if (in_frame) {
-      // Payload beat：累计 TKEEP 的有效字节，TLAST 时与 byte_count 比较。
-      payload->Drive(cur_frame, d.bytes, keep_sum, d.last, d.msg);
-      keep_sum += d.bytes;
-      payload_driven = true;
-      if (d.last) {
-        if (keep_sum < byte_count || std::getenv("PCODE_TRACE_HEADER"))
-          std::fprintf(stderr, "header parser id %llu cycle %llu frame %llu user %llu token %llu path %llu bytes %llu expected %llu seq %llu\n",
-                       Id(), CycleNow(), cur_frame, d.msg->user_id, d.msg->token_id,
-                       d.msg->path_id, keep_sum, byte_count, d.seq);
-        LOGCHECK(keep_sum >= byte_count,
-                 "HeaderParser: TLAST 时累计的有效字节少于包头写的 byte_count。");
-        in_frame = false;
-        keep_sum = 0;
+    if (!pending) {
+      payload->Idle();
+      if (!queue.empty() && payload->Ready()) {
+        auto next = queue.front();
+        queue.pop_front();
+        ++beat_count;
+        uint64_t offset = count;
+        if (!in_frame) {
+          ++frames;
+          ++parse_count;
+          count = 0;
+          offset = 0;
+          expected = next.msg ? next.msg->TotalBytes() : 0;
+          error = (!next.hdr || !next.msg || expected > kMaxTaskBytes ||
+                   next.msg->path_id > 255 || next.msg->user_id > 65535)
+                      ? 8
+                      : 0;
+        } else if (next.hdr) {
+          error = 8;
+        }
+        count += next.bytes;
+        if (next.bytes > 256 || count > expected ||
+            (next.last && count != expected) ||
+            (!next.last && count == expected))
+          error = 8;
+        auto message = next.msg ? next.msg : std::make_shared<Message>();
+        payload->Drive(frames, next.bytes, offset, next.last, message, error);
+        pending =
+            ++payload_sequence; // Drive increments the producer-local sequence.
+        in_frame = !next.last;
+        if (next.last)
+          count = 0;
       }
-      from_router->DriveReady(true);
-      return;
     }
-
-    // 首拍是 Header。包头上下文（core_mask / Hardware Used / gpu_id / token_id）随
-    // Message 一起转给进核通道，Lane 按段 0 端点落库，这里不再写表。
-    LOGCHECK(Legal(d), "HeaderParser: 非法包头（没带 Message 或长度超过 32 KB）。");
-
-    ++parse_pending;
-    byte_count = d.msg->size;
-    if (std::getenv("PCODE_TRACE_HEADER"))
-      std::fprintf(stderr, "header start id %llu cycle %llu frame %llu user %llu token %llu path %llu expected %llu seq %llu\n",
-                   Id(), CycleNow(), frame_cnt+1, d.msg->user_id, d.msg->token_id,
-                   d.msg->path_id, byte_count, d.seq);
-    keep_sum = d.bytes;
-    cur_frame = ++frame_cnt;
-    in_frame = !d.last;
-    if (d.bytes != 0 || d.last) {
-      // Header 这一拍带的数据也是包的开头，从 0 起。整包只有这一拍时，边界
-      // 标记跟着它走。
-      payload->Drive(cur_frame, d.bytes, 0, d.last, d.msg);
-      payload_driven = true;
-      if (d.last) keep_sum = 0;
-    }
-    from_router->DriveReady(true);
+    from_router->DriveReady(queue.size() < 2);
+    parsed = parse_count;
+    beats = beat_count;
+    TracePerCycle("parsed", parse_count);
   }
 
-  // 入站包头合法性检查。这一轮只建结构性的几条，位域细节等包格式定死后补。
-  // 落点改由配置给（CFG_ADDRx_DST），包头 dst_addr 不再参与，也不做对齐检查。
-  bool Legal(CoreDataView const& d) const {
-    if (!d.msg) return false;
-    // 长度：最长实际支持到 32 KB。
-    if (d.msg->size > kMaxTaskBytes) return false;
-    return true;
-  }
-
+private:
   std::shared_ptr<CoreDataPort> from_router;
   std::shared_ptr<PayloadPort> payload;
-
+  std::deque<CoreDataView> queue;
   bool in_frame = false;
-  uint64_t byte_count = 0, keep_sum = 0, cur_frame = 0, frame_cnt = 0;
-  uint64_t last_seq = 0;
-  bool payload_driven = false;
-  uint64_t parse_pending = 0, beat_pending = 0;
-
+  uint64_t seen = 0, pending = 0, payload_sequence = 0, frames = 0, count = 0,
+           expected = 0, error = 0, parse_count = 0, beat_count = 0;
   Logic64 parsed, beats;
 };
-
-}  // namespace bach
-}  // namespace latch
-
+} // namespace bach
+} // namespace latch
 #endif

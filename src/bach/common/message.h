@@ -5,15 +5,20 @@
 // 的是 LogicPtr<Message>，Push 只搬 shared_ptr，不深拷 payload 字节。
 //
 // 片内包头字段照 Router《DATA_NOC_DE_HAS》“消息格式 (Header field)”节（DTE 详
-// 细设计的 3.14 包头格式同）：path_id(Byte0)、core_mask(Byte2-3)、loopback(Byte5,
+// 细设计的 3.14
+// 包头格式同）：path_id(Byte0)、core_mask(Byte2-3)、loopback(Byte5,
 // [3:2]=vcid)、pkt_length(Byte6-7)、user_id(Byte8-9)、sw_aux(Byte16-31)。Header
-// Parser 取 path_id、path_core_mask、user_id、size、vc，按 path_id 查 RouterTable。
-// vc 每一跳都被改写（下一跳的 VC 编码在包头 loopback[3:2] 里，本跳 Router 读表后
-// 改写它），所以它是 Message 的可变字段，不是 flit 上的只读副本。
+// Parser 取 path_id、path_core_mask、user_id、size、vc，按 path_id 查
+// RouterTable。 vc 每一跳都被改写（下一跳的 VC 编码在包头 loopback[3:2]
+// 里，本跳 Router 读表后 改写它），所以它是 Message 的可变字段，不是 flit
+// 上的只读副本。
 //
-// Router 不感知 payload 内容，只有 reduce 包例外：软件辅助信息固定 16 B，做加法
-// 时跳过这一段（kReduceSwHeaderBytes）。
+// Router 不感知 payload 内容，只有 reduce 包例外：软件辅助信息在 payload 前面，
+// 做加法时跳过。BACHIR 10 的 MoE kernel 固定 16 B；BACHIR 11 的 pcode 数据段是
+// 纯张量，这段为 0。装载时按版本改 DtePayloadAuxBytes()。
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -32,7 +37,7 @@ enum class Operation : uint32_t {
 
 // RouterTable 的 op_type 字段。
 enum class OpType : uint32_t {
-  kWeight = 0,     // kernel 与 weight 搬运
+  kWeight = 0, // kernel 与 weight 搬运
   kTransfer = 1,
   kReduce = 2,
   kReduceTwice = 3,
@@ -41,20 +46,31 @@ enum class OpType : uint32_t {
 // reduce 包最前面这一段是软件辅助信息，Router 加法时跳过。
 constexpr uint64_t kReduceSwHeaderBytes = 16;
 
+// 出核包 payload 前缀长度。默认 16，与现有 MoE bundle 一致；LoadBundle 见到
+// BACHIR 11 时改成 0。
+inline uint64_t& DtePayloadAuxBytes() {
+  static uint64_t bytes = kReduceSwHeaderBytes;
+  return bytes;
+}
+
 // 最短包长：只含包头与路由信息的空包。
-constexpr uint64_t kMinPacketBytes = 16;
+constexpr uint64_t kMinPacketBytes = 32;
+inline bool& DtePcodeFormat() { static bool enabled = false; return enabled; }
 
 struct Message {
   // ── 包头 ──
+  std::array<uint8_t, 32> header_raw{};
+  std::array<uint8_t, 16> sw_aux{};
+  uint8_t loopback = 0;
+  bool payload_contains_topk = false;
   uint64_t user_id = 0;
   uint64_t path_id = 0;
   // 2 B 位图，最多给 16 个核分位。core 在自己的表项里指定看哪一位。
   uint64_t path_core_mask = 0;
-  uint64_t size = 0;           // 数据通道上的字节数（含 topK），收齐判定按它
-  uint64_t vc = 0;             // 包头 loopback[3:2]，每一跳被改写
-  uint64_t reduce_aux_bytes = kReduceSwHeaderBytes;
-  uint64_t reduce_seq = 0;     // TS 按它给 reduce task 配对
-  uint64_t reissue = 0;        // 这一笔是不是 Core Mem 重发出来的
+  uint64_t size = 0;       // 数据通道上的字节数（含 topK），收齐判定按它
+  uint64_t vc = 0;         // 包头 loopback[3:2]，每一跳被改写
+  uint64_t reduce_seq = 0; // TS 按它给 reduce task 配对
+  uint64_t reissue = 0;    // 这一笔是不是 Core Mem 重发出来的
   // 这个用户在目的 core 上占的槽位。各 core 按到达顺序环形分配，分出来的号
   // 因此一致，收方的 DTE 解析出来直接用。
   uint64_t stream_id = 0;
@@ -64,12 +80,14 @@ struct Message {
 
   // ── 片外（DPU/PCIe）自定义包头 ──
   // 不在片内 Router/DTE 的 32B 包头（3.14）里。入口桩封包时写 gpu_id(8) +
-  // token_id(16)，出口桩按这一对开重组缓冲、与参考实现比对，入口桩按它记 retired。
+  // token_id(16)，出口桩按这一对开重组缓冲、与参考实现比对，入口桩按它记
+  // retired。
   uint64_t gpu_id = 0;
   uint64_t token_id = 0;
 
   // 片外寻址：PCIe Switch 按 (gpu_id, dst) 查目的端口集合。dst 是 LPU 侧的目的
-  // 标识，阵列内部靠 path_id 走，这一项只在片外那一段有意义，不进片内 32B 包头。
+  // 标识，阵列内部靠 path_id 走，这一项只在片外那一段有意义，不进片内 32B
+  // 包头。
   uint64_t dst = 0;
 
   // 片外进核那一笔的落点。出核造包时从任务的 CFG_ADDRi_DST 抄过来（commit.h 的
@@ -80,10 +98,13 @@ struct Message {
   // payload 是 MXFP8 数据后面接它的 scale（每 32 B 一个 E8M0）。发方 DTE 的任务
   // 置了 scale_valid 时打上，收方据此把包尾那一段写进存储的 scale 旁带。
   uint64_t scale_valid = 0;
+  // payload 前多少字节是软件辅助信息。出核时抄 DtePayloadAuxBytes()。
+  uint64_t payload_aux = kReduceSwHeaderBytes;
 
-  // MoE 进核包自带的 topK 表（256 B）。topk_valid 置位时收方 DTE 不落 Core Mem，
-  // 而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。与数据/scale 同一条
-  // 数据通道，算进 size 的 flit 换算；字节不走 payload 正文，单独放在 topk 字段里。
+  // MoE 进核包自带的 topK 表（256 B）。topk_valid 置位时收方 DTE 不落 Core
+  // Mem， 而是经专用数据线按 stream_id 写进 MU 的 topK_ep_table。与数据/scale
+  // 同一条 数据通道，算进 size 的 flit 换算；字节不走 payload 正文，单独放在
+  // topk 字段里。
   uint64_t topk_valid = 0;
   std::vector<uint8_t> topk;
 
@@ -95,18 +116,51 @@ struct Message {
   // 这一轮不建 numeric，payload 当不透明字节搬运。
   std::vector<uint8_t> payload;
 
+  uint64_t logical_data_bytes = 0;
   uint64_t TotalBytes() const {
-    return size > kMinPacketBytes ? size : kMinPacketBytes;
+    if (payload_contains_topk || !scale_valid)
+      return size;
+    return ((payload.size() + 7) / 8) * 8 + (topk_valid ? topk.size() : 0);
   }
-  // payload 里数据那一段的长度。带 scale 时 size = D + ceil(D / 32)，由此反推 D。
+  uint8_t WireByte(uint64_t offset) const {
+    if (offset < payload.size())
+      return payload[offset];
+    uint64_t prefix =
+        payload_contains_topk
+            ? payload.size()
+            : (scale_valid ? ((payload.size() + 7) / 8) * 8 : payload.size());
+    if (!payload_contains_topk && topk_valid && offset >= prefix &&
+        offset - prefix < topk.size())
+      return topk[offset - prefix];
+    return 0;
+  }
+  // Host payload view excludes scale alignment padding and the separately
+  // exposed topK bytes. The hardware payload remains the opaque wire stream.
+  std::vector<uint8_t> LogicalPayload() const {
+    if (!payload_contains_topk)
+      return payload;
+    uint64_t count = payload.size();
+    if (topk_valid && !topk.empty() && count >= topk.size())
+      count -= topk.size();
+    if (scale_valid && logical_data_bytes)
+      count = std::min<uint64_t>(count, logical_data_bytes +
+                                            (logical_data_bytes + 31) / 32);
+    return std::vector<uint8_t>(payload.begin(), payload.begin() + count);
+  }
+  uint64_t PacketLength() const { return 32 + TotalBytes(); }
+  // payload 里数据那一段的长度。带 scale 时 size = D + ceil(D / 32)，由此反推
+  // D。
   uint64_t DataBytes() const {
-    return scale_valid != 0 ? size - (size + 32) / 33 : size;
+    if (logical_data_bytes)
+      return logical_data_bytes;
+    uint64_t body = size - (topk_valid ? topk.size() : 0);
+    return scale_valid != 0 ? body - (body + 32) / 33 : body;
   }
 };
 
 using MessagePtr = std::shared_ptr<Message>;
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

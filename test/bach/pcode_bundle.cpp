@@ -161,19 +161,19 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   m->path_core_mask = active_mask;
   m->user_id = 0;
   m->token_id = 1;
-  m->size = 304 + 6336;
+  m->size = 336 + 6336;
   m->payload.assign(m->size, 0);
   for (uint64_t ep = 0; ep < 6; ++ep) {
     uint64_t count = counts[ep];
-    m->payload[ep * 50] = uint8_t(count);
+    m->payload[ep * 56] = uint8_t(count);
     for (uint64_t e = 0; e < count; ++e) {
-      m->payload[ep * 50 + 2 + e * 6] = uint8_t(e);
+      m->payload[ep * 56 + 2 + e * 6] = uint8_t(e);
       uint32_t w = numeric::BitsOf(0.125f);
-      for (int b = 0; b < 4; ++b) m->payload[ep * 50 + 4 + e * 6 + b] = uint8_t(w >> (8*b));
+      for (int b = 0; b < 4; ++b) m->payload[ep * 56 + 4 + e * 6 + b] = uint8_t(w >> (8*b));
     }
   }
-  std::fill(m->payload.begin() + 304, m->payload.begin() + 304 + 6144, 0x38);
-  std::fill(m->payload.begin() + 304 + 6144, m->payload.end(), 127);
+  std::fill(m->payload.begin() + 336, m->payload.begin() + 336 + 6144, 0x38);
+  std::fill(m->payload.begin() + 336 + 6144, m->payload.end(), 127);
   if (fixture) m = fixture->Message();
   C2cBridge feed(clk, "feed", StubCfg()), sink(clk, "sink", StubCfg());
   uint64_t max_cycles = 30000;
@@ -222,6 +222,14 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
       std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<char const*>(bytes.data()),bytes.size());
     };
     for (uint64_t chip=0;chip<48;++chip) {
+      for(uint64_t p=0;p<10;++p) {
+        auto base=std::string(prefix)+".c"+std::to_string(chip)+".p"+std::to_string(p);
+        dump(base+".cmem",all[chip]->GetCore(p).Cmem().Peek(0,expected_outputs*65536));
+        dump(base+".sf",all[chip]->GetCore(p).Cmem().PeekScale(0,expected_outputs*65536/32));
+        dump(base+".smem",all[chip]->GetCore(p).Smem().Peek(0,32768));
+        for(uint64_t sid=0;sid<expected_outputs;++sid)
+          dump(base+".topk"+std::to_string(sid),all[chip]->GetCore(p).GetMu().EpInfo().TopkBytes(sid));
+      }
       auto& mem=all[chip]->GetCore(9).Cmem();
       std::string path=std::string(prefix)+".chip"+std::to_string(chip);
       dump(path+".fc13",mem.Peek(0x6000,9*512*2));
@@ -267,6 +275,7 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
         }
       }
       EXPECT_EQ(core.GetRouter().GetXbar().OverflowCount(), 0u) << "chip " << c << " core " << p;
+      EXPECT_EQ(core.GetDte().Completion().Error(), 0u) << "DTE exception chip " << c << " core " << p;
       EXPECT_EQ(core.GetMu().Drains(), 0u) << "chip " << c << " core " << p;
       for (uint64_t s = 0; s < 16; ++s) {
         auto const& e = core.GetTs().Table().Peek(s);

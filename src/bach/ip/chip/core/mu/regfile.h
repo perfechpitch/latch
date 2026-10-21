@@ -16,13 +16,13 @@
 // 偏移乘进绝对地址。
 
 #include <array>
+#include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include <deque>
 #include <string>
 
 #include "base/log.h"
 #include "bach/common/numeric/mx.h"
 #include "bach/ip/chip/core/dte/dte_ports.h"
-#include "bach/ip/chip/core/mu/gen_ep_info.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
 #include "bach/ip/module_base.h"
 
@@ -56,17 +56,39 @@ constexpr uint64_t kMuBusy = 1u << 0;
 constexpr uint64_t kMuArrayK = 128;
 constexpr uint64_t kMuArrayN = 64;
 
-// primitive_mode 位域。宽度 25 位：[0] primitive_type、[2:1] A_data_type、
-// [3] C_data_type、[6:4] share_ep_data_type、[9:7] router_ep_data_type、
-// [13:10] share_ep_count、[21:14] router_expert_count、[22] share_ep_en、
-// [23] router_ep_reduce_en、[24] task_last。
+// primitive_mode 位域。文档 v0.2：
+//   [0] primitive_type、[1] A_data_type、[2] C_data_type、[4:3] share_ep_data_type、
+//   [6:5] router_ep_data_type、[14:7] share_en_mask、[22:15] router_expert_count、
+//   [23] router_ep_reduce_en、[24] task_last。
 constexpr uint64_t kMuPrimTypeShift = 0;             // [0] 0: 1×K128×N64、1: 1×K64×N128
-constexpr uint64_t kMuADataTypeShift = 1;            // [2:1] token：0 BF16、1 MXFP8
-constexpr uint64_t kMuCDataTypeShift = 3;            // [3] out：0 FP32、1 BF16
-constexpr uint64_t kMuRouterEpDtypeShift = 7;        // [9:7] weight：0 BF16、1 MXFP8、2 MXFP4、3 NVFP4
-constexpr uint64_t kMuRouterExpertCountShift = 14;   // [21:14] 路由专家数
+constexpr uint64_t kMuADataTypeShift = 1;            // [1] token：0 BF16、1 MXFP8
+constexpr uint64_t kMuCDataTypeShift = 2;            // [2] out：0 FP32、1 BF16
+constexpr uint64_t kMuShareEpDtypeShift = 3;         // [4:3] 共享专家 weight 精度
+constexpr uint64_t kMuRouterEpDtypeShift = 5;        // [6:5] weight：0 BF16、1 MXFP8、2 MXFP4、3 其他
+constexpr uint64_t kMuShareEnMaskShift = 7;          // [14:7] 共享专家使能掩码
+constexpr uint64_t kMuRouterExpertCountShift = 15;   // [22:15] 路由专家数
 constexpr uint64_t kMuRouterEpReduceEn = 1u << 23;
 constexpr uint64_t kMuTaskLast = 1u << 24;
+
+// 模版区：0x1000 起 4 套 × 128 B。TASK_TRIGGER[2:1] 选套，temp_valid 时以模版为底、
+// 本次显式写过的动态寄存器覆盖。
+constexpr uint64_t kMuTemplateBase = 0x1000;
+constexpr uint64_t kMuTemplateStride = 0x80;
+constexpr uint64_t kMuTemplateNum = 4;
+constexpr uint64_t kMuTemplateFields = 10;           // PRIMITIVE_DIM..PRIMITIVE_MODE
+constexpr uint64_t kMuTriggerTempIndexShift = 1;
+constexpr uint64_t kMuTriggerTempIndexMask = 0x3;
+
+// 文档里 Core Mem / Matrix Mem 的绝对地址。软件按文档写 A/C/B，MU 按存储内偏移用。
+constexpr uint64_t kMuDocCmemBase = 0x48400000;
+constexpr uint64_t kMuDocCmemBytes = 1024 * 1024;
+constexpr uint64_t kMuDocMmemBase = 0x48C00000;
+constexpr uint64_t kMuDocMmemBytes = 32ull * 1024 * 1024;
+inline uint64_t MuStripDocBase(uint64_t a) {
+  if (a >= kMuDocCmemBase && a < kMuDocCmemBase + kMuDocCmemBytes) return a - kMuDocCmemBase;
+  if (a >= kMuDocMmemBase && a < kMuDocMmemBase + kMuDocMmemBytes) return a - kMuDocMmemBase;
+  return a;
+}
 
 // primitive_dim 位域：[15:0] Nblock、[31:16] Kblock。
 constexpr uint64_t kMuNblockShift = 0;
@@ -90,7 +112,8 @@ struct MuTaskCfg {
   bool ep_reduce = false;        // router_ep_reduce_en：FC2 置 1，FC1/FC3 置 0
   bool task_last = false;        // 任务包里最后一笔，完成后要反馈 TS
   bool pcode = false;
-  uint64_t share_mask = 0;
+  bool pcode_moe = false;
+  uint64_t share_en_mask = 0;    // share_en_mask[7:0]，低位连续的共享专家
 
   // primitive_dim：[31:16] Kblock、[15:0] Nblock。
   uint64_t kblock = 1;
@@ -118,11 +141,27 @@ struct MuTaskCfg {
   uint64_t task_id = 0;
   uint64_t user_id = 0;
 
+  // 这一笔任务配置过的寄存器数：从上一笔 trigger 到写 TASK_TRIGGER 之间，软件写
+  // 任务配置寄存器（0x004~0x028）的次数。写 trigger 那一刻锁存，供波形带出去。
+  uint64_t cfg_count = 0;
+
   // 一条原语的 K 与 N，由 primitive_type 从物理阵列折出。
   uint64_t PrimK() const { return primitive_type == 1 ? kMuArrayK / 2 : kMuArrayK; }
   uint64_t PrimN() const { return primitive_type == 1 ? kMuArrayN * 2 : kMuArrayN; }
-  // 这一笔要走几个专家。不带 topK 的那一档按一个走。
+  // 路由专家个数。不带 topK 的那一档（FC0）按一个走。
   uint64_t Experts() const { return expert_count == 0 ? 1 : expert_count; }
+  // 共享专家铺在 B_ADDR 的低地址，占最高置位 + 1 个槽（掩码是低位连续的）。
+  // 掩码为 0 时没有共享专家，路由专家仍从 B_ADDR 起算。
+  uint64_t SharedSlots() const {
+    uint64_t n = 0;
+    for (uint64_t m = share_en_mask; m != 0; m >>= 1) ++n;
+    return n;
+  }
+  // 一列要算的专家槽：共享在前，路由在后。FC0 不带专家，掩码也不展开。
+  uint64_t ExpertSlots() const {
+    if (expert_count == 0) return 1;
+    return pcode_moe ? expert_count : SharedSlots() + expert_count;
+  }
 };
 
 class MuRegfile : public BachModule {
@@ -137,8 +176,8 @@ class MuRegfile : public BachModule {
   // boot 期 ctrl_noc 灌配置走这一条。与 RV core 的 dsa_iss 那一条分开：两条通路
   // 同时往一个端口上写就是两个写者，而它们本来就不在同一段时间里用。
   void CfgWrite(uint64_t offset, uint64_t data) { WriteReg(offset, data); }
-  void SetPcodeMode(bool enabled) { pcode_mode = enabled; live.pcode = enabled; }
-  void AttachTopkTable(GenEpInfo const* table) { topk_table = table; }
+  void SetPcodeMode(bool on) { live.pcode = on; }
+  void AttachTopkTable(GenEpInfo const* t) { topk_table = t; }
 
   DsaCfgPort& CfgPort() { return *cfg_port; }
   std::shared_ptr<DsaCfgPort> CfgPortPtr() const { return cfg_port; }
@@ -157,6 +196,10 @@ class MuRegfile : public BachModule {
 
   MuTaskCfg const& Live() const { return live; }
   uint64_t Triggers() const { return triggers.Get(); }
+  // 收下的那一笔的身份，Core 层发 dsa_task_trigger 用。笔数 Triggers() 已经有 ——
+  // 每次写 trigger 锁成一笔就自增一次，反压（DriveReady(!pending)）保证不会丢。
+  uint64_t AcceptedTask() const { return latched.task_id; }
+  uint64_t AcceptedUser() const { return latched.user_id; }
 
   bool Quiescent() const override { return !pending; }
 
@@ -199,8 +242,8 @@ class MuRegfile : public BachModule {
 
   uint64_t ReadReg(uint64_t addr) const {
     if (addr >= 0x3000 && addr < 0x4000) {
-      LOGCHECK(topk_table != nullptr, "MU TopK register view is not connected");
-      return topk_table->ReadTopkWord(addr - 0x3000);
+      LOGCHECK(topk_table, "MU TopK register view not connected");
+      return topk_table->ReadTopkWord(addr-0x3000);
     }
     switch (addr) {
       case kMuStatus: return busy ? kMuBusy : 0;
@@ -213,76 +256,86 @@ class MuRegfile : public BachModule {
     }
   }
 
+  static bool IsTaskField(uint64_t addr) {
+    return addr >= kMuPrimitiveDim && addr <= kMuPrimitiveMode;
+  }
+  static uint64_t FieldOf(uint64_t addr) { return (addr - kMuPrimitiveDim) / 4; }
+
   void WriteReg(uint64_t addr, uint64_t v) {
-    if (pcode_mode && addr >= 0x1000 && addr < 0x1200) {
-      uint64_t field = ((addr - 0x1000) % 0x80) / 4;
-      if (field < 10) templates[(addr - 0x1000) / 0x80][field] = v;
+    if (addr == kMuTaskTrigger) {
+      // [0] temp_valid、[2:1] temp_index。没写过的模版视作不用模版，写 trigger
+      // 本身就是启动。身份信号在这一拍采样，必须最后写。
+      uint64_t temp_idx =
+          (v >> kMuTriggerTempIndexShift) & kMuTriggerTempIndexMask;
+      if ((v & kMuTriggerValid) && tpl_set[temp_idx]) {
+        std::array<uint64_t, kMuTemplateFields> merged = tpl[temp_idx];
+        for (uint64_t i = 0; i < kMuTemplateFields; ++i)
+          if (dirty & (1ull << i))
+            merged[i] = fields[i];
+        for (uint64_t i = 0; i < kMuTemplateFields; ++i)
+          ApplyField(i, merged[i]);
+      }
+      dirty = 0;
+      DsaTaskIds ids = cfg_port->TaskIds();
+      live.stream_id = ids.stream;
+      live.task_id = ids.task;
+      live.user_id = ids.user;
+      live.cfg_count = cfg_write_cnt;
+      cfg_write_cnt = 0;
+      latched = live;
+      pending = true;
+      ++trigger_pending;
       return;
     }
-    if (pcode_mode && addr >= 4 && addr <= kMuPrimitiveMode) {
-      raw[(addr - 4) / 4] = v;
-      dirty |= 1u << ((addr - 4) / 4);
+    if (IsTaskField(addr)) {
+      // 任务配置寄存器（0x004~0x028）每写一次记一笔：一笔任务配置过多少个
+      // 寄存器。TASK_TRIGGER 是启动位不算配置，模版区与静态配置也不计。
+      ++cfg_write_cnt;
+      uint64_t i = FieldOf(addr);
+      fields[i] = v;
+      dirty |= 1ull << i;
+      ApplyField(i, v);
+      return;
     }
-    switch (addr) {
+    // 模版区：0x1000 起 4 套 × 128 B，每套前 10 个字对应 PRIMITIVE_DIM..MODE。
+    if (addr >= kMuTemplateBase &&
+        addr < kMuTemplateBase + kMuTemplateNum * kMuTemplateStride) {
+      uint64_t rel = addr - kMuTemplateBase;
+      uint64_t idx = rel / kMuTemplateStride;
+      uint64_t off = rel % kMuTemplateStride;
+      if (off < kMuTemplateFields * 4) {
+        tpl[idx][off / 4] = v;
+        tpl_set[idx] = true;
+      }
+    }
+  }
+
+  void ApplyField(uint64_t i, uint64_t v) {
+    switch (kMuPrimitiveDim + i * 4) {
       case kMuPrimitiveDim:
         live.kblock = (v >> kMuKblockShift) & 0xFFFFu;
         live.nblock = (v >> kMuNblockShift) & 0xFFFFu;
         break;
-      case kMuAAddr: live.a_addr = v; break;
+      case kMuAAddr: live.a_addr = MuStripDocBase(v); break;
       case kMuAStreamStride: live.a_stream_stride = v; break;
-      case kMuCAddr: live.c_addr = v; break;
+      case kMuCAddr: live.c_addr = MuStripDocBase(v); break;
       case kMuCStreamStride: live.c_stream_stride = v; break;
       case kMuAcExpertStride:
         live.token_expert_stride = (v >> kMuTokenExpertStrideShift) & 0xFFFFu;
         live.output_expert_stride = (v >> kMuOutputExpertStrideShift) & 0xFFFFu;
         break;
-      case kMuBAddr: live.b_addr = v; break;
+      case kMuBAddr: live.b_addr = MuStripDocBase(v); break;
       case kMuBExpertStride: live.b_expert_stride = v; break;
       case kMuTopkTableAddr: live.topk_table_addr = v; break;
       case kMuPrimitiveMode:
-        if (pcode_mode) {
-          live.primitive_type = v & 1u;
-          live.a_dtype = DecodeADtype((v >> 1) & 1u);
-          live.out_bf16 = ((v >> 2) & 1u) != 0;
-          live.b_dtype = DecodeBDtype((v >> 5) & 3u);
-          live.share_mask = (v >> 7) & 0xFFu;
-          live.expert_count = (v >> 15) & 0xFFu;
-          live.ep_reduce = (v & kMuRouterEpReduceEn) != 0;
-          live.task_last = (v & kMuTaskLast) != 0;
-          break;
-        }
         live.primitive_type = (v >> kMuPrimTypeShift) & 1u;
-        live.a_dtype = DecodeADtype((v >> kMuADataTypeShift) & 0x3u);
+        live.a_dtype = DecodeADtype((v >> kMuADataTypeShift) & 0x1u);
         live.out_bf16 = ((v >> kMuCDataTypeShift) & 1u) != 0;
-        live.b_dtype = DecodeBDtype((v >> kMuRouterEpDtypeShift) & 0x7u);
+        live.b_dtype = DecodeBDtype((v >> kMuRouterEpDtypeShift) & 0x3u);
+        live.share_en_mask = (v >> kMuShareEnMaskShift) & 0xFFu;
         live.expert_count = (v >> kMuRouterExpertCountShift) & 0xFFu;
         live.ep_reduce = (v & kMuRouterEpReduceEn) != 0;
         live.task_last = (v & kMuTaskLast) != 0;
-        break;
-      case kMuTaskTrigger:
-        // 写 1 启动，硬件接收后自清零。身份信号在这一拍采样，必须最后写。
-        if (v & kMuTriggerValid) {
-          if (pcode_mode) {
-            auto merged = templates[(v >> 1) & 3u];
-            for (uint64_t i = 0; i < raw.size(); ++i) {
-              if (dirty & (1u << i)) merged[i] = raw[i];
-            }
-            for (uint64_t i = 0; i < merged.size(); ++i) WriteReg(4 + i * 4, merged[i]);
-            dirty = 0;
-          }
-          DsaTaskIds ids = cfg_port->TaskIds();
-          live.stream_id = ids.stream;
-          live.task_id = ids.task;
-          live.user_id = ids.user;
-          latched = live;
-          if (pcode_mode) {
-            if (latched.a_addr >= 0x48400000 && latched.a_addr < 0x48500000) latched.a_addr -= 0x48400000;
-            if (latched.c_addr >= 0x48400000 && latched.c_addr < 0x48500000) latched.c_addr -= 0x48400000;
-            if (latched.b_addr >= 0x48C00000 && latched.b_addr < 0x4AC00000) latched.b_addr -= 0x48C00000;
-          }
-          pending = true;
-          ++trigger_pending;
-        }
         break;
       default:
         break;
@@ -306,18 +359,21 @@ class MuRegfile : public BachModule {
   };
 
   std::shared_ptr<DsaCfgPort> cfg_port;
-  GenEpInfo const* topk_table = nullptr;
-  bool pcode_mode = false;
-  std::array<std::array<uint64_t, 10>, 4> templates{};
-  std::array<uint64_t, 10> raw{};
-  uint64_t dirty = 0;
   std::shared_ptr<DsaRdataPort> rdata;
   std::deque<ReadBack> pending_read;
   bool rdata_used = false, busy = false;
   MuTaskCfg live, latched;
+  GenEpInfo const* topk_table = nullptr;
+  std::array<std::array<uint64_t, kMuTemplateFields>, kMuTemplateNum> tpl{};
+  std::array<bool, kMuTemplateNum> tpl_set{};
+  std::array<uint64_t, kMuTemplateFields> fields{};
+  uint64_t dirty = 0;
   bool pending = false;
   uint64_t last_seq = 0;
   uint64_t trigger_pending = 0;
+  // 从上一笔 trigger 到这一拍，任务配置寄存器（0x004~0x028）被写了几次。写 trigger
+  // 那一刻锁进 latched.cfg_count 再清零，好让下一笔任务重新数。
+  uint64_t cfg_write_cnt = 0;
 
   Logic64 triggers;
 };

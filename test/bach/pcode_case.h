@@ -49,17 +49,18 @@ struct Fixture {
   }
   MessagePtr Message() const {
     auto m=std::make_shared<latch::bach::Message>();m->path_id=63;m->path_core_mask=mask;m->user_id=user;m->token_id=token;
-    m->size=6640;m->payload.assign(m->size,0);
+    constexpr uint32_t topk_stride=56, input_offset=6*topk_stride;
+    m->size=input_offset+6144+192;m->payload.assign(m->size,0);
     for(uint32_t ep=0;ep<6;++ep) {
-      m->payload[ep*50]=experts[ep].size();
+      m->payload[ep*topk_stride]=experts[ep].size();
       for(uint32_t j=0;j<experts[ep].size();++j) {
-        auto e=experts[ep][j];uint32_t at=ep*50+2+j*6, word=numeric::BitsOf(e.second);
+        auto e=experts[ep][j];uint32_t at=ep*topk_stride+2+j*6, word=numeric::BitsOf(e.second);
         m->payload[at]=e.first;m->payload[at+1]=e.first>>8;
         for(uint32_t k=0;k<4;++k)m->payload[at+2+k]=word>>(8*k);
       }
     }
-    std::copy(input.begin(),input.end(),m->payload.begin()+304);
-    std::copy(scales.begin(),scales.end(),m->payload.begin()+304+6144);return m;
+    std::copy(input.begin(),input.end(),m->payload.begin()+input_offset);
+    std::copy(scales.begin(),scales.end(),m->payload.begin()+input_offset+6144);return m;
   }
   void Load(std::vector<Chip*> const& chips, std::string const& root) const {
     std::ifstream ir(root+"/pcode_ep6_tp8/pcode_ep6_tp8.bachir");

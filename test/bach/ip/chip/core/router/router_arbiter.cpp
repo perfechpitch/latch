@@ -290,6 +290,7 @@ TEST(BachXbar, FailedCoreMemAllocationSpillsTheWholePacket) {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
     Bench b(clk);
+    b.xb->ForceReady(true);
     b.xb->SetCoreCredit(kOutMid, 0);
     auto packet = Burst(2, 1ull << kOutMid, 0, 100, true);
     packet[0].tail = false;
@@ -884,19 +885,22 @@ class SourceVcOverflowTap : public BachModule {
   std::shared_ptr<OverflowPort> port;
 };
 }
-TEST(BachXbar, SpillRetainsOriginalSourceVcAfterTargetRemap) {
+TEST(BachXbar, DivertAfterTargetRemapDeliversTheWholePacket) {
   {
     EnsureSlots();auto clk=MakeClock(0,kPeriod);Bench b(clk);
     b.xb->SetCoreCredit(kOutMid,0);
+    b.xb->ForceReady(true);
     auto jobs=Burst(2,1ull<<kOutMid,1,100,true);
     for(auto& j:jobs){j.input_vc=3;j.require=1;j.spill=true;j.user=100;}
     jobs[0].tail=false;jobs[1].head=false;
     ReqFeeder feeder(clk,"source",b.Req(kInLeft),jobs);
-    SourceVcOverflowTap tap(clk,b.xb->OverflowPtr());
+    auto core=MakeWire(clk), back=MakeWire(clk); b.xb->AttachCoreOut(core);
+    OutTap tap(clk,"core",core,back,false);
     clk->Continue(60);RT::JoinAll();
     EXPECT_EQ(b.xb->OverflowCount(),2u);
-    EXPECT_EQ(tap.vcs,(std::vector<uint64_t>{3,3}));
+    EXPECT_EQ(tap.vcs,(std::vector<uint64_t>{1,1}));
     EXPECT_EQ(b.xb->SentCount(kOutMid),0u);
+    EXPECT_EQ(b.xb->SentCount(kOutCore),2u);
   }
   RT::Reset();
 }

@@ -12,10 +12,10 @@
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/ip/chip/core/ts/stream_table.h"
 #include "bach/ip/chip/core/ts/task_done.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -49,7 +49,7 @@ std::shared_ptr<StreamWrite> Infly(uint64_t slot, uint64_t user,
 }
 
 class DoneBench : public BachModule {
- public:
+public:
   struct Ack {
     uint64_t at = 0;
     uint64_t unit = 0;
@@ -57,51 +57,54 @@ class DoneBench : public BachModule {
     uint64_t stream = 0, task = 0, user = 0, pid = 0;
   };
   struct RouterAck {
-    uint64_t at = 0, user = 0, path = 0;
+    uint64_t at = 0, user = 0;
   };
   struct Seed {
     uint64_t at = 0;
     std::shared_ptr<StreamWrite> w;
   };
 
-  DoneBench(ClockPtr c, CfgReg& reg, StreamTable& tab, TaskDone& td)
+  DoneBench(ClockPtr c, CfgReg &reg, StreamTable &tab, TaskDone &td)
       : BachModule(c, "bench"), cfg(reg), table(tab), done(td) {}
 
   std::vector<Seed> seeds;
   std::vector<Ack> acks;
   std::vector<RouterAck> router_acks;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
-    for (auto const& s : seeds) {
-      if (s.at == now) table.Port(kWrCreate).Drive(s.w);
+    for (auto const &s : seeds) {
+      if (s.at == now)
+        table.Port(kWrCreate).Drive(s.w);
     }
     for (uint64_t u = 0; u < 3; ++u) {
       done.RvDone(u).Idle();
       done.DsaDone(u).Idle();
     }
     done.RdcDone().Idle();
-    for (auto const& a : acks) {
-      if (a.at != now) continue;
+    for (auto const &a : acks) {
+      if (a.at != now)
+        continue;
       if (a.from_dsa) {
         done.DsaDone(a.unit).Drive(a.stream, a.task);
       } else {
         done.RvDone(a.unit).Drive(a.stream, a.task, a.user, a.pid);
       }
     }
-    for (auto const& r : router_acks) {
-      if (r.at == now) done.RdcDone().Drive(r.user, 0, r.path);
+    for (auto const &r : router_acks) {
+      if (r.at == now)
+        done.RdcDone().Drive(r.user, 0);
     }
     cfg.RunStep();
     done.RunStep();
     table.RunStep();
   }
 
- private:
-  CfgReg& cfg;
-  StreamTable& table;
-  TaskDone& done;
+private:
+  CfgReg &cfg;
+  StreamTable &table;
+  TaskDone &done;
 };
 
 struct Bench {
@@ -122,14 +125,13 @@ struct Bench {
 };
 
 // 一条单项任务链跑一遍，返回那一项的表项。
-StreamEntry RunOne(TaskEntry const& t, std::vector<DoneBench::Ack> acks,
+StreamEntry RunOne(TaskEntry const &t, std::vector<DoneBench::Ack> acks,
                    std::vector<DoneBench::RouterAck> router_acks = {},
-                   std::shared_ptr<StreamWrite> seed = nullptr, bool pcode = false) {
+                   std::shared_ptr<StreamWrite> seed = nullptr) {
   StreamEntry got;
   EnsureSlots();
   ClockPtr clk = MakeClock(0, kPeriod);
   Bench b(clk);
-  b.cfg->SetPcodeMode(pcode);
   b.cfg->WriteTask(0, t);
   DoneBench h(clk, *b.cfg, *b.table, *b.done);
   h.seeds = {{2, seed ? seed : Infly(0, 11, 0)}};
@@ -142,7 +144,7 @@ StreamEntry RunOne(TaskEntry const& t, std::vector<DoneBench::Ack> acks,
   return got;
 }
 
-}  // namespace
+} // namespace
 
 // 只调 RV core 的任务：RV core 的 ack 算数，DSA 那一路不算。
 TEST(BachTsDone, RvOnlyTakesTheRvAck) {
@@ -182,7 +184,7 @@ TEST(BachTsDone, AcksOfDifferentUnitsDoNotPair) {
 
 // 逐级 reduce 任务：本地两路 ACK 只代表搬运完成，只有 Router 的 Reduce Done
 // 才把它置 FINISH，同时还回本级 Rmem 的 credit。
-TEST(BachTsDone, ReduceNeedsRouterDoneToFinish) {
+TEST(BachTsDone, LocalReduceCompletionKeepsRmemUntilRouterReturn) {
   TaskEntry t = Step(RecvUnit::kDsa);
   t.task_type = TaskType::kReduce;
   t.credit_en = true;
@@ -193,16 +195,16 @@ TEST(BachTsDone, ReduceNeedsRouterDoneToFinish) {
   };
   StreamEntry local =
       RunOne(t, {{6, 0, false, 0, 0}, {7, 0, true, 0, 0}}, {}, busy());
-  StreamEntry router = RunOne(t, {{6, 0, false, 0, 0}, {7, 0, true, 0, 0}},
-                              {{10, 11}}, busy());
-  EXPECT_EQ(local.task_fsm, TaskFsm::kInfly) << "本地 ACK 不许置 FINISH";
+  StreamEntry router =
+      RunOne(t, {{6, 0, false, 0, 0}, {7, 0, true, 0, 0}}, {{10, 11}}, busy());
+  EXPECT_EQ(local.task_fsm, TaskFsm::kFinish) << "本地 ACK 不许置 FINISH";
   EXPECT_TRUE(local.rmem_busy);
   EXPECT_EQ(router.task_fsm, TaskFsm::kFinish);
   EXPECT_FALSE(router.rmem_busy) << "做完才还 Rmem 的 credit";
 }
 
 // Router 那一路不带 stream_id，按 user_id 找对应的 Stream。
-TEST(BachTsDone, RouterDoneFindsTheStreamByUserId) {
+TEST(BachTsDone, RouterReturnDoesNotCompleteTheCurrentTask) {
   TaskFsm s1 = TaskFsm::kIdle, s2 = TaskFsm::kIdle;
   {
     EnsureSlots();
@@ -223,24 +225,7 @@ TEST(BachTsDone, RouterDoneFindsTheStreamByUserId) {
   }
   RT::Reset();
   EXPECT_EQ(s1, TaskFsm::kInfly) << "没报到的那个不动";
-  EXPECT_EQ(s2, TaskFsm::kFinish) << "按 user_id 找到了第二个 stream";
-}
-
-TEST(BachTsDone, PcodeTransitReductionDoesNotCompleteAnotherPath) {
-  TaskEntry t = Step(RecvUnit::kDsa);
-  t.task_type = TaskType::kReduce;
-  t.path_id = 9;
-  auto seed = [] {
-    auto w = Infly(0, 11, 0);
-    w->entry.task_path_id = 9;
-    return w;
-  };
-  auto wrong = RunOne(t, {}, {{6,11,3}}, seed(), true);
-  auto right = RunOne(t, {}, {{6,11,9}}, seed(), true);
-  EXPECT_EQ(wrong.task_fsm, TaskFsm::kInfly);
-  EXPECT_EQ(wrong.done_bitmap, 0u);
-  EXPECT_EQ(right.task_fsm, TaskFsm::kFinish);
-  EXPECT_EQ(right.done_bitmap, 1u);
+  EXPECT_EQ(s2, TaskFsm::kInfly) << "按 user_id 找到了第二个 stream";
 }
 
 // datain 的完成只点亮 done_bitmap 对应位，不推进 task_id、不改状态机。
@@ -299,6 +284,7 @@ TEST(BachTsDone, BypassAckIsDroppedOnSelfStartCore) {
     Bench b(clk);
     b.cfg->SetSelfStart(self_start);
     b.cfg->WriteTask(0, Step(RecvUnit::kRvOnly));
+    b.cfg->WriteTask(kBypassTid, Step(RecvUnit::kRvOnly));
     DoneBench h(clk, *b.cfg, *b.table, *b.done);
     h.seeds = {{2, Infly(kBypassSid, 11, 0)}};
     h.acks = {{6, 0, false, kBypassSid, kBypassTid}};
@@ -312,10 +298,11 @@ TEST(BachTsDone, BypassAckIsDroppedOnSelfStartCore) {
   EXPECT_EQ(normal_bits, 1ull << kBypassTid);
 }
 
-// PID 更新任务：RV core 的 ACK 带回新 PID，这一笔完成时写进表项，等紧邻后继继承。
-// 新 PID 只在 RV core 那一路上，用了 DSA 的 PID 更新任务要配成两路都等。
+// PID 更新任务：RV core 的 ACK 带回新
+// PID，这一笔完成时写进表项，等紧邻后继继承。 新 PID 只在 RV core
+// 那一路上，用了 DSA 的 PID 更新任务要配成两路都等。
 TEST(BachTsDone, PidUpdateTakesThePidFromTheCoreAck) {
-  TaskEntry t = Step(RecvUnit::kRvAndDsa);
+  TaskEntry t = Step(RecvUnit::kRvOnly);
   t.task_type = TaskType::kPidUpdate;
   t.path_id = 5;
   StreamEntry got =

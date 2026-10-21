@@ -42,7 +42,7 @@ class MuAgu {
     if (cur.k_idx >= cfg.kblock) {
       cur.k_idx = 0;
       ++cur.e_idx;
-      if (cur.e_idx >= cfg.Experts()) {
+      if (cur.e_idx >= cfg.ExpertSlots()) {
         cur.e_idx = 0;
         ++cur.n_idx;
         if (cur.n_idx >= cfg.nblock) cur.done = true;

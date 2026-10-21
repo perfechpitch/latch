@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "base/log.h"
+#include "bach/ip/chip/core/ports.h"
 #include "bach/ip/chip/core/rv_core/custom0.h"
 #include "bach/ip/chip/core/rv_core/rv_ports.h"
 #include "bach/ip/chip/core/rv_core/task_queue.h"
@@ -63,7 +64,76 @@ struct RvRegUse {
   uint32_t rs1 = 0, rs2 = 0, rd = 0;
 };
 
+// 功能模型执行原始 RVC；时序层展开整数指令，只用于依赖、资源与访存地址判定。
+inline uint32_t RvTimingInst(uint32_t inst) {
+  if ((inst & 3) == 3) return inst;
+  uint32_t c = inst & 0xffff, q = c & 3, f = c >> 13;
+  uint32_t rd = (c >> 7) & 31, rs2 = (c >> 2) & 31;
+  uint32_t rp = 8 + ((c >> 7) & 7), dp = 8 + ((c >> 2) & 7);
+  auto sx = [](uint32_t v, unsigned bits) {
+    return int32_t(v << (32 - bits)) >> (32 - bits);
+  };
+  auto iword = [](uint32_t op, uint32_t d, uint32_t a, uint32_t fn, int32_t imm) {
+    return (uint32_t(imm) & 0xfff) << 20 | a << 15 | fn << 12 | d << 7 | op;
+  };
+  auto sword = [](uint32_t a, uint32_t b, uint32_t imm) {
+    return (imm & 0xfe0) << 20 | b << 20 | a << 15 | 2u << 12 |
+           (imm & 31) << 7 | 0x23u;
+  };
+  if (q == 0) {
+    if (f == 0) {
+      uint32_t imm = ((c >> 7) & 15) << 6 | ((c >> 11) & 3) << 4 |
+                     ((c >> 5) & 1) << 3 | ((c >> 6) & 1) << 2;
+      return iword(0x13, dp, 2, 0, imm);
+    }
+    uint32_t imm = ((c >> 5) & 1) << 6 | ((c >> 10) & 7) << 3 |
+                   ((c >> 6) & 1) << 2;
+    if (f == 2) return iword(0x03, dp, rp, 2, imm);
+    if (f == 6) return sword(rp, dp, imm);
+  } else if (q == 1) {
+    int32_t imm = sx(((c >> 12) & 1) << 5 | ((c >> 2) & 31), 6);
+    if (f == 0) return iword(0x13, rd, rd, 0, imm);
+    if (f == 2) return iword(0x13, rd, 0, 0, imm);
+    if (f == 3) {
+      if (rd != 2) return (uint32_t(imm) & 0xfffff) << 12 | rd << 7 | 0x37;
+      uint32_t spimm = ((c >> 12) & 1) << 9 | ((c >> 3) & 3) << 7 |
+                       ((c >> 5) & 1) << 6 | ((c >> 2) & 1) << 5 |
+                       ((c >> 6) & 1) << 4;
+      return iword(0x13, 2, 2, 0, sx(spimm, 10));
+    }
+    if (f == 4) {
+      uint32_t fn = (c >> 10) & 3;
+      if (fn < 2) return iword(0x13, rp, rp, 5, (c >> 2 & 31) | (fn << 10));
+      if (fn == 2) return iword(0x13, rp, rp, 7, imm);
+      uint32_t sub = (c >> 5) & 3;
+      uint32_t funct3[] = {0, 4, 6, 7};
+      return (sub == 0 ? 0x40000000 : 0) | dp << 20 | rp << 15 |
+             funct3[sub] << 12 | rp << 7 | 0x33;
+    }
+    if (f == 1 || f == 5) return (f == 1 ? 1u << 7 : 0) | 0x6f;
+    if (f == 6 || f == 7) return rp << 15 | (f == 7 ? 1u << 12 : 0) | 0x63;
+  } else if (q == 2) {
+    if (f == 0) return iword(0x13, rd, rd, 1, (c >> 2) & 31);
+    if (f == 2) {
+      uint32_t imm = ((c >> 2) & 3) << 6 | ((c >> 12) & 1) << 5 |
+                     ((c >> 4) & 7) << 2;
+      return iword(0x03, rd, 2, 2, imm);
+    }
+    if (f == 6) {
+      uint32_t imm = ((c >> 7) & 3) << 6 | ((c >> 9) & 15) << 2;
+      return sword(2, rs2, imm);
+    }
+    if (f == 4) {
+      bool high = (c >> 12) & 1;
+      if (!rs2) return rd ? iword(0x67, high ? 1 : 0, rd, 0, 0) : 0x00100073;
+      return rs2 << 20 | (high ? rd << 15 : 0) | rd << 7 | 0x33;
+    }
+  }
+  return 0;  // 功能模型仍负责拒绝不支持或保留的编码。
+}
+
 inline RvRegUse RvDecodeRegs(uint32_t inst) {
+  inst = RvTimingInst(inst);
   RvRegUse u;
   u.rs1 = (inst >> 15) & 0x1Fu;
   u.rs2 = (inst >> 20) & 0x1Fu;
@@ -86,8 +156,8 @@ inline RvRegUse RvDecodeRegs(uint32_t inst) {
       u.has_rs2 = true;
       break;
     case 0x73:                              // SYSTEM（含 CSR）
-      u.has_rd = ((inst >> 12) & 7u) != 0;
-      u.has_rs1 = ((inst >> 12) & 7u) >= 1 && ((inst >> 12) & 7u) <= 3;
+      u.has_rd = true;
+      u.has_rs1 = true;
       break;
     case 0x0B: {                            // custom-0（custom0.h，字段同 self_inst.h）
       uint32_t funct3 = (inst >> 12) & 0x7u;
@@ -124,6 +194,7 @@ enum RvIssueRes : uint32_t {
 };
 
 inline uint32_t RvIssueResOf(uint32_t inst) {
+  inst = RvTimingInst(inst);
   switch (inst & 0x7Fu) {
     case 0x03: case 0x23: return kResMem;
     case 0x33: return ((inst >> 25) & 0x7Fu) == 1u ? kResMul : 0u;
@@ -220,7 +291,6 @@ class RvExec : public BachModule {
 
   // ── 对外 ──
   std::shared_ptr<TaskStartPort> StartPtr() const { return start; }
-  void SetPcodeMode(bool enabled) { pcode_mode = enabled; }
   void AttachStart(std::shared_ptr<TaskStartPort> p) { start = std::move(p); }
   std::shared_ptr<TaskDonePort> FinishPtr() const { return finish; }
   void AttachFinish(std::shared_ptr<TaskDonePort> p) { finish = std::move(p); }
@@ -236,10 +306,38 @@ class RvExec : public BachModule {
   void AttachLsqWb(std::shared_ptr<GprWbPort> p) { lsq_wb = std::move(p); }
 
   // boot 期由 ctrl_noc 装载 ITCM 与 DTCM。只写镜像，核保持复位停机；
-  // TS 下发任务时再跳到那一笔的 task_pc。PokeItcm 同样只写字节。
+  // TS 下发任务时再跳到那一笔的 task_pc。PokeItcm 同样只写字节，地址是绝对地址。
   void LoadImage(std::string const& path) { sys->LoadProgramFile(path); }
   void PokeItcm(uint64_t addr, std::vector<uint8_t> const& bytes) {
+    LOGCHECK(addr >= kItcmBase && bytes.size() <= kItcmSize &&
+                 addr - kItcmBase <= kItcmSize - bytes.size(),
+             "RvExec: ITCM 越界。");
+    if (bytes.empty()) return;
     local->Write(const_cast<uint8_t*>(bytes.data()), addr, bytes.size());
+  }
+  // 显式选 ABI。旧的不动；BachFlow 只把 SP 改到别名窗口顶，GP 仍是旧值。
+  void SetAbi(RvAbi which) {
+    abi = which;
+    MapFunctionalMemory();
+    ResetAbi();
+  }
+  void SetBachflowAbi() { SetAbi(RvAbi::kBachflow); }
+  void PokeDtcm(uint64_t offset, std::vector<uint8_t> const& bytes) {
+    LOGCHECK(offset<=kDtcmSize && bytes.size()<=kDtcmSize-offset,"DTCM span out of bounds");
+    if(!bytes.empty()) dtcm->Write(const_cast<uint8_t*>(bytes.data()),kDtcmBase+offset,bytes.size());
+  }
+  uint32_t Sp() const {
+    return sys->registerSystem->GetRegFile(rv32::REG_SR, 0)[2].U32();
+  }
+  uint32_t Gpr(uint32_t idx) const {
+    if (idx == 0) return 0;
+    return sys->registerSystem->GetRegFile(rv32::REG_SR, 0)[idx].U32();
+  }
+  // 从功能模型的存储读一字节。别名与旧窗口都走这条，用来核对是不是同一块。
+  uint8_t PeekByte(uint64_t addr) const {
+    uint8_t b = 0;
+    router->Read(&b, addr, 1);
+    return b;
   }
 
   // 三个 RV core 都进 wait 后 core 把 ready 拉高，SCP 据此开放业务接收。
@@ -299,21 +397,12 @@ class RvExec : public BachModule {
     task_ctrl->SetReadFn([this](uint64_t at) { return CsrOf(at); });
     share_mem = std::make_shared<MmioSink>(kShareMemBase, kShareMemSize);
     core_mem = std::make_shared<MmioSink>(kCoreMemBase, kCoreMemSize);
+    share_mem_doc = std::make_shared<MmioSink>(kDocShareMemBase, kShareMemSize);
+    core_mem_doc = std::make_shared<MmioSink>(kDocCoreMemBase, kRouterIoOffset);
     local = std::make_shared<systeml::MemoryBase>();
     dtcm = std::make_shared<systeml::MemoryBase>();
 
-    // ITCM 与 DTCM 各挂一段，中间那一大块留给 DSA IO 与 task 控制区。一段盖住
-    // 另一段的地址，路由就按谁先注册挑，不留这种含糊：各段互不重叠。
-    router->AddPort(local, kItcmBase, kItcmSize, 0, 0, "itcm");
-    router->AddPort(dtcm, kDtcmBase, kDtcmSize, 0, 0, "dtcm");
-    router->AddPort(dsa_io, DsaIoBase(), DsaIoSize(), 1, 0, "dsa");
-    router->AddPort(task_ctrl, kTaskCtrlBase, kTaskCtrlSize, 1, 0, "taskctrl");
-    router->AddPort(share_mem, kShareMemBase, kShareMemSize, 1, 0, "smem");
-    router->AddPort(core_mem, kCoreMemBase, kCoreMemSize, 1, 0, "cmem");
-    router->AddPort(share_mem, 0x48300000, kShareMemSize, 1,
-                    int64_t(kShareMemBase) - 0x48300000, "pcode_smem");
-    router->AddPort(core_mem, 0x48400000, kCoreMemSize, 1,
-                    int64_t(kCoreMemBase) - 0x48400000, "pcode_cmem");
+    MapFunctionalMemory();
 
     engine = std::make_unique<rv32::Engine>(/*maxCycles=*/~0ull);
     engine->Add(sys.get(), 0);
@@ -321,15 +410,38 @@ class RvExec : public BachModule {
     ResetAbi();
   }
 
+  void MapFunctionalMemory() {
+    router->Reset();
+    router->AddPort(local, kItcmBase, kItcmSize, 0, 0, "itcm");
+    router->AddPort(dtcm, kDtcmBase, kDtcmSize, 0, 0, "dtcm");
+    // 仅 BachFlow ABI 开别名。旧 DTE 在同一地址仍访问 Core Mem。
+    if (abi == RvAbi::kBachflow) {
+      router->AddPort(dtcm, kDtcmAliasBase, kDtcmSize, 2,
+                      int64_t(kDtcmBase) - int64_t(kDtcmAliasBase), "dtcm_alias");
+    }
+    router->AddPort(dsa_io, DsaIoBase(), DsaIoSize(), 1, 0, "dsa");
+    router->AddPort(task_ctrl, kTaskCtrlBase, kTaskCtrlSize, 1, 0, "taskctrl");
+    router->AddPort(share_mem, kShareMemBase, kShareMemSize, 1, 0, "smem");
+    router->AddPort(share_mem_doc, kDocShareMemBase, kShareMemSize, 1, 0,
+                    "smem_doc");
+    // Core Mem 的核内窗口只有 DTE core 有；文档绝对地址的别名三个核都开。
+    if (unit == RvUnit::kDte) {
+      router->AddPort(core_mem, kCoreMemBase, kCoreMemSize, 1, 0, "cmem");
+    }
+    router->AddPort(core_mem_doc, kDocCoreMemBase, kRouterIoOffset, 1, 0,
+                    "cmem_doc");
+  }
+
   // firmware 的 _start 头两条做的事：栈顶与全局指针。模型里 RV core 不跑
   // firmware（TS 下发任务时直接跳到那一笔的 task_pc），所以这两个寄存器在
   // 这里给初值。不给的话 kernel 里但凡用一次栈，地址就落到 0 减去帧长那里。
   //
-  // 栈顶取 DTCM 的顶，往下长；全局指针取链接脚本里 .data 起点加 0x800，与
-  // compiler/kernel/link.ld 的 global_pointer 同一个地址。
+  // 旧 ABI 的栈顶取旧 DTCM 的顶，往下长。BachFlow ABI 的栈顶取别名窗口的顶
+  // （0x102000）。全局指针两套都取链接脚本里 .data 起点加 0x800。
   void ResetAbi() {
     auto& sr = sys->registerSystem->GetRegFile(rv32::REG_SR, 0);
-    sr[2].Retype(uint32) = uint32_t(kDtcmBase + kDtcmSize);
+    uint64_t sp = abi == RvAbi::kBachflow ? kBachflowSp : kDtcmBase + kDtcmSize;
+    sr[2].Retype(uint32) = uint32_t(sp);
     sr[3].Retype(uint32) = uint32_t(kDtcmBase + 0x800);
   }
 
@@ -368,7 +480,7 @@ class RvExec : public BachModule {
     cur.path_id = start->path_id.Get();
     cur.dsa_en = start->dsa_en.Get() != 0;
     cur.vcid = start->vcid.Get();
-    if (pcode_mode) ResetAbi();
+    if (DtePcodeFormat() || abi == RvAbi::kBachflow) ResetAbi();
     sys->SetPC(cur.task_pc, 0);
     sys->SetHaltState(false, 0);
     running = true;
@@ -381,9 +493,11 @@ class RvExec : public BachModule {
 
     // 读到未就绪的源寄存器就等。等的这一拍不取指，pc 保持。
     uint64_t pc = sys->GetPC(0);
+    if(pc>=kItcmSize) { spdlog::error("RV PC out of range unit {} sid {} uid {} tid {} entry {} pc {} sp {}",uint64_t(unit),cur.stream_id,cur.user_id,cur.task_id,cur.task_pc,pc,Sp()); LOGCHECK(false,"RV fetch outside ITCM"); }
     uint32_t inst = sys->LoadMem<uint32_t>(pc);
     RvRegUse u = RvDecodeRegs(inst);
-    if ((u.has_rs1 && !ready[u.rs1]) || (u.has_rs2 && !ready[u.rs2])) {
+    if ((u.has_rs1 && !ready[u.rs1]) || (u.has_rs2 && !ready[u.rs2]) ||
+        (u.has_rd && !ready[u.rd])) {
       ++wait_cnt;
       return;
     }
@@ -415,7 +529,8 @@ class RvExec : public BachModule {
   // 双发射的第二条：紧跟在第一条后面、与它不冲突的才同拍发。
   void TrySecond(uint64_t pc1, uint32_t inst1, RvRegUse const& u1) {
     uint64_t pc = sys->GetPC(0);
-    if (pc != pc1 + 4) return;   // 第一条跳走了
+    if (pc != pc1 + ((inst1 & 3) == 3 ? 4 : 2)) return;   // 第一条跳走了
+    if(pc>=kItcmSize) { spdlog::error("RV PC out of range unit {} sid {} uid {} tid {} entry {} pc {} sp {}",uint64_t(unit),cur.stream_id,cur.user_id,cur.task_id,cur.task_pc,pc,Sp()); LOGCHECK(false,"RV fetch outside ITCM"); }
     uint32_t inst = sys->LoadMem<uint32_t>(pc);
     RvRegUse u = RvDecodeRegs(inst);
     if (u1.has_rd && ((u.has_rs1 && u.rs1 == u1.rd) ||
@@ -425,7 +540,8 @@ class RvExec : public BachModule {
     }
     uint32_t res1 = RvIssueResOf(inst1), res = RvIssueResOf(inst);
     if ((res1 & res & (kResMem | kResMul)) != 0) return;
-    if ((u.has_rs1 && !ready[u.rs1]) || (u.has_rs2 && !ready[u.rs2])) return;
+    if ((u.has_rs1 && !ready[u.rs1]) || (u.has_rs2 && !ready[u.rs2]) ||
+        (u.has_rd && !ready[u.rd])) return;
     if (ToDsa(inst) && (dsa_used || !dsa_req->Ready())) return;
     if (ToLsq(inst) && !lsq_req->Ready()) return;
 
@@ -438,6 +554,7 @@ class RvExec : public BachModule {
 
   // load / store 的访存地址，不是访存指令返回 0。源寄存器已经就绪才调它。
   uint64_t MemAddr(uint32_t inst) const {
+    inst = RvTimingInst(inst);
     uint32_t op = inst & 0x7Fu;
     int32_t imm = 0;
     if (op == 0x03) {
@@ -458,13 +575,15 @@ class RvExec : public BachModule {
     return a >= base && a < base + size;
   }
   // 这一条访存经 lsq 发出去：Share Mem、Core Mem 与 Router I/O reg。
+  // DTCM 别名落在 DTE Core Mem 窗口里，但那一段是本地存储，不进 LSQ。
   bool ToLsq(uint32_t inst) const {
     if ((RvIssueResOf(inst) & kResMem) == 0) return false;
     uint64_t a = MemAddr(inst);
+    if (abi == RvAbi::kBachflow && InRange(a, kDtcmAliasBase, kDtcmSize)) return false;
     return InRange(a, kShareMemBase, kShareMemSize) ||
-           InRange(a, kCoreMemBase, kCoreMemSize) ||
-           InRange(a, 0x48300000, kShareMemSize) ||
-           InRange(a, 0x48400000, kCoreMemSize);
+           InRange(a, kDocShareMemBase, kShareMemSize) ||
+           InRange(a, kDocCoreMemBase, kRouterIoOffset) ||
+           (unit == RvUnit::kDte && InRange(a, kCoreMemBase, kCoreMemSize));
   }
   // 这一条发 DSA 请求：DSA 读写指令，或访存落在本核 DSA 的 IO 窗口。
   bool ToDsa(uint32_t inst) const {
@@ -492,6 +611,16 @@ class RvExec : public BachModule {
       MmioSink::Req r = share_mem->Front();
       share_mem->Pop();
       SendLsq(LsqTarget::kShareMem, r, u, r.addr - share_mem->Base());
+    }
+    while (!share_mem_doc->Empty()) {
+      MmioSink::Req r = share_mem_doc->Front();
+      share_mem_doc->Pop();
+      SendLsq(LsqTarget::kShareMem, r, u, r.addr - share_mem_doc->Base());
+    }
+    while (!core_mem_doc->Empty()) {
+      MmioSink::Req r = core_mem_doc->Front();
+      core_mem_doc->Pop();
+      SendLsq(LsqTarget::kCoreMem, r, u, r.addr - core_mem_doc->Base());
     }
     while (!core_mem->Empty()) {
       MmioSink::Req r = core_mem->Front();
@@ -536,7 +665,7 @@ class RvExec : public BachModule {
     if (at == kCsrTaskId) return cur.task_id;
     if (at == kCsrUserId) return cur.user_id;
     if (at == kCsrPathId) return cur.path_id;
-    if (at == 0x1C) return cur.vcid;
+    if (at == kCsrVcId) return cur.vcid;
     return 0;
   }
 
@@ -555,10 +684,13 @@ class RvExec : public BachModule {
       cur.task_id = r.data;
       return;
     }
-    if (at == 0x1C) { cur.vcid = r.data & 3u; return; }
     if (at == kCsrPathId) {
       // PID 更新任务：软件把新 PID 写进来，随 task_done 回 TS。
       cur.path_id = r.data;
+      return;
+    }
+    if (at == kCsrVcId) {
+      cur.vcid = r.data & 0x3u;
       return;
     }
     if (at == kRegTaskDone) {
@@ -581,7 +713,6 @@ class RvExec : public BachModule {
   }
 
   RvUnit unit;
-  bool pcode_mode = false;
   std::shared_ptr<TaskStartPort> start;
   std::shared_ptr<TaskDonePort> finish;
   std::shared_ptr<DonePort> done;
@@ -596,10 +727,12 @@ class RvExec : public BachModule {
   std::unique_ptr<rv32::Engine> engine;
   std::shared_ptr<systeml::MemoryBase> local, dtcm;
   std::shared_ptr<MmioSink> dsa_io, task_ctrl, share_mem, core_mem;
+  std::shared_ptr<MmioSink> share_mem_doc, core_mem_doc;
 
   // gpr 就绪表：32 位，复位全 1。
   std::array<bool, 32> ready{};
   RvTask cur;
+  RvAbi abi = RvAbi::kLegacy;
   bool running = false, dsa_used = false, lsq_used = false;
   uint64_t last_start_seq = 0, last_dsa_wb = 0, last_lsq_wb = 0;
   uint64_t dsa_seq = 0, lsq_seq = 0, finish_seq = 0;

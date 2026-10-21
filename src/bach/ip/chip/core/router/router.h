@@ -223,8 +223,11 @@ class Router {
 
   void Wire() {
     xbar->SetReduceAdmission(
-        [this](Message const& m, uint64_t lane) { return reduce->CanAcceptHead(m, lane); },
-        [this](Message const& m, uint64_t lane) { reduce->ReserveHead(m, lane); });
+        [this](Message const& m, uint64_t lane) { return reduce->CanAcceptHead(m,lane); },
+        [this](Message const& m, uint64_t lane) { reduce->ReserveHead(m,lane); });
+    xbar->SetForwardSkip([this](uint64_t user, uint64_t path) {
+      core_station->NoteSkipReissue(user, path);
+    });
     // 三个 R2R 方向：外部链路接进站，Xbar 的出口接出去。
     for (uint64_t d = 0; d < kR2RNum; ++d) {
       in_wire.push_back(MakeWire(clk));
@@ -258,6 +261,10 @@ class Router {
     stations[3]->AttachUpBack(core_back);
     core_station->AttachStationBack(core_back);
     xbar->AttachCoreLevel(core_station->LevelPtr());
+    xbar->AttachDataLevel(core_station->DataLevelPtr());
+    reduce->SetHeadNotify([this](uint64_t user, uint64_t path) {
+      core_station->NoteSkipReissue(user, path);
+    });
 
     // 三路 reduce 出口进 ReduceModule，结果经第五个站重新参与仲裁。
     for (uint64_t r = 0; r < 3; ++r) {
@@ -277,6 +284,7 @@ class Router {
     auto bcast = retire->BroadcastPtr();
     xbar->AttachRetire(bcast);
     reduce->AttachRetire(bcast);
+    core_station->AttachRetire(bcast);
     // release 与数据反向走：还给上游的写在往上游去的出线上，下游还回来的从下游
     // 来的进线上读。出线上数据那一路由 Xbar 写，两者各写各的字段。
     for (uint64_t d = 0; d < kR2RNum; ++d) {

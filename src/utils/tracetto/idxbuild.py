@@ -1,6 +1,6 @@
 """建索引：按 core 并行、原子发布、复用没变的。
 
-- **按 core 切**：一个 core 的那些信号 → 十条行是天然不可分的单位（`core_spans` 一次要
+- **按 core 切**：一个 core 的那些信号 → 十三条行是天然不可分的单位（`core_spans` 一次要
   全读），408 个 core 就是 408 个任务；先拿每个 core 的事件数当权重，降序动态派发，免得
   一个重 core 拖尾。
 - **用 spawn 不用 fork**：`/api/reload` 触发的重建是在服务已经起了线程之后，fork 只继承
@@ -30,7 +30,7 @@ STALE_SECONDS = 3600
 
 
 def _write_one(reader: TraceReader, job) -> Tuple[int, List[int]]:
-    """解一个 core 的十条行，写成 `cores/<idx>.bin`。"""
+    """解一个 core 的十三条行，写成 `cores/<idx>.bin`。"""
     _prefix, core_idx, sigs, t_end, cores_dir, lane_base = job
     rows = S.lanes_of(S.core_spans(reader, sigs, t_end))
     (Path(cores_dir) / f"{core_idx:05d}.bin").write_bytes(
@@ -90,9 +90,16 @@ def _clean_stale(parent: Path) -> None:
         if not p.name.startswith(BUILDING_PREFIX) or not p.is_dir():
             continue
         parts = p.name.split(".")
-        pid = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else -1
-        alive = (pid > 0 and os.path.exists(f"/proc/{pid}")) \
-            if sys.platform.startswith("linux") else True
+        pid = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else -1
+        alive = False
+        if pid > 0:
+            try:
+                os.kill(pid, 0)
+                alive = True
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                alive = True
         try:
             old = now - p.stat().st_mtime > STALE_SECONDS
         except OSError:

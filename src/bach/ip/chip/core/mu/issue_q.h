@@ -52,7 +52,7 @@ struct MuInflight {
 
   explicit MuInflight(MuTaskCfg const& task)
       : cfg(task), agu(task),
-        total(task.kblock * task.Experts() * task.nblock) {
+        total(task.kblock * task.ExpertSlots() * task.nblock) {
     if (total == 0) total = 1;
   }
   uint64_t Kblock() const { return cfg.kblock == 0 ? 1 : cfg.kblock; }
@@ -60,7 +60,7 @@ struct MuInflight {
   // 各出一份时每个专家写一次。
   uint64_t OutTotal() const {
     uint64_t n = cfg.nblock;
-    if (!cfg.ep_reduce) n *= cfg.Experts();
+    if (!cfg.ep_reduce) n *= cfg.ExpertSlots();
     return n == 0 ? 1 : n;
   }
   bool Done() const { return stored >= OutTotal(); }

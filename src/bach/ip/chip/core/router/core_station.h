@@ -6,17 +6,18 @@
 // 进 core 与出 core 两条数据通路完全并行，互不共享仲裁状态。
 //
 // 进 core（M7、M8）：
-//   三态准入在 Xbar 那一级做：进本 core 的表也在它手里，没有空项就不往 core 出口
-//   发，那一笔留在它那个 VC 上等，VC 还有空位时照样能继续从上游收（F-021）。
-//   到这里的包已经过了那一档，一定有 Core Mem 空间，不再查 Core 方向的 VC credit。
+//   三态准入在 Xbar 那一级做：进本 core 的表也在它手里，没有空项就不往 core
+//   出口 发，那一笔留在它那个 VC 上等，VC
+//   还有空位时照样能继续从上游收（F-021）。 到这里的包已经过了那一档，一定有
+//   Core Mem 空间，不再查 Core 方向的 VC credit。
 //
-//   软件管理的 Header 写进 HeaderFIFO；pcode Header 随数据由 DTE 写入 Hmem 或
-//   CoreMem，不留无人读取的软件副本。Payload 写进 OutputBuffer，保持包的顺序与
+//   Header 写进 HeaderFIFO，Payload 写进 OutputBuffer，两者保持同一包的顺序与
 //   边界。Header 就绪即通知 TS，不等整包收完，OutputBuffer 因此是流水缓冲
 //   而不是整包缓冲，进 core 的包长不受它的容量约束。
 //
-//   trigger 请求发出后保持到 TS 拉 ready。TS 入口占满时本笔原地保持，不发下一笔，
-//   也不清 HeaderFIFO 的队头：丢一笔 trigger 就等于丢一个 token。
+//   trigger 请求发出后保持到 TS 拉 ready。TS
+//   入口占满时本笔原地保持，不发下一笔， 也不清 HeaderFIFO 的队头：丢一笔
+//   trigger 就等于丢一个 token。
 //
 // 出 core（M9）：DTE 已经查好 VC 与下游资源，这里只拆出 Header 与 Payload，
 // 按 Header 的 VC 号写进 Core 方向的输入 VC，之后与其他方向一样查表、参与仲裁。
@@ -29,19 +30,25 @@
 #include <deque>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/ports.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/chip/core/router/xbar.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
 
-// HeaderFIFO 与 OutputBuffer 的深度，建模计划的默认值。60 flit 取自 DATA_NOC
-// HAS 的 DTE-local 桥接 Router→DTE 60 flits。
-constexpr uint64_t kHeaderFifoDepth = 16;
+// HeaderFIFO 与 OutputBuffer 的深度。60 flit 取自 DATA_NOC HAS 的
+// DTE-local 桥接 Router→DTE 60 flits。
+//
+// 包头槽在用户退休时释放（pcode 的 DTE kernel 不写 hdr_pop）。16 名用户同时
+// 在途、每人还占着前一条 path 的包头时，16 深的队列会顶满，下一路的包头进
+// 不来，读包头的任务又在等这一路。深度按 16 用户 × 每用户若干包留余量。
+[[maybe_unused]] constexpr uint64_t kHeaderFifoDepth = 16;
 constexpr uint64_t kOutBufFlits = 60;
 
 // 包头读口的地址布局：队头那个包的包头按 4 B 一项排开，读哪一项由地址的低位定。
@@ -54,8 +61,8 @@ enum HdrRegOffset : uint64_t {
   kHdrCoreMask = 12,
   kHdrStreamId = 16,
   kHdrTaskId = 20,
-  kHdrDstAddr = 24,     // 落点：收方按它搬进存储（配置驱动下由 datain 任务读）
-  kHdrScaleValid = 28,  // 带 scale 的包：包尾那一段进 scale 旁带
+  kHdrDstAddr = 24,    // 落点：收方按它搬进存储（配置驱动下由 datain 任务读）
+  kHdrScaleValid = 28, // 带 scale 的包：包尾那一段进 scale 旁带
   kHdrPopOffset = 32,
   kHdrRegBytes = 36,
 };
@@ -64,8 +71,8 @@ enum HdrRegOffset : uint64_t {
 constexpr uint64_t kHdrReadLatency = 1;
 
 class CoreStation : public BachModule {
- public:
-  CoreStation(ClockPtr clock, const std::string& name, uint64_t parent = 0,
+public:
+  CoreStation(ClockPtr clock, const std::string &name, uint64_t parent = 0,
               bool tick = true)
       : BachModule(clock, name, parent, tick),
         from_xbar(std::make_shared<LinkEnd>(clock)),
@@ -73,43 +80,60 @@ class CoreStation : public BachModule {
         from_dte(std::make_shared<CoreDataPort>(clock)),
         trigger(std::make_shared<TriggerPort>(clock)),
         level(std::make_shared<ReadyLevelPort>(clock)),
+        data_level(std::make_shared<ReadyLevelPort>(clock)),
         to_station(std::make_shared<LinkEnd>(clock)),
         hdr(std::make_shared<MemPort>(clock)),
-        admitted(clock),
+        dte_credit(std::make_shared<DteTxCreditPort>(clock)), admitted(clock),
         triggers(clock) {}
 
   // Xbar 的 core 出口接这里。
   void AttachFromXbar(LinkEndPtr wire) { from_xbar = std::move(wire); }
-  LinkEnd& FromXbar() { return *from_xbar; }
+  LinkEnd &FromXbar() { return *from_xbar; }
 
-  CoreDataPort& ToDte() { return *to_dte; }
+  CoreDataPort &ToDte() { return *to_dte; }
   std::shared_ptr<CoreDataPort> ToDtePtr() const { return to_dte; }
-  CoreDataPort& FromDte() { return *from_dte; }
+  CoreDataPort &FromDte() { return *from_dte; }
   std::shared_ptr<CoreDataPort> FromDtePtr() const { return from_dte; }
-  TriggerPort& Trigger() { return *trigger; }
+  TriggerPort &Trigger() { return *trigger; }
   std::shared_ptr<TriggerPort> TriggerPtr() const { return trigger; }
 
   // 出核数据交给 core 方向的 RouterStation。
   void AttachToStation(LinkEndPtr wire) { to_station = std::move(wire); }
-  LinkEnd& ToStation() { return *to_station; }
+  LinkEnd &ToStation() { return *to_station; }
   // core 方向那个站的 release 回线。
   void AttachStationBack(LinkEndPtr wire) { station_back = std::move(wire); }
   // core 方向那个站的 VC 深度，与站上配的一致。
-  void SetVcDepth(VcDepth const& priv, uint64_t shared) {
+  void SetVcDepth(VcDepth const &priv, uint64_t shared) {
     priv_depth = priv;
     shared_depth = shared;
     private_cr = priv;
     shared_cr = shared;
   }
 
+  std::shared_ptr<DteTxCreditPort> DteCreditPtr() const { return dte_credit; }
+  VcDepth PrivateDepth() const { return priv_depth; }
+  uint64_t SharedDepth() const { return shared_depth; }
+  void EnableDteCredits() { native_credit = true; }
   // 包头读口，接 DTE RV core 的 cm_lsq。本模块是从端。
-  MemPort& Hdr() { return *hdr; }
+  MemPort &Hdr() { return *hdr; }
   std::shared_ptr<MemPort> HdrPtr() const { return hdr; }
   void AttachHdr(std::shared_ptr<MemPort> p) { hdr = std::move(p); }
+  void SetSoftwareHeaderQueue(bool on) { software_headers=on; }
   uint64_t HeaderDepth() const { return hdr_fifo.size(); }
-  // Generated pcode datain kernels deliver header context through DTE into
-  // Hmem/Cmem; legacy software-managed kernels read/pop the Router header FIFO.
-  void SetSoftwareHeaderQueue(bool enabled) { software_headers = enabled; }
+  uint64_t TriggerDepth() const { return trig_q.size() + (trig_hold ? 1 : 0); }
+  // 本级退休广播。这个用户留下的包头槽在 Step 里删掉。
+  void AttachRetire(std::shared_ptr<RetireBroadcastPort> p) {
+    retire_in = std::move(p);
+  }
+  // 停钟后看包头队列里每一笔的 user 与 path。队头在前。
+  std::vector<std::pair<uint64_t, uint64_t>> HeaderIds() const {
+    std::vector<std::pair<uint64_t, uint64_t>> out;
+    for (MessagePtr const& m : hdr_fifo) {
+      if (!m) continue;
+      out.emplace_back(m->user_id, m->path_id);
+    }
+    return out;
+  }
   // 进核那一段还压着几个 flit。
   uint64_t OutBufDepth() const { return out_buf.size(); }
   uint64_t Popped() const { return pop_cnt; }
@@ -117,22 +141,31 @@ class CoreStation : public BachModule {
   uint64_t Admitted() const { return admitted.Get(); }
   uint64_t Triggers() const { return triggers.Get(); }
 
-  // Xbar 读它决定 core 方向能不能收。电平每拍发布，Xbar 读上一拍的值，所以拉高
-  // 之后路上最多还有两个 flit：一个上一拍已经发出，一个照着这一拍的电平发。两处
-  // 缓冲都要留得出这两格，包头队列按每个 flit 都是头 flit 算。
-  bool CoreReady() const {
-    return out_buf.size() + 2 <= kOutBufFlits &&
-           (!software_headers || hdr_fifo.size() + 2 <= kHeaderFifoDepth);
+  // 归约模块收下了这一包。只跳过同 path 的 P2P reissue，不另开一条链。
+  void NoteSkipReissue(uint64_t user, uint64_t path) {
+    trig_q.push_back({user, path, false, true});
   }
+
+  // Xbar 读它决定 core 方向能不能收新的包头。电平每拍发布，Xbar 读上一拍的值，
+  // 所以拉高之后路上最多还有两个 flit。数据缓冲要留得出这两格。
+  // 已经进核的那个包，后面的 flit 不再占包头槽，只看 DataReady。
+  //
+  // 包头队列的深度检查暂时拿掉。飞书 Router 的 Core 边界不设 HeaderFIFO，pcode
+  // 又不写 hdr_pop，16 深会把后续 path 的包头挡在核外。队列仍按到达顺序收下
+  // 包头并通知 TS，只是不再用深度反压。
+  bool DataReady() const { return out_buf.size() + 2 <= kOutBufFlits; }
+  bool HeaderReady() const { return true; }
+  bool CoreReady() const { return DataReady() && HeaderReady(); }
   std::shared_ptr<ReadyLevelPort> LevelPtr() const { return level; }
+  std::shared_ptr<ReadyLevelPort> DataLevelPtr() const { return data_level; }
 
-  bool Quiescent() const override {
-    return out_buf.empty() && !trig_hold;
-  }
+  bool Quiescent() const override { return out_buf.empty() && !trig_hold; }
 
- protected:
+protected:
   void Step() override {
-    // 末级先做。
+    // 末级先做。退休的用户不会再读包头，先把它占着的槽让出来，
+    // 后面的用户才进得来。
+    TakeRetire();
     ServeHdr();
     DrainToDte();
     PushTrigger();
@@ -142,6 +175,7 @@ class CoreStation : public BachModule {
 
     // 准入电平：本拍末算出来，Xbar 下一拍读到。
     level->Drive(CoreReady());
+    data_level->Drive(DataReady());
     from_dte->DriveReady(DteReady());
     admitted = admitted_pending;
     triggers = trigger_pending;
@@ -149,11 +183,30 @@ class CoreStation : public BachModule {
     TracePerCycle("hdr_fifo", hdr_fifo.size());
   }
 
- private:
+private:
   struct Pending {
     uint64_t user_id = 0, path_id = 0;
     bool reissue = false;
+    bool skip_only = false;
   };
+
+  // 本级退休：这个用户的搬运已经结束，它留在包头队列里的槽不会再被 hdr_pop
+  // 读走。不删的话队列顶满，下一个用户的包头进不来，任务又在等那个包。
+  void TakeRetire() {
+    if (!retire_in || !retire_in->Valid()) return;
+    if (retire_in->Seq() == last_retire_seq) return;
+    last_retire_seq = retire_in->Seq();
+    uint64_t user = retire_in->User();
+    std::deque<MessagePtr> kept;
+    for (MessagePtr const& m : hdr_fifo) {
+      if (m && m->user_id == user) {
+        ++pop_cnt;
+        continue;
+      }
+      kept.push_back(m);
+    }
+    hdr_fifo.swap(kept);
+  }
 
   // 包头读口的从端：读队头那个包的包头，写 kHdrPopOffset 把它弹出。
   void ServeHdr() {
@@ -189,20 +242,42 @@ class CoreStation : public BachModule {
   // 队头那个包的包头，按 4 B 一项排开。队列空时读出来是全 0。
   ByteBlock HeaderBytes(uint64_t addr, uint64_t bytes) const {
     ByteBlock out(bytes == 0 ? 4 : bytes, 0);
-    if (hdr_fifo.empty()) return out;
-    MessagePtr const& m = hdr_fifo.front();
+    if (hdr_fifo.empty())
+      return out;
+    MessagePtr const &m = hdr_fifo.front();
     uint64_t off = addr % kHdrRegBytes;
     uint64_t v = 0;
     switch (off) {
-      case kHdrUserId: v = m->user_id; break;
-      case kHdrPathId: v = m->path_id; break;
-      case kHdrSize: v = m->size; break;
-      case kHdrCoreMask: v = m->path_core_mask; break;
-      case kHdrStreamId: v = m->stream_id; break;
-      case kHdrTaskId: v = m->task_id; break;
-      case kHdrDstAddr: v = m->dst_addr; break;
-      case kHdrScaleValid: v = m->scale_valid; break;
-      default: v = 0; break;
+    case kHdrUserId:
+      v = m->user_id;
+      break;
+    case kHdrPathId:
+      v = m->path_id;
+      break;
+    case kHdrSize:
+      v = m->size;
+      if (m->payload_contains_topk && m->scale_valid && m->logical_data_bytes)
+        v = m->logical_data_bytes + (m->logical_data_bytes + 31) / 32 +
+            (m->topk_valid ? 256 : 0);
+      break;
+    case kHdrCoreMask:
+      v = m->path_core_mask;
+      break;
+    case kHdrStreamId:
+      v = m->stream_id;
+      break;
+    case kHdrTaskId:
+      v = m->task_id;
+      break;
+    case kHdrDstAddr:
+      v = m->dst_addr;
+      break;
+    case kHdrScaleValid:
+      v = m->scale_valid;
+      break;
+    default:
+      v = 0;
+      break;
     }
     for (uint64_t i = 0; i < out.size() && i < 8; ++i) {
       out[i] = uint8_t((v >> (8 * i)) & 0xFF);
@@ -212,22 +287,22 @@ class CoreStation : public BachModule {
 
   // M7：收下 Xbar 发进来的 flit。
   //
-  // 收不下就断言，不静默丢：进核那一段没有重发通路，丢一个 flit 是半个包，丢一个
-  // 包头就等于丢一个 token 的搬运任务，DTE RV core 再也拿不到它。两处余量都由准入
-  // 电平（CoreReady）留够：电平拉低到 Xbar 停下来隔着一拍，那一拍它还会再发一笔。
+  // 收不下就断言，不静默丢：进核那一段没有重发通路，丢一个 flit
+  // 是半个包，丢一个 包头就等于丢一个 token 的搬运任务，DTE RV core
+  // 再也拿不到它。两处余量都由准入 电平（CoreReady）留够：电平拉低到 Xbar
+  // 停下来隔着一拍，那一拍它还会再发一笔。
   void AcceptFromXbar() {
     FlitView f = ReadFlit(from_xbar->flit);
-    if (!f.valid || !f.msg) return;
+    if (!f.valid || !f.msg)
+      return;
     uint64_t user = f.msg->user_id;
     LOGCHECK(out_buf.size() < kOutBufFlits,
              "CoreStation: 进核缓冲满了还发进来，Xbar 没按准入电平停。");
-    LOGCHECK(!software_headers || !f.head || hdr_fifo.size() < kHeaderFifoDepth,
-             "CoreStation: 包头队列满了还发进来，Xbar 没按准入电平停。");
     out_buf.push_back(f);
     ++admitted_pending;
-    // 每个头 flit 排一笔 trigger；软件管理的包头另留在 HeaderFIFO。
+    // 头 flit 同时进 HeaderFIFO，并排一笔 trigger。
     if (f.head) {
-      if (software_headers) hdr_fifo.push_back(f.msg);
+      if(software_headers) hdr_fifo.push_back(f.msg);
       trig_q.push_back({user, f.msg->path_id, f.msg->reissue != 0});
     }
   }
@@ -249,7 +324,7 @@ class CoreStation : public BachModule {
     }
     Pending p = trig_q.front();
     trig_q.pop_front();
-    trigger->Drive(p.user_id, p.path_id, p.reissue);
+    trigger->Drive(p.user_id, p.path_id, p.reissue, p.skip_only);
     trig_hold = true;
   }
 
@@ -271,7 +346,7 @@ class CoreStation : public BachModule {
         return;
       }
     }
-    FlitView const& f = out_buf.front();
+    FlitView const &f = out_buf.front();
     to_dte->Drive(f.bytes, f.tail, f.head, f.vc, f.msg);
     sent_hold = true;
   }
@@ -283,7 +358,12 @@ class CoreStation : public BachModule {
   void AcceptFromDte() {
     to_station->release.Idle();
     CoreDataView d = ReadCoreData(*from_dte);
-    if (!d.valid || d.seq == last_dte_seq || !VcRoom(d.vc)) {
+    if (!d.valid || d.seq == last_dte_seq) {
+      to_station->flit.Idle();
+      return;
+    }
+    if (!VcRoom(d.vc)) {
+      LOGCHECK(!native_credit, "CoreStation: DTE transmitted without credit");
       to_station->flit.Idle();
       return;
     }
@@ -305,7 +385,8 @@ class CoreStation : public BachModule {
   // 只压一笔在端口上，所以一格就够。
   bool DteReady() const {
     for (uint64_t v = 0; v < kVcNum; ++v) {
-      if (!VcRoom(v)) return false;
+      if (!VcRoom(v))
+        return false;
     }
     return true;
   }
@@ -313,10 +394,14 @@ class CoreStation : public BachModule {
   // core 方向那个站的 flit 离开 VC Buffer 就还一个 credit。回填与占用对称：
   // private 没满补 private，满了补 shared。
   void ReturnCredit() {
-    if (!station_back) return;
+    dte_credit->returned_mask = 0;
+    if (!station_back)
+      return;
     ReleaseView r = ReadRelease(station_back->release);
-    if (!r.vc_valid) return;
+    if (!r.vc_valid)
+      return;
     uint64_t v = r.vc_id;
+    dte_credit->returned_mask = 1ull << v;
     LOGCHECK(v < kVcNum, "CoreStation: 归还的 VC 号越界。");
     if (private_cr[v] < priv_depth[v]) {
       ++private_cr[v];
@@ -329,14 +414,18 @@ class CoreStation : public BachModule {
 
   LinkEndPtr from_xbar, to_station, station_back;
   std::shared_ptr<MemPort> hdr;
+  std::shared_ptr<DteTxCreditPort> dte_credit;
+  bool native_credit = false;
   std::shared_ptr<CoreDataPort> to_dte, from_dte;
   std::shared_ptr<TriggerPort> trigger;
-  std::shared_ptr<ReadyLevelPort> level;
+  std::shared_ptr<ReadyLevelPort> level, data_level;
 
   // Step 独占。
-  bool software_headers = true;
   std::deque<FlitView> out_buf;
+  bool software_headers=true;
   std::deque<MessagePtr> hdr_fifo;
+  std::shared_ptr<RetireBroadcastPort> retire_in;
+  uint64_t last_retire_seq = 0;
   std::deque<Pending> trig_q;
   bool trig_hold = false, sent_hold = false;
   ByteBlockPtr hdr_rsp;
@@ -352,7 +441,7 @@ class CoreStation : public BachModule {
   Logic64 admitted, triggers;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

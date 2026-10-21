@@ -1,8 +1,8 @@
 // 装载器的检查：bundle 里与坏 core、角色对不上的地方，在应用之前拦下来。
 //
 // 从 compiler 编出来的 moe_chip 那一份出发，每条检查一个反例：改一行或加一行，
-// 写成一套新的 bundle，装载应当断言。原样的那一份装得进去，只改 core_bad_mask 且
-// 其余都对得上的那一份也装得进去。
+// 写成一套新的 bundle，装载应当断言。原样的那一份装得进去，只改 core_bad_mask
+// 且 其余都对得上的那一份也装得进去。
 
 #include <gtest/gtest.h>
 
@@ -13,9 +13,9 @@
 #include <utility>
 #include <vector>
 
+#include "bach/ip/bundle_load.h"
 #include "base/clock.h"
 #include "base/runtime.h"
-#include "bach/ip/bundle_load.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -41,9 +41,9 @@ struct Mutation {
 };
 
 // 写成 bundle_check/<name>/<name>.bachir。KERNEL 那几行不抄：几个反例在检查那一
-// 步就停，改 core_bad_mask 的那一套只看 Router 与 TS 的配置。返回 replace 里有几
-// 行在原文里找到了。
-uint64_t WriteMutated(std::string const& name, Mutation const& m) {
+// 步就停，改 core_bad_mask 的那一套只看 Router 与 TS 的配置。返回 replace
+// 里有几 行在原文里找到了。
+uint64_t WriteMutated(std::string const &name, Mutation const &m) {
   std::ifstream in(BundleRoot() + "/moe_chip/moe_chip.bachir");
   std::filesystem::create_directories(std::string(kCheckRoot) + "/" + name);
   std::ofstream out(std::string(kCheckRoot) + "/" + name + "/" + name +
@@ -51,21 +51,25 @@ uint64_t WriteMutated(std::string const& name, Mutation const& m) {
   uint64_t hit = 0;
   std::string line;
   while (std::getline(in, line)) {
-    if (line.rfind("KERNEL", 0) == 0) continue;
-    for (auto const& r : m.replace) {
-      if (line != r.first) continue;
+    if (line.rfind("KERNEL", 0) == 0)
+      continue;
+    for (auto const &r : m.replace) {
+      if (line != r.first)
+        continue;
       line = r.second;
       ++hit;
       break;
     }
-    if (!line.empty()) out << line << "\n";
+    if (!line.empty())
+      out << line << "\n";
   }
-  for (std::string const& a : m.append) out << a << "\n";
+  for (std::string const &a : m.append)
+    out << a << "\n";
   return hit;
 }
 
 class BachBundleCheck : public ::testing::Test {
- protected:
+protected:
   void SetUp() override {
     EnsureSlots();
     clk = MakeClock(0, kPeriod);
@@ -77,11 +81,12 @@ class BachBundleCheck : public ::testing::Test {
   }
 
   // 改完装载，应当在检查那一步断言。why 是断言信息里要出现的那一截。
-  void ExpectRejected(std::string const& name, Mutation const& m,
-                      char const* why = "装载检查没过") {
+  void ExpectRejected(std::string const &name, Mutation const &m,
+                      char const *why = "装载检查没过") {
     ASSERT_EQ(WriteMutated(name, m), m.replace.size())
-        << "要改的那几行在 moe_chip.bachir 里没找全，bundle 重新生成过就要跟着改";
-    std::vector<Chip*> all = {chip.get()};
+        << "要改的那几行在 moe_chip.bachir 里没找全，bundle "
+           "重新生成过就要跟着改";
+    std::vector<Chip *> all = {chip.get()};
     EXPECT_DEATH(LoadBundle(all, kCheckRoot, name), why) << name;
   }
 
@@ -89,11 +94,30 @@ class BachBundleCheck : public ::testing::Test {
   std::unique_ptr<Chip> chip;
 };
 
-}  // namespace
+} // namespace
+
+TEST_F(BachBundleCheck, InactiveSpareCoresAreNotInitialized) {
+  std::string name = "inactive_adapter";
+  std::string dir = std::string(kCheckRoot) + "/" + name;
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream out(dir + "/" + name + ".bachir");
+    out << "BACHIR 11\nCHIP 0 0\n";
+    for (uint64_t p = 0; p < kChipCoreNum; ++p)
+      out << "CORE 0 " << p << " 3\n";
+  }
+  auto stat = LoadBundle({chip.get()}, kCheckRoot, name);
+  EXPECT_EQ(stat.tasks, 0u);
+  for (uint64_t p = 0; p < kChipCoreNum; ++p) {
+    auto const &cfg = chip->GetCore(p).GetTs().Cfg();
+    EXPECT_FALSE(cfg.InitFinished());
+    EXPECT_EQ(cfg.TsState(), 0u);
+  }
+}
 
 // 原样那一份：10 个 core 各一条 CORE，没有坏 core，B core 自启动。
 TEST_F(BachBundleCheck, TheCompiledBundleLoads) {
-  std::vector<Chip*> all = {chip.get()};
+  std::vector<Chip *> all = {chip.get()};
   BundleStat st = LoadBundle(all, BundleRoot(), "moe_chip");
   EXPECT_EQ(st.chips, 1u);
   EXPECT_EQ(st.cores, kChipCoreNum);
@@ -113,7 +137,7 @@ TEST_F(BachBundleCheck, BadCoreWithOnlyRouterRecordsLoads) {
       {"RTAB 0 5 4 1 4 0 0 0 0 0 0 0 0 1 0 4 0 0 0 0 0 0 0 0 0 0 0 0 0 0",
        "RTAB 0 5 4 1 4 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"}};
   ASSERT_EQ(WriteMutated("bad_core5", m), 2u);
-  std::vector<Chip*> all = {chip.get()};
+  std::vector<Chip *> all = {chip.get()};
   LoadBundle(all, kCheckRoot, "bad_core5");
   for (uint64_t i = 0; i < kChipCoreNum; ++i) {
     EXPECT_EQ(chip->GetCore(i).Bad(), i == 5) << "i=" << i;
@@ -179,11 +203,61 @@ TEST_F(BachBundleCheck, ComputeCoreLandingInMatrixMemIsRejected) {
 // B core 的 DTEIN 落 Matrix Mem。
 TEST_F(BachBundleCheck, BroadcastCoreLandingInCoreMemIsRejected) {
   ExpectRejected("bcore_to_cm",
-                 {{{"DTEIN 0 0 1 1 0x0 6144", "DTEIN 0 0 0 1 0x0 6144"}},
-                  {}});
+                 {{{"DTEIN 0 0 1 1 0x0 6656", "DTEIN 0 0 0 1 0x0 6656"}}, {}});
 }
 
 // 不派角色的 core 没有 CFGMISC、TCHAIN、DATAIN、DTEIN。
 TEST_F(BachBundleCheck, SpareCoreWithDatainIsRejected) {
   ExpectRejected("spare_datain", {{}, {"DATAIN 0 5 0x0 0"}});
+}
+
+// BACHIR 12 boot-time spans use packed BachFlow NK matrices. Verify the data
+// representation at the SRAM boundary, including the padded scale-row layout.
+TEST_F(BachBundleCheck, PackedNkSpansRetileDataAndScalesAndPreserveQuotedPaths) {
+  std::string name = "packed_nk";
+  std::string dir = std::string(kCheckRoot) + "/" + name;
+  std::filesystem::create_directories(dir);
+  constexpr uint64_t n = 256, k = 128;
+  ByteBlock source(n*k), sf(8192, 0), shared{1,2,3,4,5,6,7,8};
+  auto scale_at=[](uint64_t address) {
+    return address/128*32 + address%128/32;
+  };
+  for(uint64_t row=0;row<n;++row) {
+    for(uint64_t col=0;col<k;++col)
+      source[row*k+col]=uint8_t(row*7+col*3);
+    for(uint64_t block=0;block<k/32;++block)
+      sf[scale_at(row*k+block*32)]=uint8_t(120+(row+block)%10);
+  }
+  auto write=[&](std::string const& file, ByteBlock const& bytes) {
+    std::ofstream out(dir+"/"+file,std::ios::binary);
+    out.write(reinterpret_cast<char const*>(bytes.data()),bytes.size());
+  };
+  write("matrix data.bin",source);write("matrix sf.bin",sf);write("shared.bin",shared);
+  {
+    std::ofstream out(dir+"/"+name+".bachir");
+    out << "BACHIR 12\nCHIP 0 0\n";
+    for(uint64_t p=0;p<kChipCoreNum;++p) out<<"CORE 0 "<<p<<" 3\n";
+    out << "COREMAP 0 1 0\nABI 0 1 bachflow\nFORMAT 0 1 nk\nINITFINISH 0 1 0\n"
+        << "DSAREG 0 1 1 0x1000 0x20002\n"
+        << "DSAREG 0 1 1 0x1018 0x48c00000\n"
+        << "DSAREG 0 1 1 0x101c 32768\n"
+        << "DSAREG 0 1 1 0x1024 33\n"
+        << "FILESPAN 0 1 mmem 0 \"matrix data.bin\" 0 32768\n"
+        << "FILESPAN 0 1 mmem_sf 0 \"matrix sf.bin\" 0 8192\n"
+        << "FILESPAN 0 1 smem 16 shared.bin 0 8\n";
+  }
+  auto stat=LoadBundle({chip.get()},kCheckRoot,name);
+  EXPECT_EQ(stat.chips,1u);EXPECT_EQ(stat.cores,10u);
+  auto& core=chip->GetCore(1);
+  EXPECT_FALSE(core.GetTs().Cfg().InitFinished());
+  EXPECT_EQ(core.Smem().Peek(16,8),shared);
+  ByteBlock expected(n*k), expected_sf(n*k/32);
+  for(uint64_t ni=0;ni<2;++ni) for(uint64_t ki=0;ki<2;++ki)
+    for(uint64_t row=0;row<128;++row) {
+      uint64_t src=(ni*128+row)*k+ki*64, dst=((ni*2+ki)*128+row)*64;
+      for(uint64_t col=0;col<64;++col) expected[dst+col]=source[src+col];
+      for(uint64_t col=0;col<2;++col) expected_sf[dst/32+col]=sf[scale_at(src+col*32)];
+    }
+  EXPECT_EQ(core.Mmem().Peek(0,n*k),expected);
+  EXPECT_EQ(core.Mmem().PeekScale(0,n*k/32),expected_sf);
 }

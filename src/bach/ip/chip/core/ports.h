@@ -29,21 +29,24 @@ using ByteBlockPtr = std::shared_ptr<ByteBlock>;
 // 存储的一个 master 端口。
 // scale 旁带的三档访问。MXFP8 数据每 32 B 配 1 B scale，与数据地址一一对应。
 //   不带         只走 SRAM 那一段
-//   正文接 scale 读回来的正文后面接上 [addr, addr + bytes) 覆盖到的那几组 scale；
+//   正文接 scale 读回来的正文后面接上 [addr, addr + bytes) 覆盖到的那几组
+//   scale；
 //                写进来的 wdata 是正文后面接 scale
-//   只访问 scale 地址与长度仍按数据的坐标给，读回来、写进去的只有 scale 那几组。
+//   只访问 scale 地址与长度仍按数据的坐标给，读回来、写进去的只有 scale
+//   那几组。
 //                DTE 边读边发，包里 scale 排在数据后面，搬 scale 那一笔走这一档
 enum ScaleAccess : uint64_t {
   kScaleNone = 0,
   kScaleWithData = 1,
   kScaleOnly = 2,
+  kScalePhysical = 3,
 };
 
 // 一组 scale 管多少字节的数据：MXFP8 32 个元素共用 1 B。
 constexpr uint64_t kScaleGroupBytes = 32;
 
 class MemPort : public Logic {
- public:
+public:
   // master 侧写
   //
   // req_woff 是这一笔在 wdata 里的有效起点：CM 接口一次固定搬一整块，而一条
@@ -53,22 +56,34 @@ class MemPort : public Logic {
   LogicPtr<ByteBlock> req_wdata;
   // 每发一笔加一。收方按它认这一笔见没见过：两侧各自打拍时，谁先跑决定读到
   // 的是当拍还是上一拍的值，只看 req_valid 就可能把同一笔收两次或漏掉一次。
-  Logic64 req_seq;
+  Logic64 req_seq, req_pair, req_pair_ready;
+  Logic64 req_hw_addr0, req_hw_addr1, req_lane_mask, req_topk_sel;
   // 存储侧写
-  Logic64 req_ready, rsp_valid;
+  Logic64 req_ready, rsp_valid, rsp_write_valid, rsp_error, rsp_write_error,
+      rsp_pair_mask;
   LogicPtr<ByteBlock> rsp_rdata;
 
   explicit MemPort(ClockPtr c)
       : req_valid(c), req_we(c), req_addr(c), req_bytes(c), req_scale_en(c),
-        req_woff(c), req_wdata(c), req_seq(c), req_ready(c), rsp_valid(c),
-        rsp_rdata(c) {
+        req_woff(c), req_wdata(c), req_seq(c), req_pair(c), req_pair_ready(c),
+        req_hw_addr0(c), req_hw_addr1(c), req_lane_mask(c), req_topk_sel(c),
+        req_ready(c), rsp_valid(c), rsp_write_valid(c), rsp_error(c),
+        rsp_write_error(c), rsp_pair_mask(c), rsp_rdata(c) {
     Fields(req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff,
-           req_wdata, req_seq, req_ready, rsp_valid, rsp_rdata);
+           req_wdata, req_seq, req_pair, req_pair_ready, req_hw_addr0,
+           req_hw_addr1, req_lane_mask, req_topk_sel, req_ready, rsp_valid,
+           rsp_write_valid, rsp_error, rsp_write_error, rsp_pair_mask,
+           rsp_rdata);
   }
 
   // master 每拍二选一调一次。
   void Read(uint64_t addr, uint64_t bytes, bool scale_en = false) {
     req_valid = 1;
+    req_pair = 0;
+    req_hw_addr0 = 0;
+    req_hw_addr1 = 0;
+    req_lane_mask = 0;
+    req_topk_sel = 0;
     req_we = 0;
     req_addr = addr;
     req_bytes = bytes;
@@ -81,6 +96,11 @@ class MemPort : public Logic {
   void Write(uint64_t addr, ByteBlockPtr data, bool scale_en = false,
              uint64_t woff = 0, uint64_t bytes = 0) {
     req_valid = 1;
+    req_pair = 0;
+    req_hw_addr0 = 0;
+    req_hw_addr1 = 0;
+    req_lane_mask = 0;
+    req_topk_sel = 0;
     req_we = 1;
     req_addr = addr;
     req_bytes = bytes != 0 ? bytes : (data ? data->size() - woff : 0);
@@ -89,6 +109,22 @@ class MemPort : public Logic {
     req_wdata = data;
     req_seq = ++issue_seq;
   }
+  void ReadPair(uint64_t address) {
+    Read(address, 256);
+    req_pair = 1;
+    req_lane_mask = 3;
+    req_hw_addr0 = address / 128;
+    req_hw_addr1 = address / 128 + 1;
+  }
+  void WritePair(uint64_t address, ByteBlockPtr data, uint64_t offset,
+                 uint64_t count) {
+    Write(address, std::move(data), false, offset, count);
+    req_pair = 1;
+    req_lane_mask = 3;
+    req_hw_addr0 = address / 128;
+    req_hw_addr1 = address / 128 + 1;
+  }
+
   // 只读 scale：bytes 是数据那一侧的长度，读回 ceil(bytes / 32) 个 scale。
   void ReadScale(uint64_t addr, uint64_t bytes) {
     Read(addr, bytes);
@@ -102,6 +138,11 @@ class MemPort : public Logic {
   }
   void IdleReq() {
     req_valid = 0;
+    req_pair = 0;
+    req_hw_addr0 = 0;
+    req_hw_addr1 = 0;
+    req_lane_mask = 0;
+    req_topk_sel = 0;
     req_we = 0;
     req_addr = 0;
     req_bytes = 0;
@@ -114,16 +155,42 @@ class MemPort : public Logic {
   // 存储每拍调一次。
   void DriveSlave(bool ready, bool rsp, ByteBlockPtr data) {
     req_ready = ready ? 1 : 0;
+    req_pair_ready = ready ? 3 : 0;
     rsp_valid = rsp ? 1 : 0;
+    rsp_write_valid = 0;
+    rsp_error = 0;
+    rsp_write_error = 0;
+    rsp_pair_mask = rsp ? 3 : 0;
     rsp_rdata = std::move(data);
   }
 
+  // 分离同拍读返回和写完成，DTE聚合通道可同时接收两类响应。
+  void DriveSlaveWithWrite(bool ready, bool read_rsp, ByteBlockPtr data,
+                           bool write_rsp, uint64_t error = 0,
+                           uint64_t write_error = 0) {
+    DriveSlave(ready, read_rsp, std::move(data));
+    rsp_write_valid = write_rsp ? 1 : 0;
+    rsp_error = error;
+    rsp_write_error = write_error;
+  }
+  bool WriteRspValid() const { return rsp_write_valid.Get() != 0; }
+  void DrivePairResponse(bool ready, uint64_t mask, ByteBlockPtr data,
+                         uint64_t error = 0) {
+    DriveSlave(ready, mask != 0, std::move(data));
+    rsp_pair_mask = mask;
+    rsp_error = error;
+  }
+  uint64_t WriteRspError() const { return rsp_write_error.Get(); }
+  uint64_t RspError() const { return rsp_error.Get(); }
+
   uint64_t Seq() const { return req_seq.Get(); }
   bool Ready() const { return req_ready.Get() != 0; }
+  bool PairReady() const { return Ready() && req_pair_ready.Get() == 3; }
+  void DrivePairReady(uint64_t lanes) { req_pair_ready = lanes & 3; }
   bool RspValid() const { return rsp_valid.Get() != 0; }
   ByteBlockPtr RspData() const { return rsp_rdata.Get(); }
 
- private:
+private:
   // master 自己的计数，不跨模块读，所以是普通成员。
   uint64_t issue_seq = 0;
 };
@@ -133,15 +200,31 @@ struct MemReqView {
   bool we = false;
   uint64_t addr = 0;
   uint64_t bytes = 0;
-  bool scale_en = false;      // 正文接 scale
-  bool scale_only = false;    // 只访问 scale
+  bool pair = false;
+  uint64_t hw_addr0 = 0, hw_addr1 = 0, lane_mask = 0, topk_sel = 0;
+  bool scale_en = false; // 正文接 scale
+  bool scale_physical = false;
+  bool scale_only = false; // 只访问 scale
   uint64_t woff = 0;
   uint64_t seq = 0;
   ByteBlockPtr wdata;
 };
 
 // 把一笔收下来的请求原样发到另一个口上。DTE 的 DMA_XBAR 转发走这一条。
-inline void ForwardMemReq(MemPort& p, MemReqView const& r) {
+inline void ForwardMemReq(MemPort &p, MemReqView const &r) {
+  if (r.pair) {
+    if (r.we)
+      p.WritePair(r.addr, r.wdata, r.woff, r.bytes);
+    else
+      p.ReadPair(r.addr);
+    if (r.scale_physical)
+      p.req_scale_en = kScalePhysical;
+    p.req_hw_addr0 = r.hw_addr0;
+    p.req_hw_addr1 = r.hw_addr1;
+    p.req_lane_mask = r.lane_mask;
+    p.req_topk_sel = r.topk_sel;
+    return;
+  }
   if (r.we) {
     if (r.scale_only) {
       p.WriteScale(r.addr, r.wdata, r.bytes);
@@ -153,25 +236,36 @@ inline void ForwardMemReq(MemPort& p, MemReqView const& r) {
   } else {
     p.Read(r.addr, r.bytes, r.scale_en);
   }
+  p.req_hw_addr0 = r.hw_addr0;
+  p.req_hw_addr1 = r.hw_addr1;
+  p.req_lane_mask = r.lane_mask;
+  p.req_topk_sel = r.topk_sel;
 }
 
-inline MemReqView ReadMemReq(MemPort const& p) {
+inline MemReqView ReadMemReq(MemPort const &p) {
   MemReqView v;
   v.valid = p.req_valid.Get() != 0;
-  if (!v.valid) return v;
+  if (!v.valid)
+    return v;
   v.we = p.req_we.Get() != 0;
+  v.pair = p.req_pair.Get() != 0;
+  v.hw_addr0 = p.req_hw_addr0.Get();
+  v.hw_addr1 = p.req_hw_addr1.Get();
+  v.lane_mask = p.req_lane_mask.Get();
+  v.topk_sel = p.req_topk_sel.Get();
   v.addr = p.req_addr.Get();
   v.bytes = p.req_bytes.Get();
   uint64_t scale = p.req_scale_en.Get();
   v.scale_en = scale == kScaleWithData;
   v.scale_only = scale == kScaleOnly;
+  v.scale_physical = scale == kScalePhysical;
   v.woff = p.req_woff.Get();
   v.seq = p.req_seq.Get();
   v.wdata = p.req_wdata.Get();
   return v;
 }
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

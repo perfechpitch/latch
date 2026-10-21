@@ -36,6 +36,18 @@ constexpr uint64_t kVuIoSize = 20 * 1024;
 // DTCM 8 KB，存 BSS、寄存器溢出与堆栈。排在 VU IO 之后。
 constexpr uint64_t kDtcmBase = 0x00020000;
 constexpr uint64_t kDtcmSize = 8 * 1024;
+// BachFlow 固件的 DTCM 窗口。与上面那一段是同一块存储的别名，落在 DTE
+// Core Mem 窗口里，路由优先级高于 Core Mem，访存不进 LSQ。
+constexpr uint64_t kDtcmAliasBase = 0x00100000;
+// 新 ABI 的栈顶：别名窗口的顶。TS 跳过 firmware 的 _start，模型要自己写 SP。
+constexpr uint64_t kBachflowSp = kDtcmAliasBase + kDtcmSize;
+
+// 哪一套 ABI。旧的栈顶在旧 DTCM 窗口顶上；BachFlow 的在别名窗口顶上。
+// GP 两套都是旧窗口的 .data 起点加 0x800，不另造一个。
+enum class RvAbi : uint32_t {
+  kLegacy = 0,
+  kBachflow = 1,
+};
 
 // task 控制区：自定义 CSR 的读口与 task_done 的写口。
 //
@@ -54,6 +66,14 @@ constexpr uint64_t kRegWaitTask = 0x14;      // 读它阻塞到下一个 task �
 // 当前任务的 PID：TS 随 task 一起送来，可读写。PID 更新任务的软件把新值写进
 // 来，随 task_done 回 TS，交给紧邻的后继任务。
 constexpr uint64_t kCsrPathId = 0x18;
+constexpr uint64_t kCsrVcId = 0x1C;
+
+// 软件用 csrr/csrw 的 CSR 号。SystemRv32Bach 把它们译成上面这几个 MMIO 偏移。
+constexpr uint32_t kCsrNumStreamId = 0xFC0;
+constexpr uint32_t kCsrNumTaskId = 0xFC1;
+constexpr uint32_t kCsrNumUserId = 0x7C0;
+constexpr uint32_t kCsrNumPathId = 0x7C1;
+constexpr uint32_t kCsrNumVcId = 0x7C2;
 
 constexpr uint64_t kShareMemBase = 0x00040000;
 constexpr uint64_t kShareMemSize = 32 * 1024;
@@ -63,6 +83,10 @@ constexpr uint64_t kCoreMemBase = 0x00080000;
 constexpr uint64_t kCoreMemSize = 1024 * 1024 + 32 * 1024;
 // Router I/O reg 从这一段的第 1 MB 起。
 constexpr uint64_t kRouterIoOffset = 1024 * 1024;
+
+// 文档绝对地址，作为上面两段核内窗口的别名。Core Mem 别名三个 RV 都开。
+constexpr uint64_t kDocShareMemBase = 0x48300000;
+constexpr uint64_t kDocCoreMemBase = 0x48400000;
 
 // 访存延迟，记在时间轴上。
 constexpr uint64_t kDtcmLatency = 3;

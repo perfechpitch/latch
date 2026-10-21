@@ -65,7 +65,7 @@ def layout(bundle,catalog):
         hs=cat['chips'][f'c{chip}']['harvests']
         h=next(v for k,v in sorted(hs.items(),key=lambda kv:int(kv[0][1:])) if v['disable_mask']==bad[chip])
         for pk,core in h['cores'].items():
-            ls={int(e['l']) for e in core.get('entries',[]) if e.get('l') is not None and 0<=int(e['l'])<8}
+            ls={int(e['l']) for e in (core.get('entries',{}).values() if isinstance(core.get('entries'),dict) else core.get('entries',[])) if e.get('l') is not None and 0<=int(e['l'])<8}
             if ls:
                 assert len(ls)==1, f'ambiguous logical core: chip {chip}, {pk}'
                 logical[chip,int(pk[1:])]=next(iter(ls))

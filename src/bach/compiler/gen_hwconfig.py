@@ -10,7 +10,6 @@
 """
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
@@ -53,7 +52,8 @@ def main():
     # kernel 编一份，每套 bundle 各拿一份副本：装载那一侧只认自己这个目录。
     kmap = kernelmap.KernelMap().load()
     for src in sorted(kmap.images.values()):
-        shutil.copyfile(src, out_dir / src.name)
+        # Intel HEX records use canonical LF in repository artifacts.
+        (out_dir / src.name).write_text(src.read_text(encoding="ascii"), encoding="ascii")
 
     if not args.quiet:
         kinds = {}

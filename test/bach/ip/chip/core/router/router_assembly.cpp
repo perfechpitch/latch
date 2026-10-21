@@ -75,7 +75,6 @@ class Downstream : public BachModule {
   uint64_t first_at = 0;
   std::vector<uint64_t> users, ats;
   std::vector<uint8_t> last_payload;
-  uint64_t release_from = 0;
 
  protected:
   void Step() override {
@@ -90,10 +89,8 @@ class Downstream : public BachModule {
       }
     }
     rel->flit.Idle();
-    if (on && f.valid) pending_credits.push_back(f.vc);
-    if (on && CycleNow() >= release_from && !pending_credits.empty()) {
-      rel->release.Drive(true, pending_credits.front(), false, 0);
-      pending_credits.pop_front();
+    if (on && f.valid) {
+      rel->release.Drive(true, f.vc, false, 0);
     } else {
       rel->release.Idle();
     }
@@ -102,7 +99,6 @@ class Downstream : public BachModule {
  private:
   LinkEndPtr src, rel;
   bool on;
-  std::deque<uint64_t> pending_credits;
 };
 
 // 扮演 DTE 与 TS：一直拉 ready 收进核数据，并把 trigger 收下。
@@ -200,7 +196,7 @@ RouteEntry ReduceSink(uint64_t in_mask) {
   e.flow_dir = 0;
   e.path_core_bypass = false;
   e.reduce_in_mask = in_mask;
-  e.operation = Operation::kReduce2;
+  e.operation = Operation::kReduce1;
   e.reduce_data_type = kReduceFp32;
   e.reduce_outdata_type = kReduceFp32;
   return e;
@@ -243,6 +239,80 @@ TEST(BachRouterAsm, ForwardsAcrossAssembly) {
   EXPECT_EQ(got, 1u);
   ASSERT_EQ(users.size(), 1u);
   EXPECT_EQ(users[0], 42u);
+}
+
+// 一包分几拍从同一方向进来：每个 flit 各给 head/tail。
+class FlitPusher : public BachModule {
+ public:
+  struct Flit {
+    uint64_t at = 0;
+    bool head = false, tail = false;
+  };
+
+  FlitPusher(ClockPtr c, LinkEndPtr port, MessagePtr m, std::vector<Flit> list)
+      : BachModule(c, "flit_pusher"), sink(std::move(port)), msg(std::move(m)),
+        flits(std::move(list)) {}
+
+ protected:
+  void Step() override {
+    uint64_t now = CycleNow();
+    for (auto const& f : flits) {
+      if (f.at != now) continue;
+      sink->flit.Drive(0, f.head, f.tail, 64, msg);
+      return;
+    }
+    sink->flit.Idle();
+  }
+
+ private:
+  LinkEndPtr sink;
+  MessagePtr msg;
+  std::vector<Flit> flits;
+};
+
+// 只转发的多 flit 包，包尾离开本核之后才通知 TS 这一笔走完（F-036）。包头一走
+// 就通知的话，本核退休、release 回上游时包身还在上游，上游会把这个 user 的
+// stream 坑再占回去，以后没有 release 来还。
+TEST(BachRouterAsm, PureForwardNotifiesAfterTail) {
+  std::vector<uint64_t> flit_at, skip_at;
+  {
+    EnsureSlots();
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Router rt(clk, "router", RouterCfg{});
+    rt.Preload(3, Forward(kFlowRight, /*enters_core=*/false));
+
+    FlitPusher push(clk, rt.InWire(kLeft), MakeMsg(3, 42),
+                    {{2, true, false}, {3, false, false}, {20, false, true}});
+    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
+    class SkipSide : public BachModule {
+     public:
+      SkipSide(ClockPtr c, Router& r) : BachModule(c, "skip_side"), rt(r) {}
+      std::vector<uint64_t> at;
+
+     protected:
+      void Step() override {
+        rt.ToDte().DriveReady(true);
+        rt.FromDte().Idle();
+        if (rt.Trigger().Valid() && rt.Trigger().skip_only.Get() != 0) {
+          at.push_back(CycleNow());
+        }
+        rt.Trigger().DriveReady(true);
+        rt.CreditReq().Idle();
+        rt.RetireReq().Idle();
+      }
+
+     private:
+      Router& rt;
+    } core(clk, rt);
+    clk->Continue(80 * kPeriod);
+    RT::JoinAll();
+    flit_at = down.ats;
+    skip_at = core.at;
+  }
+  RT::Reset();
+  ASSERT_EQ(flit_at.size(), 3u) << "三个 flit 都往右转出去";
+  ASSERT_EQ(skip_at.size(), 1u) << "一包只通知一次";
+  EXPECT_GE(skip_at[0], flit_at.back()) << "包尾出去之前就通知了";
 }
 
 // A9：进核由包头 path_core_mask 的第 idx 位定，该位为 1 时进核，为 0 时
@@ -591,11 +661,9 @@ TEST(BachRouterAsm, OverflowGoesToReissue) {
   EXPECT_EQ(occ, 0u);
 }
 
-// Transport VC credit exhaustion waits for credits, independently of the
-// stream/CoreMem allocation failure controlled by stall_way.
-TEST(BachRouterAsm, TransportCreditWaitsAndResumesWithoutSpill) {
-  uint64_t overflow = 0, stored = 0, got = 0;
-  std::vector<uint64_t> users, ats;
+// credit 耗光时包留在当前 VC 等，不改送进核，也不进 Reissue 保序。
+TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
+  uint64_t overflow = 0, got = 0, to_core = 0;
   {
     EnsureSlots();
     ClockPtr clk = MakeClock(0, kPeriod);
@@ -604,31 +672,27 @@ TEST(BachRouterAsm, TransportCreditWaitsAndResumesWithoutSpill) {
     Router rt(clk, "router", cfg);
     rt.Preload(3, Forward(kFlowRight, false, /*stall_way=*/true));
 
-    // Consume all 40 link credits, then return them from cycle 150. The last
-    // ten packets must remain pending and resume without loss or spill.
+    // 一个方向的 credit 是 private 20 加 shared 20 共 40。前 40 笔把它用光。
+    // 后面的包留在 VC 里等 credit，不进核。
     std::vector<Pusher::Job> jobs;
     for (uint64_t i = 0; i < 50; ++i) {
       jobs.push_back({1 + i, MakeMsg(3, 500 + i)});
     }
     Pusher push(clk, rt.InWire(kLeft), jobs);
-    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), true);
-    down.release_from = 150;
+    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), false);
     CoreSide core(clk, rt);
     AsmProbe probe(clk, rt);
     clk->Continue(300 * kPeriod);
     RT::JoinAll();
     overflow = probe.overflow;
-    stored = probe.stored;
     got = down.got;
-    users = down.users; ats = down.ats;
+    to_core = rt.GetXbar().SentCount(kOutCore);
   }
   RT::Reset();
-  EXPECT_EQ(got, 50u);
+  // 40 个 credit 用完。剩下的包不进核，也不走溢流口。
+  EXPECT_EQ(got, 40u);
+  EXPECT_EQ(to_core, 0u);
   EXPECT_EQ(overflow, 0u);
-  EXPECT_EQ(stored, 0u);
-  EXPECT_EQ(std::count_if(ats.begin(), ats.end(), [](uint64_t at) { return at < 150; }), 40);
-  ASSERT_EQ(users.size(), 50u);
-  for (uint64_t i = 0; i < 50; ++i) EXPECT_EQ(users[i], 500 + i);
 }
 
 // 坏 core：core_bad_mask 里本 core 那一位为 1，整个 Router 进透传档，不投递本

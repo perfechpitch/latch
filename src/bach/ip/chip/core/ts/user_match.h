@@ -3,13 +3,15 @@
 
 // User_Match 与 DataIn_task_table，对应详细设计的 DataIn Module。
 //
-// 普通模式下 Router 的 trigger 带 {user_id, path_id, reissue}，这里一起判三件事：
+// 普通模式下 Router 的 trigger 带 {user_id, path_id,
+// reissue}，这里一起判三件事：
 //
 //   用户      拿 user_id 与 stream_table 比对，没匹配上是新用户，从 Task 0 开始
 //             建表；匹配上复用原来的 stream_id
 //   搬入任务  按 path_id 在 task_chain 里找 wait_wake 的项，这个用户已经做完的
 //             跳过，取最低的那一项。同一个 PID 可以对多个任务
-//   跳过      按那一项的 TASK_TYPE 与 reissue 定这一次跳过哪几项：Broadcast 重发
+//   跳过      按那一项的 TASK_TYPE 与 reissue 定这一次跳过哪几项：Broadcast
+//   重发
 //             的搬入且 reissue=0，搬入照做，配对的搬出跳过；P2P 重发的搬入且
 //             reissue=0，搬入与配对的搬出都跳过，不派 DTE；reissue=1 两种都照做
 //
@@ -20,24 +22,27 @@
 // 自启动 core 与权重加载模式走 Bypass：不查 stream_table、不建表，PC 取
 // DATAIN_TASK，身份用保留的 SID 15 / TID 63。
 //
-// 系统保证有效的 user_id 唯一：一个 user_id 在本 core 上的 stream 退休之前，不会
-// 有另一个 token 用同一个号进来。老用户这一次在任务链上既没有要派的搬入任务、
+// 系统保证有效的 user_id 唯一：一个 user_id 在本 core 上的 stream
+// 退休之前，不会 有另一个 token
+// 用同一个号进来。老用户这一次在任务链上既没有要派的搬入任务、
 // 也没有要跳过的，就是这条保证被打破了，这一笔没有去处，直接断言失败。
 //
-// trigger 口不设入口队列。条件不满足时直接拉低 ready，由 CoreStation 保持这一笔，
-// 每拍重判一次，不丢弃、不越过。这条通路上的 trigger 与 token 一一对应，丢一笔就
-// 等于丢一个 token，所以只许反压不许丢。请求的保持责任本来就在 CoreStation 那一
+// trigger 口不设入口队列。条件不满足时直接拉低 ready，由 CoreStation
+// 保持这一笔， 每拍重判一次，不丢弃、不越过。这条通路上的 trigger 与 token
+// 一一对应，丢一笔就 等于丢一个
+// token，所以只许反压不许丢。请求的保持责任本来就在 CoreStation 那一
 // 侧，加一级队列只是把同一个反压点往后挪一格。
 
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/router/router_ports.h"
 #include "bach/ip/chip/core/ts/cfg_reg.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
@@ -45,258 +50,258 @@ namespace bach {
 // DataIn_task_table：只有 1 项。空闲时把 datain 任务信息与 Router 的请求信息
 // 一起登记进去；被占住时不再接收要派 DTE 的请求。
 struct DatainHold {
-  bool valid = false;
-  uint64_t task_pc = 0;
-  uint64_t task_id = 0;
-  uint64_t user_id = 0;
-  uint64_t path_id = 0;
-  uint64_t stream_id = 0;
+  bool valid = false, bypass = false, weight = false;
+  uint64_t task_pc = 0, task_id = 0, user_id = 0, path_id = 0, stream_id = 0;
+  uint64_t seq = 0, allocation = 0;
+};
+
+class DatainCandidatePort : public Logic {
+public:
+  LogicPtr<DatainHold> candidate;
+  Logic64 taken_seq, query_mask;
+  explicit DatainCandidatePort(ClockPtr c)
+      : candidate(c), taken_seq(c), query_mask(c) {
+    Fields(candidate, taken_seq, query_mask);
+  }
 };
 
 class UserMatch : public BachModule {
- public:
-  UserMatch(ClockPtr clock, const std::string& name, CfgReg& reg,
+public:
+  UserMatch(ClockPtr clock, const std::string &name, CfgReg &reg,
             uint64_t parent = 0, bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        cfg(reg),
+      : BachModule(clock, name, parent, tick), cfg(reg),
         trigger(std::make_shared<TriggerPort>(clock)),
         snap(std::make_shared<SnapshotPort>(clock)),
         create_port(std::make_shared<StreamWritePortIf>(clock)),
-        created(clock),
-        matched(clock),
-        stalls(clock) {}
-
-  TriggerPort& Trigger() { return *trigger; }
+        candidate_port(std::make_shared<DatainCandidatePort>(clock)),
+        created(clock), matched(clock), stalls(clock) {}
+  TriggerPort &Trigger() { return *trigger; }
   void AttachTrigger(std::shared_ptr<TriggerPort> p) { trigger = std::move(p); }
   void AttachSnapshot(std::shared_ptr<SnapshotPort> p) { snap = std::move(p); }
   std::shared_ptr<StreamWritePortIf> CreatePtr() const { return create_port; }
-
-  // DataIn_task_table 的那一格。发射通路把它取走后释放。
-  DatainHold const& Hold() const { return hold; }
+  std::shared_ptr<DatainCandidatePort> CandidatePtr() const {
+    return candidate_port;
+  }
+  DatainHold const &Hold() const { return hold; }
   void ReleaseHold() { hold.valid = false; }
-
   uint64_t Created() const { return created.Get(); }
   uint64_t Matched() const { return matched.Get(); }
   uint64_t Stalls() const { return stalls.Get(); }
-
-  // 建表的笔数与最近建出来的那一步的身份。Created() 数的是 create 口写成功的
-  // 次数，老用户那条重发/跳过的支也走同一个口，所以不能拿它当建表的序号。
-  // Core 层拿 Made() 认“本拍新建了一个表项”，与它下发那一拍对起来就是这一步
-  // 在 TS 里等的时间。
   uint64_t Made() const { return made_cnt; }
   uint64_t MadeTask() const { return made_task; }
   uint64_t MadeUser() const { return made_user; }
-  // 建出来的那一项有没有用户身份。
   bool MadeUserValid() const { return made_user_vld; }
+  bool Quiescent() const override { return !hold.valid && !lookup && !pending; }
 
-  bool Quiescent() const override { return !hold.valid && !pending; }
-
- protected:
+protected:
   void Step() override {
-    ForgetShownUsers();
-    // 上一笔写表请求还没被 stream_table 收下就原地保持。
+    if (hold.valid && candidate_port->taken_seq.Get() == hold.seq)
+      hold.valid = false;
+    create_port->Idle();
+    auto view = snap->Get();
     if (pending) {
       if (create_port->Accepted()) {
         pending = false;
+        lookup.reset();
         ++created_pending;
       } else {
-        trigger->DriveReady(false);
-        created = created_pending;
-        matched = matched_pending;
-        stalls = stall_pending;
+        Publish();
         return;
       }
     }
-    create_port->Idle();
+    if (lookup && view)
+      PrepareOrCommit(*view);
+    if (!lookup && trigger->Valid() && trigger->Seq() != last_trigger_seq &&
+        view) {
+      Lookup next;
+      next.user = trigger->user_id.Get();
+      next.path = trigger->path_id.Get();
+      next.reissue = trigger->reissue.Get() != 0;
+      next.skip_only = trigger->skip_only.Get() != 0;
+      next.seq = trigger->Seq();
+      if ((cfg.WeightsMode() || cfg.SelfStartCore()) && next.skip_only) {
+        // 包进了归约、没进 DTE。Bypass 核不为此再派一笔搬入，收下就算。
+        last_trigger_seq = next.seq;
+      } else if (cfg.WeightsMode() || cfg.SelfStartCore()) {
+        if (!cfg.DatainValid() || hold.valid ||
+            (cfg.SelfStartCore() && !cfg.WeightsMode() &&
+             !cfg.InitFinished())) {
+          ++stall_pending;
+          Publish();
+          return;
+        }
+        hold = DatainHold{true,
+                          cfg.SelfStartCore(),
+                          cfg.WeightsMode(),
+                          cfg.DatainPc(),
+                          cfg.WeightsMode() ? 0 : kBypassTid,
+                          cfg.WeightsMode() ? 0 : next.user,
+                          cfg.WeightsMode() ? 0 : next.path,
+                          cfg.WeightsMode() ? 0 : kBypassSid,
+                          ++candidate_seq,
+                          0};
+        if (cfg.SelfStartCore() && !cfg.WeightsMode() && !view->started) {
+          auto w = std::make_shared<StreamWrite>();
+          w->valid = w->special_start = true;
+          create_port->Drive(w);
+          made_cnt += cfg.StreamNum();
+          made_task = made_user = 0;
+          made_user_vld = false;
+        }
+        last_trigger_seq = next.seq;
+      } else if (cfg.InitFinished()) {
+        for (uint64_t sid = 0; sid < view->slot_num; ++sid) {
+          auto const &e = view->entry[sid];
+          if (e.valid && e.user_id_vld && e.user_id == next.user) {
+            next.hit = true;
+            next.sid = sid;
+            next.allocation = e.allocation;
+            next.exclude = e.done_bitmap | e.datain_claimed_mask;
+            break;
+          }
+        }
+        // 新用户只带 skip_only（归约已收下这一包）：不建表项、不认领搬入。
+        // 本核没有 kernel（Task(0) 的 PC 为 0）：不从地址 0 取指，也不建一条
+        // 走不完的链。两种都是收下 trigger 就算。
+        if (next.hit || !(next.skip_only || cfg.Task(0).task_pc == 0))
+          lookup = next;
+        last_trigger_seq = next.seq;
+      }
+    }
+    Publish();
+  }
 
-    bool ok = Handle();
-    trigger->DriveReady(ok);
-
+private:
+  struct Lookup {
+    uint64_t user = 0, path = 0, seq = 0, sid = 0, allocation = 0, exclude = 0;
+    uint64_t tid = kTaskChainNum, skip = 0;
+    bool hit = false, reissue = false, prepared = false;
+    // 归约模块已经收下这一包，只通知 TS：只做 P2P reissue 的跳过，不认领搬入。
+    bool skip_only = false;
+  };
+  void PrepareOrCommit(StreamSnapshot const &view) {
+    auto &l = *lookup;
+    if (l.hit) {
+      auto const &e = view.entry[l.sid];
+      if (!e.valid || e.allocation != l.allocation) {
+        lookup.reset();
+        return;
+      }
+      uint64_t exclude = e.done_bitmap | e.datain_claimed_mask;
+      if (exclude != l.exclude) {
+        l.exclude = exclude;
+        l.prepared = false;
+        return;
+      }
+    }
+    if (!l.prepared) {
+      l.tid = cfg.MatchDatain(l.path, l.exclude);
+      if (l.skip_only &&
+          (l.tid >= kTaskChainNum || l.reissue ||
+           cfg.Task(l.tid).task_type != TaskType::kP2pReissueIn)) {
+        lookup.reset();
+        return;
+      }
+      if (l.tid >= kTaskChainNum) {
+        std::string where;
+        for (uint64_t id = obj_id; id != 0; id = RT::GetModulePool().GetPid(id)) {
+          where = RT::GetModulePool().GetName(id) +
+                  (where.empty() ? "" : ".") + where;
+        }
+        spdlog::error(
+            "UserMatch {} 第 {} 拍：用户 {} 在 stream {} 上已经没有 path {} "
+            "还没做的搬入任务，reissue {} done 0x{:x}",
+            where, CycleNow(), l.user, l.sid, l.path, l.reissue ? 1 : 0,
+            l.exclude);
+      }
+      LOGCHECK(l.tid < kTaskChainNum,
+               "UserMatch: PID没有未完成且未claimed的DataIn。");
+      auto const &task = cfg.Task(l.tid);
+      l.skip = 0;
+      if (!l.reissue && task.task_type == TaskType::kP2pReissueIn)
+        l.skip = (1ull << l.tid) | (1ull << task.p2p_reissue_tid);
+      else if (!l.reissue && task.task_type == TaskType::kBcastReissueIn)
+        l.skip = 1ull << task.p2p_reissue_tid;
+      l.prepared = true;
+      return;
+    }
+    bool candidate = !(l.skip & (1ull << l.tid));
+    if ((candidate && hold.valid) ||
+        (!l.hit && view.InFlight() >= cfg.StreamNum())) {
+      ++stall_pending;
+      return;
+    }
+    uint64_t sid = l.hit ? l.sid : view.AllocationSid();
+    auto w = std::make_shared<StreamWrite>();
+    w->valid = true;
+    w->stream_id = sid;
+    w->done_mask = l.skip;
+    w->set_reissue = l.reissue;
+    if (candidate)
+      w->claim_mask = 1ull << l.tid;
+    if (l.hit) {
+      w->check_allocation = true;
+      w->allocation = l.allocation;
+      ++matched_pending;
+    } else {
+      if (!cfg.TriggerChainEn())
+        return;
+      w->whole = true;
+      w->entry.valid = w->entry.user_id_vld = true;
+      w->entry.user_id = l.user;
+      w->entry.reissue = l.reissue;
+      w->entry.done_bitmap = l.skip;
+      w->entry.datain_claimed_mask = w->claim_mask;
+      ApplyTaskAttr(w->entry, cfg.Task(0));
+      w->entry.task_fsm =
+          (l.skip & 1) ? TaskFsm::kFinish : InitFsmOf(cfg.Task(0));
+      ++made_cnt;
+      made_task = 0;
+      made_user = l.user;
+      made_user_vld = true;
+    }
+    create_port->Drive(w);
+    pending = true;
+    if (candidate)
+      hold = DatainHold{true,
+                        false,
+                        false,
+                        cfg.Task(l.tid).task_pc,
+                        l.tid,
+                        l.user,
+                        l.path,
+                        sid,
+                        ++candidate_seq,
+                        l.hit ? l.allocation : 0};
+  }
+  void Publish() {
+    trigger->DriveReady(
+        !lookup && !pending &&
+        (!hold.valid || !(cfg.WeightsMode() || cfg.SelfStartCore())));
+    candidate_port->candidate = hold.valid ? std::make_shared<DatainHold>(hold)
+                                           : std::shared_ptr<DatainHold>();
+    candidate_port->query_mask =
+        lookup && lookup->hit ? 1ull << lookup->sid : 0;
     created = created_pending;
     matched = matched_pending;
     stalls = stall_pending;
-    TracePerCycle("created", created_pending);
   }
-
- private:
-  // 这一次 trigger 要派哪一项搬入任务、要跳过哪几项。
-  struct Plan {
-    uint64_t task_id = kTaskChainNum;  // kTaskChainNum 表示不派 DTE
-    uint64_t skip = 0;
-  };
-
-  Plan PlanFor(uint64_t path, bool reissue, uint64_t done) const {
-    Plan p;
-    // Transit reissue pairs are conditional side paths, not prerequisites of
-    // the ordinary token chain. The direct-transfer branch skips both tasks.
-    if (!reissue) p.skip = cfg.NonReissueMask();
-    uint64_t t = cfg.MatchDatain(path, done | p.skip);
-    if (t >= kTaskChainNum) return p;
-    TaskEntry const& in = cfg.Task(t);
-    uint64_t out = 1ull << in.p2p_reissue_tid;
-    if (!reissue && in.task_type == TaskType::kP2pReissueIn) {
-      p.skip |= (1ull << t) | out;
-      return p;
-    }
-    if (!reissue && in.task_type == TaskType::kBcastReissueIn) p.skip |= out;
-    p.task_id = t;
-    return p;
-  }
-
-  // 快照里已经出现的，就不必再记在待落表的集合里了。每拍都看：一个用户可能只来
-  // 一笔 trigger，表项建好、链走完、退休都在下一笔 trigger 之前，只在收 trigger
-  // 时看的话它一直留在集合里，这个号再来就永远等不到快照。
-  void ForgetShownUsers() {
-    if (just_created.empty()) return;
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) return;
-    for (uint64_t i = 0; i < kStreamNum && !just_created.empty(); ++i) {
-      StreamEntry const& e = s->entry[i];
-      if (e.valid && e.user_id_vld) just_created.erase(e.user_id);
-    }
-  }
-
-  // 建表这一笔记下来：笔数加一，身份留下。老用户那条重发/跳过的写不算；自启动
-  // core 上的原地重新激活不经这里，由 credit 与退休那一侧计数。
-  void NoteMade(StreamEntry const& e) {
-    ++made_cnt;
-    made_task = e.task_id;
-    made_user = e.user_id;
-    made_user_vld = e.user_id_vld;
-  }
-
-  bool Handle() {
-    if (!trigger->Valid()) return true;
-    // 同一笔会连着几拍出现在端口上，按序号认它，已经收下的不再处理。
-    if (trigger->Seq() == last_trigger_seq) return true;
-    uint64_t user = trigger->user_id.Get();
-    uint64_t path = trigger->path_id.Get();
-    bool reissue = trigger->reissue.Get() != 0;
-
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) return false;
-
-    // Bypass：自启动 core 与权重加载模式不建 stream 表项，进来的包只把 datain
-    // 任务登记进 DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID / TID。
-    if (cfg.WeightsMode() || cfg.SelfStartCore()) {
-      if (!cfg.DatainValid()) return false;
-      if (hold.valid) {
-        ++stall_pending;
-        return false;
-      }
-      hold.valid = true;
-      hold.task_id = kBypassTid;
-      hold.task_pc = cfg.DatainPc();
-      hold.user_id = user;
-      hold.path_id = path;
-      hold.stream_id = kBypassSid;
-      last_trigger_seq = trigger->Seq();
-      return true;
-    }
-
-    // 老用户：复用原来的 stream_id。
-    for (uint64_t i = 0; i < kStreamNum; ++i) {
-      StreamEntry const& e = s->entry[i];
-      if (!e.valid || !e.user_id_vld || e.user_id != user) continue;
-      Plan p = PlanFor(path, reissue, e.done_bitmap);
-      if (p.task_id >= kTaskChainNum && p.skip == 0) {
-        spdlog::error("UserMatch 第 {} 拍：用户 {} 在 stream {} 上已经没有 path {} "
-                      "还没做的搬入任务", CycleNow(), user, i, path);
-        LOGCHECK(false, "UserMatch: 老用户的这一笔没有搬入任务可派。同一个 "
-                        "user_id 还有没退休的 stream 时又进来了新 token。");
-      }
-      if (p.task_id < kTaskChainNum && hold.valid) {
-        ++stall_pending;
-        return false;
-      }
-      ++matched_pending;
-      if (reissue || p.skip != 0) {
-        auto w = std::make_shared<StreamWrite>();
-        w->valid = true;
-        w->stream_id = i;
-        w->set_reissue = reissue;
-        w->done_mask = p.skip;
-        create_port->Drive(w);
-        pending = true;
-      }
-      Register(p, user, path, i);
-      last_trigger_seq = trigger->Seq();
-      return true;
-    }
-
-    // 刚建过表但快照还没更新的那一两拍里，同一个 user 的另一笔 trigger 算不出
-    // 它做完了哪几项，先等快照跟上。
-    if (just_created.count(user) != 0) return false;
-
-    // 新用户：两条同时满足才建表。
-    if (!cfg.TriggerChainEn()) return false;  // 不允许启动任务链
-    // 在途上限看 CFG_REG 里软件配的 stream_num。
-    if (s->InFlight() >= cfg.StreamNum()) {
-      ++stall_pending;
-      return false;
-    }
-    Plan p = PlanFor(path, reissue, 0);
-    if (p.task_id < kTaskChainNum && hold.valid) {
-      ++stall_pending;
-      return false;
-    }
-
-    uint64_t slot = s->tail_ptr;
-    auto w = std::make_shared<StreamWrite>();
-    w->valid = true;
-    w->stream_id = slot;
-    w->whole = true;
-    StreamEntry& e = w->entry;
-    e.valid = true;
-    e.user_id = user;
-    e.user_id_vld = true;
-    e.reissue = reissue;
-    e.task_id = 0;
-    e.done_bitmap = p.skip;
-    TaskEntry const& t0 = cfg.Task(0);
-    ApplyTaskAttr(e, t0);
-    e.task_fsm = (p.skip & 1u) ? TaskFsm::kFinish : InitFsmOf(t0);
-    create_port->Drive(w);
-    pending = true;
-    NoteMade(e);
-    just_created.insert(user);
-    Register(p, user, path, slot);
-    last_trigger_seq = trigger->Seq();
-    return true;
-  }
-
-  // 要派 DTE 的那一笔登记进 DataIn_task_table，PC 取那一项自己的 TASK_PC。
-  void Register(Plan const& p, uint64_t user, uint64_t path, uint64_t stream) {
-    if (p.task_id >= kTaskChainNum) return;
-    hold.valid = true;
-    hold.task_id = p.task_id;
-    hold.task_pc = cfg.Task(p.task_id).task_pc;
-    hold.user_id = user;
-    hold.path_id = path;
-    hold.stream_id = stream;
-  }
-
-  CfgReg& cfg;
+  CfgReg &cfg;
   std::shared_ptr<TriggerPort> trigger;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<StreamWritePortIf> create_port;
-
-  // Step 独占。
+  std::shared_ptr<DatainCandidatePort> candidate_port;
   DatainHold hold;
-  // 已经发出建表请求、但还没在快照里露面的那些 user。
-  std::set<uint64_t> just_created;
-  uint64_t last_trigger_seq = 0;
+  std::optional<Lookup> lookup;
   bool pending = false;
+  uint64_t last_trigger_seq = 0, candidate_seq = 0;
   uint64_t created_pending = 0, matched_pending = 0, stall_pending = 0;
-
-  // 建表的笔数与最近建出来的那一步的身份，供 Core 层发波形。
   uint64_t made_cnt = 0, made_task = 0, made_user = 0;
   bool made_user_vld = false;
-
   Logic64 created, matched, stalls;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

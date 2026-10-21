@@ -124,15 +124,16 @@ TEST(BachMuGenEpInfo, DteWritesTopkMuReadsByStream) {
   GenEpInfo g(clk, "gen", 0, false);
 
   auto pack = [](std::vector<TopkEntry> const& t) {
-    std::vector<uint8_t> b(kTopkEntryBytes * t.size(), 0);
-    for (uint64_t i = 0; i < t.size(); ++i) {
-      uint64_t off = i * kTopkEntryBytes;
-      b[off] = uint8_t(t[i].local_ep_index & 0xFF);
-      b[off + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFF);
+    uint64_t n = t.size();
+    std::vector<uint8_t> b(2 + kTopkEntryBytes * n, 0);
+    b[0] = uint8_t(n & 0xFF);
+    b[1] = uint8_t((n >> 8) & 0xFF);
+    for (uint64_t i = 0; i < n; ++i) {
+      b[2 + i * 2] = uint8_t(t[i].local_ep_index & 0xFF);
+      b[2 + i * 2 + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFF);
       uint32_t w = numeric::BitsOf(t[i].weight);
-      for (int k = 0; k < 4; ++k) {
-        b[off + 2 + k] = uint8_t((w >> (8 * k)) & 0xFF);
-      }
+      uint64_t wat = 2 + n * 2 + i * 4;
+      for (int k = 0; k < 4; ++k) b[wat + k] = uint8_t((w >> (8 * k)) & 0xFF);
     }
     return b;
   };
@@ -150,19 +151,19 @@ TEST(BachMuGenEpInfo, DteWritesTopkMuReadsByStream) {
   RT::Reset();
 }
 
-// 从 DTE 写进来的字节按每项 {local_ep_index 2 B, weight 4 B} 解开。
+// 从 DTE 写进来的字节解开：2 B 计数、序号集中放、权重集中放。
 TEST(BachMuGenEpInfo, TopkBytesAreParsedSixBytesEach) {
-  std::vector<uint8_t> bytes(kTopkEntryBytes * 2, 0);
-  // 第一项：local_ep_index 0x0011，weight 1.0f。
-  bytes[0] = 0x11;
-  bytes[1] = 0x00;
+  std::vector<uint8_t> bytes(2 + kTopkEntryBytes * 2, 0);
+  bytes[0] = 2;
+  // 序号：0x0011、0x0102。权重紧跟在序号区后面。
+  bytes[2] = 0x11;
+  bytes[3] = 0x00;
+  bytes[4] = 0x02;
+  bytes[5] = 0x01;
   uint32_t one = numeric::BitsOf(1.0f);
-  for (int k = 0; k < 4; ++k) bytes[2 + k] = uint8_t((one >> (8 * k)) & 0xFF);
-  // 第二项：local_ep_index 0x0102，weight 0.5f。
-  bytes[6] = 0x02;
-  bytes[7] = 0x01;
+  for (int k = 0; k < 4; ++k) bytes[6 + k] = uint8_t((one >> (8 * k)) & 0xFF);
   uint32_t half = numeric::BitsOf(0.5f);
-  for (int k = 0; k < 4; ++k) bytes[8 + k] = uint8_t((half >> (8 * k)) & 0xFF);
+  for (int k = 0; k < 4; ++k) bytes[10 + k] = uint8_t((half >> (8 * k)) & 0xFF);
 
   std::vector<TopkEntry> t = GenEpInfo::Parse(bytes, 2);
   ASSERT_EQ(t.size(), 2u);

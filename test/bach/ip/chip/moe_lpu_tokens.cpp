@@ -3,5 +3,5 @@
 
 TEST(BachMoeLpu, ThirtyTwoTokens) {
   latch::bach::moetest::RunTokens(32, latch::bach::moetest::kLpuChips,
-                                 "moe_lpu_tokens", 200000);
+                                  "moe_lpu_tokens", 200000);
 }

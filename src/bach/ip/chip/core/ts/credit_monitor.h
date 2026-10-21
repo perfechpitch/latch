@@ -1,63 +1,67 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_TS_CREDIT_MONITOR_
 #define _LATCH_BACH_IP_CHIP_CORE_TS_CREDIT_MONITOR_
 
-// TS 这一侧的 credit 与退休。对应 task_state_update 的 credit 子模块加 retire。
-//
-// MAS 顶层的 Credit_monitor 已划删除线：出核前的资源监听在 Router 的
-// CoreMemCreditMonitor。TS 这侧做四件事：
-//
-//   申请  向 Router 注册资源申请，带 UserID、StreamID、TaskID、PathID
-//   唤醒  Router 申请到后经反向控制通路通知，把对应 task 置 READY
-//   退休  Head-only：只允许 head_ptr 指向的那一项退休
-//   Rmem  本级 Rmem 的 credit 每个用户一份，记在 stream 表项上：reduce 任务停
-//         在 WAIT 时 credit 在就置 READY；发出去占掉，Rmem 做完报回来才还
-//
-// 与 DTE 的分工：业务层的资源在这一级查完，有资源才下发；下发之后 DTE 只查 VC
-// 通路上的 flit credit。
-//
-// 退休顺序不能反：先向 Router 持续发 credit 返还请求，Router 接收后才清该槽位的
-// valid 并推进 head_ptr。反了会让还在路上的 credit 无处归还。自启动 core 同样先
-// 等 Router 接收，之后不清 valid，把这条链原地重新激活成 Task 0、排到队尾。
+// TS的方向Credit Ctrl、独立RMEM许可和Head生命周期。
+// 三方向计数各初N，每SID登记新增需求Pending，同方向按用户年龄授权。
+// 多方向全部满足才提交Grant：扣账、drct_used与READY同次Map更新。
+// Return先入计数，下一周期参与分配；不向Router发旧式资源注册。
+// Reduce在REDUCE_WAIT取得本SID RMEM许可后READY，不检查方向credit_en。
+// 执行ACK与RMEM归还分别等待，归还同拍不再授权。
+// 普通Head完成through-End、RMEM空闲且无DataIn查询占用后建立Retire Hold，
+// 下一拍发UID/valid并释放，顶层内部ready固定1。
+// SELF_START在相同资格下下一沿本地重生，不等待外部Router接受或发送Retire。
+// DTE在任务下发后独立处理各VC的真实flit信用。
 
+//
+//
+//
+//
+//
+//
+//
 #include <deque>
 #include <memory>
 #include <string>
 
-#include "base/log.h"
 #include "bach/ip/chip/core/router/coremem_reissue.h"
 #include "bach/ip/chip/core/router/credit_monitor.h"
 #include "bach/ip/chip/core/router/retire.h"
+#include "bach/ip/chip/core/router/router_table.h"
 #include "bach/ip/chip/core/ts/cfg_reg.h"
 #include "bach/ip/chip/core/ts/ts_ports.h"
 #include "bach/ip/module_base.h"
+#include "base/log.h"
 
 namespace latch {
 namespace bach {
 
 class TsCreditMonitor : public BachModule {
- public:
-  TsCreditMonitor(ClockPtr clock, const std::string& name, CfgReg& reg,
+public:
+  TsCreditMonitor(ClockPtr clock, const std::string &name, CfgReg &reg,
                   uint64_t parent = 0, bool tick = true)
-      : BachModule(clock, name, parent, tick),
-        cfg(reg),
+      : BachModule(clock, name, parent, tick), cfg(reg),
         snap(std::make_shared<SnapshotPort>(clock)),
         req(std::make_shared<CreditReqPort>(clock)),
         grant(std::make_shared<CreditGrantPort>(clock)),
         retire_req(std::make_shared<RetirePort>(clock)),
         wake(std::make_shared<StreamWritePortIf>(clock)),
-        retire_wr(std::make_shared<StreamWritePortIf>(clock)),
-        woken(clock),
-        retired(clock),
-        rmem_admitted(clock) {}
+        retire_wr(std::make_shared<StreamWritePortIf>(clock)), woken(clock),
+        retired(clock), rmem_admitted(clock) {}
 
   void AttachSnapshot(std::shared_ptr<SnapshotPort> p) { snap = std::move(p); }
-  CreditReqPort& Req() { return *req; }
+  CreditReqPort &Req() { return *req; }
   void AttachReq(std::shared_ptr<CreditReqPort> p) { req = std::move(p); }
-  CreditGrantPort& Grant() { return *grant; }
+  CreditGrantPort &Grant() { return *grant; }
   void AttachGrant(std::shared_ptr<CreditGrantPort> p) { grant = std::move(p); }
-  RetirePort& RetireReq() { return *retire_req; }
-  void AttachRetire(std::shared_ptr<RetirePort> p) { retire_req = std::move(p); }
+  RetirePort &RetireReq() { return *retire_req; }
+  std::shared_ptr<RetirePort> RetirePtr() const { return retire_req; }
+  void AttachRetire(std::shared_ptr<RetirePort> p) {
+    retire_req = std::move(p);
+  }
   // Router 的 CoreMem 重发完成后从这个口报进来，本级据此清掉那一项的重发标记。
+  // 本核 Router 表。type-4 任务的 path 在本核是纯转发（或没有本地输入）时，
+  // 不在本核归约，也就不会有 ReduceDone 回来还 rmem：直接 READY，不占 rmem。
+  void AttachRtab(RouterTable *t) { rtab = t; }
   void AttachReissueDone(std::shared_ptr<ReissueDonePort> p) {
     reissue_done = std::move(p);
   }
@@ -72,206 +76,179 @@ class TsCreditMonitor : public BachModule {
   uint64_t Reactivated() const { return reactivate_cnt; }
   uint64_t RmemAdmitted() const { return rmem_admitted.Get(); }
 
-  bool Quiescent() const override { return !asking && !retiring; }
+  bool Quiescent() const override { return !wake_pending_port; }
+  uint64_t DirectionCount(uint64_t dir) const { return counts.at(dir); }
 
- protected:
+protected:
   void Step() override {
-    // 末级先做：退休排在最前，让表项先腾空。
-    DoRetire();
-    TakeReissueDone();
-    DoWake();
-    DoAsk();
-
-    woken = wake_pending;
-    retired = retire_pending;
-    rmem_admitted = rmem_pending;
-    TracePerCycle("woken", wake_pending);
-    TracePerCycle("retired", retire_pending);
-  }
-
- private:
-  // Head-only 退休：只允许 head_ptr 那一项退休，条件是 valid=1，且第 0 项到 End
-  // 项的完成位全部置起。End 提前完成、当前任务停在 End 前面的也照样退休。
-  void DoRetire() {
-    if (retiring) {
-      if (!retire_req->Accepted()) return;  // Router 还没收，保持
-      // Router 收下了才动表项：普通 core 清 valid 并推 head_ptr；自启动 core
-      // 把这条链原地重新激活成 Task 0，排到队尾。
-      auto w = std::make_shared<StreamWrite>();
-      w->valid = true;
-      w->stream_id = retire_slot;
-      if (cfg.SelfStartCore()) {
-        w->whole = true;
-        w->entry = SelfStartEntry(cfg.Task(0));
-        w->reactivate = true;
-        w->stream_num = cfg.StreamNum();
-        ++reactivate_cnt;
-      } else {
-        w->clear_valid = true;
-      }
-      retire_wr->Drive(w);
-      retire_req->Idle();
-      retiring = false;
-      // 这一笔写要下一拍才落进表、再下一拍才进快照。这中间读到的还是旧快照，
-      // 同一项会被再判成“可以退休”。记住它，等快照里那一项不再满足退休条件
-      // 再放开：普通 core 上是 valid 掉下去，自启动 core 上是完成位清空。
-      just_retired = retire_slot;
-      just_retired_vld = true;
-      ++retire_pending;
-      return;
-    }
-    retire_wr->Idle();
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) {
-      retire_req->Idle();
-      return;
-    }
-    uint64_t through = cfg.ThroughEndMask();
-    if (just_retired_vld) {
-      StreamEntry const& old = s->entry[just_retired];
-      if (!old.valid || (old.done_bitmap & through) != through) {
-        just_retired_vld = false;
-      }
-    }
-    uint64_t h = s->head_ptr;
-    StreamEntry const& e = s->entry[h];
-    if (just_retired_vld && h == just_retired) {
-      retire_req->Idle();
-      return;
-    }
-    if (e.valid && through != 0 && (e.done_bitmap & through) == through) {
-      retire_req->Drive(e.user_id);
-      retiring = true;
-      retire_slot = h;
-      return;
-    }
-    retire_req->Idle();
-  }
-
-  // Router 的 CoreMem 重发完成：至少带 UserID 与 PathID，本级按 UserID 找到
-  // 那一项，把重发标记清掉。不清的话这个用户的重发任务会被一直选中。
-  void TakeReissueDone() {
-    if (!reissue_done || !reissue_done->Valid()) return;
-    if (reissue_done->Seq() == last_reissue_seq) return;
-    last_reissue_seq = reissue_done->Seq();
-    clear_q.push_back(reissue_done->User());
-  }
-
-  // Router 申请到资源后经这一路通知，唤醒对应 task 置 READY。
-  void DoWake() {
-    if (wake_hold) {
-      if (wake->Accepted()) {
-        wake_hold = false;
-        ++wake_pending;
-      } else {
-        return;  // 只改一个字段的写失败后只重试这一笔
-      }
-    }
-    wake->Idle();
-    if (grant->Valid()) {
-      uint64_t stream = grant->stream_id.Get();
-      auto w = std::make_shared<StreamWrite>();
-      w->valid = true;
-      w->stream_id = stream;
-      w->set_fsm = true;
-      w->fsm = TaskFsm::kReady;
-      // 这一笔 credit 对应的是一个已经建过表的老用户时，还要把 reissue 置起来。
-      w->set_reissue = true;
-      wake->Drive(w);
-      wake_hold = true;
-      return;
-    }
-    if (AdmitReduce()) return;
-    // 没有 credit 要处理时，用这个口把重发完成的那几笔标记清掉。
-    if (clear_q.empty()) return;
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) return;
-    uint64_t user = clear_q.front();
-    for (uint64_t i = 0; i < kStreamNum; ++i) {
-      StreamEntry const& e = s->entry[i];
-      if (!e.valid || !e.user_id_vld || e.user_id != user) continue;
-      auto w = std::make_shared<StreamWrite>();
-      w->valid = true;
-      w->stream_id = i;
-      w->clear_reissue = true;
-      wake->Drive(w);
-      wake_hold = true;
-      clear_q.pop_front();
-      return;
-    }
-    // 表里没有这个用户，说明它已经退休了，这一笔丢掉即可。
-    clear_q.pop_front();
-  }
-
-  // 本级 Rmem 的 credit：停在 WAIT 的 reduce 任务，这个用户的 credit 在就置
-  // READY。一拍一笔，按年龄选最老的。
-  bool AdmitReduce() {
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) return false;
-    for (uint64_t k = 0; k < kStreamNum; ++k) {
-      uint64_t i = s->AgeOrder(k);
-      StreamEntry const& e = s->entry[i];
-      if (!e.valid || e.task_fsm != TaskFsm::kWait) continue;
-      if (e.task_type != TaskType::kReduce || e.rmem_busy) continue;
-      auto w = std::make_shared<StreamWrite>();
-      w->valid = true;
-      w->stream_id = i;
-      w->set_fsm = true;
-      w->fsm = TaskFsm::kReady;
-      w->fsm_if_current = true;
-      w->from_task_id = e.task_id;
-      wake->Drive(w);
-      wake_hold = true;
-      ++rmem_pending;
-      return true;
-    }
-    return false;
-  }
-
-  // 扫 stream_table，给需要 credit 又还在 WAIT 的 task 发申请。
-  void DoAsk() {
-    if (asking) {
-      if (req->Ready()) asking = false;
-      return;  // 请求保持到 Router 收下
-    }
     req->Idle();
-    StreamSnapshotPtr s = snap->Get();
-    if (!s) return;
-    for (uint64_t k = 0; k < kStreamNum; ++k) {
-      uint64_t i = s->AgeOrder(k);
-      StreamEntry const& e = s->entry[i];
-      if (!e.valid || e.task_fsm != TaskFsm::kWait) continue;
-      TaskEntry const& t = cfg.Task(e.task_id);
-      // reduce 任务要的是本级 Rmem 的 credit，TS 自己记，不向 Router 要。
-      if (!t.credit_en || t.IsReduce()) continue;
-      req->Drive(e.user_id, i, e.task_id, t.path_id);
-      asking = true;
-      return;  // 一拍一笔
+    retire_wr->Idle();
+    auto view = snap->Get();
+    if (!view || cfg.WeightsMode())
+      return;
+    DoRetire(*view);
+    if (wake_pending_port && !wake->Accepted())
+      return;
+    wake_pending_port = false;
+    wake->Idle();
+    auto batch = std::make_shared<StreamWrite>();
+    batch->valid = true;
+    auto budget = view->credit_count;
+    counts = budget;
+    bool older_unregistered = false;
+    for (uint64_t age = 0; age < view->slot_num; ++age) {
+      uint64_t sid = view->AgeOrder(age);
+      auto const &e = view->entry[sid];
+      if (!e.valid || (e.done_bitmap & (1ull << e.task_id))) {
+        pending[sid].reset();
+        continue;
+      }
+      if (e.task_fsm == TaskFsm::kReduceWait && !LocalReduce(e.task_path_id)) {
+        batch->updates.push_back(Ready(sid, e));
+        continue;
+      }
+      if (e.task_fsm == TaskFsm::kReduceWait && !e.rmem_busy) {
+        auto w = Ready(sid, e);
+        w->take_rmem = true;
+        batch->updates.push_back(w);
+        ++rmem_pending;
+        continue;
+      }
+      if (e.task_fsm != TaskFsm::kWaitCredit) {
+        pending[sid].reset();
+        continue;
+      }
+      uint64_t need = cfg.Route(e.task_path_id).dir & 7 & ~e.drct_used;
+      if (!pending[sid] || pending[sid]->tid != e.task_id ||
+          pending[sid]->allocation != e.allocation ||
+          pending[sid]->need != need) {
+        pending[sid] = Pending{e.task_id, e.allocation, need};
+        older_unregistered = true;
+        continue;
+      }
+      if (older_unregistered)
+        continue;
+      bool enough = true;
+      for (uint64_t dir = 0; dir < 3; ++dir)
+        if ((need & (1ull << dir)) && budget[dir] == 0)
+          enough = false;
+      if (!enough)
+        continue;
+      auto w = Ready(sid, e);
+      w->grant_dirs = need;
+      if (cfg.Task(e.task_id).task_type == TaskType::kReissueOut)
+        w->set_reissue = true;
+      for (uint64_t dir = 0; dir < 3; ++dir)
+        if (need & (1ull << dir))
+          --budget[dir];
+      batch->updates.push_back(w);
+      pending[sid].reset();
+      ++wake_count;
     }
+    if (reissue_done && reissue_done->Valid() &&
+        reissue_done->Seq() != last_reissue_seq) {
+      last_reissue_seq = reissue_done->Seq();
+      for (uint64_t sid = 0; sid < view->slot_num; ++sid) {
+        auto const &e = view->entry[sid];
+        if (e.valid && e.user_id_vld && e.user_id == reissue_done->User()) {
+          auto w = std::make_shared<StreamWrite>();
+          w->valid = w->clear_reissue = true;
+          w->stream_id = sid;
+          batch->updates.push_back(w);
+        }
+      }
+    }
+    if (!batch->updates.empty()) {
+      wake->Drive(batch);
+      wake_pending_port = true;
+    }
+    woken = wake_count;
+    retired = retire_count;
+    rmem_admitted = rmem_pending;
   }
 
-  CfgReg& cfg;
+private:
+  struct Pending {
+    uint64_t tid, allocation, need;
+  };
+  std::shared_ptr<StreamWrite> Ready(uint64_t sid, StreamEntry const &e) {
+    auto w = std::make_shared<StreamWrite>();
+    w->valid = w->set_fsm = w->fsm_if_current = w->check_allocation = true;
+    w->stream_id = sid;
+    w->from_task_id = e.task_id;
+    w->allocation = e.allocation;
+    w->fsm = TaskFsm::kReady;
+    return w;
+  }
+  void DoRetire(StreamSnapshot const &view) {
+    if (last_retired) {
+      auto const &e = view.entry[last_retired->sid];
+      if (retire_wr->Accepted() && !last_retired->counted) {
+        if (!retire_wr->AcceptedCount()) {
+          last_retired.reset();
+          return;
+        }
+        last_retired->counted = true;
+        ++retire_count;
+        if (cfg.SelfStartCore())
+          ++reactivate_cnt;
+      }
+      if (!e.valid || e.allocation != last_retired->allocation)
+        last_retired.reset();
+      else
+        return;
+    }
+    uint64_t sid = view.head_ptr;
+    auto const &e = view.entry[sid];
+    uint64_t through = cfg.ThroughEndMask();
+    if (!e.valid || !e.user_id_vld || e.rmem_busy || e.datain_busy ||
+        !through || (e.done_bitmap & through) != through)
+      return;
+    auto w = std::make_shared<StreamWrite>();
+    w->valid = true;
+    w->stream_id = sid;
+    if (cfg.SelfStartCore()) {
+      w->whole = w->reactivate = true;
+      w->entry = SelfStartEntry(cfg.Task(0));
+      w->stream_num = cfg.StreamNum();
+    } else {
+      w->clear_valid = true;
+    }
+    w->check_allocation = true;
+    w->allocation = e.allocation;
+    retire_wr->Drive(w);
+    last_retired = RetiredToken{sid, e.allocation};
+  }
+  struct RetiredToken {
+    uint64_t sid, allocation;
+    bool counted = false;
+  };
+  bool LocalReduce(uint64_t path_id) const {
+    if (!rtab)
+      return true;
+    RouteEntry const &re = rtab->Lookup(0, path_id);
+    return re.operation != Operation::kForward && re.reduce_in_mask != 0;
+  }
+
+  CfgReg &cfg;
+  RouterTable *rtab = nullptr;
   std::shared_ptr<SnapshotPort> snap;
   std::shared_ptr<CreditReqPort> req;
   std::shared_ptr<CreditGrantPort> grant;
   std::shared_ptr<RetirePort> retire_req;
   std::shared_ptr<StreamWritePortIf> wake, retire_wr;
   std::shared_ptr<ReissueDonePort> reissue_done;
-
-  std::deque<uint64_t> clear_q;
-  uint64_t last_reissue_seq = 0;
-
-  bool asking = false, retiring = false, wake_hold = false;
-  bool just_retired_vld = false;
-  uint64_t retire_slot = 0, just_retired = 0;
-  uint64_t wake_pending = 0, retire_pending = 0, rmem_pending = 0;
-  // 重新激活的笔数，供 Core 层发波形。
+  std::array<std::optional<Pending>, kStreamNum> pending{};
+  std::optional<RetiredToken> last_retired;
+  std::array<uint64_t, 3> counts{};
+  bool wake_pending_port = false;
+  uint64_t last_reissue_seq = 0, wake_count = 0, retire_count = 0,
+           rmem_pending = 0;
   uint64_t reactivate_cnt = 0;
-
   Logic64 woken, retired, rmem_admitted;
 };
 
-}  // namespace bach
-}  // namespace latch
+} // namespace bach
+} // namespace latch
 
 #endif

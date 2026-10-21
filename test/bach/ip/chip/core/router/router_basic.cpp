@@ -317,6 +317,7 @@ class VcRemapHarness : public BachModule {
     uint64_t now=CycleNow();auto request=ReadXbarReq(st.Req());
     if (request.valid && request.seq!=last_seq) {
       last_seq=request.seq;users.push_back(request.user_id);
+      EXPECT_EQ(request.input_vc,request.user_id-100);
       vcs.push_back(request.vc);cycles.push_back(now);
     }
     st.Req().DriveRoom((1ull<<kVcNum)-1);
@@ -358,10 +359,13 @@ std::vector<uint64_t> RunVcRemap(bool same_vc,bool same_direction) {
 }
 }
 
-TEST(BachRouter, VcRemappingKeepsEachOutgoingPacketContiguous) {
+// Station requests retain source-FIFO identity. Target-VC packet locking is
+// enforced by Xbar; BachXbar.RemappedSourceQueuesKeepOnePacketOwnerAcrossMulticastStall
+// verifies the physical output under backpressure.
+TEST(BachRouter, VcRemappingRetainsSourceFifoIdentityBeforeXbar) {
   auto users=RunVcRemap(true,true);
   users.erase(std::remove(users.begin(),users.end(),102),users.end());
-  EXPECT_EQ(users,(std::vector<uint64_t>{100,100,100,101,101,101}));
+  EXPECT_EQ(users,(std::vector<uint64_t>{100,101,100,101,100,101}));
 }
 TEST(BachRouter, DistinctOutgoingVcsStillProgressIndependently) {
   auto users=RunVcRemap(false,true);

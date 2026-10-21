@@ -6,6 +6,9 @@ list(FILTER BACH_TEST_SRCS EXCLUDE REGEX "/build/|/CMakeFiles/")
 
 foreach(BACH_TEST_SRC ${BACH_TEST_SRCS})
   get_filename_component(TEST_NAME ${BACH_TEST_SRC} NAME_WE)
+  if(BACH_TEST_SRC MATCHES "/test/bach/ip/pcode_bundle.cpp$")
+    set(TEST_NAME pcode_native_bundle)
+  endif()
   add_executable(${TEST_NAME} ${BASE_SRC} ${BACH_TEST_SRC})
   # dte.cpp 的 t.wr = {{...}}（std::vector<Wr> 空向量的 operator=(initializer_list)
   # → assign → _M_assign_aux → std::copy 到空 _M_start）在 GCC 13 -O3 内联后触发
@@ -32,6 +35,8 @@ endforeach()
 # 硬件配置生成器与参考实现都是 Python 写的，各挂一条 CTest。
 # 参考实现那一条还查比对向量与代码同步：向量由 C++ 那一侧读进来做逐 bit 比对，
 # 不同步的话比的就是旧结果。
+# tracetto 是 src/utils 下的波形查看器，与 bach 无关，也挂在这里 —— 全仓就这一处
+# find_package(Python3) 挂 Python 用例，另起一处再来一遍 find_package 没意思。
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_FOUND)
   add_test(NAME hwconfig
@@ -40,4 +45,26 @@ if(Python3_FOUND)
   add_test(NAME reference
            COMMAND ${Python3_EXECUTABLE}
                    ${LATCH_ROOT_DIR}/src/bach/compiler/reference/selftest.py)
+  add_test(NAME tracetto
+           COMMAND ${Python3_EXECUTABLE}
+                   ${LATCH_ROOT_DIR}/src/utils/tracetto/selftest_tracetto.py)
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import numpy"
+                  RESULT_VARIABLE GOLDEN_NUMPY_RESULT
+                  OUTPUT_QUIET ERROR_QUIET)
+  if(GOLDEN_NUMPY_RESULT EQUAL 0)
+    add_test(NAME checkpoint_golden
+             COMMAND ${Python3_EXECUTABLE}
+                     ${LATCH_ROOT_DIR}/src/bach/compiler/reference/selftest_checkpoint_golden.py)
+  endif()
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c
+                  "import pytest, bachflow, bachflow_runtime, bachflow_codegen"
+                  RESULT_VARIABLE BACHFLOW_PYTHON_RESULT
+                  OUTPUT_QUIET ERROR_QUIET)
+  if(BACHFLOW_PYTHON_RESULT EQUAL 0)
+    add_test(NAME bachflow_input
+             COMMAND ${Python3_EXECUTABLE} -m pytest -q
+                     ${LATCH_ROOT_DIR}/src/bach/compiler/bachflow/tests)
+    set_tests_properties(bachflow_input PROPERTIES
+                         ENVIRONMENT "PYTHONPATH=${LATCH_ROOT_DIR}/src")
+  endif()
 endif()

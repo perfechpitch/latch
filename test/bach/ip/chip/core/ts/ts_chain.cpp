@@ -2,19 +2,20 @@
 //
 // 这两块合在一起看：Task_ctrl 读上一拍的表快照算出下一步，把整项写回
 // Stream_table。后继是当前任务之后、THROUGH_END_MASK 以内、done_bitmap 还没置位
-// 的最低一项，一次 64 位优先编码一拍算完；初始状态由 wait_wake 与 credit_en 定；
-// PID 更新任务带回的新 PID 只由紧邻的后继继承。
+// 的最低一项，一次 64 位优先编码一拍算完；初始状态由 wait_wake 与 credit_en
+// 定； PID 更新任务带回的新 PID 只由紧邻的后继继承。
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/runtime.h"
 #include "bach/ip/chip/core/ts/stream_table.h"
 #include "bach/ip/chip/core/ts/task_ctrl.h"
+#include "base/clock.h"
+#include "base/runtime.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -35,8 +36,8 @@ TaskEntry Step(uint64_t pc) {
 
 // 表、配置、Task_ctrl 与灌写口的动作全在这一个协程里，次序由调用顺序定死。
 class ChainBench : public BachModule {
- public:
-  ChainBench(ClockPtr c, CfgReg& reg, StreamTable& tab, TaskCtrl& ctl)
+public:
+  ChainBench(ClockPtr c, CfgReg &reg, StreamTable &tab, TaskCtrl &ctl)
       : BachModule(c, "bench"), cfg(reg), table(tab), ctrl(ctl) {}
 
   struct WriteJob {
@@ -45,28 +46,33 @@ class ChainBench : public BachModule {
     std::shared_ptr<StreamWrite> w;
   };
   std::vector<WriteJob> jobs;
+  std::function<void()> before_table;
 
   // 每个写口被收下的拍。
   std::vector<std::pair<uint64_t, uint64_t>> accepted_at;
 
- protected:
+protected:
   void Step() override {
     uint64_t now = CycleNow();
     for (uint64_t p = 0; p < kWrPortNum; ++p) {
-      if (table.Port(p).Accepted()) accepted_at.push_back({now, p});
+      if (table.Port(p).Accepted())
+        accepted_at.push_back({now, p});
     }
-    for (auto const& j : jobs) {
-      if (j.at == now) table.Port(j.port).Drive(j.w);
+    for (auto const &j : jobs) {
+      if (j.at == now)
+        table.Port(j.port).Drive(j.w);
     }
     cfg.RunStep();
     ctrl.RunStep();
+    if (before_table)
+      before_table();
     table.RunStep();
   }
 
- private:
-  CfgReg& cfg;
-  StreamTable& table;
-  TaskCtrl& ctrl;
+private:
+  CfgReg &cfg;
+  StreamTable &table;
+  TaskCtrl &ctrl;
 };
 
 struct Bench {
@@ -101,7 +107,7 @@ std::shared_ptr<StreamWrite> Sitting(uint64_t slot, uint64_t task_id,
 }
 
 // 一条 n 项的链，末项是 End。
-void PlainChain(CfgReg& cfg, uint64_t n) {
+void PlainChain(CfgReg &cfg, uint64_t n) {
   for (uint64_t i = 0; i < n; ++i) {
     TaskEntry t = Step(0x100 + i);
     t.end = i + 1 == n;
@@ -110,7 +116,7 @@ void PlainChain(CfgReg& cfg, uint64_t n) {
   cfg.SetInitFinish();
 }
 
-}  // namespace
+} // namespace
 
 // 落到不同 stream 的写互不相干，同一拍可以都做。
 TEST(BachStreamTable, DifferentStreamsAreWrittenTogether) {
@@ -216,11 +222,11 @@ TEST(BachStreamTable, SkipMaskFinishesOnlyTheCurrentTask) {
     auto mask_a = std::make_shared<StreamWrite>();
     mask_a->valid = true;
     mask_a->stream_id = 2;
-    mask_a->done_mask = 0b11;   // 含当前的 task 0
+    mask_a->done_mask = 0b11; // 含当前的 task 0
     auto mask_b = std::make_shared<StreamWrite>();
     mask_b->valid = true;
     mask_b->stream_id = 3;
-    mask_b->done_mask = 0b110;  // 不含当前的 task 0
+    mask_b->done_mask = 0b110; // 不含当前的 task 0
     h.jobs = {{2, kWrCreate, seed_a},
               {5, kWrCreate, seed_b},
               {8, kWrCreate, mask_a},
@@ -270,8 +276,9 @@ TEST(BachTaskCtrl, SkipsDoneTasksInOneStep) {
     clk->Continue(30 * kPeriod);
     RT::JoinAll();
     landed = b.table->Peek(0).task_id;
-    for (auto const& kv : h.accepted_at) {
-      if (kv.second == kWrInstall && at == 0) at = kv.first;
+    for (auto const &kv : h.accepted_at) {
+      if (kv.second == kWrInstall && at == 0)
+        at = kv.first;
     }
   }
   RT::Reset();
@@ -293,8 +300,9 @@ TEST(BachTaskCtrl, NoSuccessorWhenEverythingThroughEndIsDone) {
     clk->Continue(20 * kPeriod);
     RT::JoinAll();
     task_id = b.table->Peek(0).task_id;
-    for (auto const& kv : h.accepted_at) {
-      if (kv.second == kWrInstall) ++installs;
+    for (auto const &kv : h.accepted_at) {
+      if (kv.second == kWrInstall)
+        ++installs;
     }
   }
   RT::Reset();
@@ -338,6 +346,45 @@ TEST(BachTaskCtrl, InstallWritesTheWholeEntryAtOnce) {
   EXPECT_EQ(got.user_id, 100u) << "用户级标记不受影响";
 }
 
+TEST(BachTaskCtrl, AcceptedIdentityExcludesCanceledSuccessorsInTheBatch) {
+  EnsureSlots();
+  {
+    ClockPtr clk = MakeClock(0, kPeriod);
+    Bench b(clk);
+    PlainChain(*b.cfg, 3);
+    ChainBench h(clk, *b.cfg, *b.table, *b.ctrl);
+    auto create = std::make_shared<StreamWrite>();
+    create->valid = true;
+    create->updates = {Sitting(0, 0, 1), Sitting(1, 1, 3)};
+    h.jobs = {{2, kWrCreate, create}};
+    bool canceled = false;
+    uint64_t installed = 0;
+    h.before_table = [&] {
+      installed = b.ctrl->Installed();
+      if (canceled || !b.ctrl->InstallPtr()->Valid())
+        return;
+      auto done = std::make_shared<StreamWrite>();
+      done->valid = true;
+      done->stream_id = 1;
+      done->done_mask = 1ull << 2;
+      b.table->Port(kWrCompletion).Drive(done);
+      canceled = true;
+    };
+    clk->Continue(20 * kPeriod);
+    RT::JoinAll();
+    EXPECT_TRUE(canceled);
+    EXPECT_EQ(b.table->Peek(0).task_id, 1u);
+    EXPECT_EQ(b.table->Peek(1).task_id, 1u);
+    EXPECT_EQ(installed, 1u);
+    EXPECT_EQ(b.ctrl->NextTask(), 2u);
+    EXPECT_EQ(b.ctrl->NextUser(), 101u);
+    EXPECT_EQ(b.ctrl->AcceptedTask(), 1u);
+    EXPECT_EQ(b.ctrl->AcceptedUser(), 100u);
+    EXPECT_TRUE(b.ctrl->AcceptedUserValid());
+  }
+  RT::Reset();
+}
+
 // 后继的初始状态：wait_wake 或 credit_en 的置 WAIT，其余置 READY。
 TEST(BachTaskCtrl, InitialStateFollowsWaitWakeAndCredit) {
   StreamEntry s0, s1, s2;
@@ -349,6 +396,7 @@ TEST(BachTaskCtrl, InitialStateFollowsWaitWakeAndCredit) {
     TaskEntry credit = Step(0x200);
     credit.credit_en = true;
     b.cfg->WriteTask(1, credit);
+    b.cfg->WriteRouterTable(0, 1, 0);
     TaskEntry wake = Step(0x300);
     wake.wait_wake = true;
     b.cfg->WriteTask(2, wake);
@@ -369,7 +417,7 @@ TEST(BachTaskCtrl, InitialStateFollowsWaitWakeAndCredit) {
   }
   RT::Reset();
   EXPECT_EQ(s0.task_id, 1u);
-  EXPECT_EQ(s0.task_fsm, TaskFsm::kWait) << "credit_en";
+  EXPECT_EQ(s0.task_fsm, TaskFsm::kWaitCredit) << "credit_en";
   EXPECT_EQ(s1.task_id, 2u);
   EXPECT_EQ(s1.task_fsm, TaskFsm::kWait) << "wait_wake";
   EXPECT_EQ(s2.task_id, 3u);
@@ -387,7 +435,8 @@ TEST(BachTaskCtrl, NewPidGoesOnlyToTheAdjacentTask) {
     for (uint64_t i = 0; i < 4; ++i) {
       TaskEntry t = Step(0x100 + i);
       t.path_id = 5 + i;
-      if (i == 0) t.task_type = TaskType::kPidUpdate;
+      if (i == 0)
+        t.task_type = TaskType::kPidUpdate;
       t.end = i == 3;
       b.cfg->WriteTask(i, t);
     }
@@ -397,7 +446,7 @@ TEST(BachTaskCtrl, NewPidGoesOnlyToTheAdjacentTask) {
     auto a = Sitting(0, 0, 0b1);
     a->entry.task_path_id = 33;
     a->entry.pid_pending = true;
-    auto c = Sitting(1, 0, 0b11);  // 紧邻的 task 1 已经跳过
+    auto c = Sitting(1, 0, 0b11); // 紧邻的 task 1 已经跳过
     c->entry.task_path_id = 44;
     c->entry.pid_pending = true;
     h.jobs = {{2, kWrCreate, a}, {3, kWrCreate, c}};

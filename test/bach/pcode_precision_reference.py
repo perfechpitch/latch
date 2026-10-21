@@ -72,7 +72,9 @@ class PrecisionRoutes:
                           if h['disable_mask']==bad[chip])
             for key,core in selected['cores'].items():
                 physical=int(key[1:])
-                for entry in core.get('entries',[]):
+                for entry in (core.get('entries',{}).values() if isinstance(core.get('entries'),dict) else core.get('entries',[])):
+                    if entry.get('operation',0) and not entry.get('dataout',False):
+                        continue  # Per-input PID entry; the local dataout PID carries the result.
                     net=entry.get('net')
                     if net is not None:self.raw[int(net)][chip,physical]=entries[chip,physical,int(entry['PathID'])]
         self.reverse={(chip,slot):(chip,core) for (chip,core),slot in logical.items()}

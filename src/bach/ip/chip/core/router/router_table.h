@@ -121,11 +121,12 @@ struct RouteEntry {
   uint64_t path_core_mask_idx = 0;
   bool path_core_bypass = true;
 
+  uint64_t reduce_task_path = ~0ull; // Adapter identity: all operand PIDs of one task.
   bool need_buffer = false;           // 允许进 core 缓存，即溢流使能
-  // streamNeedMask：哪几个出方向发之前要查那个方向的 stream 资源表。位与 Xbar 的
-  // 出口同序：bit0 mid、bit1 left、bit2 right、bit3 进本 core。一个方向要不要查
-  // 只看下一跳进不进 core，进本 core 那一位只有真占容量的 core 置，落 Matrix Mem
-  // 的 B core 与 R core 不置。
+  // streamNeedMask：哪几个出方向发之前要查那个方向的 stream 资源。位与 Xbar 的
+  // 出口同序：bit0 mid、bit1 left、bit2 right、bit3 进本 core。route 规划的
+  // streamCheck 为 1 时，directionMask 里的每个出口都置位；为 0 不查。落
+  // Matrix Mem 的 B/R 规划不因进核置 streamCheck，这一位保持 0。
   uint64_t stream_need = 0;
 
   uint64_t cur_credit_type = 0;       // 0 广播、1 P2P
