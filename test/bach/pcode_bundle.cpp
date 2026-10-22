@@ -18,10 +18,15 @@ class PcodeHarness : public SpreadHarness {
   std::vector<Chip*> observed_chips;
   std::set<uint64_t> observed_users;
   uint64_t compute_overlap_cycle = 0;
+  uint64_t peak_compute_users = 0, peak_core_users = 0;
+  std::set<uint64_t> overlapped_users;
+  uint64_t observed_stream_mask = 0;
  protected:
   void Step() override {
     SpreadHarness::Step();
-    if (observed_users.size() == 2 && !compute_overlap_cycle) {
+    bool pair = observed_users.size() == 2;
+    if (observed_users.size() >= 2 && (!pair || !compute_overlap_cycle) &&
+        (pair || CycleNow() % 16 == 0)) {
       std::set<uint64_t> active;
       std::set<uint64_t> snapshot_users;
       for (auto* chip : observed_chips) {
@@ -30,11 +35,17 @@ class PcodeHarness : public SpreadHarness {
           if (core.Bad() || core.GetTs().Cfg().SelfStartCore()) continue;
           auto snapshot = core.GetTs().Table().SnapPtr()->Get();
           if (!snapshot) continue;
+          uint64_t local = 0, sid = 0;
           for (auto const& entry : snapshot->entry) {
             if (entry.valid && entry.user_id_vld) snapshot_users.insert(entry.user_id);
-            if (entry.valid && entry.user_id_vld && observed_users.count(entry.user_id))
+            if (entry.valid && entry.user_id_vld && observed_users.count(entry.user_id)) {
               active.insert(entry.user_id);
+              ++local;
+              observed_stream_mask |= 1ull << sid;
+            }
+            ++sid;
           }
+          peak_core_users = std::max(peak_core_users, local);
         }
       }
       if (CycleNow() % 1000 == 0) {
@@ -42,7 +53,13 @@ class PcodeHarness : public SpreadHarness {
         for (auto user : snapshot_users) std::cerr << " " << user;
         std::cerr << "\n";
       }
-      if (active == observed_users) {
+      if (active.size() >= 2) overlapped_users.insert(active.begin(), active.end());
+      if (active.size() > peak_compute_users) {
+        peak_compute_users = active.size();
+        std::cerr << "pcode peak compute users " << peak_compute_users << " at " << CycleNow()
+                  << " core peak " << peak_core_users << " stream mask " << observed_stream_mask << "\n";
+      }
+      if (active == observed_users && !compute_overlap_cycle) {
         compute_overlap_cycle = CycleNow();
         std::cerr << "pcode concurrent compute users at " << compute_overlap_cycle;
         for (auto user : active) std::cerr << " " << user;
@@ -107,14 +124,28 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
       std::array<uint64_t,6>{2,2,1,1,1,1} : std::array<uint64_t,6>{2,2,0,2,0,2};
   uint64_t active_mask = 0;
   for (uint64_t ep = 0; ep < 6; ++ep) if (counts[ep]) active_mask |= 1ull << ep;
-  std::unique_ptr<pcode_test::Fixture> fixture;
-  if (auto path = std::getenv("PCODE_CASE_FILE")) fixture = std::make_unique<pcode_test::Fixture>(path);
-  std::unique_ptr<pcode_test::Fixture> second;
-  if (auto path = std::getenv("PCODE_SECOND_CASE_FILE")) {
-    ASSERT_NE(fixture, nullptr);
-    second = std::make_unique<pcode_test::Fixture>(path);
+  std::vector<std::unique_ptr<pcode_test::Fixture>> fixtures;
+  if (auto list_path = std::getenv("PCODE_CASE_LIST")) {
+    ASSERT_EQ(std::getenv("PCODE_CASE_FILE"), nullptr);
+    ASSERT_EQ(std::getenv("PCODE_SECOND_CASE_FILE"), nullptr);
+    std::ifstream list(list_path);
+    ASSERT_TRUE(list.good());
+    std::string item;
+    while (std::getline(list, item))
+      if (!item.empty()) fixtures.push_back(std::make_unique<pcode_test::Fixture>(item.c_str()));
+    ASSERT_GE(fixtures.size(), 1u);
+    // Batch length is independent of the 16 physical TS slots. The existing
+    // ingress/Router/TS credit paths throttle later users until slots retire.
+    ASSERT_LE(fixtures.size(), 1024u);
+  } else {
+    if (auto path = std::getenv("PCODE_CASE_FILE")) fixtures.push_back(std::make_unique<pcode_test::Fixture>(path));
+    if (auto path = std::getenv("PCODE_SECOND_CASE_FILE")) {
+      ASSERT_EQ(fixtures.size(), 1u);
+      fixtures.push_back(std::make_unique<pcode_test::Fixture>(path));
+    }
   }
-  size_t expected_outputs = second ? 2 : 1;
+  auto* fixture = fixtures.empty() ? nullptr : fixtures.front().get();
+  size_t expected_outputs = std::max<size_t>(1, fixtures.size());
   if (auto threads = std::getenv("PCODE_THREADS")) {
     uint64_t n = std::stoull(threads); ASSERT_GT(n,0u); ASSERT_LE(n,16u);
     RT::Reset(n, (600 + n - 1) / n);
@@ -143,19 +174,32 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
     for (uint64_t c = 0; c < all.size(); ++c)
       for (uint64_t p = 0; p < 10; ++p)
         std::cerr << "reduce id " << all[c]->GetCore(p).GetRouter().GetReduce().Id() << " chip " << c << " core " << p << "\n";
-  if (fixture) fixture->Load(all,root);
+  if (fixture) { for (auto const& f : fixtures) f->Load(all,root); }
   else LoadFixtureWeights(all, root, counts);
-  if (second) second->Load(all,root);
   if (auto model = std::getenv("PCODE_DENSE_MODEL")) {
     ASSERT_NE(fixture, nullptr);
-    ASSERT_TRUE(fixture->weights.empty());
-    pcode_test::ValidateDenseFixture(*fixture);
-    if (second) {
-      ASSERT_TRUE(second->weights.empty());
-      pcode_test::ValidateDenseFixture(*second);
+    for (auto const& f : fixtures) {
+      ASSERT_TRUE(f->weights.empty());
+      pcode_test::ValidateDenseFixture(*f);
     }
     pcode_test::LoadDenseModel(all,model,root);
   }
+  // New pcode exports search the complete external broadcast tree. Its
+  // packet PathID is assigned by the planner, rather than the legacy 63 stub.
+  uint64_t ingress_chip = 0, ingress_core = 5, ingress_path = 63;
+  {
+    std::ifstream ir(std::string(root) + "/pcode_ep6_tp8/pcode_ep6_tp8.bachir");
+    std::string line;
+    while (std::getline(ir, line)) {
+      if (line.rfind("# PCIE_INGRESS ", 0) != 0) continue;
+      std::istringstream row(line.substr(15));
+      ASSERT_TRUE(bool(row >> ingress_chip >> ingress_core >> ingress_path));
+      ASSERT_EQ(ingress_chip % 4, 0u);
+      ASSERT_EQ(ingress_core, 5u);  // chip W input attaches to physical Router 5
+    }
+  }
+  std::cerr << "pcode external ingress chip " << ingress_chip << " core "
+            << ingress_core << " path " << ingress_path << "\n";
   auto m = std::make_shared<Message>();
   m->path_id = 63;
   m->path_core_mask = active_mask;
@@ -175,30 +219,49 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   std::fill(m->payload.begin() + 336, m->payload.begin() + 336 + 6144, 0x38);
   std::fill(m->payload.begin() + 336 + 6144, m->payload.end(), 127);
   if (fixture) m = fixture->Message();
+  m->path_id = ingress_path;
   C2cBridge feed(clk, "feed", StubCfg()), sink(clk, "sink", StubCfg());
   uint64_t max_cycles = 30000;
   if (char const* cap = std::getenv("PCODE_MAX_CYCLES")) max_cycles = std::stoull(cap);
-  PcodeHarness h(clk, all, GridLinks(12, 4), feed, sink, 0, kChipW, 47,
+  PcodeHarness h(clk, all, GridLinks(12, 4), feed, sink, ingress_chip, kChipW, 47,
                   kChipE, 2, max_cycles, m);
   std::vector<MessagePtr> inputs{m};
-  if (second) inputs.push_back(second->Message());
+  if (fixture) {
+    inputs.clear();
+    for (auto const& f : fixtures) inputs.push_back(f->Message());
+  }
+  for (auto& input : inputs) input->path_id = ingress_path;
   std::vector<uint64_t> sent_at;
   bool require_compute_overlap = false;
-  if (second) {
-    ASSERT_FALSE(inputs[0]->user_id == inputs[1]->user_id &&
-                 inputs[0]->token_id == inputs[1]->token_id);
+  if (inputs.size() > 1) {
+    std::set<uint64_t> users;
+    std::set<std::pair<uint64_t,uint64_t>> identities;
+    for (auto const& input : inputs) {
+      ASSERT_TRUE(identities.insert({input->user_id,input->token_id}).second);
+      users.insert(input->user_id);
+    }
     std::string mode = std::getenv("PCODE_INJECT_MODE") ? std::getenv("PCODE_INJECT_MODE") : "overlap";
     ASSERT_TRUE(mode == "overlap" || mode == "sequential");
     if (mode == "overlap") {
-      ASSERT_NE(inputs[0]->user_id, inputs[1]->user_id);
+      ASSERT_EQ(users.size(), inputs.size());
       h.observed_chips = all;
-      h.observed_users = {inputs[0]->user_id, inputs[1]->user_id};
+      h.observed_users = users;
       // Legacy sparse campaigns only require overlapping packet lifetimes.
       // Dense GLM5 pairs explicitly request simultaneous compute occupancy.
       require_compute_overlap = std::getenv("PCODE_REQUIRE_COMPUTE_OVERLAP") != nullptr;
     }
     uint64_t gap = std::getenv("PCODE_TOKEN_GAP") ? std::stoull(std::getenv("PCODE_TOKEN_GAP")) : 1;
     h.expected_outputs = expected_outputs;
+    if (inputs.size() > 2) {
+      h.input_flit_observer = [&](MessagePtr const& packet, uint64_t now, bool head, bool tail) {
+        if (!head && !tail) return;
+        auto it = std::find(inputs.begin(), inputs.end(), packet);
+        ASSERT_NE(it, inputs.end());
+        auto index = std::distance(inputs.begin(), it);
+        std::cerr << "pcode wire token " << index << " " << (head ? "head" : "tail")
+                  << " at " << now << " user " << packet->user_id << " token " << packet->token_id << "\n";
+      };
+    }
     h.input_source = [&, mode, gap](uint64_t now) -> MessagePtr {
       size_t index = sent_at.size();
       if (index == inputs.size() || now < 2 + index * gap) return {};
@@ -217,17 +280,22 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
   }
   clk->Continue();
   RT::JoinAll();
+  if (inputs.size() > 2)
+    std::cerr << "pcode concurrency summary peak " << h.peak_compute_users
+              << " core peak " << h.peak_core_users << " overlapped users " << h.overlapped_users.size()
+              << " stream mask " << h.observed_stream_mask << "\n";
   if (auto prefix = std::getenv("PCODE_SNAPSHOT_PREFIX")) {
     auto dump=[](std::string const& path, ByteBlock const& bytes) {
       std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<char const*>(bytes.data()),bytes.size());
     };
+    const auto snapshot_slots = std::min<size_t>(expected_outputs, 16u);
     for (uint64_t chip=0;chip<48;++chip) {
       for(uint64_t p=0;p<10;++p) {
         auto base=std::string(prefix)+".c"+std::to_string(chip)+".p"+std::to_string(p);
-        dump(base+".cmem",all[chip]->GetCore(p).Cmem().Peek(0,expected_outputs*65536));
-        dump(base+".sf",all[chip]->GetCore(p).Cmem().PeekScale(0,expected_outputs*65536/32));
+        dump(base+".cmem",all[chip]->GetCore(p).Cmem().Peek(0,snapshot_slots*65536));
+        dump(base+".sf",all[chip]->GetCore(p).Cmem().PeekScale(0,snapshot_slots*65536/32));
         dump(base+".smem",all[chip]->GetCore(p).Smem().Peek(0,32768));
-        for(uint64_t sid=0;sid<expected_outputs;++sid)
+        for(uint64_t sid=0;sid<snapshot_slots;++sid)
           dump(base+".topk"+std::to_string(sid),all[chip]->GetCore(p).GetMu().EpInfo().TopkBytes(sid));
       }
       auto& mem=all[chip]->GetCore(9).Cmem();
@@ -312,7 +380,7 @@ TEST(PcodeBundle, Ep6ExportedTokens) {
     ASSERT_EQ(result.payload.size(), 6144u * 2);
     std::cerr << "pcode received token " << index << " at " << h.out_at[i] << " user "
               << result.user_id << " token " << result.token_id << "\n";
-    auto path = second ? actual_path + ".token" + std::to_string(index) + ".bf16" : actual_path;
+    auto path = expected_outputs > 1 ? actual_path + ".token" + std::to_string(index) + ".bf16" : actual_path;
     std::ofstream actual(path, std::ios::binary);
     ASSERT_TRUE(actual.good());
     actual.write(reinterpret_cast<char const*>(result.payload.data()), result.payload.size());

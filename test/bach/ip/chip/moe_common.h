@@ -429,6 +429,8 @@ public:
   // 的时候填。
   std::vector<MessagePtr> tokens;
   std::function<MessagePtr(uint64_t)> input_source;
+  // Optional observation of actual ingress flits, distinct from source enqueue.
+  std::function<void(MessagePtr const&, uint64_t, bool, bool)> input_flit_observer;
   uint64_t expected_outputs = 1;
   static constexpr uint64_t kGpuUnlimited = ~uint64_t{0};
   uint64_t credit = kGpuUnlimited;
@@ -481,6 +483,8 @@ protected:
       uint64_t total = packet->TotalBytes();
       uint64_t bytes = std::min<uint64_t>(256, total - input_offset);
       bool last = input_offset + bytes == total;
+      if (input_flit_observer)
+        input_flit_observer(packet, CycleNow(), input_offset == 0, last);
       feed_in->flit.Drive(0, input_offset == 0, last, bytes, packet);
       --feed_room;
       input_offset += bytes;

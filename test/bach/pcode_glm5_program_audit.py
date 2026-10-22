@@ -28,12 +28,43 @@ def audit_program(bundle,catalog_path,templates):
                     count+=1
         assert count==32;destinations+=count
     assert rows==12 and destinations==384
+    # A routed off-chip broadcast must gate every B-core, including root.
+    # Legacy exports retain the old path-63 stub and have no ingress record.
+    ingress_records = [row for row in records if row[:2] == ['#', 'PCIE_INGRESS']]
+    external_destinations = 0
+    if ingress_records:
+        assert len(ingress_records) == 1
+        ingresses = [(net, r) for net, r in enumerate(requests)
+                     if r['src_mem'] == 'DDR' and not r['skip']]
+        assert len(ingresses) == 1
+        net, req = ingresses[0]
+        assert req['kind'] == 'broadcast' and req['src_coord'] == [[0,0,8]]
+        assert req['dst_coord'] == [[row//4, row%4*4, 8] for row in range(12)]
+        assert req['core_mask_idx'] == [row//2 for row in range(12)]
+        for row in range(12):
+            chip = row * 4
+            hs = catalog['chips'][f'c{chip}']['harvests']
+            h = next(h for h in hs.values() if h['disable_mask'] == bad[chip])
+            landing = [(int(k[1:]), e) for k, core in h['cores'].items()
+                       for e in core.get('entries', []) if e['net'] == net and e.get('l') == 8]
+            assert len(landing) == 1
+            core, e = landing[0]
+            native = entries[chip, core, int(e['PathID'])]
+            assert (int(native[12]), int(native[13]), int(native[14])) == (1, row//2, 0)
+            assert int(native[4]) == 1  # transfer, no implicit reduction
+            chain = [r for r in records if r[:3] == ['TCHAIN', str(chip), str(core)]]
+            assert len(chain) == 2 and [int(r[3]) for r in chain] == [0,1]
+            assert [int(r[-1]) for r in chain] == [0,1]  # check_flag -> broadcast END
+            assert len([r for r in records if r[:3] == ['DATAIN', str(chip), str(core)]]) == 1
+            external_destinations += 1
+        assert external_destinations == 12
     images={row[-1] for row in records if row and row[0]=='KERNELCORE'}
     assert len(images)==855 and all((bundle/name).is_file() for name in images)
     assert len(templates)==768
     for (_,_,stage),template in templates.items():
         assert (template[0]&65535,template[0]>>16,template[7])==((4,12,393216) if stage==0 else (6,4,196608))
-    return dict(rv_hex_images=855,route_entries=len(rtab),fc13_broadcast_rows=rows,
+    return dict(rv_hex_images=855,route_entries=len(rtab),
+                external_masked_bcores=external_destinations,fc13_broadcast_rows=rows,
                 fc13_masked_destinations=destinations,masked_bypass_entries=0,mu_templates=768,
                 fc13_local_shape=[512,768],fc2_local_shape=[768,256],
                 fc13_expert_stride=393216,fc2_expert_stride=196608)
