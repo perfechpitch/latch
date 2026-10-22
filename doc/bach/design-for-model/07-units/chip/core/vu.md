@@ -321,7 +321,7 @@ VU 服务 LayerNorm、RMSNorm、Softmax、SwiGLU、MoE-Router、Sigmoid、ReLU �
 | F37 | VALU0（29 条独有）：加减乘、最值、MACC、除法 `vfdiv.vv`（范围 20～30 cycle，暂定 20；发起间隔未给，模型仍每拍收一段）、符号注入、比较生成 Mask、`vfclass`、`vfmerge`、标量广播 / 搬入 |
 | F38 | VALU1（6 条独有）：加减乘、最值、跨元素归约（求和 / 最大 / 最小）、Top-16 排序（同时输出 16 个 INT16 索引）、标量广播 / 搬出。归约与 Top-K 的输出是 NaN / Inf 替换与上报的收口位置之一 |
 | F39 | VALU2（4 条独有）：加减乘、最值、标量广播、`vmv.v.v` 向量直通缓冲、`vswap2.v` 相邻偶奇对交换、两条 slide（`vfslide1up.vf` / `vfslide1down.vf`）。后四条只搬 element 的位置，不做数值运算、不改数据格式、不产生舍入，**也不参与 NaN / Inf 检测与替换**。`vfslide1up.vf` 在 index 0 补填充标量，`vfslide1down.vf` 在 index VL−1 补填充标量，延迟与同单元其余编码相同。`vmv.v.v` 当延迟对齐缓冲用时只贡献 VALU2 的**首拍延迟** |
-| F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。各函数延迟一致，范围 4～8 拍，暂定 8 拍、完全流水。源不能取自身的输出；自定义拟合函数暂定不实现 |
+| F40 | VSFU（12 条）：sin / cos / tanh / exp / exp2 / ln / log2 / rcp / rsqrt / sqrt / sigmoid。各函数延迟一致，规范范围 4～8 拍，模型暂定 **10 拍**（按当前建模要求上调）、完全流水。源不能取自身的输出；自定义拟合函数暂定不实现 |
 | F40a | VSFU 有 `VSFU0` 与 `VSFU1` 两个功能一致的单元，`VSFU_op` 低 16-bit 配 VSFU0、高 16-bit 配 VSFU1，`src_sel` 的 `0x05` / `0x06` 分别是两者的输出。FP32 精度下两者独立工作，BF16 精度下两者拼接成一个逻辑单元、共同处理 64 element/cycle，此时 VSFU1 的两个字段被忽略、`0x06` 也不可再作为来源 |
 | F40b | 除 SEXE 外，每个执行单元在单条宏指令里只能被调用 1 次：LU、SU、VALU0 / VALU1 / VALU2、MEXE 各 1 次；**VSFU0 与 VSFU1 各 1 次、合计 2 次**（FP32 下两个可各配一次，BF16 下拼接为一个逻辑单元、最多 1 次）。SEXE 是唯一允许多次调用的执行单元，最多 3 次 |
 | F40c | VEXE 内部分为**五个可并行工作的执行分组**：VALU0 / VALU1 / VALU2 / VSFU0 / VSFU1。五个分组共享 SMUX 的源操作数网络与 DMUX 的结果分发，但**各自独立接收微指令、独立流控**——各有独立的 valid/ready 与 done/err，任一分组反压不影响其他分组。「可并行工作」指五个分组是并列资源、可同时对不同的段推进。分组之间不限定先后，下一级用 `src_sel` 取上一级的输出（bypass），不经过 DMUX。数据流不可回环：不能取自身输出，两个分组不能互取对方的输出，违反置 `CFG_ERROR`。DMUX 只把结果分到寄存器堆或 SU |
@@ -465,7 +465,7 @@ VU 与 VU-Core 之间的交互抽象是宏指令：一条宏指令描述的是�
   <text x="458" y="342" font-size="8.5" fill="#6b7280" text-anchor="end">D1</text>
   <text x="326" y="362" font-size="11" fill="#111827">退休与 dsa_done</text>
   <path d="M300 356 L315 356" stroke="#475569" marker-end="url(#arqov)" fill="none"/>
-  <text x="20" y="438" font-size="10.5" fill="#374151">M6 的首拍：规范给范围，模型在范围内取暂定值（加减 2、乘 4、最值/比较/搬运 3、MACC 5、除法 20、VSFU 8、MEXE 2、SEXE 一次迭代 2），范围与暂定值见第 7 节，代码里可按计算改。SEXE0/1/2 是同一物理单元的三次串行迭代，拍数按次相加。各级是流水的：每拍收一段、每拍交一段，拍数只决定首拍延迟。</text>
+  <text x="20" y="438" font-size="10.5" fill="#374151">M6 的首拍：规范给范围，模型取暂定值（加减 2、乘 4、最值/比较/搬运 3、MACC 5、除法 20、VSFU 10、MEXE 2、SEXE 一次迭代 2），范围与暂定值见第 7 节，代码里可按计算改。SEXE0/1/2 是同一物理单元的三次串行迭代，拍数按次相加。各级是流水的：每拍收一段、每拍交一段，拍数只决定首拍延迟。</text>
   <text x="20" y="466" font-size="10.5" fill="#374151">一条宏指令内多条并行通路经过的执行分组级数不同，合并点的两个源操作数会不同拍到达，配平是软件的责任：差一级用 VALU2 的 vmv.v.v 对齐，差得多就拆成多条宏指令。</text>
   <text x="20" y="494" font-size="10.5" fill="#374151">CM 访存依赖硬件不追踪，靠 MACRO_INST_FENCE（等此前全部）或 CM_FENCE（只等 CM 访问）；建模时若默认硬件会挡，结果会偏乐观。</text>
 </svg>
@@ -871,7 +871,7 @@ VL 粒度约束         MXFP8 访存与间隔访问要求 VL 为 32 的整数倍
 | VALU0 除法 | 20～30（暂定 20） | 非全吞吐，VALU 中最长的一档；发起间隔未给，模型仍每拍收一段。能用倒数 + 乘法替代时应优先替代 |
 | VALU1 归约 | 4（占位） | 公式是 LANES 内归约 + ⌈log2 SEG⌉ 级累加，系数未给；结果为标量，经 SRF 虚拟写口 p1 暂存 |
 | VALU1 Top-16 排序 | 4（占位） | 与 SEG 成正比，系数未给；逐段维护 16 项有序表，输出 16 个极值及其 INT16 索引 |
-| VSFU0 / VSFU1 特殊函数 | 4～8（暂定 8） | 查表 + 多项式拟合；**各函数延迟一致**，完全流水。两个 VSFU 串起来时相加，并行时取较长一路 |
+| VSFU0 / VSFU1 特殊函数 | 4～8（模型暂定 **10**） | 查表 + 多项式拟合；**各函数延迟一致**，完全流水。两个 VSFU 串起来时相加，并行时取较长一路 |
 | MEXE 掩码逻辑 | 1～2（暂定 2） | 位运算，MRF entry 宽 64 bit |
 | MEXE `vcpop.m` / `vfirst.m` | 2～4（暂定 2） | 结果为标量，可直供 SU 的 Scalar Store 或写入 SRF。前缀与按索引改位没单列，先与这一档的暂定值相同 |
 | SEXE 单次迭代 | 2～4（暂定 2）；`fdiv` / `fsqrt` 更长 | 物理上只有一个 SEXE，SEXE0 → SEXE1 → SEXE2 串行迭代，**延迟按次累加**。`fdiv` / `fsqrt` 的额外拍数未给，先与这一档的暂定值相同 |
