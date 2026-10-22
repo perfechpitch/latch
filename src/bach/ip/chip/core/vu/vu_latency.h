@@ -117,7 +117,7 @@ class VuLatency {
   }
 
   static uint64_t DefaultVsfu(VsfuOp op) {
-    return op == VsfuOp::kNop ? 0 : 8;
+    return op == VsfuOp::kNop ? 0 : 10;
   }
 
   // 位运算与 vcpop/vfirst 暂定 2。前缀与按索引改位没单列，先同样取 2。
