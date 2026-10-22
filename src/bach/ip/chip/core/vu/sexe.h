@@ -49,6 +49,9 @@ class VuSexe : public VuExeStage {
       f.sexe[k] = VuOperand();
       SexeOp op = SexeOp(r.opcode);
       if (op == SexeOp::kNop) continue;
+      // SEXE 取走源；VALU1 等 VEXE 分组的结果在这里释放槽位。
+      f.Consume(r.src1);
+      if (SexeUsesTwoSrc(uint32_t(op))) f.Consume(r.src2);
       float x = Scalar(f, r.src1);
       float y = Scalar(f, r.src2);
       f.sexe[k].scalar = numeric::ClampNanInf(One(op, x, y));

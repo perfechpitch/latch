@@ -228,7 +228,7 @@ constexpr uint64_t kVuScoreboardGrain = 4;    // 记分板按 4 个 entry 比对
 constexpr uint64_t kVuCmLatency = 14;         // CM 访问延迟，VU 侧 14T
 // 已发出、读回的数据还没被下游消耗的请求上限。名额在发出时占下，这一笔的数据
 // 交出去才还；下游不收，在途会从 14 一直涨到这个数，再发就被反压。
-constexpr uint64_t kVuLuReqDepth = 32;
+constexpr uint64_t kVuLuReqDepth = 16;
 constexpr uint64_t kVuExeStages = 4;          // 归约 / Top-16 的占位拍数，其余见 VuLatency
 constexpr uint64_t kVuTopK = 16;
 constexpr uint64_t kVuLanes = 32;             // 一拍 32 个 FP32，归约的 LANES
