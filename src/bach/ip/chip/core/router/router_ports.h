@@ -129,6 +129,8 @@ struct XbarReqView {
   uint64_t credit_require = 0;
   MessagePtr msg;
   uint64_t seq = 0;
+  // 从哪类入口进来：三个 R2R 方向，本核出核口，其余是归约结果。
+  bool from_mesh = false, from_local = false;
 };
 
 inline XbarReqView ReadXbarReq(XbarReqPort const &p) {

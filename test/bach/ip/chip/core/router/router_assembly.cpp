@@ -661,38 +661,40 @@ TEST(BachRouterAsm, OverflowGoesToReissue) {
   EXPECT_EQ(occ, 0u);
 }
 
-// credit 耗光时包留在当前 VC 等，不改送进核，也不进 Reissue 保序。
-TEST(BachRouterAsm, StallWayStoresWhenCreditIsGone) {
-  uint64_t overflow = 0, got = 0, to_core = 0;
-  {
-    EnsureSlots();
-    ClockPtr clk = MakeClock(0, kPeriod);
-    RouterCfg cfg;
-    cfg.reissue_pkts_per_vc = 16;
-    Router rt(clk, "router", cfg);
-    rt.Preload(3, Forward(kFlowRight, false, /*stall_way=*/true));
+// 下游 credit 耗光时，stallWay=1 的包整包进核等重发，否则多播 wormhole 会
+// 成环；stallWay=0 的包留在当前 VC 等。两种都不走溢流口。
+TEST(BachRouterAsm, StallWayDivertsWhenCreditIsGone) {
+  for (bool stall_way : {false, true}) {
+    SCOPED_TRACE(stall_way ? "stallWay=1" : "stallWay=0");
+    uint64_t overflow = 0, got = 0, to_core = 0;
+    {
+      EnsureSlots();
+      ClockPtr clk = MakeClock(0, kPeriod);
+      RouterCfg cfg;
+      cfg.reissue_pkts_per_vc = 16;
+      Router rt(clk, "router", cfg);
+      rt.Preload(3, Forward(kFlowRight, false, stall_way));
 
-    // 一个方向的 credit 是 private 20 加 shared 20 共 40。前 40 笔把它用光。
-    // 后面的包留在 VC 里等 credit，不进核。
-    std::vector<Pusher::Job> jobs;
-    for (uint64_t i = 0; i < 50; ++i) {
-      jobs.push_back({1 + i, MakeMsg(3, 500 + i)});
+      // 一个方向的 credit 是 private 20 加 shared 20 共 40。前 40 笔把它用光。
+      std::vector<Pusher::Job> jobs;
+      for (uint64_t i = 0; i < 50; ++i) {
+        jobs.push_back({1 + i, MakeMsg(3, 500 + i)});
+      }
+      Pusher push(clk, rt.InWire(kLeft), jobs);
+      Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), false);
+      CoreSide core(clk, rt);
+      AsmProbe probe(clk, rt);
+      clk->Continue(300 * kPeriod);
+      RT::JoinAll();
+      overflow = probe.overflow;
+      got = down.got;
+      to_core = rt.GetXbar().SentCount(kOutCore);
     }
-    Pusher push(clk, rt.InWire(kLeft), jobs);
-    Downstream down(clk, rt.OutWire(kRight), rt.BackWire(kRight), false);
-    CoreSide core(clk, rt);
-    AsmProbe probe(clk, rt);
-    clk->Continue(300 * kPeriod);
-    RT::JoinAll();
-    overflow = probe.overflow;
-    got = down.got;
-    to_core = rt.GetXbar().SentCount(kOutCore);
+    RT::Reset();
+    EXPECT_EQ(got, 40u);
+    EXPECT_EQ(to_core, stall_way ? 10u : 0u);
+    EXPECT_EQ(overflow, 0u);
   }
-  RT::Reset();
-  // 40 个 credit 用完。剩下的包不进核，也不走溢流口。
-  EXPECT_EQ(got, 40u);
-  EXPECT_EQ(to_core, 0u);
-  EXPECT_EQ(overflow, 0u);
 }
 
 // 往右的 stream 表被 16 个别的用户占满，stallWay=1 的包整包进核等重发。这条 VC

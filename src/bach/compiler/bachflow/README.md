@@ -104,11 +104,12 @@ the same token. The bound comes from pcode's ingress kernel. It indexes a
 by arrival order, so ids and arrival counts must stay below 1024. More than 16
 users reuse the 16 stream IDs; the input feed is paced by C2C link credit.
 
-32, 64 and 128 users complete without a cap (near cycles 13300, 20000 and
-33500) and match the golden. User order is not fully kept: at 128 users a few cores on
-chip 47 create later users' stream entries ahead of earlier ones, since a
-user that already holds a downstream stream entry does not wait behind
-earlier users diverted on the same VC. `BACHFLOW_MAX_IN_FLIGHT=N` feeds user k
+32, 64 and 128 users complete without a cap (near cycles 14000, 21200 and
+35100), match the golden and leave the egress in user order. The 128-user
+run needs the Router to divert a packet to its core when the next hop has no
+VC credit left (`stallWay=1`), not only when it is short of a stream entry:
+without that, multicast wormholes on VC 0 close a cycle on chip 43.
+`BACHFLOW_MAX_IN_FLIGHT=N` feeds user k
 only after user k-N has its egress output. It is a harness option, not a
 claim that the hardware needs host-side pacing, and EP1 does not need it.
 
@@ -118,10 +119,10 @@ limit; 4000 is enough for EP1.
 
 A run needs `BACHFLOW_CYCLE_LIMIT` and `BACHFLOW_WALL_LIMIT` well above the
 defaults (3000 cycles, 300 s): one user ends near cycle 7000, 16 users near
-10000, 32 users near 13300, 64 users near 20000, 128 users near 33500
+10000, 32 users near 14000, 64 users near 21200, 128 users near 35100
 uncapped. With two to four runs side by side on one host, wall time was about
-10 minutes for 1 user, 16 for 16 users, 13 for 32, 30 for 64 and 30 to 45 for
-128. Even one user overruns the 300 s default.
+10 minutes for 1 user, 16 for 16 users, 13 to 18 for 32, 26 to 30 for 64 and
+30 to 45 for 128. Even one user overruns the 300 s default.
 
 EP1 endpoints, the defaults of `scripts/run-exact-native.sh` and overridable
 by the same variables:

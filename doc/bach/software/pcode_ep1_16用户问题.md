@@ -572,7 +572,7 @@ Step7、128 用户重跑，日志 `/tmp/ep1_unit_logs/s07_u128_rmem.log`。第 8
 - 下游 Stream 不够、`stallWay=1`、这一包还没向原目标交过 flit，整包进 Core，原 VC 进入 Reissue 保序（F-025、F-027）。
 - 下一跳 VC credit 不够，暂停并留下上下文，下一 flit 从暂停处继续，同一 VC 后面的包不越过它，别的就绪 VC 可以发。不触发 Reissue。
 
-latch 原先只要这一拍资源不够（含 credit 为 0）且 `stall_way` 为真就 `DivertToCore`。改成 `StreamShortOnly`：只有某个网格出口的 Stream 不够、其余出口都拿得到资源时才整包改送进核。`BachRouterAsm.StallWayStoresWhenCreditIsGone` 改成：40 个 credit 用完后，剩下的包留在 VC 里等，进核数 0，溢流 0。
+latch 原先只要这一拍资源不够（含 credit 为 0）且 `stall_way` 为真就 `DivertToCore`。改成 `StreamShortOnly`：只有某个网格出口的 Stream 不够、其余出口都拿得到资源时才整包改送进核。`BachRouterAsm.StallWayStoresWhenCreditIsGone` 改成：40 个 credit 用完后，剩下的包留在 VC 里等，进核数 0，溢流 0。9.21 又让 credit 用完的包头改送进核，这个测试改名为 `StallWayDivertsWhenCreditIsGone`。
 
 同一轮还放宽了一条：一包包头已发、包身还在上游没到（`FlightPending` 为假）时，交叉开关不再挡这条 VC，`flight_` 也从 station 的 `hold_block` 里拿掉。这条放宽是为 p7「西口满、交叉开关空」加的，后来查明那次的真因是 9.15 的 `order_` 没清。这条放宽在 Step8 上造成两包交错（9.16），9.17 已经撤回。
 
@@ -756,3 +756,20 @@ gx=3 这一列东边没有邻片，p4、p9 只剩南口这一个出路，几种�
 - 在 latch 实现 `reduce_sel`（9.19 的第 2 条），按 pcode 原表，路由不动。
 - 沿这个思路改规划器：允许 unused 核做 `p4↔p9` 纵向透传，并且 release CSR 能在同一透传核上区分两路上游。两条都要硬件确认，单靠规划器做不到。
 - 导出时把 p2 改成中间相加（9.19 的第 1 条），latch 能跑通，但违反第 189 行，只是模型侧的近似。
+
+### 9.21 改送按 (出口, VC) 计数，下游 credit 用完也改送
+
+全图 128 用户、不限在途。改送规则换成硬件提的计数方案后，只完成 33 个用户，第 15364 拍起 MU 计数不变。卡点在全局 chip 43 的 VC 0：`u347p0` 在 p0 分三路（本核、往 p5、往 p1），往 p5 的分支包头已经锁住 p5–p8 和 chip 47 的 VC 0，包身还在 p0；往 p1 的分支没有 credit，多播 flit 要每个分支都有 credit 才发，两个分支一起停。p1、p2、p3 的 left 入口 VC 0 各满 40 个 flit，p3 队头要进 p8；p8 的 mid 入口队头要用的出口正被 `u347p0` 的往 p5 分支锁着，这个分支又在等 p0 送后面的 flit，成环。环上只有 VC credit 和包头到包尾的锁，没有包在等重发，Stream 都够。改送规则不在环里，原规则能跑完是时序上没撞到。
+
+**计数。** `xbar.h` 的 `reissue_wait_` 只当成每个 (出口, VC) 的计数用：改送进核时 +1，那一包的重发包头从本核发出时 -1。latch 用 (user, path) 认出本核发出的是不是那一包重发，代替硬件包头上的重发标记，所以换成 `multimap`。`WaitAhead`：
+
+- 网格进来的包（`from_mesh`），计数不为 0 就改送进核排在后面，占没占下游一项都一样。
+- 本核发出的包（`from_local`）不在这里挡。重发包本身不能挡；普通发送由 TS 按用户年龄授权：`CreditMonitor::SetReissueBusy` 查 Router 的 `ReissueBusyFor`，这几个出口上有计数时，年长的一笔没授权，年轻的不能先拿。
+- reduce 结果不能改送，已占下游一项的照走，没占的等。
+- 只在本核发出的包头经过时减计数（`Consume` 查 `from_local`）。
+
+**credit 用完也改送。** `StreamShortOnly` 加 `MeshCreditShort`：某个网格出口这条 VC 私有、共享 credit 都是 0，表项 `stallWay=1`，其余出口都拿得到资源时，包头整包进核，也记一次计数。这个出口正被别的包锁着时只等它发完，不改送。9.14 按飞书阻塞表把触发收窄到只有 Stream，这里又放宽了：环上每一步都是在等下游 VC 0 的 credit，包头在 credit 用完时能进核，环上就有一处能把整包让出去。这一条飞书 Router 文档没有写，要硬件确认。
+
+`BachRouterAsm.StallWayStoresWhenCreditIsGone` 改名 `StallWayDivertsWhenCreditIsGone`，对 `stallWay` 0 和 1 各跑一遍：40 个 credit 用完后，`stallWay=1` 剩下的 10 笔整包进核，`stallWay=0` 留在 VC 里等，溢流都是 0。router 和 TS 的 154 个测试通过。
+
+全图 128 用户不限在途，BachFlow bundle 为 `a4fc8a6` / `9cd3a29` 之后的构建：128/128 完成，最后一个在第 35133 拍，用户 101、202 的 cosine 是 0.99972、0.99974。改送 17842 次，credit 引起的 26 次，其余是 Stream 不够。egress 按用户顺序输出，相邻颠倒 0 处。

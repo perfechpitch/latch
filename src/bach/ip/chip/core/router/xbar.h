@@ -319,6 +319,22 @@ public:
     }
   }
 
+  // mask 里有没有一个出口正有包改送进核等重发（不分 VC）。TS 据此在这些方向
+  // 上按用户年龄授权。
+  uint64_t ReissueBusy(uint64_t mask) const {
+    uint64_t busy = 0;
+    for (uint64_t o = 0; o < kR2RNum; ++o)
+      if (((mask >> o) & 1u) && !reissue_wait_[o].empty())
+        busy |= 1ull << o;
+    return busy;
+  }
+  bool InStreamTab(uint64_t mask, uint64_t user) const {
+    for (uint64_t o = 0; o < kR2RNum; ++o)
+      if (((mask >> o) & 1u) && stream_tab[o].count(user) == 0)
+        return false;
+    return true;
+  }
+
   bool Quiescent() const override {
     for (auto const &per_vc : in_q) {
       for (auto const &q : per_vc) {
@@ -432,6 +448,8 @@ private:
       if (!v.valid || v.seq == last_seq[in])
         continue;
       last_seq[in] = v.seq;
+      v.from_mesh = in < kInLocal;
+      v.from_local = in == kInLocal;
       LOGCHECK(v.vc < kVcNum, "Xbar: VC 号越界。");
       LOGCHECK(in_q[in][v.vc].size() < kXbarInDepth,
                "Xbar: 入口缓冲满了。上游按 room 发，满就说明门限留少了。");
@@ -490,24 +508,37 @@ private:
     return false;
   }
 
-  // 这一跳被挡住，是不是只因为下游 mesh 的 Stream 不够。credit、口被占、
-  // Core 或 Reduce 反压都不算。两者同时不够时先等 credit。
+  // 这一跳被挡住，是不是只因为下游 mesh 的 Stream 不够，或下游连包头这一个
+  // flit 都收不下。口被占、Core 或 Reduce 反压都不算。
   bool StreamShortOnly(uint64_t in, XbarReqView const& v,
                        std::array<bool, kXbarOutNum> const& taken) const {
     bool stream_short = false;
+    bool credit_short = false;
+    bool locked = false;
     bool other = false;
     for (uint64_t o = 0; o < kXbarOutNum; ++o) {
       if (((v.out_mask >> o) & 1u) == 0) continue;
-      if (!OwnerOk(o, v.vc, in)) continue;
+      if (!OwnerOk(o, v.vc, in)) {
+        locked = true;
+        continue;
+      }
       if (taken[o]) {
         other = true;
         continue;
       }
       if (ResourceOk(o, v)) continue;
       if (MeshStreamShort(o, v)) stream_short = true;
+      else if (MeshCreditShort(o, v)) credit_short = true;
       else other = true;
     }
-    return stream_short && !other;
+    // 下游 credit 用完时整包进核，否则多播 wormhole 会成环；出口被别的包锁着
+    // 只是等它发完，不改送。
+    if (credit_short && locked) return false;
+    return (stream_short || credit_short) && !other;
+  }
+
+  bool MeshCreditShort(uint64_t o, XbarReqView const& v) const {
+    return o < kR2RNum && private_cr[o][v.vc] == 0 && shared_cr[o] == 0;
   }
 
   bool MeshStreamShort(uint64_t o, XbarReqView const& v) const {
@@ -702,8 +733,9 @@ private:
     // 归还的那一项。
     if (v.head) {
       for (uint64_t o = 0; o < kR2RNum; ++o)
-        if (((v.out_mask >> o) & 1u) && MeshStreamShort(o, v))
-          reissue_wait_[o][{v.user_id, v.path_id}] = v.vc;
+        if (((v.out_mask >> o) & 1u) &&
+            (MeshStreamShort(o, v) || MeshCreditShort(o, v)))
+          reissue_wait_[o].emplace(std::make_pair(v.user_id, v.path_id), v.vc);
     }
     // 多播的几个方向共享同一个 Message。重发标记只打在送进本核的这一份上，
     // 不能改共享对象，否则还在别的路口上的副本也会被当成已经改道。
@@ -1163,13 +1195,17 @@ private:
     return ((v.stream_need >> o) & 1u) != 0;
   }
 
-  // 同 VC 上有别的用户已改送进核在等重发，就让它先。已占下游一项的用户不抢
-  // 下游新还回的那一项，不用等。
+  // 每个 (出口, VC) 一个计数：改送进核 +1，那一包重发的包头从本核发出 -1。
+  // 计数不为 0 时网上来的包不直通，一律改送进核排在后面，占没占下游一项都
+  // 一样。本核发出的不在这里挡：重发包本身不能挡，普通发送由 TS 按用户年龄
+  // 授权。reduce 结果不能改送，已占下游一项的照走，没占的等。
   bool WaitAhead(uint64_t o, XbarReqView const &v) const {
-    if (stream_tab[o].count(v.user_id) != 0)
+    if (v.from_local)
+      return false;
+    if (!v.from_mesh && stream_tab[o].count(v.user_id) != 0)
       return false;
     for (auto const& [up, vc] : reissue_wait_[o])
-      if (vc == v.vc && up.first != v.user_id)
+      if (vc == v.vc && (v.from_mesh || up.first != v.user_id))
         return true;
     return false;
   }
@@ -1199,8 +1235,11 @@ private:
     // 这段时间放直通包过去，到下游就排在它前面了。包头占住这一出口的 VC 之后，
     // 同 VC 的后来者只能跟在包尾后面。按 (user, path) 清：同一用户别的 path
     // 先从这一出口发出，不代表等重发的那个包已经发出。
-    if (v.head)
-      reissue_wait_[o].erase({v.user_id, v.path_id});
+    if (v.head && v.from_local) {
+      auto rec = reissue_wait_[o].find({v.user_id, v.path_id});
+      if (rec != reissue_wait_[o].end())
+        reissue_wait_[o].erase(rec);
+    }
     if (pass_through)
       return;
     // 坑按 user 记，不按包记：同一个 user 第二次发送余额不变。credit 的量也
@@ -1264,7 +1303,9 @@ private:
   std::array<std::set<uint64_t>, kOutCore + 1> stream_tab;
   std::array<uint64_t, kR2RNum> core_credit{};
   std::array<std::map<uint64_t, uint64_t>, kR2RNum> taken_kb;
-  std::array<std::map<std::pair<uint64_t, uint64_t>, uint64_t>, kR2RNum>
+  // 硬件只记每个 (出口, VC) 的个数；(user, path) 只用来认出从本核发出的
+  // 是不是那一包重发，代替硬件包头上的重发标记。
+  std::array<std::multimap<std::pair<uint64_t, uint64_t>, uint64_t>, kR2RNum>
       reissue_wait_;
   bool force_ready = false;
   std::function<bool(Message const &)> reduce_admission;

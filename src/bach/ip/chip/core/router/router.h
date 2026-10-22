@@ -313,6 +313,12 @@ class Router {
   void TakeStreamFor(uint64_t user, uint64_t path) {
     xbar->TakeStream(StreamDirsOf(path), user);
   }
+  // 这条 path 出核要查 stream 的方向里，哪几个正有包改送进核等重发；这个用户
+  // 已在这几个方向的下游各占一项的，返回 0。
+  uint64_t ReissueBusyFor(uint64_t user, uint64_t path) const {
+    uint64_t busy = xbar->ReissueBusy(StreamDirsOf(path));
+    return busy && xbar->InStreamTab(busy, user) ? 0 : busy;
+  }
 
  private:
 

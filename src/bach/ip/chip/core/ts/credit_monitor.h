@@ -70,6 +70,11 @@ public:
   // 堵在本核唯一的出核 VC 上。授权时查这张表并当场占坑。
   void SetStreamCheck(CreditMonitor::ResourceCheck fn) { stream_check = std::move(fn); }
   void SetStreamTake(CreditMonitor::ResourceTake fn) { stream_take = std::move(fn); }
+  // Router 那几个出口上有包改送进核等重发时，这些方向按用户年龄严格授权：
+  // 年长的一笔没授权，年轻的就不能先拿，否则它直通出去排到等重发的前面。
+  void SetReissueBusy(std::function<uint64_t(uint64_t, uint64_t)> fn) {
+    reissue_busy = std::move(fn);
+  }
 
   std::shared_ptr<StreamWritePortIf> WakePtr() const { return wake; }
   std::shared_ptr<StreamWritePortIf> RetireWrPtr() const { return retire_wr; }
@@ -101,6 +106,7 @@ protected:
     auto budget = view->credit_count;
     counts = budget;
     bool older_unregistered = false;
+    uint64_t older_waiting = 0;
     for (uint64_t age = 0; age < view->slot_num; ++age) {
       uint64_t sid = view->AgeOrder(age);
       auto const &e = view->entry[sid];
@@ -133,14 +139,19 @@ protected:
       }
       if (older_unregistered)
         continue;
+      uint64_t busy =
+          reissue_busy ? reissue_busy(e.user_id, e.task_path_id) : 0;
+      if (busy & older_waiting)
+        continue;
       bool enough = true;
       for (uint64_t dir = 0; dir < 3; ++dir)
         if ((need & (1ull << dir)) && budget[dir] == 0)
           enough = false;
-      if (!enough)
+      if (!enough ||
+          (stream_check && !stream_check(e.user_id, e.task_path_id))) {
+        older_waiting |= busy;
         continue;
-      if (stream_check && !stream_check(e.user_id, e.task_path_id))
-        continue;
+      }
       if (stream_take)
         stream_take(e.user_id, e.task_path_id);
       auto w = Ready(sid, e);
@@ -249,6 +260,7 @@ private:
   std::shared_ptr<ReissueDonePort> reissue_done;
   CreditMonitor::ResourceCheck stream_check;
   CreditMonitor::ResourceTake stream_take;
+  std::function<uint64_t(uint64_t, uint64_t)> reissue_busy;
   std::array<std::optional<Pending>, kStreamNum> pending{};
   std::optional<RetiredToken> last_retired;
   std::array<uint64_t, 3> counts{};
