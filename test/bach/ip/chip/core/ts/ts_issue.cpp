@@ -212,7 +212,7 @@ TaskEntry EndOn(SendUnit unit) {
 } // namespace
 
 // R core 与 B core 上进来的包不建 stream 表项：只把 datain 任务登记进
-// DataIn_task_table，PC 取 DATAIN_TASK，身份用保留的 SID 15 / TID 63，同一个
+// DataIn_task_table，PC 取 DATAIN_TASK，使用 SID0/TID0，不返回完成 ACK，同一个
 // 用户来第二次照样登记。
 TEST(BachTsIssue, SelfStartBypassDoesNotAddUserSlots) {
   std::vector<IssueBench::Got> d;

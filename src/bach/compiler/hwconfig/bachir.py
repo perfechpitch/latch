@@ -17,7 +17,7 @@ VUSTATIC 是开机写一次的 VU 静态组（门控组 1/2、求和组 4/5）�
 kernel_vu.c 的 gate_setup / add_setup 同一份数。
 """
 
-HEADER = "BACHIR 10"
+HEADER = "BACHIR 11"
 
 
 # 一层 MoE 那套拓扑的产物。core 一律按 (chip 号, 片内 core 号) 定位，与模型里

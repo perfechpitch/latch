@@ -65,6 +65,13 @@ public:
   void AttachTopkWr(std::shared_ptr<MemPort> p) {
     out[2][kWrite] = std::move(p);
   }
+  std::shared_ptr<MemPort> LaneSmem(uint64_t lane) const {
+    return side[kToSmem].at(lane);
+  }
+  std::shared_ptr<MemPort> SmemWrPtr() const { return out[kToSmem][kWrite]; }
+  void AttachSmemWr(std::shared_ptr<MemPort> p) {
+    out[kToSmem][kWrite] = std::move(p);
+  }
 
   // ── 对外：每块存储的读与写各一个口 ──
   MemPort &CmemRd() { return *out[kToCmem][kRead]; }
@@ -82,6 +89,12 @@ public:
   }
   void AttachMmemWr(std::shared_ptr<MemPort> p) {
     out[kToMmem][kWrite] = std::move(p);
+  }
+  void BlockMmemIngress(bool on) { mmem_ingress_blocked = on; }
+  bool MmemQuiescent() const {
+    for (auto const& pending : pend[kToMmem]) if (!pending.empty()) return false;
+    for (auto const& queue : slot[kToMmem]) if (!queue.empty()) return false;
+    return true;
   }
 
   bool Quiescent() const override {
@@ -109,12 +122,13 @@ protected:
       Serve(kToMmem);
       Serve(2);
     }
+    Serve(kToSmem);
     topk_first = !topk_first;
     TracePerCycle("grants", grant_cnt);
   }
 
 private:
-  enum Which : uint64_t { kToCmem = 0, kToMmem = 1, kWhichNum = 3 };
+  enum Which : uint64_t { kToCmem = 0, kToMmem = 1, kToSmem = 3, kWhichNum = 4 };
   enum Rw : uint64_t { kRead = 0, kWrite = 1, kRwNum = 2 };
 
   // 入口每个通道的格数，与报 ready 的门限。
@@ -133,7 +147,8 @@ private:
     Forward(which, kWrite);
     for (uint64_t i = 0; i < kLaneNum; ++i) {
       side[which][i]->DriveSlaveWithWrite(
-          slot[which][i].size() < kSlotMark, i == read_owner,
+          slot[which][i].size() < kSlotMark &&
+              !(which == kToMmem && mmem_ingress_blocked), i == read_owner,
           i == read_owner ? data : ByteBlockPtr(), i == write_owner,
           i == read_owner ? read_error : 0, i == write_owner ? write_error : 0);
     }
@@ -195,7 +210,8 @@ private:
   // 轮转取一笔发给存储。读与写各走各的口，各有各的轮转指针。
   void Forward(uint64_t which, uint64_t rw) {
     MemPort &port = *out[which][rw];
-    if ((which != kToCmem && mtop_used[rw]) || !port.Ready()) {
+    bool mtop = which == kToMmem || which == 2;
+    if ((mtop && mtop_used[rw]) || !port.Ready()) {
       port.IdleReq();
       return;
     }
@@ -211,7 +227,7 @@ private:
       if (r.pair && !port.PairReady())
         continue;
       ForwardMemReq(port, r);
-      if (which != kToCmem)
+      if (mtop)
         mtop_used[rw] = true;
       pend[which][rw].push_back({i, r.pair, 0, 0, nullptr});
       slot[which][i].pop_front();
@@ -223,6 +239,7 @@ private:
   }
 
   std::array<std::array<std::shared_ptr<MemPort>, kLaneNum>, kWhichNum> side;
+  bool mmem_ingress_blocked = false;
   std::array<std::array<std::deque<MemReqView>, kLaneNum>, kWhichNum> slot;
   std::array<std::array<uint64_t, kLaneNum>, kWhichNum> seen{};
   std::array<std::array<std::shared_ptr<MemPort>, kRwNum>, kWhichNum> out;

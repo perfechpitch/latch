@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "bach/common/numeric/accum.h"
+#include "bach/common/numeric/fp32.h"
 #include "bach/common/numeric/mx.h"
 #include "bach/common/numeric/round.h"
 
@@ -223,3 +224,39 @@ TEST(Numeric, ClampNanInf) {
 }
 
 }  // namespace
+
+TEST(NumericFp32, SpecialValuesAndFlags) {
+  auto invalid = Fp32Mul(0, 0x7f800000);
+  EXPECT_EQ(invalid.bits, 0x7fc00000u); EXPECT_EQ(invalid.flags, kFpNv);
+  invalid = Fp32Add(0x7f800000, 0xff800000);
+  EXPECT_EQ(invalid.bits, 0x7fc00000u); EXPECT_EQ(invalid.flags, kFpNv);
+  EXPECT_EQ(Fp32Add(0x7f800001, 0x3f800000).flags, kFpNv);
+  EXPECT_EQ(Fp32Add(0x7fc01234, 0x3f800000).flags, 0u);
+  EXPECT_EQ(Fp32Mul(0x7f7fffff, 0x40000000).flags, kFpOf | kFpNx);
+  EXPECT_EQ(Fp32Mul(0x7f7fffff, 0x40000000).bits, 0x7f800000u);
+  EXPECT_EQ(Fp32Add(0x80000000, 0x80000000).bits, 0x80000000u);
+  EXPECT_EQ(Fp32Add(0x80000000, 0).bits, 0u);
+  EXPECT_EQ(Fp32Mul(0x80000000, 0x3f800000).bits, 0x80000000u);
+}
+
+TEST(NumericFp32, GradualUnderflowAndTieToEven) {
+  auto exact = Fp32Mul(0x00800000, 0x3f000000);
+  EXPECT_EQ(exact.bits, 0x00400000u); EXPECT_EQ(exact.flags, 0u);
+  auto tiny = Fp32Mul(1, 0x3f000000);
+  EXPECT_EQ(tiny.bits, 0u); EXPECT_EQ(tiny.flags, kFpUf | kFpNx);
+  EXPECT_EQ(Fp32Mul(3, 0x3f000000).bits, 2u);
+  auto tie = Fp32Add(0x3f800000, 0x33800000);
+  EXPECT_EQ(tie.bits, 0x3f800000u); EXPECT_EQ(tie.flags, kFpNx);
+  EXPECT_EQ(Fp32Add(0x3f800001, 0x33800000).bits, 0x3f800002u);
+  EXPECT_EQ(Fp32ToBf16(0x3f808000).bits, 0x3f80u);
+  EXPECT_EQ(Fp32ToBf16(0x3f818000).bits, 0x3f82u);
+  EXPECT_EQ(Fp32ToBf16(0x7f7fffff).flags, kFpOf | kFpNx);
+  EXPECT_EQ(Fp32ToBf16(0x00008000).flags, kFpUf | kFpNx);
+}
+
+TEST(Numeric, Fp4ScaleFormatsAreDistinct) {
+  EXPECT_EQ(ScaleBlockOf(DataType::kMxfp4), 32u);
+  EXPECT_EQ(ScaleBlockOf(DataType::kNvfp4), 16u);
+  EXPECT_EQ(DecodeScale(DataType::kMxfp4, {127}, 1)[0], 1.0f);
+  EXPECT_EQ(DecodeScale(DataType::kNvfp4, {0x38}, 1)[0], 1.0f);
+}

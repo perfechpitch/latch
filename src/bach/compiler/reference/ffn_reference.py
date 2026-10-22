@@ -69,7 +69,7 @@ def gemm(dtype, token, weight, scale, k, count_n, out_bf16, wscale=None):
             acc = n.accum_by_scale_block2(prod, sc, wsc, block)
         else:
             acc = n.accum_by_scale_block(prod, sc, block)
-        r = n.clamp_nan_inf(acc)
+        r = n.float_of(0x7fc00000) if n.is_nan(acc) else acc
         if out_bf16:
             r = n.from_bf16(n.to_bf16(r))
         out.append(r)

@@ -150,7 +150,7 @@ private:
     if (cmd.Valid() && fire[u] == 0) {
       uint64_t s = cmd.stream_id.Get();
       uint64_t t = cmd.task_id.Get();
-      uint64_t key = s * kTaskChainNum + t + 1;
+      uint64_t key = cmd.Seq();
       if (key != last_key[u]) {
         ++cnt;
         stream[u] = s;
@@ -158,7 +158,9 @@ private:
         last_key[u] = key;
         if (log)
           log->push_back(t);
-        fire[u] = now + latency;
+        bool bypass = u == 0 && ts.Cfg().SelfStartCore() &&
+                      cmd.task_pc.Get() == ts.Cfg().DatainPc();
+        if (!bypass) fire[u] = now + latency;
       }
     }
     cmd.DriveReady(fire[u] == 0 || fire[u] > now);
@@ -563,7 +565,8 @@ protected:
         last_seq[u] = cmd[u]->Seq();
         Got g{now, u, cmd[u]->stream_id.Get(), cmd[u]->task_id.Get()};
         issued.push_back(g);
-        pending[u].push_back({now + latency[u], g});
+        bool bypass = u == 0 && cmd[u]->task_pc.Get() == ts.Cfg().DatainPc();
+        if (!bypass) pending[u].push_back({now + latency[u], g});
       }
       cmd[u]->DriveReady(true);
       if (head[u] < pending[u].size() && pending[u][head[u]].first <= now) {
@@ -608,11 +611,11 @@ TEST(BachTs, SelfStartIssuesTask0sBackToBack) {
   RT::Reset();
   std::vector<SelfStartUnits::Got> t0_issue, t0_done;
   for (auto const &g : issued) {
-    if (g.task == 0)
+    if (g.unit == 1 && g.task == 0)
       t0_issue.push_back(g);
   }
   for (auto const &g : done) {
-    if (g.task == 0)
+    if (g.unit == 1 && g.task == 0)
       t0_done.push_back(g);
   }
   ASSERT_GE(t0_issue.size(), 4u);
@@ -641,7 +644,7 @@ TEST(BachTs, SelfStartChainRestartsInPlace) {
     clk->Continue(200 * kPeriod);
     RT::JoinAll();
     for (auto const &g : units.issued) {
-      if (g.task == 0)
+      if (g.unit == 1 && g.task == 0)
         t0_streams.push_back(g.stream);
     }
     retire_seen = router.retire_seen;

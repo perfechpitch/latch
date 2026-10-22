@@ -162,8 +162,8 @@ class KnCpu:
                 s = asc[:, :, blk:blk + 1] * wsc[(base + ki * tile_k + b * 32)
                                                  // 32]
                 total = total + part * s
-            r = clamp(total)
-            acc = r if acc is None else clamp(acc + r)
+            r = total
+            acc = r if acc is None else acc + r
         return acc
 
     def chips(self, tokens, g, keep=True):
@@ -215,8 +215,8 @@ class KnCpu:
                                 lambda c: c * seg_i, v.FC2_K,
                                 seg_i // v.FC2_K)
             wep = np.float32(n.f32(v.KN_W_EP[e]))
-            one = clamp(acc * wep)
-            ep = one if ep is None else clamp(ep + one)
+            one = acc * wep
+            ep = one if ep is None else ep + one
         concat = to_bf16(ep)
         out = []
         for t in range(t_n):

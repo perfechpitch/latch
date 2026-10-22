@@ -21,6 +21,8 @@
 #include "base/clock.h"
 #include "base/runtime.h"
 #include "bach/ip/chip/core/mu/mu.h"
+#include "bach/ip/chip/core/memory/core_mem.h"
+#include "bach/ip/chip/core/memory/matrix_mem.h"
 
 using namespace latch;
 using namespace latch::bach;
@@ -131,7 +133,7 @@ std::vector<uint8_t> TameScale(numeric::DataType t, uint64_t nblock,
   std::vector<uint8_t> v = Pattern(nblock, seed);
   for (uint8_t& b : v) {
     // E8M0：127 是 2^0，把它收进 2^−7～2^7。
-    b = t == numeric::DataType::kMxfp8 ? uint8_t(120 + (b % 15)) : b;
+    b = (t == numeric::DataType::kMxfp8 || t == numeric::DataType::kMxfp4) ? uint8_t(120 + (b % 15)) : b;
   }
   return v;
 }
@@ -388,7 +390,7 @@ TEST(Mu, TriggerLatchesConfig) {
                                  kMuTaskLast},
           {kMuAAddr, 0x1000u},
           {kMuCAddr, 0x8000u},
-          {kMuTaskTrigger, kMuTriggerValid},
+          {kMuTaskTrigger, kMuTriggerDefault},
       };
       uint64_t now = CycleNow();
       if (now == 0 || now > 5) {
@@ -583,9 +585,11 @@ class MuDriver : public BachModule {
 
 // topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const& t) {
-  std::vector<uint8_t> b(t.size() * kTopkEntryBytes, 0);
+  std::vector<uint8_t> b(kTopkBytesPerStream, 0);
+  b[0] = uint8_t(t.size());
+  b[1] = uint8_t(t.size() >> 8);
   for (size_t i = 0; i < t.size(); ++i) {
-    uint64_t at = i * kTopkEntryBytes;
+    uint64_t at = 2 + i * kTopkEntryBytes;
     b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
     b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
@@ -619,6 +623,7 @@ TEST(Mu, AssemblySingleTile) {
   want.b_addr = 0x0;
   want.c_addr = 0x20000;
   want.stream_id = 2;
+  want.a_stream_stride = want.c_stream_stride = 0x2000;
   want.task_id = 3;
   want.task_last = true;   // 单笔任务要置 task_last，才会报一次 dsa_done
 
@@ -629,17 +634,19 @@ TEST(Mu, AssemblySingleTile) {
 
   std::vector<uint8_t> token = TamePattern(want.a_dtype, k, 0x901);
   std::vector<uint8_t> weight = TamePattern(want.b_dtype, k * n, 0x902);
-  cmem.Poke(want.a_addr, token);
+  cmem.Poke(want.a_addr + want.stream_id * want.a_stream_stride, token);
   mmem.Poke(want.b_addr, weight);
 
   CfgWriter writer(clk, cfg_port);
   writer.SetIds(want.stream_id, want.task_id);
-  writer.Push(kMuPrimitiveMode, kMuTaskLast);   // BF16×BF16、1×K128×N64
+  writer.Push(kMuPrimitiveMode, kMuTaskLast | kMuShareEpEn | (1u << kMuShareEpMaskShift));   // BF16×BF16、1×K128×N64
   writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
   writer.Push(kMuAAddr, want.a_addr);
-  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuAStreamStride, want.a_stream_stride);
+  writer.Push(kMuBAddr, want.b_addr / 64);
   writer.Push(kMuCAddr, want.c_addr);
-  writer.Push(kMuTaskTrigger, kMuTriggerValid);
+  writer.Push(kMuCStreamStride, want.c_stream_stride);
+  writer.Push(kMuTaskTrigger, kMuTriggerDefault);
 
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
@@ -648,7 +655,7 @@ TEST(Mu, AssemblySingleTile) {
 
   ASSERT_EQ(sink.got.size(), 1u);
   std::vector<float> ref = Reference(want, token, weight, {});
-  std::vector<uint8_t> raw = outmem.Peek(want.c_addr, n * 4);
+  std::vector<uint8_t> raw = outmem.Peek(want.c_addr + want.stream_id * want.c_stream_stride, n * 4);
   for (uint64_t j = 0; j < n; ++j) {
     uint32_t b = 0;
     for (int t = 0; t < 4; ++t) b |= uint32_t(raw[j * 4 + t]) << (8 * t);
@@ -686,6 +693,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   want.b_addr = 0x0;
   want.c_addr = 0x20000;
   want.stream_id = 5;
+  want.a_stream_stride = want.c_stream_stride = 0x2000;
   want.task_id = 7;
   want.task_last = true;
 
@@ -700,7 +708,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   for (uint64_t e = 0; e < want.expert_count; ++e) {
     tok.push_back(TamePattern(want.a_dtype, k, 0xA10 + e));
     wgt.push_back(TamePattern(want.b_dtype, k * n, 0xA20 + e));
-    cmem.Poke(want.a_addr + e * want.token_expert_stride, tok.back());
+    cmem.Poke(want.a_addr + want.stream_id * want.a_stream_stride + e * want.token_expert_stride, tok.back());
   }
   // topK 里第 0 个是组内第 1 个专家，第 1 个是组内第 0 个；topK 直接存组内序号。
   // 表由 DTE 搬运时经专用数据线按 stream_id 直接写进 MU 的 topK_ep_table。
@@ -711,16 +719,18 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
 
   CfgWriter writer(clk, cfg_port);
   writer.SetIds(want.stream_id, want.task_id);
-  writer.Push(kMuPrimitiveMode, (want.expert_count << kMuRouterExpertCountShift) |
+  writer.Push(kMuPrimitiveMode, (kMuRouterEpEn | ((want.expert_count - 1) << kMuRouterExpertCountShift)) |
                                     kMuRouterEpReduceEn | kMuTaskLast);
   writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
   writer.Push(kMuAAddr, want.a_addr);
-  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuAStreamStride, want.a_stream_stride);
+  writer.Push(kMuBAddr, want.b_addr / 64);
   writer.Push(kMuCAddr, want.c_addr);
+  writer.Push(kMuCStreamStride, want.c_stream_stride);
   writer.Push(kMuAcExpertStride,
               want.token_expert_stride << kMuTokenExpertStrideShift);
-  writer.Push(kMuBExpertStride, want.b_expert_stride);
-  writer.Push(kMuTaskTrigger, kMuTriggerValid);
+  writer.Push(kMuBExpertStride, want.b_expert_stride / 64);
+  writer.Push(kMuTaskTrigger, kMuTriggerDefault);
 
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
@@ -732,7 +742,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
   // 先各自算完一列，各乘自己的权重，再顺序相加。
   std::vector<float> p0 = Reference(want, tok[0], wgt[0], {});
   std::vector<float> p1 = Reference(want, tok[1], wgt[1], {});
-  std::vector<uint8_t> raw = outmem.Peek(want.c_addr, n * 4);
+  std::vector<uint8_t> raw = outmem.Peek(want.c_addr + want.stream_id * want.c_stream_stride, n * 4);
   for (uint64_t j = 0; j < n; ++j) {
     float a = numeric::ClampNanInf(p0[j] * w0);
     float b = numeric::ClampNanInf(p1[j] * w1);
@@ -742,7 +752,7 @@ TEST(Mu, ExpertReduceWeightsAndSums) {
     EXPECT_EQ(got, numeric::BitsOf(ref)) << "j=" << j;
   }
   // 合并成一份，所以只写了一列。
-  std::vector<uint8_t> beyond = outmem.Peek(want.c_addr + n * 4, 4);
+  std::vector<uint8_t> beyond = outmem.Peek(want.c_addr + want.stream_id * want.c_stream_stride + n * 4, 4);
   EXPECT_EQ(beyond[0], 0u) << "第二个专家不该另写一份";
 }
 
@@ -775,6 +785,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   want.b_addr = 0x0;
   want.c_addr = 0x20000;
   want.stream_id = 6;
+  want.a_stream_stride = want.c_stream_stride = 0x2000;
   want.task_id = 8;
   want.task_last = true;
 
@@ -785,7 +796,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
 
   // 各出一份那一档，几个专家共用同一份激活。
   std::vector<uint8_t> token = TamePattern(want.a_dtype, k, 0xB01);
-  cmem.Poke(want.a_addr, token);
+  cmem.Poke(want.a_addr + want.stream_id * want.a_stream_stride, token);
   std::vector<std::vector<uint8_t>> wgt;
   for (uint64_t e = 0; e < want.expert_count; ++e) {
     wgt.push_back(TamePattern(want.b_dtype, k * n, 0xB10 + e));
@@ -799,15 +810,17 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   CfgWriter writer(clk, cfg_port);
   writer.SetIds(want.stream_id, want.task_id);
   writer.Push(kMuPrimitiveMode,
-              (want.expert_count << kMuRouterExpertCountShift) | kMuTaskLast);
+              (kMuRouterEpEn | ((want.expert_count - 1) << kMuRouterExpertCountShift)) | kMuTaskLast);
   writer.Push(kMuPrimitiveDim, 1u | (1u << 16));
   writer.Push(kMuAAddr, want.a_addr);
-  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuAStreamStride, want.a_stream_stride);
+  writer.Push(kMuBAddr, want.b_addr / 64);
   writer.Push(kMuCAddr, want.c_addr);
+  writer.Push(kMuCStreamStride, want.c_stream_stride);
   writer.Push(kMuAcExpertStride,
               want.output_expert_stride << kMuOutputExpertStrideShift);
-  writer.Push(kMuBExpertStride, want.b_expert_stride);
-  writer.Push(kMuTaskTrigger, kMuTriggerValid);
+  writer.Push(kMuBExpertStride, want.b_expert_stride / 64);
+  writer.Push(kMuTaskTrigger, kMuTriggerDefault);
 
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
@@ -818,7 +831,7 @@ TEST(Mu, ExpertsWriteSeparateResults) {
   for (uint64_t e = 0; e < want.expert_count; ++e) {
     std::vector<float> ref = Reference(want, token, wgt[e], {});
     std::vector<uint8_t> raw =
-        outmem.Peek(want.c_addr + e * want.output_expert_stride, n * 4);
+        outmem.Peek(want.c_addr + want.stream_id * want.c_stream_stride + e * want.output_expert_stride, n * 4);
     for (uint64_t j = 0; j < n; ++j) {
       uint32_t got = 0;
       for (int t = 0; t < 4; ++t) got |= uint32_t(raw[j * 4 + t]) << (8 * t);
@@ -855,6 +868,7 @@ void RunAllTiles(uint64_t prim_type) {
   want.b_addr = 0x0;
   want.c_addr = 0x20000;
   want.stream_id = 4;
+  want.a_stream_stride = want.c_stream_stride = 0x2000;
   want.task_id = 11;
   want.task_last = true;
 
@@ -870,9 +884,9 @@ void RunAllTiles(uint64_t prim_type) {
   // 每个 tile_K 一段 token 与它那几个 scale，每个 (n, k) 一块权重与它那几个
   // scale。primitive_type = 1 时一段 token 只有 64 B，第二段从一行的中间开始。
   for (uint64_t ki = 0; ki < want.kblock; ++ki) {
-    cmem.Poke(want.a_addr + ki * tok_bytes,
+    cmem.Poke(want.a_addr + want.stream_id * want.a_stream_stride + ki * tok_bytes,
               TamePattern(want.a_dtype, k, 0x600 + ki));
-    cmem.PokeScale(want.a_addr + ki * tok_bytes,
+    cmem.PokeScale(want.a_addr + want.stream_id * want.a_stream_stride + ki * tok_bytes,
                    TameScale(want.a_dtype, sc_bytes, 0x700 + ki));
   }
   for (uint64_t i = 0; i < want.kblock * want.nblock; ++i) {
@@ -886,12 +900,16 @@ void RunAllTiles(uint64_t prim_type) {
   writer.SetIds(want.stream_id, want.task_id);
   writer.Push(kMuPrimitiveMode, (prim_type << kMuPrimTypeShift) |
                                     (1u << kMuADataTypeShift) |
-                                    (1u << kMuRouterEpDtypeShift) | kMuTaskLast);
+                                    (1u << kMuRouterEpDtypeShift) | kMuTaskLast |
+                                    kMuShareEpEn | (1u << kMuShareEpMaskShift) |
+                                    (1u << kMuShareEpDtypeShift));
   writer.Push(kMuPrimitiveDim, want.kblock | (want.nblock << 16));
   writer.Push(kMuAAddr, want.a_addr);
-  writer.Push(kMuBAddr, want.b_addr);
+  writer.Push(kMuAStreamStride, want.a_stream_stride);
+  writer.Push(kMuBAddr, want.b_addr / 64);
   writer.Push(kMuCAddr, want.c_addr);
-  writer.Push(kMuTaskTrigger, kMuTriggerValid);
+  writer.Push(kMuCStreamStride, want.c_stream_stride);
+  writer.Push(kMuTaskTrigger, kMuTriggerDefault);
 
   MuDoneSink sink(clk, mu.Done());
   MuDriver driver(clk, mu);
@@ -925,7 +943,7 @@ void RunAllTiles(uint64_t prim_type) {
       }
     }
 
-    std::vector<uint8_t> raw = outmem.Peek(want.c_addr + ni * n * 4, n * 4);
+    std::vector<uint8_t> raw = outmem.Peek(want.c_addr + want.stream_id * want.c_stream_stride + ni * n * 4, n * 4);
     for (uint64_t j = 0; j < n; ++j) {
       uint32_t b = 0;
       for (int t = 0; t < 4; ++t) b |= uint32_t(raw[j * 4 + t]) << (8 * t);
@@ -1001,7 +1019,7 @@ std::vector<GemmCase> ReadPrimCases() {
     GemmCase c;
     c.k = std::stoull(col[2]);
     c.n = std::stoull(col[3]);
-    if (!((c.k == 64 && c.n == 128) || (c.k == 128 && c.n == 64))) continue;
+    if (c.n != 64 && c.n != 128) continue;
     c.dtype = TypeByName(col[1]);
     c.out_bf16 = col[4] == "1";
     c.token = HexBytes(col[5]);
@@ -1028,7 +1046,7 @@ TEST(Mu, MatchesPythonReference) {
     cfg.a_dtype = c.dtype;
     cfg.b_dtype = c.dtype;
     cfg.out_bf16 = c.out_bf16;
-    cfg.primitive_type = c.k == 64 ? 1 : 0;
+    cfg.primitive_type = c.n == 128 ? 1 : 0;
     ASSERT_EQ(cfg.PrimK(), c.k);
     ASSERT_EQ(cfg.PrimN(), c.n);
 
@@ -1045,6 +1063,144 @@ TEST(Mu, MatchesPythonReference) {
     for (size_t i = 0; i < c.want.size(); ++i) {
       EXPECT_EQ(numeric::BitsOf(r.out[i]), numeric::BitsOf(c.want[i]))
           << "K=" << c.k << " N=" << c.n << " 第 " << i << " 个输出";
+    }
+    RT::Reset();
+  }
+}
+
+TEST(Mu, AllSupportedPrecisionPairsUsePhysicalLaneRows) {
+  using numeric::DataType;
+  struct Pair { DataType a, b; uint64_t k; };
+  const std::vector<Pair> pairs = {
+      {DataType::kBf16, DataType::kBf16, 64},
+      {DataType::kMxfp8, DataType::kMxfp8, 128},
+      {DataType::kBf16, DataType::kMxfp8, 128},
+      {DataType::kMxfp8, DataType::kMxfp4, 256},
+      {DataType::kMxfp8, DataType::kNvfp4, 256},
+      {DataType::kBf16, DataType::kMxfp4, 128},
+      {DataType::kBf16, DataType::kNvfp4, 128}};
+  for (auto const& pair : pairs) for (uint64_t type : {0u, 1u}) {
+    EnsureSlots();
+    {
+      auto clk = MakeClock(0, kPeriod);
+      Mu mu(clk, "mu", MuCfg{});
+      CoreMem cmem(clk, "cmem", 0, false);
+      MatrixMem mmem(clk, "mmem", 0, false);
+      MuTaskCfg shape; shape.a_dtype = pair.a; shape.b_dtype = pair.b;
+      shape.primitive_type = type;
+      uint64_t k = pair.k >> type, n = type ? 128 : 64;
+      ASSERT_EQ(shape.PrimK(), k);
+      uint64_t lane_bytes = k * n * numeric::ElemBitsOf(pair.b) / 512;
+      uint64_t baddr = lane_bytes == 64 ? 64 : 0;
+      auto token = numeric::Encode(pair.a, std::vector<float>(k, 1.0f), {}, numeric::RoundMode::kRne);
+      std::vector<float> columns(k * n);
+      for (uint64_t j = 0; j < n; ++j)
+        for (uint64_t i = 0; i < k; ++i) columns[j * k + i] = float(1 + j % 4);
+      auto packed = numeric::Encode(pair.b, columns, {}, numeric::RoundMode::kRne);
+      std::vector<uint8_t> row(8192);
+      for (uint64_t lane = 0; lane < 64; ++lane)
+        std::copy_n(packed.begin() + lane * lane_bytes, lane_bytes, row.begin() + lane * 128 + baddr);
+      cmem.Poke(0, token); mmem.Poke(0, row);
+      if (pair.a == DataType::kMxfp8)
+        cmem.PokeScale(0, std::vector<uint8_t>(k / 32, 127));
+      uint64_t block = numeric::ScaleBlockOf(pair.b);
+      if (block) {
+        uint64_t group = block * numeric::ElemBitsOf(pair.b) / 8;
+        uint8_t scale = pair.b == DataType::kNvfp4 ? 0x38 : 127;
+        for (uint64_t lane = 0; lane < 64; ++lane)
+          mmem.PokeScale(lane * 128 + baddr, std::vector<uint8_t>(lane_bytes / group, scale), group);
+      }
+      mu.AttachCmemRd(cmem.PortPtr(kCmemMuRd));
+      mu.AttachMmemRd(mmem.PortPtr(kMmemMu));
+      mu.AttachCmemWr(cmem.PortPtr(kCmemMuWr));
+      mu.Regfile().CfgWrite(kMuPrimitiveDim, 0x10001);
+      mu.Regfile().CfgWrite(kMuCAddr, 0x4000);
+      mu.Regfile().CfgWrite(kMuBAddr, baddr);
+      mu.Regfile().CfgWrite(kMuPrimitiveMode, type | (pair.a == DataType::kMxfp8 ? 2 : 0) |
+          (uint64_t(pair.b) << kMuShareEpDtypeShift) | kMuShareEpEn |
+          (1u << kMuShareEpMaskShift) | kMuTaskLast);
+      mu.Regfile().CfgWrite(kMuTaskTrigger, 0);
+      class Driver : public BachModule {
+       public:
+        Driver(ClockPtr c, Mu& unit, CoreMem& cm, MatrixMem& mm)
+            : BachModule(c, "driver"), target(unit), token_memory(cm), weight_memory(mm) {}
+       protected:
+        void Step() override {
+          token_memory.RunStep(); weight_memory.RunStep(); target.RunStep();
+        }
+       private:
+        Mu& target; CoreMem& token_memory; MatrixMem& weight_memory;
+      } driver(clk, mu, cmem, mmem);
+      clk->Continue(180 * kPeriod); RT::JoinAll();
+      ASSERT_EQ(mu.Error(), 0u);
+      EXPECT_EQ(mu.DoneCnt(), 1u);
+      auto bytes = cmem.Peek(0x4000, n * 4);
+      for (uint64_t j = 0; j < n; ++j) {
+        uint32_t bits = 0;
+        for (uint64_t b = 0; b < 4; ++b) bits |= uint32_t(bytes[j * 4 + b]) << (8 * b);
+        EXPECT_EQ(bits, numeric::BitsOf(float(k * (1 + j % 4))))
+            << "A=" << uint64_t(pair.a) << " B=" << uint64_t(pair.b) << " type=" << type << " column=" << j;
+      }
+    }
+    RT::Reset();
+  }
+}
+
+TEST(Mu, SparseSharedAndMixedRouterExpertsProduceExpectedOutputs) {
+  using numeric::DataType;
+  for (bool reduce : {false, true}) {
+    EnsureSlots();
+    {
+      auto clk = MakeClock(0, kPeriod);
+      Mu mu(clk, "mu", MuCfg{});
+      CoreMem cmem(clk, "cmem", 0, false); MatrixMem mmem(clk, "mmem", 0, false);
+      for (uint64_t e = 0; e < 3; ++e) {
+        cmem.Poke(e * 256, numeric::Encode(DataType::kMxfp8, std::vector<float>(256, float(e + 1)), {}, numeric::RoundMode::kRne));
+        cmem.PokeScale(e * 256, std::vector<uint8_t>(8, 127));
+      }
+      auto tile = [&](uint64_t row, DataType dtype, uint64_t k, float value) {
+        mmem.Poke(row * 8192, numeric::Encode(dtype, std::vector<float>(64 * k, value), {}, numeric::RoundMode::kRne));
+        uint64_t group = numeric::ScaleBlockOf(dtype) * numeric::ElemBitsOf(dtype) / 8;
+        for (uint64_t lane = 0; lane < 64; ++lane)
+          mmem.PokeScale(row * 8192 + lane * 128, std::vector<uint8_t>(128 / group, 127), group);
+      };
+      // S=3, mask=101: shared slot 1 stays unused. Router local index 2
+      // follows the complete three-slot prefix, with half the reference stride.
+      tile(0, DataType::kMxfp8, 128, 1); tile(1, DataType::kMxfp8, 128, 1);
+      tile(4, DataType::kMxfp8, 128, 2); tile(5, DataType::kMxfp8, 128, 2);
+      tile(8, DataType::kMxfp4, 256, 4);
+      std::vector<uint8_t> topk(256); topk[0] = 1; topk[2] = 2;
+      uint32_t coefficient = numeric::BitsOf(0.5f);
+      for (uint64_t i = 0; i < 4; ++i) topk[4 + i] = uint8_t(coefficient >> (8 * i));
+      mu.EpInfo().WriteTopk(0, topk);
+      mu.AttachCmemRd(cmem.PortPtr(kCmemMuRd)); mu.AttachCmemWr(cmem.PortPtr(kCmemMuWr));
+      mu.AttachMmemRd(mmem.PortPtr(kMmemMu));
+      auto& reg = mu.Regfile();
+      reg.CfgWrite(kMuPrimitiveDim, 0x20001); reg.CfgWrite(kMuCAddr, 0x4000);
+      reg.CfgWrite(kMuBExpertStride, 256);
+      reg.CfgWrite(kMuAcExpertStride, reduce ? 256 : 256u << 16);
+      reg.CfgWrite(kMuPrimitiveMode, 2 | (1u << kMuShareEpDtypeShift) |
+          (2u << kMuRouterEpDtypeShift) | (2u << kMuShareEpCountShift) |
+          kMuShareEpEn | (5u << kMuShareEpMaskShift) | kMuRouterEpEn |
+          (reduce ? kMuRouterEpReduceEn : 0) | kMuTaskLast);
+      reg.CfgWrite(kMuTaskTrigger, 0);
+      class Driver : public BachModule {
+       public:
+        Driver(ClockPtr c, Mu& m, CoreMem& a, MatrixMem& b) : BachModule(c, "driver"), unit(m), cm(a), mm(b) {}
+       protected:
+        void Step() override { cm.RunStep(); mm.RunStep(); unit.RunStep(); }
+       private:
+        Mu& unit; CoreMem& cm; MatrixMem& mm;
+      } driver(clk, mu, cmem, mmem);
+      clk->Continue(220 * kPeriod); RT::JoinAll();
+      EXPECT_EQ(mu.Error(), 0u); EXPECT_EQ(mu.DoneCnt(), 1u);
+      auto result = cmem.Peek(0x4000, reduce ? 256 : 768);
+      for (uint64_t i = 0; i < result.size() / 4; ++i) {
+        uint32_t bits = 0;
+        for (uint64_t b = 0; b < 4; ++b) bits |= uint32_t(result[i * 4 + b]) << (8 * b);
+        float expected = reduce ? 2816.0f : float(256u << (i / 64));
+        EXPECT_EQ(bits, numeric::BitsOf(expected)) << "reduce=" << reduce << " column=" << i;
+      }
     }
     RT::Reset();
   }

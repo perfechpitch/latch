@@ -44,6 +44,9 @@ public:
                  std::shared_ptr<HalfDonePort> wr) {
     sources.push_back({std::move(rd), std::move(wr)});
   }
+  void AddDecoded(std::shared_ptr<AdmitPort> port) {
+    decoded.push_back(std::move(port));
+  }
   DonePort &ToTs() { return *to_ts; }
   void AttachToTs(std::shared_ptr<DonePort> p) { to_ts = std::move(p); }
 
@@ -170,6 +173,15 @@ private:
   }
 
   void Collect() {
+    for (auto const &port : decoded) {
+      if (!port->Valid()) continue;
+      auto desc = port->Desc();
+      if (!desc) continue;
+      auto entry = rs.find(desc->commit_seq);
+      if (entry == rs.end()) continue;
+      entry->second.desc = *desc;
+      if (desc->error && !IsInbound(desc->route)) entry->second.joined = true;
+    }
     Take(*rd_done, kRd);
     Take(*wr_done, kWr);
     for (auto const &s : sources) {
@@ -251,10 +263,12 @@ private:
       if (!smem_wr->Ready())
         break;
       auto bytes = std::make_shared<ByteBlock>(128, 0);
+      uint64_t offset = e.desc.smem_addr % 128;
       for (uint64_t k = 0; k < 4; ++k) {
-        (*bytes)[k] = uint8_t(e.desc.smem_data >> (8 * k));
+        (*bytes)[offset + k] = uint8_t(e.desc.smem_data >> (8 * k));
       }
-      smem_wr->Write(e.desc.smem_addr, bytes, false, 0, 4);
+      smem_wr->Write(e.desc.smem_addr - offset, bytes, false, offset, 4);
+      smem_wr->req_hw_addr0 = e.desc.smem_addr / 128;
       e.smem_issued = true;
       smem_flight.push_back(kv.first);
       smem_used = true;
@@ -294,6 +308,7 @@ private:
   std::shared_ptr<HalfDonePort> retired, canceled;
   uint64_t first_error = 0, error_ids = 0, first_entry = 0, interrupt_mask = 0;
   std::shared_ptr<DteExceptionPort> exception;
+  std::vector<std::shared_ptr<AdmitPort>> decoded;
   uint64_t join_pending = 0, report_pending = 0;
   // 完成了但不报 TS 的笔数与最近一笔的身份，供 Core 层发 dsa_done_noack。
   uint64_t noack_cnt = 0, noack_task = 0, noack_user = 0;

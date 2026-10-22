@@ -37,11 +37,13 @@ enum TsStateBit : uint64_t {
 constexpr uint64_t kTsRouteNum = 64;
 
 // ROUTER_TABLE 的一项：这条 path 往哪几个方向走、用哪个 VC。方向只保存与读回；
-// VCID 随 DTE 任务一起下发。TASK_DIR 的位：bit0 上下，bit1 左，bit2 右，bit3
-// 本地。
+// VCID 随任务一起下发。TASK_DIR[4:0]：上、下、左、右、本地。
 struct TsRoute {
   uint64_t dir = 0;
   uint64_t vcid = 0;
+  uint64_t Directions() const {
+    return ((dir & 3) ? 1u : 0u) | ((dir >> 1) & 6);
+  }
 };
 
 class TsApbPort : public Logic {
@@ -66,7 +68,7 @@ public:
 
   std::shared_ptr<TsApbPort> ApbPtr() const { return apb; }
   // ── 配置面。boot 期由 ctrl_noc 逐项写，这里给的是等价的直接接口 ──
-  // 一项任务的 PC 与 ATTR 一起写；写 ATTR 时硬件把 TASK_VALID 置起来。
+  // 配置助手提交一项有效任务；APB 的 ATTR[31] 独立按软件写值生效。
   void WriteTask(uint64_t idx, TaskEntry e) {
     LOGCHECK(idx < kTaskChainNum, "CfgReg: task_chain 下标越界。");
     e.valid = true;
@@ -135,7 +137,7 @@ public:
           t.credit_en = ((value >> 14) & 1) != 0;
           t.path_id = (value >> 15) & 255;
           t.end = ((value >> 23) & 1) != 0;
-          t.valid = true;
+          t.valid = (value >> 31) != 0;
           t = PreserveReserved(t, previous);
           attr_written[tid] = true;
         }
@@ -152,8 +154,8 @@ public:
     if (address >= 0x400 && address < 0x500) {
       uint64_t pid = (address - 0x400) / 4;
       if (write)
-        route[pid] = {value & 15, (value >> 4) & 3};
-      return {uint32_t(route[pid].dir | (route[pid].vcid << 4)), false};
+        route[pid] = {value & 31, (value >> 5) & 3};
+      return {uint32_t(route[pid].dir | (route[pid].vcid << 5)), false};
     }
     switch (address) {
     case 0x200:
@@ -166,7 +168,7 @@ public:
       if (write) {
         weights_mode_on = (value & 1) != 0;
         datain_attr_written = true;
-        datain_valid = true;
+        datain_valid = (value >> 31) != 0;
       }
       return {uint32_t(weights_mode_on) | (uint32_t(datain_valid) << 31),
               false};
@@ -201,7 +203,8 @@ public:
     return chain[idx];
   }
   TsRoute const &Route(uint64_t pid) const {
-    return route[pid & (kTsRouteNum - 1)];
+    LOGCHECK(pid < kTsRouteNum, "CfgReg: TS Lite supports PathID 0..63; wider IDs require a resolved Lite mapping.");
+    return route[pid];
   }
   // Router 送来的 PID 对的是哪一个搬入任务：在 wait_wake 的项里找 path_id
   // 相同、 这个用户还没做完的最低一项。同一个 PID 可以对多个任务。找不到返回

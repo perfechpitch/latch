@@ -29,7 +29,7 @@ constexpr uint64_t kDteIoBase = 0x00008000;
 constexpr uint64_t kMuIoBase = 0x0000C000;
 constexpr uint64_t kVuIoBase = 0x0000D000;
 constexpr uint64_t kDteIoSize = 16 * 1024;
-constexpr uint64_t kDsaIoSize = 4 * 1024;
+constexpr uint64_t kDsaIoSize = 16 * 1024;
 constexpr uint64_t kVuIoSize = 20 * 1024;
 
 // DTCM 8 KB，存 BSS、寄存器溢出与堆栈。排在 VU IO 之后。
@@ -62,6 +62,8 @@ constexpr uint64_t kCoreMemBase = 0x00080000;
 constexpr uint64_t kCoreMemSize = 1024 * 1024 + 32 * 1024;
 // Router I/O reg 从这一段的第 1 MB 起。
 constexpr uint64_t kRouterIoOffset = 1024 * 1024;
+constexpr uint64_t kRouterIoBase = kCoreMemBase + kRouterIoOffset;
+constexpr uint64_t kRouterIoSize = 36;
 
 // 访存延迟，记在时间轴上。
 constexpr uint64_t kDtcmLatency = 3;

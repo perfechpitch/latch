@@ -147,7 +147,7 @@ class VuVexeNet : public BachModule {
   void AttachOut(std::shared_ptr<VuFlowPort> p) { out = std::move(p); }
 
   bool Quiescent() const override {
-    return segs.empty() && pending_lu.empty() && !held;
+    return incoming.empty() && segs.empty() && pending_lu.empty() && !held;
   }
 
  protected:
@@ -159,10 +159,14 @@ class VuVexeNet : public BachModule {
     Tick();
     Start();
     TakeSeg();
+    if (!incoming.empty() && CanAdmit(*incoming.front())) {
+      segs.push_back(MakeSeg(std::move(incoming.front())));
+      incoming.pop_front();
+    }
     Start();
     Emit();
     Charge();
-    in->DriveReady(true);
+    in->DriveReady(incoming.size() < 2);
     lu_in->DriveReady(true);
   }
 
@@ -320,12 +324,28 @@ class VuVexeNet : public BachModule {
     return s;
   }
 
+  // 一个分段先同时取得所有消费者的入口容量，再交付共享的向量数据。
+  // 等待其他操作数和已完成但尚未交出的分段仍持有容量；广播不会只交给快的一路。
+  bool CanAdmit(VuFlow const& flow) const {
+    bool any = false;
+    for (int g = 0; g < kGroups; ++g) {
+      if (!On(flow.uops, g)) continue;
+      any = true;
+      uint64_t occupied = 0;
+      for (auto const& segment : segs)
+        occupied += segment.phase[g] != kOff;
+      if (occupied >= LatOf(flow.uops, g) + 1) return false;
+    }
+    return any || segs.empty();
+  }
+
   void TakeSeg() {
     if (!in->Valid() || in->Seq() == last_seg) return;
     VuFlowPtr f = in->Flow();
     if (!f) return;
+    LOGCHECK(incoming.size() < 4, "VEXE registered ingress overflow");
     last_seg = in->Seq();
-    segs.push_back(MakeSeg(std::move(f)));
+    incoming.push_back(std::move(f));
   }
 
   void TakeLu() {
@@ -379,6 +399,7 @@ class VuVexeNet : public BachModule {
   VuVsfu& vsfu;
   std::shared_ptr<VuFlowPort> in, lu_in, out;
   std::deque<Seg> segs;
+  std::deque<VuFlowPtr> incoming;
   std::deque<VuFlowPtr> pending_lu;
   // 出口上压着、等下游收下的那一段。
   struct Held {

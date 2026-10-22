@@ -274,9 +274,8 @@ TEST(BachTsDone, WeightsModeDropsEveryAck) {
   EXPECT_EQ(got.done_bitmap, 0u);
 }
 
-// 自启动 core 上 Bypass datain 带 SID 15 / TID 63 回来的 ACK 丢掉；普通 core 上
-// 同样的号照常更新表项。
-TEST(BachTsDone, BypassAckIsDroppedOnSelfStartCore) {
+// 主任务链的 SID0/TID0 在普通和 SELF_START 模式下都接受合法 ACK。
+TEST(BachTsDone, MainChainZeroIdentityIsNotFiltered) {
   uint64_t self_start_bits = 0, normal_bits = 0;
   for (bool self_start : {true, false}) {
     EnsureSlots();
@@ -284,7 +283,6 @@ TEST(BachTsDone, BypassAckIsDroppedOnSelfStartCore) {
     Bench b(clk);
     b.cfg->SetSelfStart(self_start);
     b.cfg->WriteTask(0, Step(RecvUnit::kRvOnly));
-    b.cfg->WriteTask(kBypassTid, Step(RecvUnit::kRvOnly));
     DoneBench h(clk, *b.cfg, *b.table, *b.done);
     h.seeds = {{2, Infly(kBypassSid, 11, 0)}};
     h.acks = {{6, 0, false, kBypassSid, kBypassTid}};
@@ -294,7 +292,7 @@ TEST(BachTsDone, BypassAckIsDroppedOnSelfStartCore) {
         b.table->Peek(kBypassSid).done_bitmap;
     RT::Reset();
   }
-  EXPECT_EQ(self_start_bits, 0u);
+  EXPECT_EQ(self_start_bits, 1ull << kBypassTid);
   EXPECT_EQ(normal_bits, 1ull << kBypassTid);
 }
 

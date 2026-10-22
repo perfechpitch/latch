@@ -92,17 +92,19 @@ CONCAT_PATH = tuple(16 + s for s in range(DOT_SLOT))
 ROW_PATH = 7
 # R core 之间那条链与组间那一跳各用两个号轮换：搬入与搬出走不同路由。
 R_PATH = (8, 9)
+R_PIPE_PATH = (32, 33)
 RELAY_PATH = (6, 10)
 
-# 每条 path 走哪个 VC。VC3 专给逐级 reduce；FC2 输入广播与 concat 各用一个 VC，
-# 与 token 广播分开。TS 的 ROUTER_TABLE 给出核那一跳的 VC，路由表的 nxt_vc 给后
-# 面各跳，两处取同一个值。
+# 每条 path 走哪个 VC。逐级 reduce 的基础路径用 VC3，R core 的备用路径用 VC0；
+# FC2 输入广播用 VC1，concat 用 VC2。TS 的 ROUTER_TABLE 给出核那一跳的 VC，
+# 路由表的 nxt_vc 给后面各跳，两处取同一个值。
 REDUCE_VC = 3
 VC_OF_PATH = {IN_PATH: 0, BCAST_IN_PATH: 0, RELAY_PATH[0]: 0,
               RELAY_PATH[1]: 0, R_PATH[0]: REDUCE_VC, R_PATH[1]: REDUCE_VC,
               CHIP_RED_PATH: REDUCE_VC, ROW_PATH: REDUCE_VC,
               FC2_BCAST_PATH: 1}
 VC_OF_PATH.update({p: 2 for p in CONCAT_PATH})
+VC_OF_PATH.update({p: 0 for p in R_PIPE_PATH})
 
 
 def dir_of_port(port):
@@ -223,7 +225,7 @@ def reduce_hop(path_id, in_mask, flow, first, last):
     分配的，一个用户在那边的那一项 Stream 资源同时代表两者。
     """
     del last
-    return Entry(flow_dir=flow, vc=REDUCE_VC, op_type=OPTYPE_REDUCE,
+    return Entry(flow_dir=flow, vc=VC_OF_PATH[path_id], op_type=OPTYPE_REDUCE,
                  bypass=True, reduce_in_mask=in_mask,
                  operation=OP_REDUCE0 if first else OP_REDUCE1,
                  reduce_data_type=REDUCE_BF16,
@@ -738,7 +740,8 @@ def rcore_chain(out_path):
     送进本级 Rmem 相加，结果直接发往下一行。送进 Rmem 那一笔是逐级 reduce 任务，
     本地Core/DSA双ACK完成Task，RMEM UID返回另行释放许可。"""
     return [
-        ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find")),
+        ChainItem(0, "MU", "RV_ONLY", ("mu", "task_rc_find"),
+                  path_id=out_path, task_type="PID_UPDATE"),
         ChainItem(1, "DTE", "RV_DSA", ("dte", "task_dte_rc_reduce"),
                   path_id=out_path, task_type="REDUCE", credit_en=False,
                   end=True),
@@ -834,20 +837,23 @@ class Plan:
     def ts_routes(self):
         """TS 的 ROUTER_TABLE：每个配了任务链的 core，按它用到的 PID 各一项
         {pid: (TASK_DIR, TASK_VCID)}。方向取自这个 core 上那条 path 的路由表项，
-        bit0 上下（mid）、bit1 左、bit2 右、bit3 进本 core；VCID 取这条 path 走的
+        bit0 上、bit1 下、bit2 左、bit3 右、bit4 进本 core；VCID 取这条 path 走的
         那个 VC。"""
         out = {}
         for key, items in self.chains.items():
             table = self.entries.get(key, {})
             pids = {it.path_id for it in items} | set(self.path_task.get(key, {}))
+            if any(it.sym == ("mu", "task_rc_find") for it in items):
+                pids.update(R_PIPE_PATH)
             one = {}
             for pid in sorted(pids):
                 e = table.get(pid)
                 d = 0
                 if e is not None:
-                    d = e.stream_need & FLOW_ALL_DIR
+                    needed = e.stream_need & FLOW_ALL_DIR
+                    d = (needed & 1) | ((needed & 6) << 1)
                     if not e.path_core_bypass:
-                        d |= 8
+                        d |= 16
                 one[pid] = (d, VC_OF_PATH.get(pid, pid % VC_NUM))
             out[key] = one
         return out
@@ -928,6 +934,7 @@ def build_plan(desc):
             here = gy * cols + cols - 1
             below = here + cols if gy + 1 < rows else None
             wire_rcore_hop(fab, here, below, R_PATH[gy % 2], gy == 0)
+            wire_rcore_hop(fab, here, below, R_PIPE_PATH[gy % 2], gy == 0)
     if use_bcore:
         for g in range(groups - 1):
             wire_relay_hop(fab, bcore_chip(g), bcore_chip(g) + cols,

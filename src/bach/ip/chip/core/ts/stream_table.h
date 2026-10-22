@@ -232,7 +232,7 @@ private:
         if (cfg && e.valid) {
           auto const &t = cfg->Task(e.task_id);
           e.credit_drct = t.credit_en && !t.IsReduce()
-                              ? cfg->Route(e.task_path_id).dir & 7
+                              ? cfg->Route(e.task_path_id).Directions()
                               : 0;
           if (e.task_fsm == TaskFsm::kWaitCredit && !e.credit_drct)
             e.task_fsm = TaskFsm::kReady;
@@ -268,7 +268,7 @@ private:
               (e.done_bitmap & (1ull << e.task_id)) ||
               (w.grant_dirs & e.drct_used) ||
               (cfg && w.grant_dirs !=
-                          (cfg->Route(e.task_path_id).dir & 7 & ~e.drct_used)))
+                          (cfg->Route(e.task_path_id).Directions() & ~e.drct_used)))
             continue;
           bool enough = true;
           for (uint64_t dir = 0; dir < 3; ++dir)
@@ -340,7 +340,7 @@ private:
         if (cfg) {
           auto const &task = cfg->Task(e.task_id);
           e.credit_drct =
-              task.credit_en && !task.IsReduce() ? cfg->Route(pid).dir & 7 : 0;
+              task.credit_en && !task.IsReduce() ? cfg->Route(pid).Directions() : 0;
         }
         e.task_fsm = w.entry.task_fsm;
         if (e.task_fsm == TaskFsm::kWaitCredit &&

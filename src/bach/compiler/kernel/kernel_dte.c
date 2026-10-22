@@ -402,10 +402,10 @@ TASK void task_dte_rc_datain(void) {
  * RMEM UID返回另行归还空间 */
 TASK void task_dte_rc_reduce(void) {
   u32 slot = smem_read(RC_SLOT_OFF + stream_id() * 4);
-  u32 head = smem_read(RC_HEAD_OFF);
+  u32 need = rc_need();
   u32 dst = rc_land(user_id(), 1);
   u32 hdr = dte_hdr_cmem(user_id());
-  if (head == 0u) {
+  if (need == 2u) {
     dsa_write(DTE_ADDR0_SRC, hdr);
     dsa_write(DTE_ADDR1_SRC, dte_ep(DTE_EP_MMEM, rc_land(slot, 0)));
     dsa_write(DTE_ADDR1_DST, dst);

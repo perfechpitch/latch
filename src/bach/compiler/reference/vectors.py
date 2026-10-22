@@ -210,6 +210,8 @@ def write_ffn(path):
     for dtype in (n.BF16, n.MXFP8, n.MXFP4, n.NVFP4):
         block = n.SCALE_BLOCK[dtype]
         for idx, (k, cnt) in enumerate(shapes):
+            if dtype == n.BF16 and cnt in (64, 128):
+                k //= 2
             token = tame(dtype, pattern(k * n.ELEM_BITS[dtype] // 8,
                                         0x1234 + k))
             weight = tame(dtype, pattern(cnt * k * n.ELEM_BITS[dtype] // 8,
@@ -329,7 +331,7 @@ def tame_scale(dtype, data):
     MXFP8 的 scale 是 E8M0，0xFF 是它的 NaN；FP4 那两档的 scale 是 FP8 E4M3。
     另外把量级压到 1 上下：scale 太大时一条长累加链的结果会溢出到 Inf。
     """
-    if dtype == n.MXFP8:
+    if dtype in (n.MXFP8, n.MXFP4):
         return bytes(0x7F if b == 0xFF else (0x78 | (b & 0x07)) for b in data)
     return bytes(0x38 | (b & 0x07) for b in data)
 
@@ -500,14 +502,12 @@ def kn_blocked(tokens, matrix, row0, col0, k, cnt, kblock, nblock, w_ep=None):
                 seg = tok[ki * k:(ki + 1) * k]
                 sc = tsc[ki * (k // 32):(ki + 1) * (k // 32)]
                 r = ffn.gemm(n.MXFP8, seg, data, sc, k, cnt, False, wsc)
-                acc = r if ki == 0 else [n.clamp_nan_inf(n.f32(x + y))
-                                         for x, y in zip(acc, r)]
+                acc = r if ki == 0 else [n.f32(x + y) for x, y in zip(acc, r)]
             if w_ep is None:
                 outs[e].extend(acc)
                 continue
-            w = [n.clamp_nan_inf(n.f32(x * n.f32(w_ep[e]))) for x in acc]
-            ep_acc = w if e == 0 else [n.clamp_nan_inf(n.f32(x + y))
-                                       for x, y in zip(ep_acc, w)]
+            w = [n.f32(x * n.f32(w_ep[e])) for x in acc]
+            ep_acc = w if e == 0 else [n.f32(x + y) for x, y in zip(ep_acc, w)]
         if w_ep is not None:
             merged.extend(ep_acc)
     if w_ep is None:

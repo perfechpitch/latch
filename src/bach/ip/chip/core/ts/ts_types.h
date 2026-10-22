@@ -22,10 +22,10 @@ namespace bach {
 constexpr uint64_t kTaskChainNum = 64;
 // stream_table 16 项。
 constexpr uint64_t kStreamNum = 16;
-// 自启动 core 上 Bypass 那一路 datain 用的保留身份：不占 stream 表项，它回来的
-// 完成 ACK 不更新任何表项。
-constexpr uint64_t kBypassSid = 15;
-constexpr uint64_t kBypassTid = 63;
+// 独立 DataIn Chain 使用零身份，不占 Stream，也不产生 Core/DSA ACK。
+// 主任务链的 SID0/TID0 仍是合法任务，TaskDone 不按身份过滤它。
+constexpr uint64_t kBypassSid = 0;
+constexpr uint64_t kBypassTid = 0;
 
 // TASK_SEND_UNIT。
 enum class SendUnit : uint32_t {
@@ -64,7 +64,7 @@ enum class TaskFsm : uint32_t {
 
 // task_chain 的一项。位域照《Task Scheduler MAS》的 TASK_CHAIN_xx_PC / ATTR。
 struct TaskEntry {
-  bool valid = false;                     // ATTR[31]：写 ATTR 时硬件置起
+  bool valid = false;                     // ATTR[31]：软件配置有效位
   uint64_t task_pc = 0;                   // PC[31:0]
   SendUnit send_unit = SendUnit::kDte;    // ATTR[1:0]
   RecvUnit recv_unit = RecvUnit::kRvOnly; // ATTR[3:2]

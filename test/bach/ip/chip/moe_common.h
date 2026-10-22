@@ -150,8 +150,10 @@ inline void ExpectSame(std::vector<uint8_t> const &got,
 // topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 inline std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const &t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
+  b[0] = uint8_t(t.size());
+  b[1] = uint8_t(t.size() >> 8);
   for (size_t i = 0; i < t.size(); ++i) {
-    uint64_t at = i * kTopkEntryBytes;
+    uint64_t at = 2 + i * kTopkEntryBytes;
     b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
     b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);

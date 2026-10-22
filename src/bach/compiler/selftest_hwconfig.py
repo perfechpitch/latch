@@ -58,7 +58,8 @@ def check_one(path):
         for pid, (directions, unused_vc) in routes.items():
             entry = plan.entries.get(key, {}).get(pid)
             needed = entry.stream_need & moe.FLOW_ALL_DIR if entry else 0
-            if directions & moe.FLOW_ALL_DIR != needed:
+            normalized = (1 if directions & 3 else 0) | ((directions >> 1) & 6)
+            if normalized != needed:
                 return f"{key} PID {pid} 的TS许可方向包含无需业务资源的转发方向"
 
     if build_topo(path)[1] != lines:

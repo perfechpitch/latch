@@ -31,7 +31,20 @@ public:
         to_rs(std::make_shared<AdmitPort>(clock)),
         retired(std::make_shared<HalfDonePort>(clock)),
         canceled(std::make_shared<HalfDonePort>(clock)), admitted(clock),
-        stalled(clock), queued(clock) {}
+        stalled(clock), queued(clock) {
+    for (auto &port : decoded)
+      port = std::make_shared<AdmitPort>(clock);
+  }
+  void BindDecoder(std::function<uint64_t(Descriptor &)> validate) {
+    validate_task = std::move(validate);
+  }
+  std::shared_ptr<AdmitPort> DecodedPtr(uint64_t lane) const {
+    return decoded.at(lane);
+  }
+  bool DecodersEmpty() const {
+    for (auto const &context : held) if (context) return false;
+    return true;
+  }
 
   DescPort &FromRv() { return *from_rv; }
   std::shared_ptr<DescPort> FromRvPtr() const { return from_rv; }
@@ -151,6 +164,7 @@ protected:
     }
     RetireEntry();
     TakeFromRv();
+    Decode();
     TryDispatch();
     Deliver();
 
@@ -215,17 +229,15 @@ private:
     uint64_t blocked = 0;
     bool waiting = false, progress = false;
     for (auto &d : central_q) {
+      if (d.error || (entry_error && entry_error(d.commit_seq)))
+        break;
       if (d.dispatched)
         continue;
-      if (d.error) {
-        d.dispatched = true;
-        continue;
-      }
       uint64_t lane = d.Lane();
       if (lane >= to_lane.size() || (blocked & (1ull << lane)))
         continue;
       waiting = true;
-      if (skip[lane] || held[lane] || !to_lane[lane]->Ready()) {
+      if (skip[lane] || held[lane]) {
         blocked |= 1ull << lane;
         continue;
       }
@@ -235,7 +247,13 @@ private:
       start_user = d.user_id;
       if (!desc->msg && !IsInbound(desc->route))
         MakeOutboundMsg(*desc);
-      held[lane] = Held{std::move(desc), lane};
+      uint64_t segments = 0;
+      for (auto const &segment : d.seg)
+        if (segment.valid && segment.len &&
+            !(segment.is_header && IsInbound(d.route) && d.hw_header_op))
+          ++segments;
+      uint64_t delay = segments * (d.route == Route::kMmToCm ? 2 : 1) + 2;
+      held[lane] = Held{std::move(desc), lane, CycleNow() + delay, false};
       blocked |= 1ull << lane;
       d.dispatched = true;
       ++admit_cnt;
@@ -289,18 +307,37 @@ private:
   // 发出去，直到两边都收下。一次握手最少两拍，接收方按序号认。两边的 ready 是
   // 收下这一拍的请求之后算的，TryDispatch 发一笔之后又空一拍，所以读到 ready 时
   // 发过的每一笔都已算进去，发一拍就算送到。
+  void Decode() {
+    for (auto &context : held) {
+      if (!context || context->ready || CycleNow() < context->ready_at) continue;
+      context->ready = true;
+      if (validate_task) context->desc->error = validate_task(*context->desc);
+      if (context->desc->error)
+        for (auto &entry : central_q)
+          if (entry.commit_seq == context->desc->commit_seq)
+            entry.error = context->desc->error;
+    }
+  }
   void Deliver() {
     for (uint64_t lane = 0; lane < to_lane.size(); ++lane) {
-      if (held[lane]) {
-        to_lane[lane]->Drive(held[lane]->desc, held[lane]->desc->commit_seq);
+      decoded[lane]->Idle();
+      to_lane[lane]->Idle();
+      if (held[lane] && held[lane]->ready &&
+          (to_lane[lane]->Ready() ||
+           (held[lane]->desc->error && !IsInbound(held[lane]->desc->route)))) {
+        auto const &desc = held[lane]->desc;
+        decoded[lane]->Drive(desc, desc->commit_seq);
+        if (!desc->error || IsInbound(desc->route))
+          to_lane[lane]->Drive(desc, desc->commit_seq);
         held[lane].reset();
         just_sent[lane] = true;
-      } else
-        to_lane[lane]->Idle();
+      }
     }
   }
 
   std::function<uint64_t(uint64_t)> entry_state, entry_error;
+  std::function<uint64_t(Descriptor &)> validate_task;
+  std::array<std::shared_ptr<AdmitPort>, kLaneNum> decoded;
   Hmem &hmem;
   std::shared_ptr<DescPort> from_rv;
   std::vector<std::shared_ptr<AdmitPort>> to_lane;
@@ -314,6 +351,8 @@ private:
   struct Held {
     std::shared_ptr<Descriptor> desc;
     uint64_t lane = 0;
+    uint64_t ready_at = 0;
+    bool ready = false;
   };
   std::array<std::optional<Held>, kLaneNum> held;
   std::array<bool, kLaneNum> just_sent{}; // 上一拍发过一笔

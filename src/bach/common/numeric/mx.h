@@ -4,7 +4,7 @@
 // MX 系列：一个 block 共用一个 scale。
 //
 //   MXFP8   元素 FP8，block 32 个，scale 是 E8M0
-//   MXFP4   元素 FP4，block 16 个，scale 是 FP8
+//   MXFP4   元素 FP4，block 32 个，scale 是 E8M0
 //   NVFP4   元素 FP4，block 16 个，scale 是 FP8 的 E4M3
 //
 // 算力按精度组合分六档：BF16×BF16 4K MACs；MXFP8×MXFP8 8K；MXFP8×MXFP4 与
@@ -34,8 +34,8 @@ enum class DataType : uint32_t {
 inline uint64_t ScaleBlockOf(DataType t) {
   switch (t) {
     case DataType::kMxfp8:
-      return 32;
     case DataType::kMxfp4:
+      return 32;
     case DataType::kNvfp4:
       return 16;
     default:
@@ -117,7 +117,7 @@ inline std::vector<float> DecodeScale(DataType t,
       out.push_back(1.0f);
       continue;
     }
-    out.push_back(t == DataType::kMxfp8 ? FromE8m0(bytes[i])
+    out.push_back((t == DataType::kMxfp8 || t == DataType::kMxfp4) ? FromE8m0(bytes[i])
                                         : FromFp8E4m3(bytes[i]));
   }
   return out;
@@ -126,7 +126,7 @@ inline std::vector<float> DecodeScale(DataType t,
 
 // Decode 的对偶：把一组 FP32 编回该格式的字节。高转低按 mode 舍入。
 //
-// scale 由调用方给。MXFP8 的 scale 是 E8M0，FP4 那两档是 FP8，与 DecodeScale
+// scale 由调用方给。MXFP8/MXFP4 的 scale 是 E8M0，NVFP4 是 FP8，与 DecodeScale
 // 对称。VU 的 SU 走这一条写回 Core Mem。
 inline std::vector<uint8_t> Encode(DataType t, std::vector<float> const& v,
                                    std::vector<float> const& block_scale,
@@ -179,7 +179,7 @@ inline std::vector<uint8_t> Encode(DataType t, std::vector<float> const& v,
 //
 // MXFP8 的 scale 只有 2 的幂这一档，块内峰值除以元素最大值得出的数要取整到 2 的
 // 幂：round_up 为假时向下取（VU 的 MXFP8_SCALE_ROUND = 0，峰值可能被 Clamp 到
-// 元素最大值），为真时向上取（= 1，块内不会上溢）。FP4 那两档的 scale 是 FP8，
+// 元素最大值），为真时向上取（= 1，块内不会上溢）。NVFP4 的 scale 是 FP8，
 // 不受这一项影响。
 inline std::vector<float> MakeScale(DataType t, std::vector<float> const& v,
                                     bool round_up = false) {
@@ -202,7 +202,7 @@ inline std::vector<float> MakeScale(DataType t, std::vector<float> const& v,
     }
     float raw = peak / emax;
     // MXFP8 的 scale 只有 E8M0 这一档 2 的幂，编回去再解出来才是真正生效的值。
-    if (t == DataType::kMxfp8) {
+    if (t == DataType::kMxfp8 || t == DataType::kMxfp4) {
       uint8_t e = ToE8m0(raw);
       if (round_up && FromE8m0(e) < raw && e < 0xFEu) ++e;
       out.push_back(FromE8m0(e));
@@ -219,7 +219,7 @@ inline std::vector<uint8_t> EncodeScale(DataType t,
   std::vector<uint8_t> out;
   out.reserve(scale.size());
   for (float s : scale) {
-    out.push_back(t == DataType::kMxfp8 ? ToE8m0(s) : ToFp8E4m3(s));
+    out.push_back((t == DataType::kMxfp8 || t == DataType::kMxfp4) ? ToE8m0(s) : ToFp8E4m3(s));
   }
   return out;
 }

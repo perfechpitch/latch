@@ -34,6 +34,7 @@ enum DteLoc : uint64_t {
   kDteLocMmem = 3,
   kDteLocRouter = 4,
   kDteLocMu = 5,
+  kDteLocShareMem = 6,
 };
 
 // Each half has one Active and one Hold. A younger task can issue non-last
@@ -58,6 +59,7 @@ public:
   void AttachCmem(std::shared_ptr<MemPort> p) { mem[0] = std::move(p); }
   void AttachMmem(std::shared_ptr<MemPort> p) { mem[1] = std::move(p); }
   void AttachTopk(std::shared_ptr<MemPort> p) { mem[2] = std::move(p); }
+  void AttachSmem(std::shared_ptr<MemPort> p) { mem[4] = std::move(p); }
   void AttachHeader(std::shared_ptr<MemPort> p) { mem[3] = std::move(p); }
   CoreDataPort &ToRouter() { return *to_router; }
   void AttachToRouter(std::shared_ptr<CoreDataPort> p) {
@@ -120,7 +122,7 @@ protected:
     TakePayload();
     Write();
     Read();
-    for (uint64_t ep = 0; ep < 4; ++ep)
+    for (uint64_t ep = 0; ep < mem.size(); ++ep)
       if (!used[ep])
         mem[ep]->IdleReq();
     if (!router_used)
@@ -207,6 +209,7 @@ private:
     if (ep == SegEndpoint::kHeader) return kDteLocHmem;
     if (ep == SegEndpoint::kMmem) return kDteLocMmem;
     if (ep == SegEndpoint::kTopk) return kDteLocMu;
+    if (ep == SegEndpoint::kShareMem) return kDteLocShareMem;
     return kDteLocCmem;
   }
   DteLoc RdLocHead(Descriptor const& d) const {
@@ -255,6 +258,7 @@ private:
     return ep == SegEndpoint::kMmem     ? 1
            : ep == SegEndpoint::kTopk   ? 2
            : ep == SegEndpoint::kHeader ? 3
+           : ep == SegEndpoint::kShareMem ? 4
                                         : 0;
   }
   static uint64_t Length(Descriptor const &d, uint64_t seg) {
@@ -398,6 +402,13 @@ private:
       }
       bool last = payload->last.Get() != 0;
       uint64_t n = payload->bytes.Get(), off = payload->off.Get();
+      if (active[0]->desc.error) {
+        last_payload = payload->Seq();
+        payload->accepted_seq = last_payload;
+        if (last) inbound_done.insert(frame);
+        payload->DriveReady(true);
+        return;
+      }
       if (off == 0) {
         rresp_ev = true;
         rresp_task = m ? (m->task_id & 0xFFu) : 0xFFu;
@@ -441,7 +452,7 @@ private:
                         active[0].has_value());
   }
   void Collect() {
-    for (uint64_t ep = 0; ep < 4; ++ep) {
+    for (uint64_t ep = 0; ep < mem.size(); ++ep) {
       MemPort &p = *mem[ep];
       bool read_response = p.RspValid() && !reads[ep].empty();
       if (read_response) {
@@ -552,7 +563,7 @@ private:
     if (ep == 3)
       n = 32;
     else if (ep == 2)
-      n = 128;
+      n = std::min<uint64_t>(256, Length(c.desc, c.seg) - c.offset);
     else {
       skip = addr % 256;
       n = std::min(256 - skip, Length(c.desc, c.seg) - c.offset);
@@ -563,19 +574,10 @@ private:
       return;
     if (used[ep] || !mem[ep]->Ready() || !buffer.HasRoom(idx))
       return;
-    if (ep < 2 && !mem[ep]->PairReady())
+    if (ep <= 2 && !mem[ep]->PairReady())
       return;
-    uint64_t slot;
-    if (ep == 2 && c.offset % 256 == 128) {
-      slot = topk_slot;
-    } else {
-      uint64_t reserve = ep == 2 ? 256 : n;
-      slot =
-          buffer.Reserve(idx, {Tag(c.desc), reserve, Last(c, ep == 2 ? 256 : n),
-                               nullptr, c.desc.msg, c.seg == 0});
-      if (ep == 2)
-        topk_slot = slot;
-    }
+    uint64_t slot = buffer.Reserve(idx, {Tag(c.desc), n, Last(c, n),
+                                               nullptr, c.desc.msg, c.seg == 0});
     if (ep < 2) {
       mem[ep]->ReadPair(addr - skip);
       if (s.src_kind == SegEndpoint::kScale) {
@@ -583,17 +585,20 @@ private:
         mem[ep]->req_hw_addr0 = (addr - skip) / 128 | (1ull << 13);
         mem[ep]->req_hw_addr1 = ((addr - skip) / 128 + 1) | (1ull << 13);
       }
-    } else
+    } else if (ep == 2)
+      mem[ep]->ReadPair(addr);
+    else
       mem[ep]->Read(addr, n);
     if (ep == 2) {
       mem[ep]->req_topk_sel = 1;
-      mem[ep]->req_lane_mask = 1;
-      mem[ep]->req_hw_addr0 = addr / 128;
+      mem[ep]->req_lane_mask = 3;
+      mem[ep]->req_hw_addr0 = addr / 256;
+      mem[ep]->req_hw_addr1 = addr / 256;
     }
     if (ep == 3)
       mem[ep]->req_hw_addr0 = addr;
     reads[ep].push_back(
-        {c.desc.commit_seq, slot, skip, n, ep == 2 ? c.offset % 256 : 0});
+        {c.desc.commit_seq, slot, skip, n, 0});
     used[ep] = true;
     ++c.outstanding;
     c.offset += n;
@@ -654,8 +659,9 @@ private:
       return;
     auto const &s = c.desc.seg[c.seg];
     uint64_t ep = Endpoint(s.dst_kind);
-    uint64_t addr = s.dst_addr + c.offset, skip = ep < 2 ? addr % 256 : 0;
-    uint64_t cap = ep == 3 ? 32 : ep == 2 ? 128 : 256 - skip;
+    uint64_t addr = s.dst_addr + c.offset;
+    uint64_t skip = ep < 2 ? addr % 256 : ep == 4 ? addr % 128 : 0;
+    uint64_t cap = ep == 3 ? 32 : ep == 4 ? 128 - skip : ep == 2 ? 256 : 256 - skip;
     uint64_t n = std::min(cap, Length(c.desc, c.seg) - c.offset);
     if (c.residue.size() < n) {
       if (buffer.Empty(idx) || buffer.Front(idx).tag != Tag(c.desc))
@@ -671,9 +677,9 @@ private:
     }
     if (Last(c, n) && hold[1])
       return;
-    if (used[ep] || !mem[ep]->Ready() || (ep < 2 && !mem[ep]->PairReady()))
+    if (used[ep] || !mem[ep]->Ready() || (ep <= 2 && !mem[ep]->PairReady()))
       return;
-    auto bytes = std::make_shared<ByteBlock>(ep < 2 ? 256 : n, 0);
+    auto bytes = std::make_shared<ByteBlock>(ep <= 2 ? 256 : ep == 4 ? 128 : n, 0);
     for (uint64_t k = 0; k < n; ++k) {
       (*bytes)[skip + k] = c.residue.front();
       c.residue.pop_front();
@@ -685,12 +691,18 @@ private:
         mem[ep]->req_hw_addr0 = (addr - skip) / 128 | (1ull << 13);
         mem[ep]->req_hw_addr1 = ((addr - skip) / 128 + 1) | (1ull << 13);
       }
+    } else if (ep == 2)
+      mem[ep]->WritePair(addr, bytes, 0, 256);
+    else if (ep == 4) {
+      mem[ep]->Write(addr - skip, bytes, false, skip, n);
+      mem[ep]->req_hw_addr0 = (addr - skip) / 128;
     } else
       mem[ep]->Write(addr, bytes);
     if (ep == 2) {
       mem[ep]->req_topk_sel = 1;
-      mem[ep]->req_lane_mask = 1;
-      mem[ep]->req_hw_addr0 = addr / 128;
+      mem[ep]->req_lane_mask = 3;
+      mem[ep]->req_hw_addr0 = addr / 256;
+      mem[ep]->req_hw_addr1 = addr / 256;
     }
     if (ep == 3)
       mem[ep]->req_hw_addr0 = addr;
@@ -791,11 +803,11 @@ private:
   }
   uint64_t idx;
   DteBuffer &buffer;
-  std::array<std::shared_ptr<MemPort>, 4> mem;
-  std::array<bool, 4> used{};
-  std::array<std::deque<Flight>, 4> reads;
+  std::array<std::shared_ptr<MemPort>, 5> mem;
+  std::array<bool, 5> used{};
+  std::array<std::deque<Flight>, 5> reads;
   std::deque<BufferedResponse> responses;
-  std::array<std::deque<uint64_t>, 4> writes;
+  std::array<std::deque<uint64_t>, 5> writes;
   std::array<TaskQueue, 2> q{{TaskQueue(1), TaskQueue(4)}};
   std::array<std::optional<Context>, 2> active, hold;
   std::set<uint64_t> inbound_done, rd_complete;

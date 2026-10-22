@@ -10,7 +10,7 @@
 // Current完成置FINISH，Future完成只并其完成位；Skip不绑定匿名UID。
 // 仅Current/type5/Core-only的Core ACK新PID产生pending，供紧邻后继继承。
 // loading丢弃新六路ACK/RMEM返回，既有配对FIFO保留并暂停配对。
-// SELF_START的SID15/TID63独立DTE Bypass ACK过滤，不影响普通计算完成。
+// 独立 DataIn Chain 不返回 ACK；主任务链的零身份按正常完成规则处理。
 
 //
 //
@@ -134,9 +134,6 @@ private:
     if (!port.Valid())
       return;
     uint64_t sid = port.stream_id.Get(), tid = port.task_id.Get();
-    if (cfg.SelfStartCore() && unit == 0 && sid == kBypassSid &&
-        tid == kBypassTid)
-      return;
     if (sid >= view.slot_num || tid >= kTaskChainNum || !view.entry[sid].valid)
       return;
     auto const &task = cfg.Task(tid);

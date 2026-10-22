@@ -65,7 +65,8 @@ enum class SegEndpoint : uint32_t {
   kScale = 2,  // CoreMem scale 旁带（地址低位给对应数据地址）
   kTopk = 3,   // MU topK_table（按 stream_id 索引写 MU）
   kHeader = 4, // header_table（DTE 的 Hmem，按 stream_id 索引）
-  kInvalid = 5,
+  kShareMem = 5, // InCh.WR 数据及包头写；不支持作为搬运源端
+  kInvalid = 6,
 };
 
 // 端点地址范围译码的位约定：地址高 4 bit 作端点 tag，低位为端内偏移。飞书文档只

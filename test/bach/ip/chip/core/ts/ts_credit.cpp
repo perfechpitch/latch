@@ -84,6 +84,7 @@ public:
   std::vector<uint64_t> retire_users, retire_at;
   // 计数器是打拍的，只能在仿真里读。
   uint64_t rmem_admitted = 0;
+  std::vector<uint64_t> ready_per_cycle;
 
 protected:
   void Step() override {
@@ -122,6 +123,10 @@ protected:
     credit.RunStep();
     table.RunStep();
     rmem_admitted = credit.RmemAdmitted();
+    uint64_t ready = 0;
+    for (uint64_t sid = 0; sid < kStreamNum; ++sid)
+      ready += table.Peek(sid).valid && table.Peek(sid).task_fsm == TaskFsm::kReady;
+    ready_per_cycle.push_back(ready);
   }
 
 private:
@@ -155,7 +160,7 @@ TEST(BachTsCredit, InternalGrantDebitsAllRequiredDirections) {
   auto clk = MakeClock(0, kPeriod);
   Bench b(clk);
   b.cfg->WriteTask(0, Step(true, 6, true));
-  b.cfg->WriteRouterTable(6, 3, 2);
+  b.cfg->WriteRouterTable(6, 5, 2);
   b.table->AttachCfg(*b.cfg);
   CreditBench h(clk, *b.cfg, *b.table, *b.credit);
   auto w = Sitting(0, 22, 0, TaskFsm::kWaitCredit);
@@ -335,4 +340,32 @@ TEST(BachTsCredit, ReduceTakesTheLocalRmemCredit) {
   EXPECT_EQ(busy_fsm, TaskFsm::kReduceWait) << "上一笔 reduce 还没做完";
   EXPECT_EQ(admitted, 1u);
   EXPECT_TRUE(reqs.empty()) << "reduce 不向 Router 申请 credit";
+}
+
+TEST(BachTsCredit, IndependentUsersReceiveAtMostOneDirectionGrantPerCycle) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Bench b(clk);
+  b.cfg->WriteTask(0, Step(true, 6, true));
+  b.cfg->WriteRouterTable(6, 4, 0);
+  b.table->AttachCfg(*b.cfg);
+  CreditBench h(clk, *b.cfg, *b.table, *b.credit);
+  auto batch = std::make_shared<StreamWrite>();
+  batch->valid = true;
+  for (uint64_t sid = 0; sid < 3; ++sid) {
+    auto entry = Sitting(sid, 20 + sid, 0, TaskFsm::kWaitCredit);
+    entry->entry.task_path_id = 6;
+    batch->updates.push_back(entry);
+  }
+  h.seeds = {{2, batch}};
+  clk->Continue(40);
+  RT::JoinAll();
+  uint64_t previous = 0;
+  for (auto ready : h.ready_per_cycle) {
+    EXPECT_LE(ready, previous + 1);
+    previous = ready;
+  }
+  EXPECT_EQ(previous, 3u);
+  EXPECT_EQ(b.credit->DirectionCount(1), 13u);
+  RT::Reset();
 }

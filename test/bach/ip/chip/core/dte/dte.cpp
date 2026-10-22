@@ -17,6 +17,7 @@
 #include "bach/ip/chip/core/dte/dte.h"
 #include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/memory/core_mem.h"
+#include "bach/ip/chip/core/memory/share_mem.h"
 #include "base/clock.h"
 #include "base/runtime.h"
 
@@ -858,5 +859,62 @@ TEST(BachDte, ErrorAcceptsRegisterAccessAndDiscardsTriggerWhenQueueIsFull) {
   EXPECT_FALSE(driver.created_descriptor);
   EXPECT_EQ(driver.returned, 0x1234u);
   EXPECT_EQ(reg.Triggers(), 0u);
+  RT::Reset();
+}
+
+TEST(BachDte, SharedMemoryDataAndCompletionFlagShareAnOrderedWritePort) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Dte dte(clk, "dte");
+  DteDriver driver(clk, dte);
+  ShareMem memory(clk, "shared");
+  dte.AttachSmemWr(memory.PortPtr(kSmemDteDsa));
+  memory.Poke(0, ByteBlock(1024, 0xa5));
+  auto task = InboundTask(0, 3, 11, 0x80200078u, 272);
+  task.wr.insert(task.wr.end() - 2, {kDteRegSmWAddr, 0x200});
+  task.wr.insert(task.wr.end() - 2, {kDteRegSmWData, 0x12345678});
+  task.wr[task.wr.size() - 2].data |= kDteWrSharememFlag;
+  RvCfgDriver rv(clk, dte, {task}, 2);
+  auto msg = MakeMsg(11, 0, 272);
+  msg->payload.resize(272);
+  for (uint64_t k = 0; k < 272; ++k) msg->payload[k] = uint8_t(k * 17 + 3);
+  FrameFeeder feeder(clk, dte, {{40, msg}});
+  TsSide ts(clk, dte);
+  clk->Continue(500);
+  RT::JoinAll();
+  EXPECT_EQ(ts.dones, 1u);
+  EXPECT_EQ(memory.Peek(120, 272), msg->payload);
+  EXPECT_EQ(memory.Peek(119, 1), ByteBlock({0xa5}));
+  EXPECT_EQ(memory.Peek(392, 1), ByteBlock({0xa5}));
+  EXPECT_EQ(memory.Peek(0x200, 4), ByteBlock({0x78, 0x56, 0x34, 0x12}));
+  RT::Reset();
+}
+
+TEST(BachDte, StopAcceptsControlAndDropsFullQueueTrigger) {
+  EnsureSlots();
+  auto clk = MakeClock(0, kPeriod);
+  Agcu agcu;
+  DteRegfile reg(clk, "reg", agcu, 0, false);
+  reg.BindStopped([] { return true; });
+  struct Driver : BachModule {
+    DteRegfile &reg;
+    bool ready = false, descriptor = false;
+    Driver(ClockPtr c, DteRegfile &r) : BachModule(c, "driver"), reg(r) {}
+    void Step() override {
+      reg.OutPtr()->DriveCredits(0);
+      auto now = CycleNow();
+      if (now == 3) reg.Cfg().Drive(kDteRegAddr0Src, 0x1234, 1);
+      else if (now == 5) reg.Cfg().Drive(kDteRegTrigger, 0, 2);
+      else reg.Cfg().Idle();
+      if (now == 8) ready = reg.Cfg().Ready();
+      descriptor |= reg.OutPtr()->Valid();
+      reg.RunStep();
+    }
+  } driver(clk, reg);
+  clk->Continue(15);
+  RT::JoinAll();
+  EXPECT_TRUE(driver.ready);
+  EXPECT_FALSE(driver.descriptor);
+  EXPECT_EQ(reg.ConfigRead(kDteRegAddr0Src), 0x1234u);
   RT::Reset();
 }

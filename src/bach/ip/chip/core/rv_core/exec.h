@@ -299,7 +299,7 @@ class RvExec : public BachModule {
     task_ctrl = std::make_shared<MmioSink>(kTaskCtrlBase, kTaskCtrlSize);
     task_ctrl->SetReadFn([this](uint64_t at) { return CsrOf(at); });
     share_mem = std::make_shared<MmioSink>(kShareMemBase, kShareMemSize);
-    core_mem = std::make_shared<MmioSink>(kCoreMemBase, kCoreMemSize);
+    router_io = std::make_shared<MmioSink>(kRouterIoBase, kRouterIoSize);
     local = std::make_shared<systeml::MemoryBase>();
     dtcm = std::make_shared<systeml::MemoryBase>();
 
@@ -310,9 +310,9 @@ class RvExec : public BachModule {
     router->AddPort(dsa_io, DsaIoBase(), DsaIoSize(), 1, 0, "dsa");
     router->AddPort(task_ctrl, kTaskCtrlBase, kTaskCtrlSize, 1, 0, "taskctrl");
     router->AddPort(share_mem, kShareMemBase, kShareMemSize, 1, 0, "smem");
-    // Core Mem 只有 DTE core 看得见。
+    // Router 包头控制口独立映射；三个 RV core 都不映射 CM 数据空间。
     if (unit == RvUnit::kDte) {
-      router->AddPort(core_mem, kCoreMemBase, kCoreMemSize, 1, 0, "cmem");
+      router->AddPort(router_io, kRouterIoBase, kRouterIoSize, 1, 0, "routerio");
     }
 
     engine = std::make_unique<rv32::Engine>(/*maxCycles=*/~0ull);
@@ -347,7 +347,7 @@ class RvExec : public BachModule {
     }
     if (lsq_wb->Valid() && lsq_wb->Seq() != last_lsq_wb) {
       last_lsq_wb = lsq_wb->Seq();
-      // Share Mem 与 Core Mem 那两路同理：功能模型这边只有占位值，读回来的
+      // Share Mem 与 Router I/O 那两路同理：功能模型这边只有占位值，读回来的
       // 内容这时候才补进目的寄存器。DTCM 走功能模型自己的存储，不带数据。
       if (lsq_wb->HasData() && lsq_wb->RdIdx() != 0) {
         sys->registerSystem->GetRegFile(rv32::REG_SR, 0)[lsq_wb->RdIdx()]
@@ -458,12 +458,12 @@ class RvExec : public BachModule {
   static bool InRange(uint64_t a, uint64_t base, uint64_t size) {
     return a >= base && a < base + size;
   }
-  // 这一条访存经 lsq 发出去：Share Mem、Core Mem 与 Router I/O reg。
+  // 这一条访存经 lsq 发出去：Share Mem 与 Router I/O reg。
   bool ToLsq(uint32_t inst) const {
     if ((RvIssueResOf(inst) & kResMem) == 0) return false;
     uint64_t a = MemAddr(inst);
     return InRange(a, kShareMemBase, kShareMemSize) ||
-           (unit == RvUnit::kDte && InRange(a, kCoreMemBase, kCoreMemSize));
+           (unit == RvUnit::kDte && InRange(a, kRouterIoBase, kRouterIoSize));
   }
   // 这一条发 DSA 请求：DSA 读写指令，或访存落在本核 DSA 的 IO 窗口。
   bool ToDsa(uint32_t inst) const {
@@ -492,16 +492,9 @@ class RvExec : public BachModule {
       share_mem->Pop();
       SendLsq(LsqTarget::kShareMem, r, u, r.addr - share_mem->Base());
     }
-    while (!core_mem->Empty()) {
-      MmioSink::Req r = core_mem->Front();
-      core_mem->Pop();
-      uint64_t at = r.addr - core_mem->Base();
-      // Router I/O reg 复用这一段的高地址，出口换成 CoreStation 的包头读口。
-      if (at >= kRouterIoOffset) {
-        SendLsq(LsqTarget::kRouterIo, r, u, at - kRouterIoOffset);
-      } else {
-        SendLsq(LsqTarget::kCoreMem, r, u, at);
-      }
+    while (!router_io->Empty()) {
+      auto request = router_io->Front(); router_io->Pop();
+      SendLsq(LsqTarget::kRouterIo, request, u, request.addr - router_io->Base());
     }
     while (!task_ctrl->Empty()) {
       MmioSink::Req r = task_ctrl->Front();
@@ -593,7 +586,7 @@ class RvExec : public BachModule {
   std::shared_ptr<rv32::SystemRv32> sys;
   std::unique_ptr<rv32::Engine> engine;
   std::shared_ptr<systeml::MemoryBase> local, dtcm;
-  std::shared_ptr<MmioSink> dsa_io, task_ctrl, share_mem, core_mem;
+  std::shared_ptr<MmioSink> dsa_io, task_ctrl, share_mem, router_io;
 
   // gpr 就绪表：32 位，复位全 1。
   std::array<bool, 32> ready{};

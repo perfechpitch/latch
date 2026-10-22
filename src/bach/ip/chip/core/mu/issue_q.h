@@ -1,11 +1,7 @@
 #ifndef _LATCH_BACH_IP_CHIP_CORE_MU_ISSUE_Q_
 #define _LATCH_BACH_IP_CHIP_CORE_MU_ISSUE_Q_
 
-// issue_q：深度 16，顺序执行与 finish。
-//
-// 任务切换无 bubble，并且支持 task 间在执行通路上不同操作类型的重叠：
-//   task0 load → {task0 计算 ‖ task1 load} → {task0 写回 ‖ task1 计算} → …
-// 所以队列里同时可以有几笔在不同阶段，只是各阶段各自只有一笔。
+// TaskQ 深度 8，保存独立任务快照；读、算、写跨任务重叠，按队头顺序退休。
 
 #include <deque>
 #include <string>
@@ -19,7 +15,7 @@
 namespace latch {
 namespace bach {
 
-constexpr uint64_t kMuIssueQDepth = 16;
+constexpr uint64_t kMuIssueQDepth = 8;
 
 // 一笔在飞的任务走过的几个阶段。三段重叠就是这几段各自有一笔。
 enum class MuStage : uint32_t {
@@ -38,6 +34,10 @@ enum class MuStage : uint32_t {
 // 读与算按 tile 数走，写回按输出的列数走：K 那一层的几段与合并成一份的那几个
 // 专家都只产出一个结果。
 struct MuInflight {
+  struct Fault {
+    uint64_t type = 0, address = 0;
+    bool mmem = false, address_valid = false;
+  } fault;
   MuTaskCfg cfg;
   MuStage stage = MuStage::kQueued;
   uint64_t seq = 0;
@@ -46,24 +46,29 @@ struct MuInflight {
   uint64_t issued = 0, computed = 0, stored = 0;
   // acu 查出越界：这一笔余下的数据全部作废，已发出的回复收回来也不算。
   bool dropped = false;
+  bool planned = true;
+  uint64_t error = 0, error_addr = 0, numeric_flags = 0;
+  bool reported_error = false;
+  std::vector<MuStep> steps;
   // 各 tile 写回哪。发读的时候由 AGU 算出来记下，算完那一拍再取，因为 AGU 的
   // 迭代这时已经走到后面的 tile 了。
   std::vector<uint64_t> out_addr;
 
   explicit MuInflight(MuTaskCfg const& task)
       : cfg(task), agu(task),
-        total(task.kblock * task.Experts() * task.nblock) {
-    if (total == 0) total = 1;
+        total(task.Tiles()) {
+    planned = !task.decoded_mode;
   }
   uint64_t Kblock() const { return cfg.kblock == 0 ? 1 : cfg.kblock; }
   // 写回的次数。一列不管切成几段都只写一次；几个专家合并成一份时也只写一次，
   // 各出一份时每个专家写一次。
   uint64_t OutTotal() const {
+    if (dropped || !cfg.Experts()) return 0;
     uint64_t n = cfg.nblock;
     if (!cfg.ep_reduce) n *= cfg.Experts();
-    return n == 0 ? 1 : n;
+    return n;
   }
-  bool Done() const { return stored >= OutTotal(); }
+  bool Done() const { return planned && stored >= OutTotal(); }
 };
 
 class MuIssueQ : public BachModule {
@@ -73,7 +78,7 @@ class MuIssueQ : public BachModule {
       : BachModule(clock, name, parent, tick), depth(clock), issued(clock) {}
 
   bool HasRoom() const { return q.size() < kMuIssueQDepth; }
-  void Push(MuTaskCfg const& cfg) {
+  MuInflight &Push(MuTaskCfg const& cfg) {
     LOGCHECK(HasRoom(), "MuIssueQ: 满了。写 trigger 前应当先看有没有空位。");
     MuInflight f(cfg);
     f.seq = next_seq++;
@@ -81,6 +86,7 @@ class MuIssueQ : public BachModule {
     ++issue_pending;
     start_task = cfg.task_id;
     start_user = cfg.user_id;
+    return q.back();
   }
 
   // 取第一笔还停在某个阶段的任务。顺序执行：只看队头那几笔。
@@ -94,7 +100,7 @@ class MuIssueQ : public BachModule {
   // 于是同一笔任务的相邻 tile 与相邻两笔任务都能重叠。
   MuInflight* FirstToLoad() {
     for (auto& f : q) {
-      if (f.issued < f.total) return &f;
+      if (!f.planned || f.issued < f.total) return &f;
     }
     return nullptr;
   }
@@ -113,6 +119,14 @@ class MuIssueQ : public BachModule {
     return nullptr;
   }
   MuInflight* Head() { return q.empty() ? nullptr : &q.front(); }
+  MuInflight const* Head() const { return q.empty() ? nullptr : &q.front(); }
+  MuInflight const* AtSlot(uint64_t slot) const {
+    for (auto const& f : q) if ((f.seq & 7) == slot) return &f;
+    return nullptr;
+  }
+  uint64_t HeadSlot() const { return q.empty() ? next_seq & 7 : q.front().seq & 7; }
+  uint64_t TailSlot() const { return next_seq & 7; }
+  void Clear() { q.clear(); next_seq = 0; }
   // 按下发序号找。读回来的响应带着这个号，据此记给对应那一笔。
   MuInflight* BySeq(uint64_t s) {
     for (auto& f : q) {
@@ -122,7 +136,7 @@ class MuIssueQ : public BachModule {
   }
   // 队头做完就出队：finish 按顺序，与执行通路上的重叠无关。
   void RetireFront() {
-    if (!q.empty() && q.front().stage == MuStage::kFinished) q.pop_front();
+    if (!q.empty() && q.front().stage == MuStage::kFinished && !q.front().error) q.pop_front();
   }
   bool Empty() const { return q.empty(); }
   uint64_t Size() const { return q.size(); }

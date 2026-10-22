@@ -211,6 +211,7 @@ public:
     control_write = std::move(write);
   }
   void BindError(std::function<bool()> read) { error_state = std::move(read); }
+  void BindStopped(std::function<bool()> read) { stopped_state = std::move(read); }
   void ConfigWrite(uint64_t at, uint64_t data) { WriteReg(at, data); }
   uint64_t ConfigRead(uint64_t at) const { return ReadReg(at); }
   // ── 观测 ──
@@ -237,7 +238,7 @@ protected:
     if (!rdata_used)
       rdata->Idle();
 
-    cfg->DriveReady(InError() || out->Credits() > submitted.size());
+    cfg->DriveReady(InError() || Stopped() || HasSpace());
     triggers = trig_cnt;
     writes = write_cnt;
     TracePerCycle("submitted", submitted.size());
@@ -256,6 +257,8 @@ protected:
 
 private:
   bool InError() const { return error_state && error_state(); }
+  bool Stopped() const { return stopped_state && stopped_state(); }
+  bool HasSpace() const { return out->Credits() > submitted.size(); }
   void Drain() {
     uint64_t ack = out->AcceptedSeq();
     while (!submitted.empty() && submitted.front() <= ack)
@@ -266,7 +269,7 @@ private:
   void TakeCfg() {
     if (!cfg->Valid() || cfg->Seq() == last_seq)
       return;
-    if (!InError() && out->Credits() <= submitted.size())
+    if (!InError() && !Stopped() && !HasSpace())
       return;
     last_seq = cfg->Seq();
     uint64_t at = cfg->req_addr.Get();
@@ -357,7 +360,7 @@ private:
 
   // 写 CFG_TRIGGER 那一拍：合并配置 → 采样 STUPV → 组装 4 段位 Descriptor。
   void Fire(uint64_t trigger) {
-    if (InError()) {
+    if (InError() || (Stopped() && !HasSpace())) {
       dirty = 0;
       cfg_write_cnt = 0;
       return;
@@ -418,7 +421,7 @@ private:
       d->seg[i] = s;
     }
 
-    d->error = agcu.Validate(*d);
+    d->error = agcu.Precheck(*d);
     uint64_t seq = out->NextSeq();
     submitted.push_back(seq);
     out->Drive(d, seq);
@@ -436,6 +439,7 @@ private:
   std::function<uint64_t(uint64_t)> control_read;
   std::function<void(uint64_t, uint64_t)> control_write;
   std::function<bool()> error_state;
+  std::function<bool()> stopped_state;
   Agcu agcu;
   std::shared_ptr<DsaCfgPort> cfg;
   std::shared_ptr<DescPort> out;

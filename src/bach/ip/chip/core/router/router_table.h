@@ -3,7 +3,7 @@
 
 // RouterTable 与 CSR。
 //
-// 64 条表项按 path_id 索引，只描述静态路由与资源需求，不保存包的动态执行状态。
+// 256 条表项按 path_id 索引，只描述静态路由与资源需求，不保存包的动态执行状态。
 // 同一个 path_id 在不同 core 上表项不同，所以每 core 一份，不能从拓扑反推。
 //
 // 内部多副本：所有需要并行查询的位置各持一份，由这里统一接收写事务。更新状态机
@@ -27,7 +27,7 @@ namespace latch {
 namespace bach {
 
 // 表项数，按 path_id 索引。
-constexpr uint64_t kPathNum = 64;
+constexpr uint64_t kPathNum = 256;
 
 // core_bad_mask 的位数：一颗 chip 2×5 共 10 个 core。
 constexpr uint64_t kCoreBadMaskBits = 10;

@@ -83,10 +83,10 @@ public:
     comp->AttachToTs(std::move(p));
   }
   // shareMem 表项写，接 Share Mem 的 DTE DSA 口。
-  MemPort &SmemWr() { return comp->SmemWr(); }
-  std::shared_ptr<MemPort> SmemWrPtr() const { return comp->SmemWrPtr(); }
+  MemPort &SmemWr() { return *xbar->SmemWrPtr(); }
+  std::shared_ptr<MemPort> SmemWrPtr() const { return xbar->SmemWrPtr(); }
   void AttachSmemWr(std::shared_ptr<MemPort> p) {
-    comp->AttachSmemWr(std::move(p));
+    xbar->AttachSmemWr(std::move(p));
   }
   void AttachMuTopkEp(GenEpInfo *ep) {
     LOGCHECK(ep, "DTE: topK endpoint is required");
@@ -106,6 +106,8 @@ public:
   void AttachMmemWr(std::shared_ptr<MemPort> p) {
     xbar->AttachMmemWr(std::move(p));
   }
+  void BlockMmemIngress(bool on) { xbar->BlockMmemIngress(on); }
+  bool MmemQuiescent() const { return xbar->MmemQuiescent(); }
 
   std::shared_ptr<DteExceptionPort> ExceptionPtr() const {
     return comp->ExceptionPtr();
@@ -159,8 +161,15 @@ private:
     for (auto &l : lanes)
       commit->AddLanePort(l->AdmitPtr());
     comp->AttachAdmit(commit->RsPortPtr());
+    commit->BindDecoder([this](Descriptor &desc) { return agcu.Validate(desc); });
+    for (uint64_t lane = 0; lane < kLaneNum; ++lane)
+      comp->AddDecoded(commit->DecodedPtr(lane));
+    // InCh 数据写与 SM Ptr 的完成标志共用物理口，响应按实际发出顺序返回。
+    lanes[kInCh]->AttachSmem(xbar->LaneSmem(0));
+    comp->AttachSmemWr(xbar->LaneSmem(1));
     comp->AttachCanceled(commit->CancelPtr());
     reg->BindError([this] { return comp->Error() != 0; });
+    reg->BindStopped([this] { return !commit->Running(); });
     // The source does not freeze control offsets. These are model parameters.
     reg->BindControl(
         [this](uint64_t at) -> uint64_t {

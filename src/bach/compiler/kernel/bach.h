@@ -54,6 +54,7 @@ static inline __attribute__((always_inline)) u32 dsa_read(u32 off) {
 #define DTE_EP_SCALE 2u
 #define DTE_EP_TOPK 3u
 #define DTE_EP_HDR 4u
+#define DTE_EP_SMEM 5u
 static inline u32 dte_ep(u32 ep, u32 off) {
   if (ep == DTE_EP_SCALE)
     return 0x00100000u + off;
@@ -63,6 +64,8 @@ static inline u32 dte_ep(u32 ep, u32 off) {
     return 0x20000000u + off;
   if (ep == DTE_EP_HDR)
     return 0x30000000u + off;
+  if (ep == DTE_EP_SMEM)
+    return 0x80200000u + off;
   return off;
 }
 
@@ -358,8 +361,7 @@ static inline u32 dte_template(u32 idx) {
 #define MU_AC_EXPERT_STRIDE 0x018
 #define MU_B_ADDR 0x01C
 #define MU_B_EXPERT_STRIDE 0x020
-#define MU_TOPK_TABLE_ADDR 0x024
-#define MU_PRIMITIVE_MODE 0x028
+#define MU_PRIMITIVE_MODE 0x024
 
 /* 控制与状态寄存器 0x0400~0x07FF */
 #define MU_STATUS 0x404
@@ -376,7 +378,11 @@ static inline u32 dte_template(u32 idx) {
 #define MU_OUTPUT_EXPERT_STRIDE_SHIFT 16
 
 /* TASK_TRIGGER 位域：[0] Temp Valid、[2:1] Temp Index */
-#define MU_TRIGGER_VALID (1u << 0)
+#define MU_TRIGGER_DEFAULT 0u
+#define MU_ROUTER_EP_EN (1u << 24)
+#define MU_SHARE_EP_EN (1u << 10)
+#define MU_SHARE_EP_MASK_ONE (1u << 11)
+#define MU_SHARE_EP_DTYPE_MXFP8 (1u << 3)
 
 /* primitive_mode 位域：[0] primitive_type、[2:1] A_data_type、[3] C_data_type、
  * [9:7] router_ep_data_type、[21:14] router_expert_count、[23]
@@ -384,12 +390,12 @@ static inline u32 dte_template(u32 idx) {
 #define MU_PRIM_TYPE_K64_N128 (1u << 0) /* [0] 1 = 1×K64×N128；0 = 1×K128×N64 \
                                          */
 #define MU_A_DTYPE_MXFP8 (1u << 1)      /* [2:1] token = 01（MXFP8） */
-#define MU_C_DTYPE_BF16 (1u << 3)       /* [3] out = BF16 */
-#define MU_ROUTER_EP_DTYPE_SHIFT 7      /* [9:7] weight */
+#define MU_C_DTYPE_BF16 (1u << 2)       /* [3] out = BF16 */
+#define MU_ROUTER_EP_DTYPE_SHIFT 5      /* [9:7] weight */
 #define MU_ROUTER_EP_DTYPE_MXFP8 (1u << MU_ROUTER_EP_DTYPE_SHIFT)
-#define MU_ROUTER_EXPERT_SHIFT 14 /* [21:14] 路由专家数 */
-#define MU_ROUTER_EP_REDUCE_EN (1u << 23)
-#define MU_TASK_LAST (1u << 24)
+#define MU_ROUTER_EXPERT_SHIFT 19 /* [21:14] 路由专家数 */
+#define MU_ROUTER_EP_REDUCE_EN (1u << 25)
+#define MU_TASK_LAST (1u << 26)
 
 /* ===== VU：《VU-DSA 寄存器整理》§Register Map Overview ===== */
 
@@ -521,8 +527,14 @@ static inline u32 rc_flags_set(u32 s) {
 }
 
 /* 一个用户要来几包：链首没有上一行那一笔，一包；其余两包 */
-static inline u32 rc_need(void) {
-  return smem_read(RC_HEAD_OFF) != 0u ? 1u : 2u;
+static inline __attribute__((always_inline)) u32 rc_need(void) {
+  /* 核的行链角色在本次kernel运行期间保持不变。 */
+  static u32 cached_need;
+  /* 模型直接进入task，DTCM未由firmware清零，须验证初始化签名。 */
+  const u32 signature = 0x52434E00u;
+  if ((cached_need & ~3u) != signature)
+    cached_need = signature | (smem_read(RC_HEAD_OFF) != 0u ? 1u : 2u);
+  return cached_need & 3u;
 }
 
 /* Router I/O reg：DTE core 那一段 Core Mem 往后 1 MB 起，映射到 CoreStation 的

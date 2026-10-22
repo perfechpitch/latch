@@ -655,12 +655,27 @@ private:
 
   // 三块存储的各个 master 口。Matrix Mem 对三个 RV core 都不可见，VU 也读不到。
   // 要 Matrix Mem 里的数据得先由 DTE 搬到 Core Mem。
+  void SetMuMmemWindow(bool on) {
+    dte->BlockMmemIngress(on);
+    if (!on) {
+      mu_window_drained = 0;
+      mmem->RequestExclusiveWindow(false);
+      return;
+    }
+    // 已经报出的 ready 还会带来旧请求，先让入口和所有旧响应完全走空。
+    // 这一阶段保留 MM 的 DTE ready，避免把旧请求堵在窗口申请之外。
+    if (dte->MmemQuiescent()) ++mu_window_drained;
+    else mu_window_drained = 0;
+    mmem->RequestExclusiveWindow(mu_window_drained >= 3);
+  }
   void WireMemory() {
     // 读与写各占一个端口：存储那一侧只在 bank 冲突时才在读写之间二选一，
     // 合成一根线的话同一拍发出的读与写会互相盖掉。
     mu->AttachCmemRd(cmem->PortPtr(kCmemMuRd));
     mu->AttachCmemWr(cmem->PortPtr(kCmemMuWr));
     mu->AttachMmemRd(mmem->PortPtr(kMmemMu));
+    mu->BindMmemWindow([this](bool on) { SetMuMmemWindow(on); },
+                       [this] { return mu_window_drained >= 3 && mmem->ExclusiveWindowReady(); });
     vu->AttachCmemLd(cmem->PortPtr(kCmemVuRd));
     vu->AttachCmemSt(cmem->PortPtr(kCmemVuWr));
     // DTE 对每块存储的读与写各一个 master 口，五个通道在它自己的 DMA_XBAR
@@ -687,7 +702,6 @@ private:
     // 用 Core Mem 的同步 Poke/Peek，把 Core Mem 的 BankedMem 指过去。
     // cm_lsq 只有 DTE RV core 有，按地址范围分流到 Core Mem 与 Router 的包头
     // 读口。包头只有这一条读取通路，DTE DSA 不另接一条。
-    rv[0]->AttachCmem(cmem->PortPtr(kCmemRvCore));
     rv[0]->AttachHdr(router->HdrPtr());
   }
 
@@ -757,7 +771,7 @@ private:
   }
 
   // 完成了、但**不报 TS** 的那一批（ack_ts_en = 0）。只有 DTE（u == 0）有 ——
-  // 自启动 core 的 Bypass DataIn（保留号 63）与权重加载阶段的 datain 走这一路。
+  // 自启动 core 的 Bypass DataIn与权重加载阶段的 datain 走这一路。
   // 与 DsaDoneOf(0) 互斥，波形上 DTE-DSA 的终点取两者之一。
   DsaEv DsaDoneNoAckOf(uint64_t u) {
     if (u != 0) return {};
@@ -801,6 +815,7 @@ private:
   std::unique_ptr<CoreMem> cmem;
   std::unique_ptr<MatrixMem> mmem;
   std::unique_ptr<ShareMem> smem;
+  uint64_t mu_window_drained = 0;
 };
 
 } // namespace bach

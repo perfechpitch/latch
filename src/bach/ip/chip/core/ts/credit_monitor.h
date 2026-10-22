@@ -92,6 +92,7 @@ protected:
     auto budget = view->credit_count;
     counts = budget;
     bool older_unregistered = false;
+    bool direction_granted = false;
     for (uint64_t age = 0; age < view->slot_num; ++age) {
       uint64_t sid = view->AgeOrder(age);
       auto const &e = view->entry[sid];
@@ -110,7 +111,7 @@ protected:
         pending[sid].reset();
         continue;
       }
-      uint64_t need = cfg.Route(e.task_path_id).dir & 7 & ~e.drct_used;
+      uint64_t need = cfg.Route(e.task_path_id).Directions() & ~e.drct_used;
       if (!pending[sid] || pending[sid]->tid != e.task_id ||
           pending[sid]->allocation != e.allocation ||
           pending[sid]->need != need) {
@@ -118,7 +119,7 @@ protected:
         older_unregistered = true;
         continue;
       }
-      if (older_unregistered)
+      if (older_unregistered || direction_granted)
         continue;
       bool enough = true;
       for (uint64_t dir = 0; dir < 3; ++dir)
@@ -136,6 +137,7 @@ protected:
       batch->updates.push_back(w);
       pending[sid].reset();
       ++wake_count;
+      direction_granted = true;
     }
     if (reissue_done && reissue_done->Valid() &&
         reissue_done->Seq() != last_reissue_seq) {

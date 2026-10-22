@@ -20,7 +20,7 @@
 // 这一次即使不派 DTE 也照样建表。
 //
 // 自启动 core 与权重加载模式走 Bypass：不查 stream_table、不建表，PC 取
-// DATAIN_TASK，身份用保留的 SID 15 / TID 63。
+// DATAIN_TASK，使用 SID0/TID0，不返回完成 ACK。
 //
 // 系统保证有效的 user_id 唯一：一个 user_id 在本 core 上的 stream
 // 退休之前，不会 有另一个 token

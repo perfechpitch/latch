@@ -91,8 +91,10 @@ MoeCase ReadMoeCase() {
 // topK 表在数据线里的样子：每项 {local_ep_index 2 B, weight 4 B}。
 std::vector<uint8_t> TopkBytes(std::vector<TopkEntry> const &t) {
   std::vector<uint8_t> b(kTopkBytesPerStream, 0);
+  b[0] = uint8_t(t.size());
+  b[1] = uint8_t(t.size() >> 8);
   for (size_t i = 0; i < t.size(); ++i) {
-    uint64_t at = i * kTopkEntryBytes;
+    uint64_t at = 2 + i * kTopkEntryBytes;
     b[at] = uint8_t(t[i].local_ep_index & 0xFFu);
     b[at + 1] = uint8_t((t[i].local_ep_index >> 8) & 0xFFu);
     uint32_t w = numeric::BitsOf(t[i].weight);
@@ -201,22 +203,22 @@ struct MuJob {
 };
 
 void Submit(std::deque<std::pair<uint64_t, uint64_t>> &q, MuJob const &j) {
-  uint64_t mode = j.mode | (kn::kExperts << kMuRouterExpertCountShift);
+  uint64_t mode = j.mode | kMuRouterEpEn | ((kn::kExperts - 1) << kMuRouterExpertCountShift);
   if (j.ep_reduce)
     mode |= kMuRouterEpReduceEn;
   mode |= kMuTaskLast; // 单 core 用例三笔各自报一次 dsa_done，全置 task_last
   q.push_back({kMuPrimitiveMode, mode});
   q.push_back({kMuPrimitiveDim, j.nblock | (j.kblock << 16)});
   q.push_back({kMuAAddr, j.a_addr});
-  q.push_back({kMuBAddr, j.b_addr});
+  q.push_back({kMuBAddr, j.b_addr / 64});
   q.push_back({kMuCAddr, j.c_addr});
   // AC_expert_stride 拆两侧：FC2 用 token 那侧，FC1/FC3 用 output
   // 那侧，不用的写 0。
   q.push_back({kMuAcExpertStride,
                j.ep_reduce ? (j.ac_stride << kMuTokenExpertStrideShift)
                            : (j.ac_stride << kMuOutputExpertStrideShift)});
-  q.push_back({kMuBExpertStride, kn::kMmStride});
-  q.push_back({kMuTaskTrigger, kMuTriggerValid});
+  q.push_back({kMuBExpertStride, kn::kMmStride / 64});
+  q.push_back({kMuTaskTrigger, kMuTriggerDefault});
 }
 
 constexpr uint64_t kFc13Mode =

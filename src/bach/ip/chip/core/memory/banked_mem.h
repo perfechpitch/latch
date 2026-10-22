@@ -27,6 +27,7 @@
 // 错报错，这一轮只留计数器与 接口名，不注错。
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <deque>
 #include <map>
@@ -53,19 +54,16 @@ struct MemMaster {
   // 属于哪一方。exclusive_bank 管的是不同方之间撞车，同一方的几个口（如 DTE 的
   // 读与写）撞在同一个 bank 上照常排队。
   uint64_t party = kOwnParty;
+  bool posted_write = false;
 };
 
 struct BankedMemCfg {
   uint64_t bank_num = 8;
   uint64_t granule = 128; // 地址粒度，一行的字节数
   uint64_t capacity = 1 << 20;
-  // Matrix Mem 的硬约束：同一 bank 不许两方同时访问。撞了不重试、不排队，直接
-  // 断言失败。这是软件排算子时就该保证的事，用重试掩盖会让配置错误一直查不出
-  // 来。同一方的几个口撞了照常排队。Core Mem 不设这条，撞了都排队。
+  // 可选严格冲突检查；使用独占窗口的 Matrix Mem 不启用这一模式。
   bool exclusive_bank = false;
-  // exclusive_bank 撞车时是停下还是只记一笔。默认停下：真硬件上被让路的那一笔
-  // 直接丢弃，DTE 没有重传通路，丢一笔结果就错，所以模型不能让它悄悄过去。
-  // 只在测试里关掉，用来验证冲突确实被检出。
+  // 严格模式下可选择只计数，供冲突检测测试使用。
   bool halt_on_conflict = true;
   // Share Mem 的四个 master 按轮询（原文未给，建模计划的默认值）。开着时忽略
   // priority，从上一拍赢家的下一个开始扫。
@@ -73,6 +71,11 @@ struct BankedMemCfg {
   // 每 granule 配几字节 scale 寄存器，一字节管 kScaleGroupBytes 字节数据。0
   // 表示 这块存储没有这一段。
   uint64_t scale_bytes = 0;
+  uint64_t exclusive_master = kOwnParty;
+  uint64_t external_pair_latency = 0;
+  uint64_t external_bank_outstanding = 0;
+  uint64_t external_pair_issue_cycles = 2;
+  bool external_full_duplex = false;
 };
 
 // 每个 master 的前端有两格：M1 刚锁存的与 M2 等 bank 仲裁的。
@@ -105,6 +108,12 @@ public:
   uint64_t Granted() const { return granted.Get(); }
   uint64_t Conflicts() const { return conflicts.Get(); }
   uint64_t PendingCount() const { return pending_cnt.Get(); }
+  void RequestExclusiveWindow(bool on) {
+    explicit_window = true;
+    if (window_requested != on) window_quiet = 0;
+    window_requested = on;
+  }
+  bool ExclusiveWindowReady() const { return window_granted; }
 
   // ── ECC ──
   //
@@ -119,20 +128,20 @@ public:
 
   // 构造期或测试用：从 addr 那一组起直接铺几组 scale，第 k 个管
   // [addr + k × 32, addr + (k + 1) × 32)。
-  void PokeScale(uint64_t addr, ByteBlock const &bytes) {
+  void PokeScale(uint64_t addr, ByteBlock const &bytes, uint64_t group = kScaleGroupBytes) {
     LOGCHECK(cfg.scale_bytes != 0, "BankedMem: 这块存储没有 scale 寄存器。");
     for (uint64_t k = 0; k < bytes.size(); ++k) {
-      SetScaleAt(addr + k * kScaleGroupBytes, bytes[k]);
+      SetScaleAt(addr + k * group, bytes[k], group);
     }
   }
   // 从 addr 那一组起取 groups 组。不给就取一行那么多。
-  ByteBlock PeekScale(uint64_t addr, uint64_t groups = 0) const {
+  ByteBlock PeekScale(uint64_t addr, uint64_t groups = 0, uint64_t group = kScaleGroupBytes) const {
     if (groups == 0)
-      groups = cfg.scale_bytes;
+      groups = cfg.granule / group;
     ByteBlock out;
     out.reserve(groups);
     for (uint64_t k = 0; k < groups; ++k) {
-      out.push_back(ScaleAt(addr + k * kScaleGroupBytes));
+      out.push_back(ScaleAt(addr + k * group, group));
     }
     return out;
   }
@@ -163,6 +172,7 @@ protected:
     Respond(now);
     Arbitrate(now);
     Accept(now);
+    UpdateWindow();
 
     granted = granted_pending;
     conflicts = conflict_pending;
@@ -184,6 +194,7 @@ private:
     uint64_t master = 0;
     uint64_t done_cycle = 0;
     ByteBlockPtr data;
+    std::vector<uint64_t> reserved_banks;
   };
 
   uint64_t BankOf(uint64_t addr) const {
@@ -198,13 +209,18 @@ private:
       MemReqView r = ReadMemReq(*ports[m]);
       if (!r.valid)
         continue;
-      LOGCHECK(slots[m].size() < kStageNum,
-               "BankedMem: 两格都占着还发进来，master 没按 ready 停。");
+      // ready has registered propagation; preserve requests already launched
+      // before it fell, including while the external trunk is stalled.
+      uint64_t capacity = kStageNum + (cfg.exclusive_master != kOwnParty ? 2 : 0);
+      LOGCHECK(slots[m].size() < capacity,
+               "BankedMem: request exceeded the registered ingress capacity");
       slots[m].push_back({r, now, next_seq++});
     }
     // ready 在本拍末按余量给：还剩一格 = 下一拍收得下。
     for (uint64_t m = 0; m < masters.size(); ++m) {
       bool room = slots[m].size() < kStageNum;
+      if (cfg.exclusive_master != kOwnParty && m != cfg.exclusive_master && window_requested)
+        room = false;
       auto it = rsp_this_cycle.find(m);
       if (it != rsp_this_cycle.end()) {
         ports[m]->DriveSlave(room, true, it->second);
@@ -230,7 +246,7 @@ private:
       }
     std::vector<uint64_t> candidates;
     for (uint64_t m = 0; m < masters.size(); ++m)
-      if (!slots[m].empty())
+      if (!slots[m].empty() && WindowAllows(m))
         candidates.push_back(m);
     if (cfg.round_robin)
       std::sort(candidates.begin(), candidates.end(), [this](auto a, auto b) {
@@ -242,10 +258,15 @@ private:
                 [this](auto a, auto b) { return Better(a, b); });
     std::set<uint64_t> taken;
     for (auto m : candidates) {
+      auto direction = cfg.external_full_duplex && slots[m].front().req.we ? 1u : 0u;
+      if (cfg.exclusive_master != kOwnParty && m != cfg.exclusive_master && fabric_busy_until[direction] > now)
+        continue;
       auto banks = Banks(slots[m].front().req);
       bool available = true;
       for (auto bank : banks)
-        if (taken.count(bank) || bank_busy[bank] > now)
+        if (taken.count(bank) || bank_busy[bank] > now ||
+            (cfg.external_bank_outstanding && m != cfg.exclusive_master &&
+             external_flights[bank] >= cfg.external_bank_outstanding))
           available = false;
       if (!available)
         continue;
@@ -257,14 +278,44 @@ private:
           bank_busy[bank] = now + 2;
       }
       Serve(m, now);
+      if (cfg.exclusive_master != kOwnParty && m != cfg.exclusive_master)
+        fabric_busy_until[direction] = now + (served_pair ? cfg.external_pair_issue_cycles : 1);
       if (cfg.round_robin)
         rr_last = m;
     }
   }
+  bool WindowAllows(uint64_t master) const {
+    if (cfg.exclusive_master == kOwnParty) return true;
+    return master == cfg.exclusive_master ? window_granted : !window_granted;
+  }
+  void UpdateWindow() {
+    if (cfg.exclusive_master == kOwnParty) return;
+    bool owner_busy = !slots[cfg.exclusive_master].empty();
+    bool other_busy = false;
+    for (uint64_t m = 0; m < slots.size(); ++m)
+      if (m != cfg.exclusive_master && !slots[m].empty()) other_busy = true;
+    for (auto const& item : pipe) {
+      if (item.master == cfg.exclusive_master) owner_busy = true;
+      else other_busy = true;
+    }
+    for (auto const& item : rsp_this_cycle)
+      if (item.first != cfg.exclusive_master) other_busy = true;
+    if (!explicit_window) {
+      if (window_requested != owner_busy) window_quiet = 0;
+      window_requested = owner_busy;
+    }
+    if (!window_requested) { window_granted = false; window_quiet = 0; }
+    else if (other_busy) { window_granted = false; window_quiet = 0; }
+    else if (!window_granted && ++window_quiet >= 3) window_granted = true;
+  }
   std::set<uint64_t> Banks(MemReqView const &r) const {
     std::set<uint64_t> result{BankOf(r.addr)};
-    if (r.pair)
-      result.insert(BankOf(r.addr + 128));
+    if (r.pair) result.insert(BankOf(r.addr + 128));
+    else if (r.bytes) {
+      uint64_t end = r.addr + r.bytes - 1;
+      for (uint64_t row = r.addr / cfg.granule; row <= end / cfg.granule; ++row)
+        result.insert(row % cfg.bank_num);
+    }
     return result;
   }
 
@@ -306,6 +357,7 @@ private:
 
   void Serve(uint64_t m, uint64_t now) {
     MemReqView const &r = slots[m].front().req;
+    served_pair = r.pair;
     uint64_t limit = r.scale_physical ? cfg.capacity / 32 : cfg.capacity;
     LOGCHECK(r.addr < limit &&
                  (r.pair && !r.we ? true : r.addr + r.woff + r.bytes <= limit),
@@ -351,8 +403,7 @@ private:
             SetScaleAt((r.addr + r.woff + k - 32 * 1024 * 1024) * 32,
                        (*r.wdata)[r.woff + k]);
       }
-      lat = masters[m].write_latency +
-            (r.pair && cfg.exclusive_bank && r.bytes != 256 ? 1 : 0);
+      lat = masters[m].write_latency;
     } else {
       ByteBlock got;
       if (r.scale_physical) {
@@ -362,14 +413,20 @@ private:
       } else if (!r.scale_only)
         got = ReadBytes(r.addr, r.bytes);
       if (with_scale || r.scale_only)
-        AppendScale(r.addr, r.bytes, &got);
+        AppendScale(r.addr, r.bytes, &got, r.scale_group);
       data = std::make_shared<ByteBlock>(std::move(got));
       lat = masters[m].read_latency;
     }
     // 四级之和就是这个 master 的端到端拍数。M1、M2 各占一拍已经走掉，
     // 剩下的记在延迟线上。
+    if (m != cfg.exclusive_master && r.pair) lat += cfg.external_pair_latency;
     uint64_t rest = lat > 2 ? lat - 2 : 1;
-    pipe.push_back({m, now + rest, data});
+    if (!(r.we && masters[m].posted_write)) {
+      std::vector<uint64_t> reserved_banks;
+      if (cfg.external_bank_outstanding && m != cfg.exclusive_master)
+        for (auto bank : Banks(r)) { ++external_flights[bank]; reserved_banks.push_back(bank); }
+      pipe.push_back({m, now + rest, data, std::move(reserved_banks)});
+    }
     slots[m].pop_front();
     ++granted_pending;
   }
@@ -379,6 +436,10 @@ private:
     for (auto it = pipe.begin(); it != pipe.end();) {
       if (it->done_cycle <= now && rsp_this_cycle.count(it->master) == 0) {
         rsp_this_cycle[it->master] = it->data;
+        for (auto bank : it->reserved_banks) {
+          LOGCHECK(external_flights[bank] != 0, "MM external response reservation underflow");
+          --external_flights[bank];
+        }
         it = pipe.erase(it);
       } else {
         ++it;
@@ -392,24 +453,24 @@ private:
   }
 
   // 一组 scale 落在哪一行的第几个字节。
-  uint64_t ScaleAt(uint64_t addr) const {
+  uint64_t ScaleAt(uint64_t addr, uint64_t group = kScaleGroupBytes) const {
     auto it = scale_store.find(addr / cfg.granule);
     if (it == scale_store.end())
       return 0;
-    return it->second[(addr % cfg.granule) / kScaleGroupBytes];
+    return it->second[(addr % cfg.granule) / group];
   }
-  void SetScaleAt(uint64_t addr, uint8_t v) {
+  void SetScaleAt(uint64_t addr, uint8_t v, uint64_t group = kScaleGroupBytes) {
     ByteBlock &line = scale_store[addr / cfg.granule];
     if (line.empty())
       line.assign(cfg.scale_bytes, 0);
-    line[(addr % cfg.granule) / kScaleGroupBytes] = v;
+    line[(addr % cfg.granule) / group] = v;
   }
 
   // 读回来的正文后面接上 [addr, addr + bytes) 覆盖到的那几组 scale。
-  void AppendScale(uint64_t addr, uint64_t bytes, ByteBlock *out) const {
-    uint64_t n = Groups(bytes == 0 ? cfg.granule : bytes);
+  void AppendScale(uint64_t addr, uint64_t bytes, ByteBlock *out, uint64_t group = kScaleGroupBytes) const {
+    uint64_t n = ((bytes == 0 ? cfg.granule : bytes) + group - 1) / group;
     for (uint64_t k = 0; k < n; ++k) {
-      out->push_back(uint8_t(ScaleAt(addr + k * kScaleGroupBytes)));
+      out->push_back(uint8_t(ScaleAt(addr + k * group, group)));
     }
   }
 
@@ -470,6 +531,11 @@ private:
   }
 
   BankedMemCfg cfg;
+  bool explicit_window = false, window_requested = false, window_granted = false;
+  bool served_pair = false;
+  std::array<uint64_t, 2> fabric_busy_until{};
+  uint64_t window_quiet = 0;
+  std::map<uint64_t, uint64_t> external_flights;
   std::vector<MemMaster> masters;
   std::vector<std::shared_ptr<MemPort>> ports;
 

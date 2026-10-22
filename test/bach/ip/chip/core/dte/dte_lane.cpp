@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "bach/ip/chip/core/dte/dma_xbar.h"
 #include "bach/ip/chip/core/dte/agcu.h"
 #include "bach/ip/chip/core/dte/hmem.h"
 #include "bach/ip/chip/core/dte/lane.h"
@@ -567,7 +568,7 @@ TEST(BachDteLane, DrainSlotsBoundTheReadAhead) {
 // 来，落地时按 topK 段的端内偏移（表下标）把包里的 topK 写进 MU 端口，整笔只写
 // 一次。只有进核通道挂着这条数据线。topK 随包走，进核 Descriptor 的 msg 是空，
 // 得从 Header Parser 转过来的 payload 那一拍的 msg 里读。
-TEST(BachDteLane, InboundTopkUsesTwo128ByteWrites) {
+TEST(BachDteLane, InboundTopkUsesOneAtomic256ByteWrite) {
   EnsureSlots();
   auto clk = MakeClock(0, kPeriod);
   DteBuffer buf(clk, "buf", 32, 1, 0, false);
@@ -609,7 +610,10 @@ TEST(BachDteLane, InboundTopkUsesTwo128ByteWrites) {
       if (req.valid && req.seq != last_seq) {
         last_seq = req.seq;
         ++writes;
-        EXPECT_EQ(req.bytes, 128u);
+        EXPECT_EQ(req.bytes, 256u);
+        EXPECT_EQ(req.lane_mask, 3u);
+        EXPECT_EQ(req.hw_addr0, 3u);
+        EXPECT_EQ(req.hw_addr1, 3u);
       }
       if (CycleNow() == 2)
         lane.AdmitPtr()->Drive(desc, 1);
@@ -628,7 +632,7 @@ TEST(BachDteLane, InboundTopkUsesTwo128ByteWrites) {
   } driver(clk, lane, cmem, topk, headers, payload, d);
   clk->Continue(200);
   RT::JoinAll();
-  EXPECT_EQ(driver.writes, 2u);
+  EXPECT_EQ(driver.writes, 1u);
   EXPECT_EQ(topk.TopkBytes(3), expected);
   EXPECT_TRUE(lane.Quiescent());
   RT::Reset();
@@ -785,5 +789,90 @@ TEST(BachDteLane, ChannelThreeNetworkPathAddsOneCycle) {
   RT::JoinAll();
   ASSERT_GT(first_driver.first_router_at, 0u);
   EXPECT_EQ(fourth_driver.first_router_at, first_driver.first_router_at + 1);
+  RT::Reset();
+}
+
+TEST(BachDteXbar, MmemWindowDoesNotBlockIndependentTopk) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr c) : BachModule(c, "driver"), xbar(c, "xbar", 0, false), ep(c, "ep", 0, false) {
+        xbar.AttachTopkRd(ep.DteReadPtr()); xbar.AttachTopkWr(ep.DteWritePtr());
+      }
+      DteXbar xbar; GenEpInfo ep;
+      uint64_t second_issued = 0;
+      bool old_drained = false;
+     protected:
+      void Send(uint64_t sid, uint8_t value) {
+        auto& port = *xbar.LaneTopk(0);
+        auto bytes = std::make_shared<ByteBlock>(256, 0); (*bytes)[0] = value;
+        port.WritePair(sid * 256, bytes, 0, 256);
+        port.req_topk_sel = 1; port.req_hw_addr0 = sid; port.req_hw_addr1 = sid;
+      }
+      void Step() override {
+        ep.RunStep();
+        if (CycleNow() < 10) ep.DteWritePtr()->DriveSlave(false, false, nullptr);
+        xbar.RunStep();
+        if (CycleNow() == 2) Send(0, 1);
+        else if (CycleNow() >= 20 && !second_issued && xbar.LaneTopk(0)->Ready()) {
+          second_issued = CycleNow(); Send(1, 2);
+        } else xbar.LaneTopk(0)->IdleReq();
+        if (CycleNow() == 3) xbar.BlockMmemIngress(true);
+        if (CycleNow() == 16) old_drained = xbar.MmemQuiescent() && ep.TopkBytes(0).size() == 256;
+        if (CycleNow() == 30) xbar.BlockMmemIngress(false);
+      }
+    } driver(clk);
+    clk->Continue(55 * kPeriod); RT::JoinAll();
+    EXPECT_TRUE(driver.old_drained);
+    EXPECT_GE(driver.second_issued, 20u);
+    EXPECT_LT(driver.second_issued, 30u);
+    ASSERT_EQ(driver.ep.TopkBytes(0).size(), 256u);
+    ASSERT_EQ(driver.ep.TopkBytes(1).size(), 256u);
+    EXPECT_EQ(driver.ep.TopkBytes(0)[0], 1u); EXPECT_EQ(driver.ep.TopkBytes(1)[0], 2u);
+    EXPECT_TRUE(driver.xbar.MmemQuiescent());
+  }
+  RT::Reset();
+}
+
+TEST(BachDteXbar, MmemWindowDrainsAcceptedPairsAndBlocksNewMmemRequests) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr clock)
+          : BachModule(clock, "driver"), xbar(clock, "xbar", 0, false),
+            memory(clock, "memory", 0, false) {
+        xbar.AttachMmemRd(memory.PortPtr(kMmemDteRd));
+        xbar.AttachMmemWr(memory.PortPtr(kMmemDteWr));
+      }
+      DteXbar xbar;
+      MatrixMem memory;
+      uint64_t second_issue = 0, responses = 0;
+      bool old_pending = false;
+     protected:
+      void Step() override {
+        auto& lane = *xbar.LaneMmem(0);
+        if (lane.RspValid()) ++responses;
+        memory.RunStep();
+        xbar.RunStep();
+        if (CycleNow() == 4) lane.ReadPair(0);
+        else if (CycleNow() >= 10 && !second_issue && lane.Ready()) {
+          second_issue = CycleNow(); lane.ReadPair(256);
+        } else lane.IdleReq();
+        if (CycleNow() == 5) xbar.BlockMmemIngress(true);
+        if (CycleNow() == 20) old_pending = !xbar.MmemQuiescent();
+        if (CycleNow() == 30) xbar.BlockMmemIngress(false);
+      }
+    } driver(clk);
+    clk->Continue(150 * kPeriod);
+    RT::JoinAll();
+    EXPECT_TRUE(driver.old_pending);
+    EXPECT_GT(driver.second_issue, 30u);
+    EXPECT_EQ(driver.responses, 2u);
+    EXPECT_TRUE(driver.xbar.MmemQuiescent());
+  }
   RT::Reset();
 }

@@ -185,8 +185,8 @@ inline BundleStat LoadBundle(std::vector<Chip *> const &chips,
     std::string const &tag = tok[0];
 
     if (tag == "BACHIR") {
-      LOGCHECK(tok.size() == 2 && tok[1] == "10",
-               "LoadBundle: 只认 BACHIR 10 那一版产物。");
+      LOGCHECK(tok.size() == 2 && tok[1] == "11",
+               "LoadBundle: 只认 BACHIR 11 那一版产物。");
       head_ok = true;
       continue;
     }

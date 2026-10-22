@@ -62,8 +62,6 @@ class RvCore {
   }
   MemPort& Smem() { return lsq->Smem(); }
   void AttachSmem(std::shared_ptr<MemPort> p) { lsq->AttachSmem(std::move(p)); }
-  MemPort& Cmem() { return lsq->Cmem(); }
-  void AttachCmem(std::shared_ptr<MemPort> p) { lsq->AttachCmem(std::move(p)); }
   MemPort& Hdr() { return lsq->Hdr(); }
   void AttachHdr(std::shared_ptr<MemPort> p) { lsq->AttachHdr(std::move(p)); }
 

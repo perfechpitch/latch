@@ -89,9 +89,8 @@ class MemStub : public BachModule {
 struct MemSides {
   MemSides(ClockPtr c, RvCore& rv)
       : smem(c, "smem", rv.Smem(), kShareMemLatency),
-        cmem(c, "cmem", rv.Cmem(), kCoreMemLatency),
         hdr(c, "hdr", rv.Hdr(), kCoreMemLatency) {}
-  MemStub smem, cmem, hdr;
+  MemStub smem, hdr;
 };
 
 // RV core 的五个模块由装配统一驱动，装配自己不挂时钟。

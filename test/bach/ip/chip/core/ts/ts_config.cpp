@@ -271,7 +271,7 @@ TEST(BachTsCfg, ApbChecksWritesAndPreservesReservedSendingUnit) {
   cfg.Access(0x208, true, 0);
   cfg.Access(0x20c, true, 1);
   EXPECT_FALSE(cfg.InitFinished());
-  cfg.Access(4, true, 1u << 23);
+  cfg.Access(4, true, (1u << 31) | (1u << 23));
   cfg.Access(0x208, true, 31);
   cfg.Access(0x20c, true, 1);
   EXPECT_TRUE(cfg.InitFinished());
@@ -345,5 +345,37 @@ TEST(BachTsCfg, BootHelperPreservesReservedFieldsAndUpdatesValidFields) {
   EXPECT_EQ(cfg.Task(0).path_id, 17u);
   cfg.SetInitFinish();
   EXPECT_TRUE(cfg.InitFinished());
+  RT::Reset();
+}
+
+TEST(BachTsCfg, SoftwareCanSetAndClearBothValidBits) {
+  auto clock = MakeClock(0, kPeriod);
+  CfgReg cfg(clock, "cfg", 0, false);
+  cfg.Access(0, true, 0x100);
+  cfg.Access(4, true, (1u << 31) | (1u << 23));
+  EXPECT_TRUE(cfg.Task(0).valid);
+  cfg.Access(4, true, 1u << 23);
+  EXPECT_FALSE(cfg.Task(0).valid);
+  EXPECT_EQ(cfg.Task(0).task_pc, 0x100u);
+  cfg.Access(0x200, true, 0x200);
+  cfg.Access(0x204, true, (1u << 31) | 1u);
+  EXPECT_TRUE(cfg.DatainValid());
+  cfg.Access(0x204, true, 1u);
+  EXPECT_FALSE(cfg.DatainValid());
+  EXPECT_TRUE(cfg.WeightsMode());
+  RT::Reset();
+}
+
+TEST(BachTsCfg, PhysicalUpAndDownShareOneCreditDirection) {
+  auto clock = MakeClock(0, kPeriod);
+  CfgReg cfg(clock, "cfg", 0, false);
+  cfg.Access(0x400, true, 0x7fu);
+  EXPECT_EQ(cfg.Access(0x400, false).data, 0x7fu);
+  EXPECT_EQ(cfg.Route(0).Directions(), 7u);
+  EXPECT_EQ(cfg.Route(0).vcid, 3u);
+  cfg.Access(0x400, true, (2u << 5) | 2u | 4u | 16u);
+  EXPECT_EQ(cfg.Route(0).Directions(), 3u);
+  EXPECT_EQ(cfg.Route(0).vcid, 2u);
+  EXPECT_EQ(cfg.Access(0x400, false).data, 86u);
   RT::Reset();
 }

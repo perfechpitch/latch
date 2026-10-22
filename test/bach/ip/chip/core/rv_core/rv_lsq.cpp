@@ -61,7 +61,6 @@ class LsqHarness : public BachModule {
                      lsq.WbPtr()->Data()});
     }
     Serve(lsq.Smem(), smem_ops, sm_pend, smem_latency, 0, now);
-    Serve(lsq.Cmem(), cmem_ops, cm_pend, cmem_latency, 1, now);
     Serve(lsq.Hdr(), hdr_ops, hdr_pend, cmem_latency, 2, now);
 
     Feed(now);
@@ -130,7 +129,6 @@ TEST(BachRvLsq, EachTargetGoesToItsOwnPort) {
     RvLsq lsq(clk, "lsq", /*has_cm=*/true, 0, false);
     LsqHarness h(clk, lsq);
     h.jobs = {{2, LsqTarget::kShareMem, false, 0x100, 1},
-              {4, LsqTarget::kCoreMem, false, 0x200, 2},
               {6, LsqTarget::kRouterIo, false, 0x300, 3}};
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
@@ -140,7 +138,7 @@ TEST(BachRvLsq, EachTargetGoesToItsOwnPort) {
   }
   RT::Reset();
   EXPECT_EQ(sm, 1u);
-  EXPECT_EQ(cm, 1u);
+  EXPECT_EQ(cm, 0u);
   EXPECT_EQ(hdr, 1u) << "包头只有这一条读取通路";
 }
 
@@ -155,7 +153,7 @@ TEST(BachRvLsq, ReadDataComesBackWithTheWriteback) {
     RvLsq lsq(clk, "lsq", /*has_cm=*/true, 0, false);
     LsqHarness h(clk, lsq);
     h.jobs = {{2, LsqTarget::kShareMem, false, 0x100, 1},
-              {4, LsqTarget::kCoreMem, false, 0x200, 2},
+              {4, LsqTarget::kRouterIo, false, 0x200, 2},
               {6, LsqTarget::kDtcm, false, 0x300, 3}};
     clk->Continue(80 * kPeriod);
     RT::JoinAll();
@@ -169,7 +167,7 @@ TEST(BachRvLsq, ReadDataComesBackWithTheWriteback) {
       EXPECT_EQ(w.data, 0x01010101u) << "Share Mem 读回来的那 4 B";
     } else if (w.rd == 2) {
       EXPECT_TRUE(w.has_data);
-      EXPECT_EQ(w.data, 0x02020202u) << "Core Mem 读回来的那 4 B";
+      EXPECT_EQ(w.data, 0x03030303u) << "Core Mem 读回来的那 4 B";
     } else {
       EXPECT_FALSE(w.has_data) << "DTCM 那一路不带数据";
     }
@@ -283,6 +281,6 @@ TEST(BachRvLsq, CoreWithoutCmLsqRejectsCoreMemAccess) {
     has_room_without = without.HasRoom(LsqTarget::kCoreMem);
   }
   RT::Reset();
-  EXPECT_TRUE(has_room_with) << "DTE core 有 cm_lsq";
+  EXPECT_FALSE(has_room_with) << "DTE RV core 也不直接访问 CM";
   EXPECT_FALSE(has_room_without) << "另外两个核没有";
 }

@@ -106,10 +106,10 @@ protected:
       uint64_t v = 0;
       if (w.wdata) {
         for (uint64_t k = 0; k < 4 && k < w.wdata->size(); ++k) {
-          v |= uint64_t((*w.wdata)[k]) << (8 * k);
+          v |= uint64_t((*w.wdata)[w.woff + k]) << (8 * k);
         }
       }
-      smem.push_back({now, w.addr, v});
+      smem.push_back({now, w.addr + w.woff, v});
       smem_responses.push_back(now + 5);
     }
     bool response = !smem_responses.empty() && smem_responses.front() <= now;

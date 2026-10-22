@@ -217,8 +217,8 @@ class KnGpu:
                 s = asc[:, :, blk:blk + 1] * wsc[(base + ki * tile_k + b * 32)
                                                  // 32]
                 total = total + part * s
-            r = clamp(total)
-            acc = r if acc is None else clamp(acc + r)
+            r = total
+            acc = r if acc is None else acc + r
         return acc
 
     # ── 一组 8 颗 chip ──
@@ -281,8 +281,8 @@ class KnGpu:
                                 seg_i // v.FC2_K)
             wep = torch.tensor(n.f32(v.KN_W_EP[e]), dtype=torch.float32,
                                device=self.dev)
-            one = clamp(acc * wep)
-            ep = one if ep is None else clamp(ep + one)
+            one = acc * wep
+            ep = one if ep is None else ep + one
         concat = to_bf16(ep)                           # [T, chip, 6144]
         out = []
         for t in range(T):

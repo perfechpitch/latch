@@ -25,8 +25,9 @@ TASK void task_mu_compute(void) {
   dsa_write(MU_B_ADDR, MMEM_WEIGHT_BASE);
   dsa_write(MU_PRIMITIVE_MODE,
             MU_A_DTYPE_MXFP8 | MU_ROUTER_EP_DTYPE_MXFP8 | MU_C_DTYPE_BF16 |
+                MU_SHARE_EP_EN | MU_SHARE_EP_MASK_ONE | MU_SHARE_EP_DTYPE_MXFP8 |
                 MU_TASK_LAST);
-  dsa_write(MU_TASK_TRIGGER, MU_TRIGGER_VALID);
+  dsa_write(MU_TASK_TRIGGER, MU_TRIGGER_DEFAULT);
   task_done(0);
 }
 
@@ -43,18 +44,18 @@ static void mu_moe(u32 token_off, u32 weight_off, u32 out_off, u32 mode,
   dsa_write(MU_A_STREAM_STRIDE, CMEM_STREAM_STRIDE);
   dsa_write(MU_C_ADDR, CMEM_STREAM_BASE + out_off);
   dsa_write(MU_C_STREAM_STRIDE, CMEM_STREAM_STRIDE);
-  dsa_write(MU_B_ADDR, weight_off);
-  dsa_write(MU_B_EXPERT_STRIDE, MMEM_EXPERT_STRIDE);
+  dsa_write(MU_B_ADDR, weight_off / 64u);
+  dsa_write(MU_B_EXPERT_STRIDE, MMEM_EXPERT_STRIDE / 64u);
   /* AC_expert_stride 拆两侧：FC2 用 token 那侧，FC1/FC3 用 output 那侧，不用的
    * 写 0。 */
   dsa_write(MU_AC_EXPERT_STRIDE,
             ep_reduce ? (ac_stride << MU_TOKEN_EXPERT_STRIDE_SHIFT)
                       : (ac_stride << MU_OUTPUT_EXPERT_STRIDE_SHIFT));
-  u32 full = mode | (MOE_EXPERTS << MU_ROUTER_EXPERT_SHIFT);
+  u32 full = mode | MU_ROUTER_EP_EN | ((MOE_EXPERTS - 1u) << MU_ROUTER_EXPERT_SHIFT);
   if (ep_reduce) full |= MU_ROUTER_EP_REDUCE_EN;
   if (task_last) full |= MU_TASK_LAST;
   dsa_write(MU_PRIMITIVE_MODE, full);
-  dsa_write(MU_TASK_TRIGGER, MU_TRIGGER_VALID);
+  dsa_write(MU_TASK_TRIGGER, MU_TRIGGER_DEFAULT);
 }
 
 /* FC1 与 FC3 的部分和：token 第 s 段乘本 core 的 W1、W3，几个专家共用一份 token，
@@ -127,6 +128,8 @@ TASK void task_rc_find(void) {
     smem_write(rc_flag_off(s, 1), 0);
     smem_write(RC_SLOT_OFF + stream_id() * 4, s);
     set_user_id(s);
+    /* 相邻用户交替使用VC3/VC0，对应两个独立DTE出通道及其在途窗口。 */
+    if (s & 1u) set_path_id(path_id() + 24u);
     task_done(1);
     return;
   }

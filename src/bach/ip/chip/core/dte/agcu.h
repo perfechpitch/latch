@@ -11,6 +11,7 @@ struct DteWindows {
   uint64_t mm_base = 0x10000000, mm_size = 36 * 1024 * 1024;
   uint64_t topk_base = 0x20000000, topk_size = 4096;
   uint64_t header_base = 0x30000000, header_size = 512;
+  uint64_t sm_base = 0x80200000, sm_size = 32 * 1024;
 };
 enum DteError : uint64_t {
   kDteNoError = 0,
@@ -37,6 +38,8 @@ public:
       return SegEndpoint::kTopk;
     if (In(addr, windows.header_base, windows.header_size))
       return SegEndpoint::kHeader;
+    if (In(addr, windows.sm_base, windows.sm_size))
+      return SegEndpoint::kShareMem;
     return SegEndpoint::kInvalid;
   }
   uint64_t Offset(uint64_t addr, SegEndpoint endpoint) const {
@@ -51,6 +54,8 @@ public:
       return addr - windows.topk_base;
     case SegEndpoint::kHeader:
       return addr - windows.header_base;
+    case SegEndpoint::kShareMem:
+      return addr - windows.sm_base;
     default:
       return addr;
     }
@@ -69,6 +74,8 @@ public:
       return windows.topk_size;
     case SegEndpoint::kHeader:
       return windows.header_size;
+    case SegEndpoint::kShareMem:
+      return windows.sm_size;
     default:
       return 0;
     }
@@ -83,6 +90,21 @@ public:
                    (route == Route::kMmToCm ? 0 : sid * s.stride);
     if (destination)
       s.dst_addr = Offset(s.dst, s.dst_kind) + sid * s.stride;
+  }
+  uint64_t Precheck(Descriptor const &d) const {
+    if (uint64_t(d.route) > 4 || d.stream_id > 15 || d.vc > 3 ||
+        d.task_id >= 64 || d.user_id > 65535 || d.path_id > 255)
+      return kDteRouteError;
+    for (auto const &segment : d.seg) {
+      if (!segment.valid) continue;
+      if (IsInbound(d.route) && segment.is_header && d.hw_header_op) continue;
+      if (!IsInbound(d.route) && Endpoint(segment.src) != SegEndpoint::kHeader &&
+          (segment.src & 7)) return kDteAlignmentError;
+      if ((IsInbound(d.route) || d.route == Route::kMmToCm) &&
+          Endpoint(segment.dst) != SegEndpoint::kHeader && (segment.dst & 7))
+        return kDteAlignmentError;
+    }
+    return 0;
   }
   uint64_t Validate(Descriptor &d) const {
     if (uint64_t(d.route) > 4 || d.stream_id > 15 || d.vc > 3 ||
@@ -114,6 +136,8 @@ public:
           return kDteOverflowError;
         if (ep == SegEndpoint::kInvalid || Endpoint(full) != ep)
           return kDteEndpointError;
+        if (ep == SegEndpoint::kShareMem && (end == 0 || !IsInbound(d.route)))
+          return kDteRouteError;
         if (ep == SegEndpoint::kHeader) {
           if (i != 0 || offset >= Limit(ep))
             return kDteWindowError;
@@ -122,7 +146,7 @@ public:
             return kDteWindowError;
           if (offset & 7 || s.len & 7)
             return kDteAlignmentError;
-          if (ep == SegEndpoint::kTopk && ((offset & 255) || (s.len & 255)))
+          if (ep == SegEndpoint::kTopk && (offset & 255))
             return kDteAlignmentError;
         }
       }

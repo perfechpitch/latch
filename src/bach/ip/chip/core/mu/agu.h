@@ -11,10 +11,7 @@
 // 累加寄存器里，乘上这个专家的 topK 权重之后进同样是每 lane 一个的 EP 累加
 // 寄存器。两个寄存器都只存一列那么宽，所以同一列的几个专家要连着算完。
 //
-// acu 查出越界或非对齐就走 Drain & Trap 四步：阻塞任务下发 → 清理已发出的
-// 访存请求（已请求的回复照常处理，不再发起新的）→ 排空计算流水线 → 恢复默认
-// 状态。Drain 期间已进入脉动通路的合法数据照常算完写回，只丢越界那一笔的数据。
-// 本轮只留状态位与接口名，不实现行为。
+// 启动前验证完整任务；CheckStep 检查每条实际原语仍满足地址边界。
 
 #include <cstdint>
 
@@ -36,19 +33,23 @@ class MuAgu {
   explicit MuAgu(MuTaskCfg const& task) : cfg(task) {}
 
   // 由内往外：tile_K、专家、tile_N。
+  MuStep Peek() const { return cur; }
   MuStep Next() {
-    MuStep s = cur;
-    ++cur.k_idx;
-    if (cur.k_idx >= cfg.kblock) {
+    MuStep result = cur;
+    auto expert = cfg.ExpertCfg(cur.e_idx);
+    if (++cur.k_idx >= expert.kblock) {
       cur.k_idx = 0;
-      ++cur.e_idx;
-      if (cur.e_idx >= cfg.Experts()) {
-        cur.e_idx = 0;
-        ++cur.n_idx;
-        if (cur.n_idx >= cfg.nblock) cur.done = true;
+      if (cfg.ep_reduce) {
+        if (++cur.e_idx >= cfg.Experts()) {
+          cur.e_idx = 0;
+          if (++cur.n_idx >= cfg.nblock) cur.done = true;
+        }
+      } else if (++cur.n_idx >= cfg.nblock) {
+        cur.n_idx = 0;
+        if (++cur.e_idx >= cfg.Experts()) cur.done = true;
       }
     }
-    return s;
+    return result;
   }
   bool Done() const { return cur.done; }
 
@@ -58,12 +59,17 @@ class MuAgu {
   // 几个专家共用同一份激活。
   uint64_t TokenAddr(MuStep const& s) const {
     return cfg.a_addr + cfg.stream_id * cfg.a_stream_stride + ExpertOffOfA(s) +
-           s.k_idx * TokenBytes();
+           s.k_idx * MuAgu(cfg.ExpertCfg(s.e_idx)).TokenBytes();
   }
   // 权重按专家在本 EP Group 内的序号排，与 topK 里的先后无关，所以要外面把
   // 组内序号传进来（topK 里直接存的就是组内序号）。激活与结果那两侧按 topK 的先后排。
   uint64_t WeightAddr(MuStep const& s, uint64_t local_ep) const {
-    // 各 lane 访存地址相同，只发一个地址然后逐级脉动到各 lane。
+    if (cfg.decoded_mode) {
+      auto expert = cfg.ExpertCfg(s.e_idx);
+      uint64_t lane_bytes = MuAgu(expert).WeightBytes() / 64;
+      uint64_t local = expert.b_addr + (s.n_idx * expert.kblock + s.k_idx) * lane_bytes;
+      return (local / 128) * 8192 + local % 128;
+    }
     return cfg.b_addr + local_ep * cfg.b_expert_stride +
            (s.n_idx * cfg.kblock + s.k_idx) * WeightBytes();
   }
@@ -100,21 +106,24 @@ class MuAgu {
   }
   // 权重那一块的 scale 个数：只有权重重是 MXFP8 那一档带，按列排，一列 K / 32 个。
   uint64_t WeightScaleBytes() const {
-    if (cfg.b_dtype != numeric::DataType::kMxfp8) return 0;
-    return cfg.PrimK() * cfg.PrimN() / numeric::ScaleBlockOf(cfg.b_dtype);
+    uint64_t block = numeric::ScaleBlockOf(cfg.b_dtype);
+    return block ? cfg.PrimK() * cfg.PrimN() / block : 0;
   }
 
-  // acu：越界与对齐。Token 与 Weight 读要 16 B 对齐，结果写要 16 B 或 1 KB。
+  // token/结果至少 8B 对齐；MXFP8 token 为 32B 对齐。
   static bool Aligned(uint64_t addr, uint64_t grain) {
     return addr % grain == 0;
   }
   bool CheckStep(MuStep const& s, uint64_t cmem_size,
                  uint64_t mmem_size) const {
-    if (TokenAddr(s) + TokenBytes() > cmem_size) return false;
-    if (WeightAddr(s) + WeightBytes() > mmem_size) return false;
-    if (OutAddr(s) + OutBytes() > cmem_size) return false;
-    if (!Aligned(TokenAddr(s), 16)) return false;
-    if (!Aligned(OutAddr(s), 16)) return false;
+    MuAgu shape(cfg.ExpertCfg(s.e_idx));
+    if (TokenAddr(s) > cmem_size || shape.TokenBytes() > cmem_size - TokenAddr(s)) return false;
+    uint64_t weight_bytes = cfg.decoded_mode ? 8192 : shape.WeightBytes();
+    uint64_t weight_base = cfg.decoded_mode ? WeightAddr(s) & ~127ull : WeightAddr(s);
+    if (weight_base > mmem_size || weight_bytes > mmem_size - weight_base) return false;
+    if (OutAddr(s) > cmem_size || shape.OutBytes() > cmem_size - OutAddr(s)) return false;
+    if (!Aligned(TokenAddr(s), cfg.a_dtype == numeric::DataType::kMxfp8 ? 32 : 8)) return false;
+    if (!Aligned(OutAddr(s), 8)) return false;
     return true;
   }
 

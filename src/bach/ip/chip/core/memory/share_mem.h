@@ -47,7 +47,7 @@ class ShareMem : public BankedMem {
   static BankedMemCfg Cfg() {
     BankedMemCfg c;
     c.bank_num = 1;
-    c.granule = 4;
+    c.granule = 128;
     c.capacity = kShareMemBytes;
     c.round_robin = true;
     return c;

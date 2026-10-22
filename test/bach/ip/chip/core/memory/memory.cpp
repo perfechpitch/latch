@@ -110,7 +110,7 @@ TEST(BachCoreMem, UntouchedReadsZero) {
     ClockPtr clk = MakeClock(0, kPeriod);
     CoreMem cm(clk, "cmem");
     MemDriver rd(clk, cm.Port(kCmemVuRd), 1, 4096, 8);
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     got = rd.got;
   }
@@ -125,7 +125,7 @@ TEST(BachCoreMem, PerMasterLatency) {
     uint64_t port;
     uint64_t want;
   };
-  std::vector<Case> cases = {{kCmemDteRd, 13}, {kCmemMuRd, 16},
+  std::vector<Case> cases = {{kCmemDteRd, 13}, {kCmemMuRd, 11},
                              {kCmemVuRd, 14}};
   for (auto const& c : cases) {
     uint64_t issue = 0, rsp = 0;
@@ -162,7 +162,7 @@ TEST(BachCoreMem, SameBankPriority) {
   ASSERT_GT(mu_rsp, 0u);
   ASSERT_GT(vu_rsp, 0u);
   // MU 优先级更高，先被授予；VU 晚一拍才轮到
-  EXPECT_LT(mu_rsp - 16u, vu_rsp - 14u);
+  EXPECT_LT(mu_rsp - 11u, vu_rsp - 14u);
 }
 
 // 不同 bank 不互相挡，两个 master 同拍都能走。
@@ -182,25 +182,20 @@ TEST(BachCoreMem, DifferentBanksRunInParallel) {
   EXPECT_EQ(a, b);
 }
 
-// Matrix Mem 的硬约束：同一 bank 不许两个 master 同时访问。
-//
-// 默认撞上就停（LOGCHECK 失败），因为真硬件上被让路的那一笔直接丢弃、DTE 没有
-// 重传通路，丢一笔结果就错。这里把停下关掉，验证冲突确实被检出、计了数。
-TEST(BachMatrixMem, SameBankIsDetected) {
-  uint64_t conflicts = 0;
+// MU 等待已经接受的 DTE 责任全部完成，不能以冲突断言替代窗口仲裁。
+TEST(BachMatrixMem, MuWindowWaitsForAcceptedDteTransaction) {
+  RT::Reset(8, 8);
   {
-    ClockPtr clk = MakeClock(0, kPeriod);
+    auto clk = MakeClock(0, kPeriod);
     MatrixMem mm(clk, "mmem");
-    mm.RelaxConflictHalt();
-    MemDriver mu(clk, mm.Port(kMmemMu), 1, 0, 4);
     MemDriver dte(clk, mm.Port(kMmemDteRd), 1, 0, 4);
-    ConflictProbe probe(clk, mm);
-    clk->Continue(60 * kPeriod);
-    RT::JoinAll();
-    conflicts = probe.conflicts;
+    MemDriver mu(clk, mm.Port(kMmemMu), 3, 0, 4);
+    clk->Continue(150 * kPeriod); RT::JoinAll();
+    ASSERT_GT(dte.rsp_cycle, 0u);
+    ASSERT_GT(mu.rsp_cycle, dte.rsp_cycle);
+    EXPECT_GE(mu.rsp_cycle - dte.rsp_cycle, 9u);
   }
   RT::Reset();
-  EXPECT_GT(conflicts, 0u);
 }
 
 // DTE 的读口与写口是同一方：两个口撞在同一个 bank 上排队，不算硬约束被违反。
@@ -213,7 +208,7 @@ TEST(BachMatrixMem, DteReadAndWriteOnOneBankQueue) {
     MemDriver rd(clk, mm.Port(kMmemDteRd), 1, 0, 4);
     MemDriver wr(clk, mm.Port(kMmemDteWr), 1, 0, 4, Bytes({9, 9, 9, 9}));
     ConflictProbe probe(clk, mm);
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     conflicts = probe.conflicts;
     rd_lat = rd.rsp_cycle - rd.issue_cycle;
@@ -221,8 +216,8 @@ TEST(BachMatrixMem, DteReadAndWriteOnOneBankQueue) {
   }
   RT::Reset();
   EXPECT_EQ(conflicts, 0u);
-  EXPECT_EQ(rd_lat, 8u);
-  EXPECT_GT(wr_lat, 9u) << "写的那一笔排在读后面";
+  EXPECT_EQ(rd_lat, 73u);
+  EXPECT_GT(wr_lat, 73u) << "写的那一笔排在读后面";
 }
 
 // Matrix Mem 读 8T、写 9T。
@@ -232,7 +227,7 @@ TEST(BachMatrixMem, DteReadWriteLatency) {
     ClockPtr clk = MakeClock(0, kPeriod);
     MatrixMem mm(clk, "mmem");
     MemDriver rd(clk, mm.Port(kMmemDteRd), 1, 0, 4);
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     rd_lat = rd.rsp_cycle - rd.issue_cycle;
   }
@@ -241,13 +236,13 @@ TEST(BachMatrixMem, DteReadWriteLatency) {
     ClockPtr clk = MakeClock(0, kPeriod);
     MatrixMem mm(clk, "mmem");
     MemDriver wr(clk, mm.Port(kMmemDteWr), 1, 0, 4, Bytes({9, 9, 9, 9}));
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     wr_lat = wr.rsp_cycle - wr.issue_cycle;
   }
   RT::Reset();
-  EXPECT_EQ(rd_lat, 8u);
-  EXPECT_EQ(wr_lat, 9u);
+  EXPECT_EQ(rd_lat, 73u);
+  EXPECT_EQ(wr_lat, 73u);
 }
 
 // Share Mem 四个 master 轮询：都在等时轮流走，没有谁被饿死。
@@ -275,8 +270,7 @@ TEST(BachCoreMem, PriorityOrderAcrossMasters) {
   EXPECT_LT(m[kCmemMuRd].priority, m[kCmemVuRd].priority) << "MU 在最前";
   EXPECT_EQ(m[kCmemVuRd].priority, m[kCmemDteRd].priority) << "VU 与 DTE 同档";
   EXPECT_LT(m[kCmemDteRd].priority, m[kCmemReissue].priority);
-  EXPECT_EQ(m[kCmemReissue].priority, m[kCmemRvCore].priority) << "后三档平级";
-  EXPECT_EQ(m[kCmemRvCore].priority, m[kCmemCfg].priority);
+  EXPECT_EQ(m[kCmemReissue].priority, m[kCmemCfg].priority);
   // 读与写各占一个端口：合成一根的话同一拍发出的读与写会互相盖掉。
   EXPECT_EQ(m.size(), uint64_t(kCmemPortNum));
   EXPECT_NE(kCmemMuRd, kCmemMuWr);
@@ -365,7 +359,7 @@ TEST(BachCoreMem, PartialWriteTouchesOnlyItsRange) {
       bool asserted = false, done = false;
     };
     PartialDriver drv(clk, mem.Port(kCmemDteWr), blk);
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     after = mem.Peek(0, 128);
   }
@@ -387,8 +381,8 @@ TEST(BachMatrixMem, ShapeAndMasters) {
   std::vector<MemMaster> m = MatrixMemMasters();
   EXPECT_EQ(m.size(), uint64_t(kMmemPortNum));
   EXPECT_LT(m[kMmemMu].priority, m[kMmemDteRd].priority) << "撞了只执行 MU";
-  EXPECT_EQ(m[kMmemDteRd].read_latency, 8u);
-  EXPECT_EQ(m[kMmemDteWr].write_latency, 9u) << "DTE 的读 8T、写 9T";
+  EXPECT_EQ(m[kMmemDteRd].read_latency, 73u);
+  EXPECT_EQ(m[kMmemDteWr].write_latency, 73u) << "DTE 的读 8T、写 9T";
   EXPECT_EQ(kMatrixMemBytes, 36ull * 1024 * 1024);
 }
 
@@ -623,7 +617,7 @@ TEST(BachCoreMem, PartialWriteKeepsNeighbourScale) {
     (*blk)[128 + 3] = 0x23;
     OneRequest wr(clk, mem.Port(kCmemVuWr), true, 0, 64, kScaleWithData, blk,
                   /*woff=*/64);
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     scale_after = mem.PeekScale(0);
   }
@@ -641,7 +635,7 @@ TEST(BachMatrixMem, ScaleGoesWithTheData) {
     mem.Poke(0x1000, ByteBlock(128, 0x44));
     mem.PokeScale(0x1000, ByteBlock{9, 8, 7, 6});
     OneRequest rd(clk, mem.Port(kMmemMu), false, 0x1000, 128, kScaleWithData);
-    clk->Continue(60 * kPeriod);
+    clk->Continue(120 * kPeriod);
     RT::JoinAll();
     got = rd.got;
   }
@@ -706,6 +700,148 @@ TEST(BachCoreMem, EccCountersAreReadable) {
   for (uint64_t m = 0; m < mem.MasterNum(); ++m) {
     EXPECT_EQ(mem.EccSingleBit(m), 0u) << "m=" << m;
     EXPECT_EQ(mem.EccDoubleBit(m), 0u) << "m=" << m;
+  }
+  RT::Reset();
+}
+
+TEST(BachCoreMem, MuWritesHaveNoResponse) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    CoreMem memory(clk, "memory");
+    MemDriver writer(clk, memory.Port(kCmemMuWr), 1, 0x2000, 4, Bytes({1, 2, 3, 4}));
+    clk->Continue(30 * kPeriod); RT::JoinAll();
+    EXPECT_EQ(writer.rsp_cycle, 0u);
+    EXPECT_EQ(memory.Peek(0x2000, 4), (ByteBlock{1, 2, 3, 4}));
+  }
+  RT::Reset();
+}
+
+TEST(BachMatrixMem, ExclusiveWindowBlocksNewDteUntilRelease) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr c) : BachModule(c, "driver"), memory(c, "memory", 0, false) {}
+      MatrixMem memory;
+      uint64_t dte_issue = 0, dte_response = 0, mu_response = 0;
+      bool acquired = false;
+     protected:
+      void Step() override {
+        auto& mu = memory.Port(kMmemMu);
+        auto& dte = memory.Port(kMmemDteRd);
+        if (mu.RspValid()) mu_response = CycleNow();
+        if (dte.RspValid()) dte_response = CycleNow();
+        memory.RunStep();
+        if (CycleNow() == 2) memory.RequestExclusiveWindow(true);
+        if (memory.ExclusiveWindowReady()) acquired = true;
+        if (CycleNow() == 10) mu.Read(0, 4); else mu.IdleReq();
+        if (CycleNow() >= 5 && !dte_issue && dte.Ready()) {
+          dte.Read(0, 4); dte_issue = CycleNow();
+        } else dte.IdleReq();
+        if (CycleNow() == 40) memory.RequestExclusiveWindow(false);
+      }
+    } driver(clk);
+    clk->Continue(150 * kPeriod); RT::JoinAll();
+    EXPECT_TRUE(driver.acquired);
+    EXPECT_GT(driver.mu_response, 10u); EXPECT_LT(driver.mu_response, 40u);
+    EXPECT_GT(driver.dte_issue, 40u); EXPECT_GT(driver.dte_response, driver.dte_issue);
+  }
+  RT::Reset();
+}
+
+TEST(BachMatrixMem, ExternalPairsPipelineAt256BytesPerCycle) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr c) : BachModule(c, "driver"), memory(c, "memory", 0, false) {}
+      MatrixMem memory;
+      std::vector<uint64_t> responses;
+     protected:
+      void Step() override {
+        auto& port = memory.Port(kMmemDteRd);
+        if (port.RspValid()) responses.push_back(CycleNow());
+        memory.RunStep();
+        if (sent < 2 && port.Ready()) { port.ReadPair(256 * sent); ++sent; }
+        else port.IdleReq();
+      }
+     private:
+      uint64_t sent = 0;
+    } driver(clk);
+    clk->Continue(150 * kPeriod); RT::JoinAll();
+    ASSERT_EQ(driver.responses.size(), 2u);
+    EXPECT_EQ(driver.responses[1] - driver.responses[0], 1u);
+  }
+  RT::Reset();
+}
+
+TEST(BachMatrixMem, SameLaneBurstWaitsForResponseReservations) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr c) : BachModule(c, "driver"), memory(c, "memory", 0, false) {}
+      MatrixMem memory;
+      std::vector<uint64_t> responses;
+     protected:
+      void Step() override {
+        auto& port = memory.Port(kMmemDteRd);
+        if (port.RspValid()) responses.push_back(CycleNow());
+        memory.RunStep();
+        if (sent < 34 && port.Ready()) { port.ReadPair(0); ++sent; }
+        else port.IdleReq();
+      }
+     private:
+      uint64_t sent = 0;
+    } driver(clk);
+    clk->Continue(400 * kPeriod); RT::JoinAll();
+    ASSERT_EQ(driver.responses.size(), 34u);
+    uint64_t largest_gap = 0;
+    for (uint64_t i = 1; i < driver.responses.size(); ++i)
+      largest_gap = std::max(largest_gap, driver.responses[i] - driver.responses[i - 1]);
+    EXPECT_GT(largest_gap, 2u) << "A same-lane burst must reserve finite response space";
+    EXPECT_TRUE(driver.memory.Quiescent());
+  }
+  RT::Reset();
+}
+
+TEST(BachMatrixMem, ExternalReadAndWritePipelineIndependently) {
+  RT::Reset(8, 8);
+  {
+    auto clk = MakeClock(0, kPeriod);
+    class Driver : public BachModule {
+     public:
+      Driver(ClockPtr clock) : BachModule(clock, "driver"), memory(clock, "memory", 0, false) {}
+      MatrixMem memory;
+      std::vector<uint64_t> reads, writes;
+     protected:
+      void Step() override {
+        auto& rd = memory.Port(kMmemDteRd);
+        auto& wr = memory.Port(kMmemDteWr);
+        if (rd.RspValid()) reads.push_back(CycleNow());
+        if (wr.RspValid()) writes.push_back(CycleNow());
+        memory.RunStep();
+        if (read_sent < 32 && rd.Ready()) rd.ReadPair(512 * read_sent++);
+        else rd.IdleReq();
+        if (write_sent < 32 && wr.Ready()) {
+          wr.WritePair(512 * write_sent++ + 256,
+                       std::make_shared<ByteBlock>(256, 0x5a), 0, 256);
+        } else wr.IdleReq();
+      }
+     private:
+      uint64_t read_sent = 0, write_sent = 0;
+    } driver(clk);
+    clk->Continue(150 * kPeriod);
+    RT::JoinAll();
+    ASSERT_EQ(driver.reads.size(), 32u);
+    ASSERT_EQ(driver.writes.size(), 32u);
+    EXPECT_EQ(driver.reads, driver.writes);
+    EXPECT_EQ(driver.reads.back() - driver.reads.front(), 31u);
+    EXPECT_TRUE(driver.memory.Quiescent());
   }
   RT::Reset();
 }

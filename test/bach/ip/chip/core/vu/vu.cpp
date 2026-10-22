@@ -1436,8 +1436,8 @@ TEST(Vu, Vsfu0AndVsfu1RunIndependentlyInFp32) {
                   TypeVlWord(kVl, false, numeric::RoundMode::kRne));
   rig.WriteStatic(0, kVuStaticDupOffset + kVuLdAddr, kSrcAddr);
   rig.WriteStatic(0, kVuStaticDupOffset + kVuVrfWtIndex, IndexWord(0, 32));
-  // LU 同时喂两个 VSFU：同一个源供给两个消费者就是广播，按约定置 Fence。
-  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, kVuTrigFence));
+  // LU 同时广播给两个 VSFU，软件不置 Fence。
+  rig.Write(kVuMacroInstTrigger, TriggerWord(0, 0, 0));
   rig.Run(400);
 
   std::vector<float> e = rig.vu->Regfiles().ReadVrf(0, kVl, false);

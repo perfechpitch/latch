@@ -90,6 +90,7 @@ public:
   struct Got {
     uint64_t at = 0, lane = 0, commit_seq = 0, user = 0;
     MessagePtr msg;
+    uint64_t decode_started = 0;
   };
   std::vector<Got> admits;
   // Commit 收下的 Descriptor 数（一个任务只数一次），中央 TaskQueue 深与峰值。
@@ -108,7 +109,7 @@ protected:
       last_seq[i] = seq;
       auto d = lane_ports[i]->Desc();
       if (d)
-        admits.push_back({now, i, d->commit_seq, d->user_id, d->msg});
+        admits.push_back({now, i, d->commit_seq, d->user_id, d->msg, d->dispatch_cycle});
     }
     for (auto &p : lane_ports)
       p->DriveReady(now >= lane_ready_from);
@@ -327,4 +328,28 @@ TEST(BachDteCommit, StopSingleStepAndCancelAreIndependentOfQueueAdmission) {
   EXPECT_EQ(driver.admits.size(), 1u);
   EXPECT_EQ(bench.commit->Occupied(), 2u);
   RT::Reset();
+}
+
+TEST(BachDteCommit, DecoderLatencyCountsSegmentsAndDoublesInnerWork) {
+  for (bool inner : {false, true}) {
+    EnsureSlots();
+    {
+      auto clk = MakeClock(0, kPeriod);
+      Bench bench(clk);
+      CommitHarness harness(clk, *bench.commit, bench.lanes, bench.rs);
+      auto task = Outbound(1, 0, 128);
+      if (inner) task->route = Route::kMmToCm;
+      for (uint64_t i = 0; i < 4; ++i) {
+        task->seg[i].valid = i != 0;
+        task->seg[i].len = i ? 128 : 0;
+      }
+      harness.jobs = {{2, task}};
+      clk->Continue(40 * kPeriod); RT::JoinAll();
+      ASSERT_EQ(harness.admits.size(), 1u);
+      auto const& got = harness.admits.front();
+      // The observable port adds one registered edge after decoder completion.
+      EXPECT_EQ(got.at - got.decode_started, (inner ? 2 * 3 + 2 : 3 + 2) + 1);
+    }
+    RT::Reset();
+  }
 }

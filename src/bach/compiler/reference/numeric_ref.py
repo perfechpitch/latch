@@ -197,7 +197,7 @@ MXFP4 = "mxfp4"
 NVFP4 = "nvfp4"
 FP32 = "fp32"
 
-SCALE_BLOCK = {BF16: 0, MXFP8: 32, MXFP4: 16, NVFP4: 16, FP32: 0}
+SCALE_BLOCK = {BF16: 0, MXFP8: 32, MXFP4: 32, NVFP4: 16, FP32: 0}
 ELEM_BITS = {BF16: 16, MXFP8: 8, MXFP4: 4, NVFP4: 4, FP32: 32}
 # 每档能表示的最大绝对值，MakeScale 用它把块内峰值压进范围。
 ELEM_MAX = {MXFP8: E4M3_MAX, MXFP4: 6.0, NVFP4: 6.0}
@@ -275,7 +275,7 @@ def decode_scale(dtype, data, nblock):
     for i in range(nblock):
         if i >= len(data):
             out.append(1.0)
-        elif dtype == MXFP8:
+        elif dtype in (MXFP8, MXFP4):
             out.append(from_e8m0(data[i]))
         else:
             out.append(from_fp8_e4m3(data[i]))
@@ -284,7 +284,7 @@ def decode_scale(dtype, data, nblock):
 
 def encode_scale(dtype, scale):
     """decode_scale 的对偶。"""
-    if dtype == MXFP8:
+    if dtype in (MXFP8, MXFP4):
         return bytes(to_e8m0(s) for s in scale)
     return bytes(to_fp8_e4m3(s) for s in scale)
 
@@ -308,7 +308,7 @@ def make_scale(dtype, values, round_up=False):
             out.append(1.0)
             continue
         raw = peak / emax
-        if dtype == MXFP8:
+        if dtype in (MXFP8, MXFP4):
             e = to_e8m0(raw)
             if round_up and from_e8m0(e) < raw and e < 0xFE:
                 e += 1

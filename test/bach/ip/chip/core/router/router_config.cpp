@@ -215,3 +215,19 @@ TEST(BachRouterTable, CoreMaskIndexPicksTheBit) {
   EXPECT_FALSE(other.EntersCore(1ull << 5));
   EXPECT_TRUE(other.EntersCore(1ull << 4));
 }
+
+TEST(BachRouterTable, EightBitPathDoesNotAliasLowEntry) {
+  EnsureSlots();
+  {
+    auto clk = MakeClock(0, kPeriod);
+    RouterTable table(clk, "table", 0, false);
+    auto high = SomeEntry(); high.flow_dir = kFlowLeft;
+    table.Preload(255, high); table.Preload(63, SomeEntry());
+    EXPECT_EQ(kPathNum, 256u);
+    for (uint64_t copy = 0; copy < RouterTable::kCopyNum; ++copy) {
+      EXPECT_EQ(table.Lookup(copy, 255).flow_dir, kFlowLeft);
+      EXPECT_EQ(table.Lookup(copy, 63).flow_dir, kFlowRight);
+    }
+  }
+  RT::Reset();
+}

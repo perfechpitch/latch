@@ -52,7 +52,8 @@ public:
   // req_woff 是这一笔在 wdata 里的有效起点：CM 接口一次固定搬一整块，而一条
   // 向量的两端可能落在块中间，那两头的字节不该被这一笔动。写请求因此除了地址
   // 与长度还要给出块内起点，存储只改 [addr + woff, addr + woff + bytes)。
-  Logic64 req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff;
+  Logic64 req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff,
+      req_scale_group;
   LogicPtr<ByteBlock> req_wdata;
   // 每发一笔加一。收方按它认这一笔见没见过：两侧各自打拍时，谁先跑决定读到
   // 的是当拍还是上一拍的值，只看 req_valid 就可能把同一笔收两次或漏掉一次。
@@ -65,11 +66,11 @@ public:
 
   explicit MemPort(ClockPtr c)
       : req_valid(c), req_we(c), req_addr(c), req_bytes(c), req_scale_en(c),
-        req_woff(c), req_wdata(c), req_seq(c), req_pair(c), req_pair_ready(c),
+        req_woff(c), req_scale_group(c), req_wdata(c), req_seq(c), req_pair(c), req_pair_ready(c),
         req_hw_addr0(c), req_hw_addr1(c), req_lane_mask(c), req_topk_sel(c),
         req_ready(c), rsp_valid(c), rsp_write_valid(c), rsp_error(c),
         rsp_write_error(c), rsp_pair_mask(c), rsp_rdata(c) {
-    Fields(req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff,
+    Fields(req_valid, req_we, req_addr, req_bytes, req_scale_en, req_woff, req_scale_group,
            req_wdata, req_seq, req_pair, req_pair_ready, req_hw_addr0,
            req_hw_addr1, req_lane_mask, req_topk_sel, req_ready, rsp_valid,
            rsp_write_valid, rsp_error, rsp_write_error, rsp_pair_mask,
@@ -88,6 +89,7 @@ public:
     req_addr = addr;
     req_bytes = bytes;
     req_scale_en = scale_en ? 1 : 0;
+    req_scale_group = 32;
     req_woff = 0;
     req_wdata = ByteBlockPtr();
     req_seq = ++issue_seq;
@@ -105,6 +107,7 @@ public:
     req_addr = addr;
     req_bytes = bytes != 0 ? bytes : (data ? data->size() - woff : 0);
     req_scale_en = scale_en ? 1 : 0;
+    req_scale_group = 32;
     req_woff = woff;
     req_wdata = data;
     req_seq = ++issue_seq;
@@ -196,6 +199,7 @@ private:
 };
 
 struct MemReqView {
+  uint64_t scale_group = 32;
   bool valid = false;
   bool we = false;
   uint64_t addr = 0;
@@ -217,12 +221,13 @@ inline void ForwardMemReq(MemPort &p, MemReqView const &r) {
       p.WritePair(r.addr, r.wdata, r.woff, r.bytes);
     else
       p.ReadPair(r.addr);
-    if (r.scale_physical)
-      p.req_scale_en = kScalePhysical;
+    p.req_scale_en = r.scale_physical ? kScalePhysical : r.scale_only ? kScaleOnly : r.scale_en ? kScaleWithData : kScaleNone;
+    p.req_scale_group = r.scale_group;
     p.req_hw_addr0 = r.hw_addr0;
     p.req_hw_addr1 = r.hw_addr1;
     p.req_lane_mask = r.lane_mask;
     p.req_topk_sel = r.topk_sel;
+  p.req_scale_group = r.scale_group;
     return;
   }
   if (r.we) {
@@ -240,6 +245,7 @@ inline void ForwardMemReq(MemPort &p, MemReqView const &r) {
   p.req_hw_addr1 = r.hw_addr1;
   p.req_lane_mask = r.lane_mask;
   p.req_topk_sel = r.topk_sel;
+  p.req_scale_group = r.scale_group;
 }
 
 inline MemReqView ReadMemReq(MemPort const &p) {
@@ -259,6 +265,7 @@ inline MemReqView ReadMemReq(MemPort const &p) {
   v.scale_en = scale == kScaleWithData;
   v.scale_only = scale == kScaleOnly;
   v.scale_physical = scale == kScalePhysical;
+  v.scale_group = p.req_scale_group.Get() ? p.req_scale_group.Get() : 32;
   v.woff = p.req_woff.Get();
   v.seq = p.req_seq.Get();
   v.wdata = p.req_wdata.Get();

@@ -143,7 +143,7 @@ protected:
           w->entry.task_path_id = e.task_path_id;
         w->entry.pid_pending = false;
         w->entry.credit_drct = task.credit_en && !task.IsReduce()
-                                   ? cfg.Route(w->entry.task_path_id).dir & 7
+                                   ? cfg.Route(w->entry.task_path_id).Directions()
                                    : 0;
         w->entry.task_fsm = InitFsmOf(task);
         if (task.IsDataIn() &&

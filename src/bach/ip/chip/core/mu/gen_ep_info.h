@@ -8,14 +8,8 @@
 // local_ep_index * b_expert_stride 算，中间没有 global→local 的翻译：组内序号是
 // 上游在把 topK 广播进本 EP Group 之前就压好的，MU 只当本地序号用。
 //
-// topK_ep_table 能存 1024 份，每份 256 B，由 DTE 搬运时经专用数据线写进来，
-// 下标取 topK 段地址的端内偏移：计算 core 是 stream_id，MU 计算时同时读
-// topK_ep_table[stream_id]（本地）、token（Core Mem）与 weight（Matrix
-// Mem），不再 有任务启动时的前置串行读；B core 是 user_id，收下 token
-// 时按它存、广播时按它取。
-//
-// token 数据与 topK 分开存：FC1 / FC3 只需要 ids，FC2 还要 weights。
-// router_expert_count 为 0 时整个 topK 那一组寄存器都忽略。
+// topK_ep_table 为 16 个 SID 各保存一份 256B 紧凑项，前 2B 为本地专家数。
+// DTE 整项原子读写；任务 dispatch 时按 SID 取得专家快照。
 
 #include "bach/ip/chip/core/ports.h"
 #include <array>
@@ -31,11 +25,13 @@
 namespace latch {
 namespace bach {
 
-// 每份 topK 上限 256 B，每项 {local_ep_index 2 B, weight 4 B}。
+// 每份 topK 为 256 B，前 2 B 为本地专家数，每项 {local_ep_index 2 B, weight 4 B}。
 constexpr uint64_t kTopkBytesPerStream = 256;
 // topK_ep_table 能存几份。下标越界就是上游给的 user_id 超出了这张表。
-constexpr uint64_t kTopkTableNum = 1024;
+constexpr uint64_t kTopkTableNum = 16;
 constexpr uint64_t kTopkEntryBytes = 6;
+constexpr uint64_t kTopkCountBytes = 2;
+constexpr uint64_t kTopkMaxExperts = 32;
 
 struct TopkEntry {
   uint64_t local_ep_index = 0; // 组内序号（local index），上游广播前已压好
@@ -57,6 +53,8 @@ public:
   // 计算时读。
   void WriteTopk(uint64_t idx, std::vector<uint8_t> bytes) {
     LOGCHECK(idx < kTopkTableNum, "GenEpInfo: topK 表下标越界。");
+    LOGCHECK(bytes.size() <= kTopkBytesPerStream, "GenEpInfo: topK exceeds 256B");
+    bytes.resize(kTopkBytesPerStream, 0);
     table[idx] = std::move(bytes);
     dirty[idx] = true;
   }
@@ -72,9 +70,10 @@ public:
   // MU 计算时读这一份：dirty 时用 Parse 解一次，之后走缓存。
   std::vector<TopkEntry> const &Topk(uint64_t stream_id, uint64_t count) {
     LOGCHECK(stream_id < kTopkTableNum, "GenEpInfo: topK 表下标越界。");
-    if (dirty[stream_id]) {
+    if (dirty[stream_id] || parse_count[stream_id] != count) {
       parsed[stream_id] = Parse(table[stream_id], count);
       dirty[stream_id] = false;
+      parse_count[stream_id] = count;
     }
     return parsed[stream_id];
   }
@@ -83,8 +82,9 @@ public:
   static std::vector<TopkEntry> Parse(std::vector<uint8_t> const &bytes,
                                       uint64_t count) {
     std::vector<TopkEntry> out;
-    for (uint64_t i = 0; i < count; ++i) {
-      uint64_t off = i * kTopkEntryBytes;
+    uint64_t local_count = CountOf(bytes);
+    for (uint64_t i = 0; i < count && i < local_count && i < kTopkMaxExperts; ++i) {
+      uint64_t off = kTopkCountBytes + i * kTopkEntryBytes;
       if (off + kTopkEntryBytes > bytes.size())
         break;
       TopkEntry e;
@@ -97,6 +97,9 @@ public:
       out.push_back(e);
     }
     return out;
+  }
+  static uint64_t CountOf(std::vector<uint8_t> const &bytes) {
+    return bytes.size() < 2 ? 0 : uint64_t(bytes[0]) | (uint64_t(bytes[1]) << 8);
   }
 
 protected:
@@ -111,9 +114,9 @@ protected:
     uint64_t error = 0;
     if (response) {
       seen = req.seq;
-      if (req.topk_sel != 1 || req.lane_mask != 1 ||
-          req.hw_addr0 != req.addr / 128 || req.addr >= 4096 ||
-          req.bytes > 128 || req.addr + req.bytes > 4096 || (req.addr & 127))
+      if (req.topk_sel != 1 || !req.pair || req.lane_mask != 3 ||
+          req.hw_addr0 != req.addr / 256 || req.hw_addr1 != req.addr / 256 ||
+          req.addr >= 4096 || req.bytes != 256 || (req.addr & 255))
         error = 1;
       else {
         uint64_t index = req.addr / 256, off = req.addr % 256;
@@ -141,6 +144,7 @@ private:
   std::array<std::vector<uint8_t>, kTopkTableNum> table;
   std::array<std::vector<TopkEntry>, kTopkTableNum> parsed;
   std::array<bool, kTopkTableNum> dirty{};
+  std::array<uint64_t, kTopkTableNum> parse_count{};
 };
 
 } // namespace bach
