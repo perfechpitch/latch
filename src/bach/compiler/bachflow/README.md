@@ -104,14 +104,13 @@ the same token. The bound comes from pcode's ingress kernel. It indexes a
 by arrival order, so ids and arrival counts must stay below 1024. More than 16
 users reuse the 16 stream IDs; the input feed is paced by C2C link credit.
 
-64 and 128 users complete without a cap (near cycles 20000 and 33500) and
-match the golden. User order is not fully kept: at 128 users a few cores on
+32, 64 and 128 users complete without a cap (near cycles 13300, 20000 and
+33500) and match the golden. User order is not fully kept: at 128 users a few cores on
 chip 47 create later users' stream entries ahead of earlier ones, since a
 user that already holds a downstream stream entry does not wait behind
 earlier users diverted on the same VC. `BACHFLOW_MAX_IN_FLIGHT=N` feeds user k
 only after user k-N has its egress output. It is a harness option, not a
-claim that the hardware needs host-side pacing; before diverted packets freed
-their VC, 32 users deadlocked without it.
+claim that the hardware needs host-side pacing, and EP1 does not need it.
 
 `BACHFLOW_STALL_CYCLES=N` stops a run once the summed MU dispatch and done
 counts stay unchanged for N cycles, instead of running to the cycle or wall
@@ -119,17 +118,21 @@ limit; 4000 is enough for EP1.
 
 A run needs `BACHFLOW_CYCLE_LIMIT` and `BACHFLOW_WALL_LIMIT` well above the
 defaults (3000 cycles, 300 s): one user ends near cycle 7000, 16 users near
-10000, 64 users near 20000, 128 users near 33500 uncapped. With four runs
-side by side on one host, wall time was about 10 minutes for 1 user, 16 for 16
-users, 45 for 64 and 90 for 128 (measured with N = 16). Even one user overruns
-the 300 s default.
+10000, 32 users near 13300, 64 users near 20000, 128 users near 33500
+uncapped. With two to four runs side by side on one host, wall time was about
+10 minutes for 1 user, 16 for 16 users, 13 for 32, 30 for 64 and 30 to 45 for
+128. Even one user overruns the 300 s default.
 
-Documented EP1 endpoints, overridable by the same variables:
+EP1 endpoints, the defaults of `scripts/run-exact-native.sh` and overridable
+by the same variables:
 
 | end | chip | physical | address |
 | --- | --- | --- | --- |
 | ingress | 0 | 5 | `0x48c00000` |
-| egress | 47 | 8 | `1212156672` |
+| egress | 47 | 8 | `1212163072` |
+
+The egress address follows the BachFlow build's `fc2_concat` output. A wrong
+address still runs to the end, but every user then fails the comparison.
 
 Egress logical core is 7 (`fc2_concat`). Do not treat it as logical 8.
 
