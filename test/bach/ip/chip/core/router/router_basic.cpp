@@ -182,6 +182,7 @@ TEST(BachRouter, UnconfiguredPathIsNotDelivered) {
     RouterStation st(clk, "st_left", kDirLeft, rtab, 0);
     Xbar xb(clk, "xbar");
     xb.AttachReq(kInLeft, st.ReqPtr());
+    st.AttachLevel(xb.LevelPtr());
     LinkEndPtr wire_in = MakeWire(clk);
     LinkEndPtr wire_out = MakeWire(clk);
     LinkEndPtr wire_back = MakeWire(clk);
@@ -209,6 +210,7 @@ TEST(BachRouter, SameUserTwiceKeepsOneStreamSlot) {
     RouterStation st(clk, "st_left", kDirLeft, rtab, 0);
     Xbar xb(clk, "xbar");
     xb.AttachReq(kInLeft, st.ReqPtr());
+    st.AttachLevel(xb.LevelPtr());
     LinkEndPtr wire_in = MakeWire(clk);
     LinkEndPtr wire_out = MakeWire(clk);
     LinkEndPtr wire_back = MakeWire(clk);
@@ -239,6 +241,7 @@ TEST(BachRouter, VcCreditIsConserved) {
     RouterStation st(clk, "st_left", kDirLeft, rtab, 0);
     Xbar xb(clk, "xbar");
     xb.AttachReq(kInLeft, st.ReqPtr());
+    st.AttachLevel(xb.LevelPtr());
     LinkEndPtr wire_in = MakeWire(clk);
     LinkEndPtr wire_out = MakeWire(clk);
     LinkEndPtr wire_back = MakeWire(clk);
@@ -272,6 +275,7 @@ TEST(BachRouter, StopsWhenCreditRunsOut) {
     RouterStation st(clk, "st_left", kDirLeft, rtab, 0);
     Xbar xb(clk, "xbar");
     xb.AttachReq(kInLeft, st.ReqPtr());
+    st.AttachLevel(xb.LevelPtr());
     LinkEndPtr wire_in = MakeWire(clk);
     LinkEndPtr wire_out = MakeWire(clk);
     LinkEndPtr wire_back = MakeWire(clk);

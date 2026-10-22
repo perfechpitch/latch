@@ -1044,7 +1044,7 @@ def reduce_paths(reader: TraceReader) -> Dict[str, Dict[str, Dict[str, int]]]:
 
 
 def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
-    """head/tail flit 事件折成段 `[t0, t1, user, path, size, vc]`。
+    """head/tail flit 事件折成半开段 `[t0, t1, user, path, size, vc]`。
 
     `evts` 里的元素是 `(t, is_head, is_tail, user, path, size, vc)`。同一 `(user, path)`
     的 head 与 tail 先到先配；`head && tail` 的单 flit 包直接成 `[t, t+1]`。配不上
@@ -1064,7 +1064,7 @@ def fold_flits(evts: List[tuple], t_end: int) -> List[List[int]]:
         q = pending.get(key)
         if q:
             t0, sz, vc0 = q.pop(0)
-            out.append([t0, t, user, path, sz, vc0])
+            out.append([t0, t + 1, user, path, sz, vc0])
         else:
             out.append([t, t + 1, user, path, size, vc])
     for (user, path), lst in pending.items():

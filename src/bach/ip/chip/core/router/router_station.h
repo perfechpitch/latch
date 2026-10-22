@@ -91,7 +91,6 @@ class RouterStation : public BachModule {
     for (auto const& q : vc_buf) n += q.size();
     return n;
   }
-
   bool Quiescent() const override {
     for (auto const& q : vc_buf) {
       if (!q.empty()) return false;
@@ -157,13 +156,24 @@ class RouterStation : public BachModule {
     vc_buf[v].push_back(s);
   }
 
-  // M2：队首查表建上下文，在四个 VC 之间轮询挑一个交给 Xbar。
+  // M2：队首查表建上下文，在四个 VC 之间按“包内贪婪、包间轮询”挑一个交给
+  // Xbar。当前 VC 能连续发就保持到 tail；它因入口 room 或下游 VC credit 堵住
+  // 时跳过，轮询其他 VC，避免一个包堵死整个 input port。
   //
   // Xbar 那一侧上一拍说收得下就发，发了当场出队并把 VC 槽还给上游：等授予的话
   // 一笔要占两拍，一个方向的吞吐就砍掉一半。
   void IssueRequest() {
+    std::array<uint64_t, kVcNum> order{};
+    uint64_t count = 0;
+    if (greedy_valid) order[count++] = greedy_vc;
     for (uint64_t k = 1; k <= kVcNum; ++k) {
       uint64_t v = (rr_last + k) % kVcNum;
+      if (greedy_valid && v == greedy_vc) continue;
+      order[count++] = v;
+    }
+
+    for (uint64_t i = 0; i < count; ++i) {
+      uint64_t v = order[i];
       if (vc_buf[v].empty()) continue;
       FlitView const& f = vc_buf[v].front().f;
       if (!f.msg) continue;
@@ -181,11 +191,17 @@ class RouterStation : public BachModule {
         LOGCHECK(e.path_core_mask_enable,
                  "RouterStation: 表项既不进核也没有出方向。");
         ++dropped_pending;
+        UpdateGreedy(v, f.tail);
         Drop(v);
         return;
       }
       // Xbar 那一侧这个 VC 的入口缓冲快满了，这个 VC 本拍不发，队列原地不动。
       uint64_t nvc = NextVcOf(e, mask, f.vc);
+      // 每个 VC 都先查下游 VC credit：被堵就跳过、轮询下一个 VC，与硬件的包级
+      // 轮询一致（vc0→vc1→vc2→vc3→vc0）。stall_way 的包例外：它要交到 Xbar
+      // 那一侧去走 Core Mem 转存，这里不提前拦下。
+      bool stall = !pass_through && e.stall_way;
+      if (!stall && !R2rVcOk(mask, nvc)) continue;
       if (!req->RoomFor(nvc)) continue;
       req->valid = 1;
       req->out_mask = mask;
@@ -204,6 +220,7 @@ class RouterStation : public BachModule {
       req->msg = f.msg;
       req->seq = ++req_seq;
       rr_last = v;
+      UpdateGreedy(v, f.tail);
       if (CoreOperands(e) && f.head) TakeOperand(e, *f.msg, lane, v);
       // flit 离开本级 VC Buffer 就归还 VC credit，走共享总线，一拍最多一个 VC。
       Slot s = vc_buf[v].front();
@@ -221,6 +238,18 @@ class RouterStation : public BachModule {
     req->IdleReq();
     up_back->flit.Idle();
     up_back->release.Idle();
+  }
+
+  bool R2rVcOk(uint64_t mask, uint64_t vc) const {
+    for (uint64_t o = 0; o < kR2RNum; ++o) {
+      if (((mask >> o) & 1u) != 0 && !level->VcOk(o, vc)) return false;
+    }
+    return true;
+  }
+
+  void UpdateGreedy(uint64_t vc, bool tail) {
+    greedy_valid = !tail;
+    greedy_vc = vc;
   }
 
   // 走到头的那一笔：出队，把 VC 槽还给上游，这一拍不发请求。一拍吃一个 flit。
@@ -360,6 +389,8 @@ class RouterStation : public BachModule {
   std::array<uint64_t, kVcNum> cur_lane{};
   std::map<std::pair<uint64_t, uint64_t>, uint64_t> operand_seen;
   uint64_t rr_last = 0;
+  bool greedy_valid = false;
+  uint64_t greedy_vc = 0;
   uint64_t req_seq = 0;
   uint64_t forwarded_pending = 0, dropped_pending = 0;
 

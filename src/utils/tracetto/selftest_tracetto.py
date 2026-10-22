@@ -555,8 +555,8 @@ def check_router_ingress():
             sigs = S.router_ingress_paths(r)["0.0"]
             spans = S.router_ingress_spans(r, sigs, 50)
     expect(spans["mid"], [
-        [10, 13, 77, 3, 1024, 1],
-        [11, 12, 77, 5, 512, 0],
+        [10, 14, 77, 3, 1024, 1],
+        [11, 13, 77, 5, 512, 0],
         [20, 21, 88, 7, 128, 2],
         [30, 31, 99, 9, 256, 3],
         [40, 50, 100, 11, 64, 0],
@@ -600,7 +600,7 @@ def check_reduce_flits():
         with TraceReader(prefix) as r:
             sigs = S.reduce_paths(r)["0.0"]
             spans = S.reduce_spans(r, sigs, 50)
-    expect(spans["mid"], [[10, 13, 77, 3, 1024, 0]],
+    expect(spans["mid"], [[10, 14, 77, 3, 1024, 0]],
            "reduce mid 入口 flit 折段：多 flit 包，没 flit_vc 所以 vc 恒 0")
     expect(spans["out"], [[20, 21, 88, 7, 64, 0]],
            "reduce out 出口 flit 折段：单 flit 包，没 flit_vc 所以 vc 恒 0")

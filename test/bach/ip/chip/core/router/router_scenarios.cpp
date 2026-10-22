@@ -112,6 +112,7 @@ TEST(BachRouterScenario, A2BypassDoesNotTakeSlot) {
     RouterStation st(clk, "st", kDirLeft, rtab, 0);
     Xbar xb(clk, "xbar");
     xb.AttachReq(kInLeft, st.ReqPtr());
+    st.AttachLevel(xb.LevelPtr());
     LinkEndPtr in = MakeWire(clk), out = MakeWire(clk), back = MakeWire(clk);
     st.AttachUp(in);
     xb.AttachOutLink(kOutIdxRight, out);
@@ -150,6 +151,7 @@ TEST(BachRouterScenario, A15PassThroughCoreKeepsNoState) {
     Xbar xb(clk, "xbar");
     xb.SetPassThrough(rtab.CoreBad(kSelf));
     xb.AttachReq(kInLeft, st.ReqPtr());
+    st.AttachLevel(xb.LevelPtr());
     CoreStation cs(clk, "cs");
 
     LinkEndPtr in = MakeWire(clk), out = MakeWire(clk), back = MakeWire(clk);
@@ -199,6 +201,7 @@ TEST(BachRouterScenario, A16ChainedPassThroughAccumulatesHops) {
         xbs.push_back(std::make_unique<Xbar>(clk, "xb" + std::to_string(h)));
         xbs.back()->SetPassThrough(bad);
         xbs.back()->AttachReq(kInLeft, sts.back()->ReqPtr());
+        sts.back()->AttachLevel(xbs.back()->LevelPtr());
         sts.back()->AttachUp(wires.back());
         wires.push_back(MakeWire(clk));
         xbs.back()->AttachOutLink(kOutIdxRight, wires.back());
