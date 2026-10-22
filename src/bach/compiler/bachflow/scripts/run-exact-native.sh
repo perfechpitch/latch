@@ -74,7 +74,7 @@ Optional:
   BACHFLOW_INGRESS_CHIP/PHYS/ADDR
   BACHFLOW_EGRESS_CHIP/PHYS/ADDR
                            EP1 endpoints. Defaults: chip 0 phys 5 addr
-                           0x48c00000 in; chip 47 phys 8 addr 1212156672 out.
+                           0x48c00000 in; chip 47 phys 8 addr 1212163072 out.
 EOF
 }
 
@@ -136,7 +136,7 @@ ingress_phys="${BACHFLOW_INGRESS_PHYS:-5}"
 ingress_addr="${BACHFLOW_INGRESS_ADDR:-0x48c00000}"
 egress_chip="${BACHFLOW_EGRESS_CHIP:-47}"
 egress_phys="${BACHFLOW_EGRESS_PHYS:-8}"
-egress_addr="${BACHFLOW_EGRESS_ADDR:-1212156672}"
+egress_addr="${BACHFLOW_EGRESS_ADDR:-1212163072}"
 
 mode_note="transport-only; not a numerical result"
 if [[ "$full" == 1 ]]; then
