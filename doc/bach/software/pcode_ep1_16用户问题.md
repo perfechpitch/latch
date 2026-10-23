@@ -773,3 +773,32 @@ gx=3 这一列东边没有邻片，p4、p9 只剩南口这一个出路，几种�
 `BachRouterAsm.StallWayStoresWhenCreditIsGone` 改名 `StallWayDivertsWhenCreditIsGone`，对 `stallWay` 0 和 1 各跑一遍：40 个 credit 用完后，`stallWay=1` 剩下的 10 笔整包进核，`stallWay=0` 留在 VC 里等，溢流都是 0。router 和 TS 的 154 个测试通过。
 
 全图 128 用户不限在途，BachFlow bundle 为 `a4fc8a6` / `9cd3a29` 之后的构建：128/128 完成，最后一个在第 35133 拍，用户 101、202 的 cosine 是 0.99972、0.99974。改送 17842 次，credit 引起的 26 次，其余是 Stream 不够。egress 按用户顺序输出，相邻颠倒 0 处。
+
+### 9.22 归约结果按表项 nxtVC 发出，VC 由 BachFlow 分配
+
+**latch 改动。**
+
+- `reduce_module.h`：Rmem 发归约结果用本核表项的 nxtVC（飞书 Router F-039，所有出方向共用一个 VC），取 mid、left、right 中第一个置位出口的那一项；只送本核时仍用 `kReduceVc`。原来一律写死 `kReduceVc = 3`。
+- 9.21 的 credit 用完改送留作保底，默认开。`BACHFLOW_CREDIT_DIVERT=0` 关掉：`Xbar::SetCreditDivert`，bundle 测试读这个环境变量设到每个核，写进 transport.txt 的 `credit_divert` 行，`run-exact-native.sh` 校验并透传。latch 不区分 BachFlow 用哪种 VC 方案，只按表项走。
+
+**旧 bundle 不能再用。** 旧规划器给 400 条 reduce 表项都写 nxtVC=0，transfer 也大多在 VC 0（1387 条里 1223 条）。latch 写死 VC 3 时，reduce 自成一条通道，才跑得通。改按表项之后，16 用户只完成 6 个，第 13312 拍起停住，改送开关都一样。
+
+**BachFlow 的两种 VC 分配。**
+
+1. 默认：reduce 表项独占 VC 3，其余表项在 VC 0–2 上按 net 序轮转（`router_table.py` 的 `REDUCE_VC`、`DATA_VCS`），三个 VC 都被路过 hop 占了才升 reissue。reduce 结果不能改送进核，和 transfer 共用 VC 会互等成环。先试过让 reduce 也参加 4 个 VC 的轮转，16 用户一个都没完成，chip 31 的 path 7 归约上下文占满。
+2. `BACHFLOW_VC_ACYCLIC=1`：每个 net 一个 VC，按等待图（`vc_cdg.py`：通道是 (核, 面, VC)，多播各分支同进同退，进核分支也算）挑负载最轻、加进去不成环的 VC。
+
+**静态等待图。** 方案 2 各种建模都无环。方案 1 不算进核分支时无环；算上进核分支（各 VC 共用一个进核口）时有一个 702 个通道的环：net 1 的多播（VC 0）经 chip 43、47、35、39 各核的进核口和别的 net 耦合，与 9.21 chip 43 是同一个形状，不经过 reduce。
+
+**仿真。** 全图不限在途，表中是最后一个用户完成的拍数。所有用户的数值都通过，用户 101、202 的 cosine 是 0.99972、0.99974。
+
+| VC 分配 | credit 改送 | 16 | 32 | 64 | 128 |
+|---|---|---|---|---|---|
+| 9.21：旧 bundle，latch 写死 reduce VC 3 | 开 | 9906 | 14000 | 21164 | 35133 |
+| 方案 1：reduce 独占 VC 3 | 开 | 10134 | 13330 | 20107 | 33608 |
+| 方案 1 | 关 | 9995 | | 20018 | |
+| 方案 2：等待图无环 | 关 | 10020 | 13288 | 19938 | 33462 |
+
+方案 1 关掉改送，16、64 用户也跑完，静态图上那个经进核口的环这两组没有撞上；不能由此去掉保底，默认仍开。
+
+`BACHFLOW_CREDIT_DIVERT=0` 与编译期关掉改送逐拍一致（方案 2，16 用户都是 10020）。nxtVC 按跳分配暂不做，记在对接文档 F18。
