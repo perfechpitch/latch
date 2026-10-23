@@ -239,6 +239,11 @@ TEST(Ep1ExactBundle, RunsPackedTokensWithObservedOwnership) {
   Core &first_compute = all[0]->GetCore(compute_pos->first.second);
   bool transport_only = EnvU64("BACHFLOW_TRANSPORT_ONLY", 0) != 0;
   bool input_sf_prefill = EnvU64("BACHFLOW_INPUT_SF_PREFILL", 0) != 0;
+  bool credit_divert = EnvU64("BACHFLOW_CREDIT_DIVERT", 1) != 0;
+  for (auto *chip : all)
+    for (uint64_t p = 0; p < chip->CoreNum(); ++p)
+      chip->GetCore(p).GetRouter().GetXbar().SetCreditDivert(credit_divert);
+  transport << "credit_divert " << (credit_divert ? 1 : 0) << '\n';
   InputScaleCores scale_cores;
   std::map<std::pair<std::pair<uint64_t, uint64_t>, uint64_t>, uint64_t> scale_allocation;
   uint64_t scale_refills = 0;

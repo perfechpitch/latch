@@ -22,6 +22,7 @@ users="${BACHFLOW_USER_COUNT:-1}"
 in_flight="${BACHFLOW_MAX_IN_FLIGHT:-}"
 wall="${BACHFLOW_WALL_LIMIT:-300}"
 stall="${BACHFLOW_STALL_CYCLES:-}"
+credit_divert="${BACHFLOW_CREDIT_DIVERT:-1}"
 skip_build="${LATCH_SKIP_BUILD:-0}"
 npz_dir="${BACHFLOW_NPZ_DIR:-}"
 
@@ -71,6 +72,10 @@ Optional:
                            stay unchanged this many cycles (checked every
                            256 cycles; default: unset, off). The run then
                            fails with a "stall" line in transport.txt.
+  BACHFLOW_CREDIT_DIVERT   1 (default) diverts a head into its core when the
+                           next hop has no VC credit; 0 makes it wait. Use 0
+                           only with a bundle whose VC assignment has an
+                           acyclic wait graph.
   BACHFLOW_INGRESS_CHIP/PHYS/ADDR
   BACHFLOW_EGRESS_CHIP/PHYS/ADDR
                            EP1 endpoints. Defaults: chip 0 phys 5 addr
@@ -101,6 +106,7 @@ fail() {
 [[ "$wall" =~ ^[0-9]+$ && "$wall" -gt 0 ]] || fail "BACHFLOW_WALL_LIMIT must be a positive integer."
 [[ -z "$stall" || ( "$stall" =~ ^[0-9]+$ && "$stall" -ge 1 ) ]] || fail "BACHFLOW_STALL_CYCLES must be a positive integer."
 [[ "$skip_build" == 0 || "$skip_build" == 1 ]] || fail "LATCH_SKIP_BUILD must be 0 or 1."
+[[ "$credit_divert" == 0 || "$credit_divert" == 1 ]] || fail "BACHFLOW_CREDIT_DIVERT must be 0 or 1."
 
 full=0
 if [[ "$transport" == 1 && "$sf_one" == 0 ]]; then
@@ -170,6 +176,7 @@ docker run --rm \
   -e BACHFLOW_MAX_IN_FLIGHT="$in_flight" \
   -e BACHFLOW_WALL_LIMIT="$wall" \
   -e BACHFLOW_STALL_CYCLES="$stall" \
+  -e BACHFLOW_CREDIT_DIVERT="$credit_divert" \
   -e LATCH_BUILD_DIR="$build_dir" \
   -e LATCH_BUILD_JOBS="$jobs" \
   -e LATCH_SKIP_BUILD="$skip_build" \

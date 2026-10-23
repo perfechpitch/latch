@@ -136,6 +136,10 @@ public:
   // credit 直接 bypass。
   void SetPassThrough(bool on) { pass_through = on; }
 
+  // 下一跳 VC credit 用完时整包改送进核（保底）。规划器给出无环的 VC 分配时
+  // 可以关掉，credit 不够只等不改送。
+  void SetCreditDivert(bool on) { credit_divert = on; }
+
   uint64_t Granted() const { return granted.Get(); }
   uint64_t Stalled() const { return stalled.Get(); }
   uint64_t Overflow() const { return overflow.Get(); }
@@ -528,7 +532,7 @@ private:
       }
       if (ResourceOk(o, v)) continue;
       if (MeshStreamShort(o, v)) stream_short = true;
-      else if (MeshCreditShort(o, v)) credit_short = true;
+      else if (credit_divert && MeshCreditShort(o, v)) credit_short = true;
       else other = true;
     }
     // 下游 credit 用完时整包进核，否则多播 wormhole 会成环；出口被别的包锁着
@@ -734,7 +738,8 @@ private:
     if (v.head) {
       for (uint64_t o = 0; o < kR2RNum; ++o)
         if (((v.out_mask >> o) & 1u) &&
-            (MeshStreamShort(o, v) || MeshCreditShort(o, v)))
+            (MeshStreamShort(o, v) ||
+             (credit_divert && MeshCreditShort(o, v))))
           reissue_wait_[o].emplace(std::make_pair(v.user_id, v.path_id), v.vc);
     }
     // 多播的几个方向共享同一个 Message。重发标记只打在送进本核的这一份上，
@@ -1308,6 +1313,7 @@ private:
   std::array<std::multimap<std::pair<uint64_t, uint64_t>, uint64_t>, kR2RNum>
       reissue_wait_;
   bool force_ready = false;
+  bool credit_divert = true;
   std::function<bool(Message const &)> reduce_admission;
   std::function<void(uint64_t, uint64_t)> forward_skip;
   std::function<void(Message const &)> reduce_reserve;
