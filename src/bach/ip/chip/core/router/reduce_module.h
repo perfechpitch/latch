@@ -634,7 +634,7 @@ private:
     // 出口逐 flit 观测：本拍没发的先记 0，发出去了在下面覆写成本拍的真实值，保证
     // TracePerCycle 逐拍提交、脉冲不粘连。
     TraceReduceFlit(3, 0, 0, 0, 0, 0);
-    if (!req->RoomFor(kReduceVc) || out_q.empty()) {
+    if (out_q.empty()) {
       req->IdleReq();
       done->Idle();
       return;
@@ -668,12 +668,22 @@ private:
     if (mask == 0 || e.EntersCore(it.msg->path_core_mask)) {
       mask |= 1ull << kOutCore;
     }
+    // 飞书 Router F-039：Rmem 按本核表项的 nxtVC 发结果，所有出方向共用一个 VC。
+    uint64_t vc = kReduceVc;
+    if (mask & (1ull << kOutMid)) vc = e.nxt_vc[0];
+    else if (mask & (1ull << kOutLeft)) vc = e.nxt_vc[1];
+    else if (mask & (1ull << kOutRight)) vc = e.nxt_vc[2];
+    if (!req->RoomFor(vc)) {
+      req->IdleReq();
+      done->Idle();
+      return;
+    }
     bool head = it.sent == 0;
     bool tail = bytes == left;
     PackRange(c, *it.msg, it.sent, it.sent + bytes);
     req->valid = 1;
     req->out_mask = mask;
-    req->vc = kReduceVc;
+    req->vc = vc;
     req->head = head ? 1 : 0;
     req->tail = tail ? 1 : 0;
     req->bytes = bytes;
